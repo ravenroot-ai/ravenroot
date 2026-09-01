@@ -94,8 +94,16 @@ def render_mermaid(files: list[Path]) -> list[str]:
                 text=True,
             )
             if result.returncode:
-                detail = (result.stderr or result.stdout).strip().splitlines()[-1]
-                errors.append(f"{document.relative_to(ROOT)} diagram {index}: {detail}")
+                output = "\n".join(
+                    section.strip()
+                    for section in (result.stderr, result.stdout)
+                    if section and section.strip()
+                )
+                detail = output or "renderer produced no diagnostic output"
+                errors.append(
+                    f"{document.relative_to(ROOT)} diagram {index}: "
+                    f"Mermaid renderer exited with status {result.returncode}\n{detail}"
+                )
     return errors
 
 

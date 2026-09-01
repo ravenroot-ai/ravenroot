@@ -91,6 +91,7 @@ jobs:
         run: |
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_verify_api_docs
       - name: Verify shell tooling contracts
         run: |
@@ -109,6 +110,9 @@ jobs:
     if: github.event_name != 'pull_request' || github.base_ref == 'main'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
+    env:
+      # Use only the browser explicitly provisioned for this job, never an ambient runner browser.
+      PUPPETEER_CACHE_DIR: ${{ github.workspace }}/.ci-puppeteer
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -123,7 +127,12 @@ jobs:
       - name: Validate public documentation links and ADR structure
         run: python3 scripts/check_public_docs.py
       - name: Install the integrity-locked Mermaid renderer
-        run: npm ci --prefix scripts/mermaid-renderer
+        run: npm ci --ignore-scripts --prefix scripts/mermaid-renderer
+      - name: Provision the lock-pinned Mermaid browser
+        run: |
+          sudo env "PATH=$PATH" "PUPPETEER_CACHE_DIR=$PUPPETEER_CACHE_DIR" \
+            npm --prefix scripts/mermaid-renderer run install-browser:ci
+          npm --prefix scripts/mermaid-renderer run verify-browser
       - name: Render every Mermaid diagram in public documentation
         run: python3 scripts/check_public_docs.py --render-mermaid
       - name: Validate product release identity
@@ -132,6 +141,7 @@ jobs:
         run: |
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_verify_api_docs
       - name: Verify developer and platform shell contracts
         run: |

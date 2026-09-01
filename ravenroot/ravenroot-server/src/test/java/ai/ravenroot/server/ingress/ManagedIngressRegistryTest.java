@@ -7,9 +7,12 @@ import ai.ravenroot.api.ingress.IngressRouteOwner;
 import ai.ravenroot.server.AuthenticatedPrincipalAttribute;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import com.sun.net.httpserver.HttpServer;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Timeout;
 
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.Socket;
@@ -17,6 +20,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.nio.charset.StandardCharsets;
 import java.io.BufferedReader;
@@ -35,15 +39,26 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Timeout(value = 30, unit = TimeUnit.SECONDS)
 class ManagedIngressRegistryTest {
+    private static final Duration HTTP_TIMEOUT = Duration.ofSeconds(3);
+    private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(HTTP_TIMEOUT)
+            .build();
     private static final IngressAuthorityDeclaration AUTHORITY = new IngressAuthorityDeclaration("example.oas", "main",
             "/managed/example", Set.of("invoke"), 1, 1, 16, 32, Duration.ofSeconds(1));
+    private final Set<HttpServer> servers = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     @BeforeAll static void initializeProductionHeaderGuardBeforeRawJdkServers() throws Exception {
         // RavenrootServer owns this process-wide JDK property. These lower-level tests create raw
         // HttpServer instances, so initialize the production owner before the JDK freezes its value.
         Class.forName("ai.ravenroot.server.RavenrootServer", true,
                 ManagedIngressRegistryTest.class.getClassLoader());
+    }
+
+    @AfterEach void stopOwnedServers() {
+        servers.forEach(server -> server.stop(0));
+        servers.clear();
     }
 
     @Test void rejectsOverlappingAuthorityBeforeServerBindAndRefusesReplicas() {
@@ -63,7 +78,7 @@ class ManagedIngressRegistryTest {
     @Test void leaseIsAtomicFencedAndReleaseCannotRemoveReplacement() throws Exception {
         var registry = ManagedIngressRegistry.prepare(List.of(AUTHORITY), true);
         try (registry) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME, new AuthenticatedPrincipal("user", AuthenticatedPrincipal.Type.USER, "issuer", "tenant", Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -77,7 +92,7 @@ class ManagedIngressRegistryTest {
             var replacement = registry.authorityFor(new IngressRouteOwner("example.oas", "tenant", "deployment", "node", 2)).acquire("orders2", "/orders", Set.of("POST"), request -> CompletableFuture.completedFuture(new IngressResponse(202, Map.of(), new byte[] {2})));
             lease.release();
             server.start();
-            var response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/managed/example/orders")).POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofByteArray());
+            var response = HTTP_CLIENT.send(request(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/managed/example/orders")).POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(202, response.statusCode()); assertArrayEquals(new byte[] {2}, response.body());
             replacement.release(); server.stop(0);
         }
@@ -86,7 +101,7 @@ class ManagedIngressRegistryTest {
     @Test void jdkPrefixContextNeverServesALeaseSubpath() throws Exception {
         var registry = ManagedIngressRegistry.prepare(List.of(AUTHORITY), true);
         try (registry) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME, new AuthenticatedPrincipal("user", AuthenticatedPrincipal.Type.USER, "issuer", "tenant", Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -94,7 +109,7 @@ class ManagedIngressRegistryTest {
             registry.authorityFor(new IngressRouteOwner("example.oas", "tenant", "deployment", "node", 1))
                     .acquire("orders", "/orders", Set.of("POST"), request -> CompletableFuture.completedFuture(new IngressResponse(202, Map.of(), new byte[0])));
             server.start();
-            var response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/managed/example/orders/extra")).POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.discarding());
+            var response = HTTP_CLIENT.send(request(URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/managed/example/orders/extra")).POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.discarding());
             assertEquals(404, response.statusCode());
             server.stop(0);
         }
@@ -118,10 +133,10 @@ class ManagedIngressRegistryTest {
             assertEquals(1, registry.inventory().size());
 
             server.start();
-            var client = HttpClient.newHttpClient();
+            var client = HTTP_CLIENT;
             String base = "http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/example/orders";
-            var root = client.send(HttpRequest.newBuilder(URI.create(base))
+            var root = client.send(request(URI.create(base))
                             .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(202, root.statusCode());
@@ -151,7 +166,7 @@ class ManagedIngressRegistryTest {
             assertEquals(1, registry.inventory().size());
 
             server.start();
-            var response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create(
+            var response = HTTP_CLIENT.send(request(URI.create(
                                     "http://127.0.0.1:" + server.getAddress().getPort()
                                             + "/managed/example/orders/child"))
                             .POST(HttpRequest.BodyPublishers.noBody()).build(),
@@ -204,11 +219,11 @@ class ManagedIngressRegistryTest {
                     "the mixed acquisition race publishes one lease and one JDK context");
 
             server.start();
-            var client = HttpClient.newHttpClient();
+            var client = HTTP_CLIENT;
             String base = "http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/example/orders";
             for (int attempt = 0; attempt < 2; attempt++) {
-                var root = client.send(HttpRequest.newBuilder(URI.create(base))
+                var root = client.send(request(URI.create(base))
                                 .POST(HttpRequest.BodyPublishers.noBody()).build(),
                         HttpResponse.BodyHandlers.ofString());
                 assertEquals(202, root.statusCode());
@@ -225,7 +240,7 @@ class ManagedIngressRegistryTest {
     @Test void authenticatedTenantCannotBeForgedByBodyAndHandlerReceivesTrustedPrincipal() throws Exception {
         var registry = ManagedIngressRegistry.prepare(List.of(AUTHORITY), true);
         try (registry) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 String tenant = exchange.getRequestHeaders().getFirst("X-Test-Tenant");
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
@@ -244,14 +259,14 @@ class ManagedIngressRegistryTest {
             server.start();
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/example/orders");
-            var forged = HttpClient.newHttpClient().send(HttpRequest.newBuilder(uri)
+            var forged = HTTP_CLIENT.send(request(uri)
                     .header("X-Test-Tenant", "other")
                     .POST(HttpRequest.BodyPublishers.ofString("tenant=tenant"))
                     .build(), HttpResponse.BodyHandlers.discarding());
             assertEquals(403, forged.statusCode());
             assertEquals(0, calls.get(), "body content cannot forge the authenticated tenant");
 
-            var authorized = HttpClient.newHttpClient().send(HttpRequest.newBuilder(uri)
+            var authorized = HTTP_CLIENT.send(request(uri)
                     .header("X-Test-Tenant", "tenant")
                     .POST(HttpRequest.BodyPublishers.ofString("tenant=other"))
                     .build(), HttpResponse.BodyHandlers.discarding());
@@ -266,7 +281,7 @@ class ManagedIngressRegistryTest {
                 Set.of("invoke"), 3, 2, 128, 128, Duration.ofSeconds(1));
         var registry = ManagedIngressRegistry.prepare(List.of(authority), true);
         try (registry; var executor = Executors.newVirtualThreadPerTaskExecutor()) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> handler);
             registry.authorityFor(new IngressRouteOwner("example.oas", "tenant", "stable", "node", 1))
                     .acquire("stable", "/stable", Set.of("GET"), request ->
@@ -301,7 +316,7 @@ class ManagedIngressRegistryTest {
                 5, 1, 8, 8, Duration.ofMillis(50));
         var registry = ManagedIngressRegistry.prepare(List.of(bounded), true);
         try (registry) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
@@ -330,7 +345,7 @@ class ManagedIngressRegistryTest {
             });
             server.start();
             String base = "http://127.0.0.1:" + server.getAddress().getPort() + "/managed/bounded";
-            var client = HttpClient.newHttpClient();
+            var client = HTTP_CLIENT;
             assertEquals(413, post(client, base + "/request", new byte[9]).statusCode());
             assertEquals(0, calls.get(), "oversized request is rejected before plugin code");
             assertEquals(502, post(client, base + "/response", new byte[0]).statusCode());
@@ -339,7 +354,10 @@ class ManagedIngressRegistryTest {
             assertEquals(504, post(client, base + "/slow", new byte[0]).statusCode());
             assertEquals(502, post(client, base + "/headers", new byte[0]).statusCode());
             long slowStarted = System.nanoTime();
-            try (var socket = new Socket(InetAddress.getLoopbackAddress(), server.getAddress().getPort())) {
+            try (var socket = new Socket()) {
+                socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(),
+                                server.getAddress().getPort()),
+                        Math.toIntExact(HTTP_TIMEOUT.toMillis()));
                 socket.setSoTimeout(2_000);
                 socket.getOutputStream().write(("POST /managed/bounded/upload HTTP/1.1\r\nHost: localhost\r\n"
                         + "Content-Length: 8\r\nConnection: close\r\n\r\nx")
@@ -375,13 +393,44 @@ class ManagedIngressRegistryTest {
                 "the aggregate is rejected at 8193 UTF-8 bytes, not Java character count");
     }
 
+    @Test void aNonRespondingIngressProbeFailsWithinItsRequestDeadlineAndReleasesItsServer() throws Exception {
+        var handlerEntered = new CountDownLatch(1);
+        var releaseHandler = new CountDownLatch(1);
+        var server = httpServer();
+        server.createContext("/never", exchange -> {
+            handlerEntered.countDown();
+            try {
+                releaseHandler.await(5, TimeUnit.SECONDS);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+            } finally {
+                exchange.close();
+            }
+        });
+        server.start();
+
+        long started = System.nanoTime();
+        try {
+            URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort() + "/never");
+            assertThrows(HttpTimeoutException.class, () -> HTTP_CLIENT.send(
+                    request(uri, Duration.ofMillis(100)).GET().build(),
+                    HttpResponse.BodyHandlers.discarding()));
+            assertTrue(handlerEntered.await(1, TimeUnit.SECONDS),
+                    "the deadline must bound an accepted request, not a connection refusal");
+            assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofSeconds(2)) < 0,
+                    "a non-responding ingress probe must fail before the test lifecycle timeout");
+        } finally {
+            releaseHandler.countDown();
+        }
+    }
+
     @Test void synchronousBlockingCallbackIsDeadlineBoundedAndCannotStarveReplacement() throws Exception {
         var authority = new IngressAuthorityDeclaration("blocking", "main", "/managed/blocking",
                 Set.of("invoke"), 1, 1, 8, 8, Duration.ofMillis(75));
         var registry = ManagedIngressRegistry.prepare(List.of(authority), true);
         var allowOldExit = new AtomicBoolean();
         try (registry) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
@@ -401,18 +450,18 @@ class ManagedIngressRegistryTest {
                 return CompletableFuture.completedFuture(new IngressResponse(200, Map.of(), new byte[] {1}));
             });
             server.start();
-            var client = HttpClient.newHttpClient();
+            var client = HTTP_CLIENT;
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/blocking/route");
             long started = System.nanoTime();
-            var timedOut = client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.noBody()).build(),
+            var timedOut = client.send(request(uri).POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding());
             assertEquals(504, timedOut.statusCode());
             assertTrue(Duration.ofNanos(System.nanoTime() - started).compareTo(Duration.ofMillis(500)) < 0,
                     "synchronous package code is inside the request deadline");
             assertTrue(entered.await(1, TimeUnit.SECONDS));
 
-            var refusedBehindStuckWorker = client.send(HttpRequest.newBuilder(uri)
+            var refusedBehindStuckWorker = client.send(request(uri)
                             .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding());
             // The discrimination that matters: this one is 502 and the one above is 504, on the same
@@ -428,7 +477,7 @@ class ManagedIngressRegistryTest {
             registry.authorityFor(new IngressRouteOwner("blocking", "tenant", "deployment", "node", 2))
                     .acquire("replacement", "/route", Set.of("POST"), request ->
                             CompletableFuture.completedFuture(new IngressResponse(202, Map.of(), new byte[] {2})));
-            var replacement = client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.noBody()).build(),
+            var replacement = client.send(request(uri).POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(202, replacement.statusCode());
             assertArrayEquals(new byte[] {2}, replacement.body());
@@ -460,7 +509,7 @@ class ManagedIngressRegistryTest {
         };
         var registry = ManagedIngressRegistry.prepareWithLifecycleHooks(List.of(AUTHORITY), true, hooks);
         try (registry; var releases = Executors.newVirtualThreadPerTaskExecutor()) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
@@ -476,8 +525,8 @@ class ManagedIngressRegistryTest {
             server.start();
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/example/orders");
-            var client = HttpClient.newHttpClient();
-            var oldResponse = client.sendAsync(HttpRequest.newBuilder(uri)
+            var client = HTTP_CLIENT;
+            var oldResponse = client.sendAsync(request(uri)
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofByteArray());
             assertTrue(permitAcquired.await(1, TimeUnit.SECONDS));
 
@@ -509,7 +558,7 @@ class ManagedIngressRegistryTest {
                 assertInstanceOf(java.io.IOException.class, closed.getCause());
             }
             assertEquals(0, calls.get(), "retirement before publication never invokes package code");
-            var replacement = client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.noBody())
+            var replacement = client.send(request(uri).POST(HttpRequest.BodyPublishers.noBody())
                     .build(), HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(202, replacement.statusCode());
             assertArrayEquals(new byte[] {2}, replacement.body());
@@ -523,7 +572,7 @@ class ManagedIngressRegistryTest {
     @Test void lateCompletionFromRetiredGenerationCannotServeThroughReplacement() throws Exception {
         var registry = ManagedIngressRegistry.prepare(List.of(AUTHORITY), true);
         try (registry) {
-            var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+            var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
@@ -540,8 +589,8 @@ class ManagedIngressRegistryTest {
             server.start();
             URI uri = URI.create("http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/example/orders");
-            var client = HttpClient.newHttpClient();
-            var oldResponse = client.sendAsync(HttpRequest.newBuilder(uri)
+            var client = HTTP_CLIENT;
+            var oldResponse = client.sendAsync(request(uri)
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofByteArray());
             assertTrue(entered.await(2, TimeUnit.SECONDS));
 
@@ -558,7 +607,7 @@ class ManagedIngressRegistryTest {
                 assertInstanceOf(java.io.IOException.class, closedByRetirement.getCause(),
                         "retirement may fence by closing the accepted exchange");
             }
-            var replacement = client.send(HttpRequest.newBuilder(uri).POST(HttpRequest.BodyPublishers.noBody())
+            var replacement = client.send(request(uri).POST(HttpRequest.BodyPublishers.noBody())
                     .build(), HttpResponse.BodyHandlers.ofByteArray());
             assertEquals(202, replacement.statusCode());
             assertArrayEquals(new byte[] {2}, replacement.body());
@@ -590,10 +639,10 @@ class ManagedIngressRegistryTest {
             registry.authorityFor(owner).acquire("exact", "/api/orders/special", Set.of("POST"), request ->
                     CompletableFuture.completedFuture(new IngressResponse(202, Map.of(), "exact".getBytes())));
             server.start();
-            var client = HttpClient.newHttpClient();
+            var client = HTTP_CLIENT;
             String base = "http://127.0.0.1:" + server.getAddress().getPort() + "/managed/projection";
 
-            var parent = client.send(HttpRequest.newBuilder(URI.create(base + "/api/other"))
+            var parent = client.send(request(URI.create(base + "/api/other"))
                     .header("X-Idempotency-Key", "idem-parent")
                     .header("Authorization", "must-not-project")
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
@@ -601,7 +650,7 @@ class ManagedIngressRegistryTest {
             assertEquals("/other", parentSeen.get().relativePath());
             assertEquals(Map.of("x-idempotency-key", "idem-parent"), parentSeen.get().headers());
 
-            var child = client.send(HttpRequest.newBuilder(URI.create(
+            var child = client.send(request(URI.create(
                             base + "/api/orders/cafe%CC%81?tag=one&tag=two&name=caf%C3%A9&plus=a+b"))
                     .header("content-type", "application/json")
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
@@ -612,10 +661,10 @@ class ManagedIngressRegistryTest {
                     childSeen.get().query());
             assertEquals(Map.of("content-type", "application/json"), childSeen.get().headers());
 
-            var exact = client.send(HttpRequest.newBuilder(URI.create(base + "/api/orders/special"))
+            var exact = client.send(request(URI.create(base + "/api/orders/special"))
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofString());
             assertEquals("exact", exact.body(), "an exact route is more specific at its own path");
-            assertEquals(404, client.send(HttpRequest.newBuilder(URI.create(
+            assertEquals(404, client.send(request(URI.create(
                             base + "/api/orders/special/descendant"))
                     .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding()).statusCode(),
@@ -641,7 +690,7 @@ class ManagedIngressRegistryTest {
                         return CompletableFuture.completedFuture(new IngressResponse(204, Map.of(), new byte[0]));
                     });
             server.start();
-            var client = HttpClient.newHttpClient();
+            var client = HTTP_CLIENT;
             String base = "http://127.0.0.1:" + server.getAddress().getPort()
                     + "/managed/bounded-projection/api";
 
@@ -658,18 +707,18 @@ class ManagedIngressRegistryTest {
                     List.of("X-Request-Key: one", "X-Request-Key: two")));
             assertEquals(414, post(client, base + "/" + "a".repeat(16), new byte[0]).statusCode());
             assertEquals(414, post(client, base + "/ok?x=" + "a".repeat(15), new byte[0]).statusCode());
-            assertEquals(431, client.send(HttpRequest.newBuilder(URI.create(base + "/ok"))
+            assertEquals(431, client.send(request(URI.create(base + "/ok"))
                     .header("X-Request-Key", "a".repeat(13))
                     .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding()).statusCode());
-            assertEquals(431, client.send(HttpRequest.newBuilder(URI.create(base + "/ok"))
+            assertEquals(431, client.send(request(URI.create(base + "/ok"))
                     .header("X-Request-Key", "a".repeat(8))
                     .POST(HttpRequest.BodyPublishers.noBody()).build(),
                     HttpResponse.BodyHandlers.discarding()).statusCode(),
                     "13-byte canonical name plus 8-byte value is aggregate max+1");
             assertEquals(0, calls.get(), "projection refusal must happen before package delivery");
 
-            var recovered = client.send(HttpRequest.newBuilder(URI.create(
+            var recovered = client.send(request(URI.create(
                             base + "/" + "a".repeat(15) + "?x=" + "a".repeat(14)))
                     .header("X-Request-Key", "allowed")
                     .POST(HttpRequest.BodyPublishers.noBody()).build(),
@@ -699,16 +748,30 @@ class ManagedIngressRegistryTest {
                             CompletableFuture.completedFuture(new IngressResponse(202, Map.of(), new byte[] {2})));
             old.release();
             server.start();
-            var response = post(HttpClient.newHttpClient(), "http://127.0.0.1:"
+            var response = post(HTTP_CLIENT, "http://127.0.0.1:"
                     + server.getAddress().getPort() + "/managed/prefix/api/descendant", new byte[0]);
             assertEquals(202, response.statusCode());
             server.stop(0);
         }
     }
 
-    private static HttpServer authenticatedServer(ManagedIngressRegistry registry, String tenant)
-            throws Exception {
+    private HttpServer httpServer() throws IOException {
         var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
+        servers.add(server);
+        return server;
+    }
+
+    private static HttpRequest.Builder request(URI uri) {
+        return request(uri, HTTP_TIMEOUT);
+    }
+
+    private static HttpRequest.Builder request(URI uri, Duration timeout) {
+        return HttpRequest.newBuilder(uri).timeout(timeout);
+    }
+
+    private HttpServer authenticatedServer(ManagedIngressRegistry registry, String tenant)
+            throws Exception {
+        var server = httpServer();
         registry.bind(server, handler -> exchange -> {
             exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
                     new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", tenant,
@@ -719,7 +782,9 @@ class ManagedIngressRegistryTest {
     }
 
     private static int rawStatus(int port, String target, List<String> headers) throws Exception {
-        try (var socket = new Socket(InetAddress.getLoopbackAddress(), port)) {
+        try (var socket = new Socket()) {
+            socket.connect(new InetSocketAddress(InetAddress.getLoopbackAddress(), port),
+                    Math.toIntExact(HTTP_TIMEOUT.toMillis()));
             socket.setSoTimeout(2_000);
             String extra = headers.isEmpty() ? "" : String.join("\r\n", headers) + "\r\n";
             socket.getOutputStream().write(("POST " + target + " HTTP/1.1\r\nHost: localhost\r\n"
@@ -734,7 +799,7 @@ class ManagedIngressRegistryTest {
     }
 
     private static HttpResponse<Void> post(HttpClient client, String uri, byte[] body) throws Exception {
-        return client.send(HttpRequest.newBuilder(URI.create(uri))
+        return client.send(request(URI.create(uri))
                 .POST(HttpRequest.BodyPublishers.ofByteArray(body)).build(), HttpResponse.BodyHandlers.discarding());
     }
 

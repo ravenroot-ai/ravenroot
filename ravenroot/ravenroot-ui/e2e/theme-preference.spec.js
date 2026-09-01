@@ -33,6 +33,9 @@ test('switches both application and Cyto palettes without layout or model/view m
   await page.goto('/');
   await page.evaluate(() => window.ravenroot.setApplicationTheme('dark'));
   await page.locator('#btn-design').click();
+  await expect.poll(() => page.evaluate(() => Boolean(
+    window.ravenroot.activeDocument().cy.scratch('_rrLayoutRunning')))).toBe(false);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   await page.evaluate(() => {
     const owner = window.ravenroot.activeDocument();
     owner.cy.zoom(0.83);

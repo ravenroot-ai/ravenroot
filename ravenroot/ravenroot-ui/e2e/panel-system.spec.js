@@ -10,6 +10,20 @@ import { expect, test } from '@playwright/test';
 
 const PANELS = ['search', 'node-types', 'node-catalog', 'edge-types', 'graph-stats', 'inspector', 'assistant', 'activity'];
 
+async function clickFirstGraphNode(page) {
+  await expect.poll(() => page.evaluate(() => Boolean(
+    window.cy.scratch('_rrLayoutRunning')))).toBe(false);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(() => { window.cy.$(':selected').unselect(); });
+  const point = await page.evaluate(() => {
+    const node = window.cy.nodes()[0];
+    const position = node.renderedPosition();
+    const canvas = window.cy.container().getBoundingClientRect();
+    return { x: canvas.left + position.x, y: canvas.top + position.y };
+  });
+  await page.mouse.click(point.x, point.y);
+}
+
 // Seeds a selected node in Modify mode, which is the state that puts the node editor in the
 // Inspector. `#btn-new` is used rather than a fixture file because the editor's height is what is
 // under test, not the graph's contents.
@@ -18,13 +32,7 @@ async function selectedNodeInModifyMode(page) {
   await page.locator('#btn-new').click();
   await page.locator('#btn-modify').click();
   await page.waitForTimeout(300);
-  await page.evaluate(() => {
-    const host = document.querySelector('.doc-canvas') || document.getElementById('cy');
-    const instance = host && host._cyreg && host._cyreg.cy;
-    const node = instance.nodes()[0];
-    node.emit('tap');
-    instance.$(node).select();
-  });
+  await clickFirstGraphNode(page);
   await page.waitForSelector('#node-editor', { timeout: 10_000 });
   await page.waitForTimeout(300);
 }
@@ -948,13 +956,7 @@ test.describe('closing a panel', () => {
     await page.waitForTimeout(200);
     await expect(page.locator('.panel[data-panel-id="inspector"]')).toBeHidden();
 
-    await page.evaluate(() => {
-      const host = document.querySelector('.doc-canvas') || document.getElementById('cy');
-      const instance = host._cyreg.cy;
-      const node = instance.nodes()[0];
-      node.emit('tap');
-      instance.$(node).select();
-    });
+    await clickFirstGraphNode(page);
     await page.waitForTimeout(300);
     await expect(page.locator('.panel[data-panel-id="inspector"]')).toBeVisible();
   });
@@ -1230,13 +1232,7 @@ test('the commit action stays bounded when the Inspector is moved into the dock'
   await page.locator('#btn-new').click();
   await page.locator('#btn-modify').click();
   await page.waitForTimeout(250);
-  await page.evaluate(() => {
-    const host = document.querySelector('.doc-canvas') || document.getElementById('cy');
-    const instance = host._cyreg.cy;
-    const node = instance.nodes()[0];
-    node.emit('tap');
-    instance.$(node).select();
-  });
+  await clickFirstGraphNode(page);
   await page.waitForSelector('#node-editor', { timeout: 10_000 });
   await page.waitForTimeout(300);
 

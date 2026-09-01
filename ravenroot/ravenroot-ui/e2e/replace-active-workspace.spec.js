@@ -51,6 +51,28 @@ async function makeActiveDirty(page, name = 'Sibling-only edit') {
   await expect(page.locator('#dirty-state')).toHaveText('unsaved changes');
 }
 
+async function waitForWorkspaceViewportsSettled(page) {
+  await page.evaluate(() => new Promise(resolve => {
+    let previous = '';
+    let stableFrames = 0;
+    const sample = () => {
+      const current = JSON.stringify(window.ravenroot.workspace.documents.map(owner => ({
+        width: owner.container.clientWidth,
+        height: owner.container.clientHeight,
+        zoom: owner.cy.zoom(),
+        pan: owner.cy.pan(),
+        layoutRunning: Boolean(owner.cy.scratch('_rrLayoutRunning')),
+        refitPending: Boolean(owner.layoutPendingRefit || owner.cy.scratch('_rrRefitAfterLayout')),
+      })));
+      stableFrames = current === previous ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 2) resolve();
+      else requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  }));
+}
+
 const paintedPixels = (page, documentId) => page.evaluate(id => {
   const pane = window.ravenroot.workspace.find(id).pane;
   return [...pane.querySelectorAll('canvas')].reduce((total, canvas) => {
@@ -105,6 +127,7 @@ async function prepareWorkspace(page, mode = 'horizontal') {
     await splitter.focus();
     await page.keyboard.press(axis === 'column' ? 'ArrowRight' : 'ArrowDown');
   }
+  await waitForWorkspaceViewportsSettled(page);
 
   return { left, target, right };
 }

@@ -40,7 +40,7 @@ test.describe('shared active-document minimap', () => {
   test('is a single labelled active-document viewport and coalesces pan repaints', async ({ page }) => {
     await expect(page.locator('#minimap')).toHaveCount(1);
     await expect(page.locator('#minimap-canvas')).toHaveAttribute('role', 'application');
-    await expect(page.locator('#minimap-canvas')).toHaveAccessibleName(/Overview.*untitled\.graphml.*Cytoscape.*arrow keys pan graph/i);
+    await expect(page.locator('#minimap-canvas')).toHaveAccessibleName(/Overview.*untitled\.graphml.*Design renderer.*arrow keys pan graph/i);
     // The default N8N layout is animated; isolate its legitimate position events from the pan burst.
     await waitForOpeningLayout(page);
     await page.evaluate(async () => {
@@ -168,7 +168,7 @@ test.describe('shared active-document minimap', () => {
         renderer: 'cytoscape', dataRenderer: 'cytoscape',
       });
       expect(ownership.label).toContain('current.graphml');
-      expect(ownership.accessibleName).toMatch(/Overview.*current\.graphml.*Cytoscape/i);
+      expect(ownership.accessibleName).toMatch(/Overview.*current\.graphml.*Design renderer/i);
       expect(ownership.paintCount - before.paintCount).toBeLessThanOrEqual(1);
 
       const pansBeforeKey = await page.evaluate(([first, second]) => ({

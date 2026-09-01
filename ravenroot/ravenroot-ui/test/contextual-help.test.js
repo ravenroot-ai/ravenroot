@@ -10,7 +10,7 @@ const rect = (left, top, width, height) => ({
   left, top, width, height, right: left + width, bottom: top + height,
 });
 
-function setup() {
+function setup({ popoverRect = rect(0, 0, 220, 120), suppliedWindow = window } = {}) {
   document.body.innerHTML = `<main>
     <input id="editor" value="draft">
     <button id="first" type="button" aria-expanded="false" aria-controls="contextual-help-popover"
@@ -27,8 +27,8 @@ function setup() {
   const first = document.getElementById('first');
   first.getBoundingClientRect = () => rect(260, 80, 20, 20);
   document.getElementById('second').getBoundingClientRect = () => rect(260, 120, 20, 20);
-  popover.getBoundingClientRect = () => rect(0, 0, 220, 120);
-  const controller = createContextualHelp({ root: document, popover, window });
+  popover.getBoundingClientRect = () => popoverRect;
+  const controller = createContextualHelp({ root: document, popover, window: suppliedWindow });
   return {
     controller,
     popover,
@@ -88,6 +88,21 @@ describe('contextual help placement', () => {
 });
 
 describe('the delegated contextual help controller', () => {
+  it('rounds fractional placement toward the viewport-safe edge', () => {
+    const viewport = {
+      innerWidth: 360, innerHeight: 640,
+      addEventListener() {}, removeEventListener() {},
+    };
+    const { controller, popover, first } = setup({
+      popoverRect: rect(0, 0, 340, 360.09375), suppliedWindow: viewport,
+    });
+    pointerActivate(first);
+
+    expect(Number.parseFloat(popover.style.top) + 360.09375).toBeLessThanOrEqual(632);
+    expect(Number.parseFloat(popover.style.left) + 340).toBeLessThanOrEqual(352);
+    controller.destroy();
+  });
+
   it('opens by pointer without blurring the active editor and dismisses outside without cancelling it', () => {
     const { controller, popover, first, editor, outside } = setup();
     editor.focus();

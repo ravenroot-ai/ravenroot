@@ -91,6 +91,7 @@ jobs:
         run: |
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_verify_api_docs
       - name: Verify shell tooling contracts
         run: |
@@ -123,15 +124,28 @@ jobs:
       - name: Validate public documentation links and ADR structure
         run: python3 scripts/check_public_docs.py
       - name: Install the integrity-locked Mermaid renderer
-        run: npm ci --prefix scripts/mermaid-renderer
+        run: npm ci --ignore-scripts --prefix scripts/mermaid-renderer
+      - name: Provision the lock-pinned Mermaid browser
+        env:
+          # Keep root-provisioned browser files outside the checkout and away from repository tests.
+          PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ravenroot-puppeteer
+        run: |
+          sudo env "PATH=$PATH" "PUPPETEER_CACHE_DIR=$PUPPETEER_CACHE_DIR" \
+            npm --prefix scripts/mermaid-renderer run install-browser:ci
+          npm --prefix scripts/mermaid-renderer run verify-browser
       - name: Render every Mermaid diagram in public documentation
-        run: python3 scripts/check_public_docs.py --render-mermaid
+        env:
+          PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ravenroot-puppeteer
+        run: >-
+          python3 scripts/check_public_docs.py --render-mermaid
+          --puppeteer-config scripts/mermaid-renderer/puppeteer-ci.json
       - name: Validate product release identity
         run: python3 scripts/check_product_version.py
       - name: Verify Python tooling contracts
         run: |
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_verify_api_docs
       - name: Verify developer and platform shell contracts
         run: |

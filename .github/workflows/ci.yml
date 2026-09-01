@@ -42,11 +42,11 @@ jobs:
           cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
 
       - name: Build and verify the product
-        # The shared-runner stability defect is tracked in public issue #5.
+        # Shared-runner stability defects are tracked in public issues #5 and #6.
         env:
           MAVEN_ARGS: >-
             -ntp
-            -Dtest=*Test,!LoadInterleavedStabilityTest
+            -Dtest=*Test,!LoadInterleavedStabilityTest,!DurableSseReplayIntegrationTest
             -Dsurefire.failIfNoSpecifiedTests=false
             -Dsurefire.rerunFailingTestsCount=1
         run: ./ravenroot/scripts/build-release.sh

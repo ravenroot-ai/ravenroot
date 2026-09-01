@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+
 import { expect, test } from '@playwright/test';
 
 const graphDocumentModule = readFileSync(new URL('../src/graph-document.js', import.meta.url), 'utf8');
@@ -119,7 +121,7 @@ async function expectRejectedBatch(page, snapshot, message) {
 
 test('descriptor intersection exposes equal selection without a primary and distinguishes mixed, absent and secret values', async ({ page }) => {
   await open(page);
-  const secret = `runtime-canary-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const secret = `runtime-canary-${randomUUID()}`;
   await configure(page, {
     behaviors: ['multi.alpha', 'multi.beta'],
     values: [
@@ -155,7 +157,7 @@ test('descriptor intersection exposes equal selection without a primary and dist
 
 test('editing batches only touched common fields after confirmation, fails atomically and undoes in one step', async ({ page }) => {
   await open(page);
-  const secret = `runtime-canary-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const secret = `runtime-canary-${randomUUID()}`;
   await configure(page, {
     behaviors: ['multi.alpha', 'multi.beta'],
     values: [

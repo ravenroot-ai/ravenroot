@@ -64,8 +64,14 @@ jobs:
         with:
           node-version-file: .nvmrc
 
-      - name: Verify support modules
-        run: ./dev.sh setup --with-tests --skip-ui
+      - name: Prepare support modules
+        run: ./dev.sh setup --skip-ui
+
+      - name: Verify external model adapters
+        run: |
+          for adapter in ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible; do
+            mvn -B --no-transfer-progress -f "$adapter/pom.xml" verify
+          done
 
       - name: Verify the optional Akka runtime
         run: >-
@@ -82,6 +88,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
 
       - name: Set up Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0

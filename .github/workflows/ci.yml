@@ -41,15 +41,16 @@ jobs:
           cache: npm
           cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
 
-      - name: Build and verify the product
-        # Shared-runner stability defects are tracked in public issues #5 and #6.
+      - name: Build and package the complete product
         env:
-          MAVEN_ARGS: >-
-            -ntp
-            -Dtest=*Test,!LoadInterleavedStabilityTest,!DurableSseReplayIntegrationTest
-            -Dsurefire.failIfNoSpecifiedTests=false
-            -Dsurefire.rerunFailingTestsCount=1
+          MAVEN_ARGS: -ntp -DskipTests
         run: ./ravenroot/scripts/build-release.sh
+
+      - name: Verify core JVM contracts
+        run: >-
+          mvn -B --no-transfer-progress -f ravenroot/pom.xml
+          -pl ravenroot-core,ravenroot-persistence-sqlite,ravenroot-programming-graalvm,ravenroot-pekko
+          -am test -Dsurefire.rerunFailingTestsCount=1
 
   support-build:
     name: support-build

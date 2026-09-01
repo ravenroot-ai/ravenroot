@@ -47,6 +47,7 @@ jobs:
           MAVEN_ARGS: >-
             -ntp
             -Dtest=*Test,!LoadInterleavedStabilityTest
+            -Dsurefire.failIfNoSpecifiedTests=false
             -Dsurefire.rerunFailingTestsCount=1
         run: ./ravenroot/scripts/build-release.sh
 

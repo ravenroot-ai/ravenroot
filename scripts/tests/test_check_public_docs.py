@@ -49,6 +49,12 @@ class CheckPublicDocsTest(unittest.TestCase):
         config = ROOT / "scripts" / "mermaid-renderer" / "puppeteer-ci.json"
         self.assertEqual(json.loads(config.read_text(encoding="utf-8")), {"args": ["--no-sandbox"]})
 
+    def test_hosted_browser_cache_stays_outside_the_checkout(self) -> None:
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+        cache_setting = "PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ravenroot-puppeteer"
+        self.assertEqual(workflow.count(cache_setting), 2)
+        self.assertNotIn("PUPPETEER_CACHE_DIR: ${{ github.workspace }}", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()

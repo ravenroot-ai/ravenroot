@@ -49,7 +49,6 @@ describe('the panel cannot reach anything but its own Ravenroot service', () => 
       `${SERVICE}${ASSISTANT_PATHS.status}`,
       `${SERVICE}${ASSISTANT_PATHS.messages}`,
     ]);
-    expect(urlsCalled(fetchImpl).every(url => url.startsWith(SERVICE))).toBe(true);
   });
 
   // A hostile or merely wrong status response must not be able to move the panel's destination.
@@ -70,7 +69,10 @@ describe('the panel cannot reach anything but its own Ravenroot service', () => 
     const status = await client.status();
     await client.send({ prompt: 'hello', context: composeContext({}) });
 
-    expect(urlsCalled(fetchImpl).every(url => url.startsWith(SERVICE))).toBe(true);
+    expect(urlsCalled(fetchImpl)).toEqual([
+      `${SERVICE}${ASSISTANT_PATHS.status}`,
+      `${SERVICE}${ASSISTANT_PATHS.messages}`,
+    ]);
     expect(urlsCalled(fetchImpl).some(url => url.includes('attacker'))).toBe(false);
     // The provider name survives as a LABEL, which is all it may ever be.
     expect(status.provider).toBe('https://provider.attacker.example/v1/messages');

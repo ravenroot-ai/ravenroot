@@ -18,6 +18,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -221,7 +222,9 @@ class FilesystemAccessTest {
                 catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
             }
         });
-        FilesystemRuntime runtime = new FilesystemRuntime((tenant, name) -> java.util.Optional.of(profile(64)), delayed);
+        FilesystemRuntime runtime = new FilesystemRuntime(
+                (tenant, name) -> java.util.Optional.of(profile(64)), delayed,
+                deadlineAfter(moving));
         FilesystemAccess.InvocationState state = new FilesystemAccess.InvocationState();
         CountDownLatch workerFinished = new CountDownLatch(1);
         CompletableFuture<ai.ravenroot.api.execution.NodeResult> result = runtime.execute("tenant", profile(64),
@@ -240,6 +243,28 @@ class FilesystemAccessTest {
                 ((FilesystemNodeException) failure.getCause()).reason());
         assertTrue(workerFinished.await(1, TimeUnit.SECONDS));
         assertTrue(Files.readString(target).equals("old") || Files.readString(target).equals("new"));
+    }
+
+    /**
+     * Starts the deadline only after the write owns the final-move boundary. The production
+     * scheduler still measures the configured duration from invocation start; this deterministic
+     * test scheduler isolates the state transition under test instead of racing a 25 ms deadline
+     * against virtual-thread startup on the host runner.
+     */
+    private static FilesystemRuntime.DeadlineScheduler deadlineAfter(CountDownLatch moving) {
+        return (action, ignoredDelay) -> {
+            var cancelled = new AtomicBoolean();
+            Thread.ofPlatform().daemon().name("filesystem-test-deadline").start(() -> {
+                try {
+                    if (moving.await(5, TimeUnit.SECONDS) && !cancelled.get()) {
+                        action.run();
+                    }
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            });
+            return () -> cancelled.set(true);
+        };
     }
 
     @Test void restartSweepDeletesOnlyExpiredTempsOwnedByTheActiveProfile() throws Exception {

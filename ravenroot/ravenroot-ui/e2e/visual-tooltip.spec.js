@@ -223,7 +223,7 @@ test('keeps an unavailable zone control focusable and gates pointer and keyboard
   await expect(toggle).toHaveAttribute('aria-expanded', before);
 });
 
-test('central gating also blocks direct program-lifecycle handlers while exposing their reason', async ({ page }) => {
+test('central gating blocks Build until program languages load while exposing the reason', async ({ page }) => {
   const programCatalog = JSON.stringify([{
     behavior: 'program', displayName: 'Governed program', category: 'core', description: 'Program',
     visualType: 'flow', agentic: false, capabilities: [], properties: [],
@@ -239,28 +239,32 @@ test('central gating also blocks direct program-lifecycle handlers while exposin
   await page.goto('/');
   await page.locator('#btn-new').click();
   await page.locator('#btn-modify').click();
-  await page.evaluate(() => {
-    const host = document.querySelector('.doc-canvas') || document.getElementById('cy');
-    const instance = host?._cyreg?.cy || window.cy;
-    const node = instance.nodes()[0];
-    node.emit('tap');
-    instance.$(node).select();
+  await expect.poll(() => page.evaluate(() => Boolean(
+    window.cy.scratch('_rrLayoutRunning')))).toBe(false);
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(() => { window.cy.$(':selected').unselect(); });
+  const nodePoint = await page.evaluate(() => {
+    const node = window.cy.nodes()[0];
+    const position = node.renderedPosition();
+    const canvas = window.cy.container().getBoundingClientRect();
+    return { x: canvas.left + position.x, y: canvas.top + position.y };
   });
+  await page.mouse.click(nodePoint.x, nodePoint.y);
   await page.waitForSelector('#node-editor');
   await page.locator('#node-editor select[name="catalogBehavior"]').selectOption('program');
 
-  const validate = page.locator('[data-program-operation="validate"]');
-  await expect(validate).toHaveAttribute('aria-disabled', 'true');
-  await validate.scrollIntoViewIfNeeded();
+  const build = page.locator('[data-program-operation="build"]');
+  await expect(build).toHaveAttribute('aria-disabled', 'true');
+  await build.scrollIntoViewIfNeeded();
   await page.waitForTimeout(50);
-  await expectTooltipForFocus(page, validate, 'Create the artifact first');
-  await validate.click({ force: true });
-  await validate.focus();
+  await expectTooltipForFocus(page, build, 'Loading the languages this runtime supports');
+  await build.click({ force: true });
+  await build.focus();
   await page.keyboard.press('Enter');
   await page.keyboard.press('Space');
   await page.waitForTimeout(100);
-  expect(programRequests).toEqual([]);
-  await expect(page.locator('.program-status')).toHaveText('No artifact created.');
+  expect(programRequests.filter(request => request.startsWith('POST '))).toEqual([]);
+  await expect(page.locator('.program-status')).toHaveText('Not checked by the server yet.');
 });
 
 test('dismisses across panel lifecycle and honors reduced motion without duplicating the singleton', async ({ page }) => {

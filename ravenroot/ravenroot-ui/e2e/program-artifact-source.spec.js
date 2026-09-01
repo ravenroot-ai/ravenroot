@@ -643,10 +643,18 @@ test('a document-named language the runtime no longer supports is stated explici
   await page.locator('#node-editor button[type="submit"]').click();
   await page.waitForSelector('#node-editor');
 
+  // Leave the saved node before reopening it. A repeat tap on the already-selected node is
+  // intentionally debounced, so exercise the actual two-node selection transition instead.
+  await page.evaluate(() => { window.cy.getElementById('start').emit('tap'); });
+  await expect(page.locator('#node-editor input[name="id"]')).toHaveValue('start');
+
   // The runtime no longer declares python at all; the browser does not consult an artifact listing
   // to replace the document's authored language.
   currentLanguages = [DEFAULT_LANGUAGES[0]]; // javascript only
+  const refreshedLanguages = page.waitForResponse(response =>
+    response.url().endsWith('/v1/program-languages'));
   await page.evaluate(() => { window.cy.getElementById('dropped-language-node').emit('tap'); });
+  await refreshedLanguages;
   await page.waitForSelector('.program-workspace');
 
   // The author must see the unsupported language instead of having it substituted.

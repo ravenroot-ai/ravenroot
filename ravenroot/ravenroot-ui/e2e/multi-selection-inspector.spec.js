@@ -4,6 +4,8 @@ import { randomUUID } from 'node:crypto';
 import { expect, test } from '@playwright/test';
 
 const graphDocumentModule = readFileSync(new URL('../src/graph-document.js', import.meta.url), 'utf8');
+const stableEdgeIdModule = readFileSync(new URL('../src/stable-edge-id.js', import.meta.url), 'utf8');
+const adapterBindingModule = readFileSync(new URL('../src/adapter-binding.js', import.meta.url), 'utf8');
 
 const property = (name, type, options = {}) => ({
   name, displayName: options.displayName || name, type, required: false,
@@ -48,6 +50,12 @@ const CONDITIONAL_CATALOG = [
 async function open(page, catalog = CATALOG) {
   await page.route('**/e2e-graph-document.js', route => route.fulfill({
     status: 200, contentType: 'text/javascript; charset=utf-8', body: graphDocumentModule,
+  }));
+  await page.route('**/stable-edge-id.js', route => route.fulfill({
+    status: 200, contentType: 'text/javascript; charset=utf-8', body: stableEdgeIdModule,
+  }));
+  await page.route('**/adapter-binding.js', route => route.fulfill({
+    status: 200, contentType: 'text/javascript; charset=utf-8', body: adapterBindingModule,
   }));
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json; charset=utf-8', body: JSON.stringify(catalog),

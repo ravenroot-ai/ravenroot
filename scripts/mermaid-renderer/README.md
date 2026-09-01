@@ -20,3 +20,9 @@ privileges required by `apt-get`.
 
 `browser-path.mjs` verifies that both executables supplied by the pinned Puppeteer installation are
 present and executable, then reports their paths.
+
+The GitHub-hosted Ubuntu documentation job passes `puppeteer-ci.json` explicitly. That narrowly
+scoped configuration adds `--no-sandbox` because Ubuntu 24.04 AppArmor prevents the downloaded
+Headless Shell from creating the user namespace its sandbox requires. It is not an ambient
+Puppeteer setting and is not used by the local validation command above. The ephemeral job renders
+only repository documentation and still fails on every Mermaid parse or render error.

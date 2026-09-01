@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 import subprocess
 import unittest
@@ -29,17 +30,24 @@ class CheckPublicDocsTest(unittest.TestCase):
         with (
             mock.patch.object(CHECK, "MERMAID_FENCE") as fence,
             mock.patch.object(CHECK.Path, "is_file", return_value=True),
-            mock.patch.object(CHECK.subprocess, "run", return_value=completed),
+            mock.patch.object(CHECK.subprocess, "run", return_value=completed) as run,
             mock.patch.object(CHECK.Path, "read_text", return_value="graph TD; A-->B"),
         ):
             fence.findall.return_value = ["graph TD; A-->B"]
-            errors = CHECK.render_mermaid([document])
+            config = ROOT / "scripts" / "mermaid-renderer" / "puppeteer-ci.json"
+            errors = CHECK.render_mermaid([document], config)
 
         self.assertEqual(len(errors), 1)
         self.assertIn("Could not find Chrome (ver. 152.0.7977.54).", errors[0])
         self.assertIn("finalStackFrame", errors[0])
         self.assertIn("renderer context", errors[0])
         self.assertIn("exited with status 1", errors[0])
+        command = run.call_args.args[0]
+        self.assertEqual(command[-2:], ["--puppeteerConfigFile", str(config)])
+
+    def test_hosted_puppeteer_configuration_is_minimal_and_explicit(self) -> None:
+        config = ROOT / "scripts" / "mermaid-renderer" / "puppeteer-ci.json"
+        self.assertEqual(json.loads(config.read_text(encoding="utf-8")), {"args": ["--no-sandbox"]})
 
 
 if __name__ == "__main__":

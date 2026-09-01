@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+    <artifactId>ravenroot-node-starter</artifactId>
+    <name>Ravenroot external node starter</name>
+    <description>
+        Minimal example of a third-party Ravenroot node package. This is the CORE-06 acceptance
+        evidence: it depends on the Node SDK and on nothing else, so the fact that it compiles is the
+        proof that a node type can be written without depending on the engine. It is deliberately not
+        a dependency of ravenroot-distribution and does not ship.
+    </description>
+
+    <dependencies>
+        <!--
+          The Node SDK, and deliberately the ONLY compile dependency. If this module ever needs
+          ravenroot-core to build, the SDK boundary has regressed: a third party would again be
+          required to take the graph engine, TinkerGraph and a CEL interpreter in order to publish a
+          node. Adding a dependency here to make something compile is the wrong fix.
+        -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-api-testkit</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

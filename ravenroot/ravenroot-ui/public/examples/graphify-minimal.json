@@ -1,0 +1,22 @@
+{
+  "nodes": [
+    {
+      "id": "file",
+      "label": "Workflow.java",
+      "source_file": "src/Workflow.java"
+    },
+    {
+      "id": "method",
+      "label": "run()",
+      "source_file": "src/Workflow.java"
+    }
+  ],
+  "edges": [
+    {
+      "source": "file",
+      "target": "method",
+      "relation": "contains",
+      "weight": 2
+    }
+  ]
+}

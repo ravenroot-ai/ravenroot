@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+
+    <artifactId>ravenroot-plugin-bundle</artifactId>
+    <name>Ravenroot Plugin Bundle</name>
+    <description>Manifest schema, checksum, path-safety and reserved-namespace validation for
+        drop-in plugin bundles (PLAT-12). A thin, zero-additional-dependency validator: it
+        depends only on ravenroot-application-api, reusing PayloadJson/PayloadValue/PayloadLimits
+        for manifest parsing rather than adding a YAML or JSON Schema library. Deliberately does
+        not depend on ravenroot-core: this module never loads a class, never touches
+        NodePackage/NodePackages, and is callable standalone by plugin.sh (build/validate/install)
+        without pulling in the runtime.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

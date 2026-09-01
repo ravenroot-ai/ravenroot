@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="owner-all" for="all" attr.name="owner" attr.type="string"/>
+  <key id="owner-node" for="node" attr.name="Owner" attr.type="string"/>
+  <graph id="ambiguous" edgedefault="directed">
+    <node id="start"/>
+  </graph>
+</graphml>

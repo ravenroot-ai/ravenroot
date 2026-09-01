@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+    <artifactId>ravenroot-cli</artifactId>
+    <name>Ravenroot CLI</name>
+    <description>Command-line adapter over the Ravenroot application API.</description>
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-core</artifactId>
+        </dependency>
+        <!-- The OpenTelemetry bridge, disabled unless
+             RAVENROOT_OTEL_ENABLED=true. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-observability-otel</artifactId>
+        </dependency>
+        <!-- `backup`/`restore` operate directly on
+             SqliteExecutionStore/SqliteStoreLocation, bypassing RavenrootApplication entirely:
+             backup/restore is adapter-local administration (SqliteStoreLocation's own Javadoc),
+             not a portable use case, so it does not belong on the application port. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-persistence-sqlite</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-pekko</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- The remote backend and its dual-transport/Rule-29 tests need a real RavenrootServer
+             to run against, not a fake. ravenroot-server does not depend on ravenroot-cli, so this is
+             not a cycle. Test scope only, never on the shipped CLI's runtime classpath. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-server</artifactId>
+            <!-- Not in the parent's dependencyManagement (ravenroot-server was, until now, never a
+                 dependency of anything else); versioned explicitly here rather than widening that
+                 shared section for one test-scope edge. -->
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

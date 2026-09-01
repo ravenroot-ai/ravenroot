@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+    <artifactId>ravenroot-sandbox-supervisor-testkit</artifactId>
+    <name>Ravenroot Sandbox Supervisor Conformance Suite</name>
+    <description>
+        SEC-11b. A conformance suite an integrator runs against their OWN SandboxSupervisorLauncher
+        implementation to demonstrate it satisfies the contract SEC-11 declares (SandboxPolicy,
+        SandboxSupervisorLauncher, SandboxSupervisorProtocol) -- never an adversarial escape suite run
+        against a binary this project does not own. This module authors no copy of any of those
+        contract types; it depends on the one authoritative definition on ravenroot-programming-graalvm.
+        It is deliberately not a dependency of ravenroot-distribution and does not ship: the OS sandbox
+        supervisor stays integrator-provided (option B), so this repository has nothing of its own to
+        conformance-test in CI beyond the deliberately non-compliant fakes below, which exist only to
+        prove the suite's own assertions are load-bearing.
+    </description>
+
+    <dependencies>
+        <!--
+          The one authoritative definition of SandboxPolicy / SandboxSupervisorLauncher /
+          SandboxSupervisorProtocol lives here (SEC-11, 5155b92). Depending on it, rather than
+          restating the types, is what keeps this a single-source-of-truth contract instead of a
+          second one that could drift and collide, as the earlier implementation did.
+        -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-programming-graalvm</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter-api</artifactId>
+        </dependency>
+
+        <!-- Self-tests only: the compliant/non-compliant fakes and the meta-tests that run this
+             module's own contract against them to prove the assertions are load-bearing. -->
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.platform</groupId>
+            <artifactId>junit-platform-testkit</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

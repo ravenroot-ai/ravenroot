@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+
+    <artifactId>ravenroot-core</artifactId>
+    <name>Ravenroot Core</name>
+    <description>Property graph, validation and framework-independent Ravenroot runtime.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.tinkerpop</groupId>
+            <artifactId>tinkergraph-gremlin</artifactId>
+            <version>${tinkerpop.version}</version>
+            <exclusions>
+                <!-- Gremlin already routes Commons Logging through SLF4J; retaining both
+                     implementations creates duplicate classes in the executable JAR. -->
+                <exclusion>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>org.projectnessie.cel</groupId>
+            <artifactId>cel-standalone</artifactId>
+            <version>${cel.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.re2j</groupId>
+            <artifactId>re2j</artifactId>
+            <version>${re2j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-persistence-testkit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- DefaultGraphDeployment's durable-ingress path needs a real, DURABLE-capability
+             declaring ExecutionStore to test honestly. InMemoryExecutionStore does not declare
+             StoreCapability.DURABLE and must not, so it cannot stand in for the crash-across-restart
+             scenario required by the documented contract. Does not depend back on ravenroot-core, so this is not a cycle. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-persistence-sqlite</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- SEC-09 requires property-fuzzing of untrusted graph properties. Version is managed by
+             the parent, which already declares jqwik for ravenroot-application-api. -->
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Ravenroot AI node bundle.
+
+    THIS MODULE IS NOT PART OF THE PRODUCT ARTIFACT AND MUST NEVER BECOME PART OF IT. It is a
+    plugin bundle: an operator compiles it with `./plugin.sh build ai`, installs it with
+    `./plugin.sh install`, names it in RAVENROOT_ENABLED_PLUGINS and rebuilds their own image. Four
+    deliberate acts, none of which anybody performs by merely installing Ravenroot.
+
+    Being a member of ravenroot-extensions/ does not put it in ravenroot.jar: ravenroot-distribution
+    shades ravenroot-server, ravenroot-cli, ravenroot-programming-graalvm and the engine adapter, and
+    no extension module is among them. What it WOULD have put it in is an image built after
+    `./plugin.sh install` with the batch option, because that command sweeps every discovered extension into the
+    convention directory the Dockerfile copies. So plugin.sh's batch option skips this extension by name
+    and says so on stderr, exactly as it already skips jdbc: see the AI_EXTENSION_ID block there.
+
+    The release gate (`./plugin.sh check-published`) refuses any bundle declaring a
+    generative capability in the directory this project publishes, so "never shipped" is measured
+    rather than promised, and published-image artifact staging leaves PUBLISHED_PLUGINS empty.
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>ai.ravenroot</groupId><artifactId>ravenroot-parent</artifactId><version>0.1.0-alpha.1</version><relativePath>../../pom.xml</relativePath></parent>
+    <artifactId>ravenroot-ai</artifactId><name>Ravenroot AI node bundle</name>
+    <dependencies>
+        <dependency><groupId>ai.ravenroot</groupId><artifactId>ravenroot-application-api</artifactId></dependency>
+        <dependency><groupId>ai.ravenroot</groupId><artifactId>ravenroot-api-testkit</artifactId><version>${project.version}</version><scope>test</scope></dependency>
+        <dependency><groupId>ai.ravenroot</groupId><artifactId>ravenroot-core</artifactId><version>${project.version}</version><scope>test</scope></dependency>
+        <dependency><groupId>org.junit.jupiter</groupId><artifactId>junit-jupiter</artifactId><scope>test</scope></dependency>
+    </dependencies>
+</project>

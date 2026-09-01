@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Ravenroot UI</title>
+  <link rel="icon" href="/assets/brand/ravenroot-nav-raven-ice.svg">
+  <!-- Synchronous, CSP-compatible and before CSS: the resolved preference is present at first paint. -->
+  <script vite-ignore src="%BASE_URL%theme-bootstrap.js"></script>
+  <link rel="stylesheet" href="./src/styles.css">
+</head>
+<body>
+
+<!-- ══ CONTROL MARKS ════════════════════════════════════════════════════════════════════════════
+     Inline SVG at a fixed 16x16 viewBox, defined once and referenced with <use>, rather than text
+     glyphs repeated in every header. Glyph advance widths vary by font AND by glyph, which is
+     exactly what made the old `#info-close` measure 12.2px wide at a 16px font size — and a ✕ that
+     sits at a different x-offset in each panel reads as broken. Markup, not a font and not a
+     library, so this stays within the framework-light direction.
+
+     The seven panel identity marks follow below, under their own heading. -->
+<svg aria-hidden="true" width="0" height="0" style="position:absolute" focusable="false">
+  <defs>
+    <!-- The standard close glyph; it closes this panel. -->
+    <symbol id="i-close" viewBox="0 0 16 16">
+      <path d="M4.5 4.5 11.5 11.5 M11.5 4.5 4.5 11.5" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+    <!-- Overflow: three dots on the vertical centre line at y 4, 8, 12. -->
+    <symbol id="i-menu" viewBox="0 0 16 16">
+      <circle cx="8" cy="4" r="1.1" fill="currentColor"/>
+      <circle cx="8" cy="8" r="1.1" fill="currentColor"/>
+      <circle cx="8" cy="12" r="1.1" fill="currentColor"/>
+    </symbol>
+    <!-- Contextual help: a vector question mark rather than a font glyph, so its shape and
+         alignment stay identical across platforms and at the compact Inspector size. -->
+    <symbol id="i-context-help" viewBox="0 0 16 16" fill="none" stroke="currentColor"
+            stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="8" cy="8" r="6"/>
+      <path d="M6.4 6.1a1.7 1.7 0 0 1 3.2.8c0 1.5-1.6 1.6-1.6 2.8"/>
+      <path d="M8 12h.01"/>
+    </symbol>
+    <!-- Zone toggles: a frame with one side column filled. A DIFFERENT GLYPH FAMILY from the panel
+         controls on purpose — a zone command and a panel command must never be mistaken for each
+         other. Filled = expanded, hollow = collapsed; the fill is dropped by CSS when collapsed. -->
+    <symbol id="i-zone-left" viewBox="0 0 16 16">
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path class="zone-fill" d="M3.25 3.25h3v9.5h-3z" fill="currentColor"/>
+    </symbol>
+    <symbol id="i-zone-right" viewBox="0 0 16 16">
+      <rect x="2.5" y="2.5" width="11" height="11" rx="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      <path class="zone-fill" d="M9.75 3.25h3v9.5h-3z" fill="currentColor"/>
+    </symbol>
+    <!-- The Panels index. -->
+    <symbol id="i-index" viewBox="0 0 16 16">
+      <path d="M8 3.5v9 M3.5 8h9" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/>
+    </symbol>
+
+    <!-- ── THE SEVEN PANEL IDENTITY MARKS ────────────────────────────────────────────────────
+         These are the marks that must carry meaning UNAIDED: a collapsed column is nothing but
+         its rail, so here the mark IS the panel's title. Implemented as specified and not
+         invented. Family rules: 16x16 viewBox, fill none, stroke currentColor at 1.5, round caps
+         and joins, live area inset to 1.5..14.5 so no stroke touches the edge, parallel strokes
+         never closer than 3px so they cannot merge at 16px, and fills only where the fill is the
+         distinguishing feature — which happens exactly once, the Inspector's centre dot.
+
+         The first Node Catalog mark was rejected by the similarity check: a 2x2 grid with a plus
+         scored 0.556 IoU against Node Types where the decoy floor was 0.738. The single outline
+         with a centred plus below replaced it, taking the worst real pair to 0.352. -->
+    <symbol id="i-p-search" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="6.6" cy="6.6" r="4.35"/><path d="M9.9 9.9 13.9 13.9"/>
+    </symbol>
+    <symbol id="i-p-node-types" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="4.3" cy="4.6" r="2.5"/>
+      <rect x="9.1" y="2.1" width="5" height="5" rx="1.3"/>
+      <path d="M8 9.3 10.9 12.2 8 15.1 5.1 12.2Z"/>
+    </symbol>
+    <!-- REVISION 5. The revision 4 mark — one enclosed rounded square with a centred plus — IS the
+         topbar's `⊞ Hierarchy` glyph, drawn about 120px above the rail and SIMULTANEOUSLY VISIBLE.
+         Four separate boxes read as "several objects" rather than "one divided box", which also
+         keeps it clear of the zone-toggle family (a frame subdivided by a filled column). -->
+    <symbol id="i-p-node-catalog" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1.9" y="1.9" width="5" height="5" rx="1.3"/>
+      <rect x="9.1" y="1.9" width="5" height="5" rx="1.3"/>
+      <rect x="1.9" y="9.1" width="5" height="5" rx="1.3"/>
+      <path d="M11.6 9.1v5M9.1 11.6h5"/>
+    </symbol>
+    <symbol id="i-p-edge-types" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1.8 4H14.2"/>
+      <path d="M1.8 8H14.2" stroke-dasharray="3.4 2.6"/>
+      <path d="M1.8 12H14.2" stroke-dasharray="0.01 3.1"/>
+    </symbol>
+    <symbol id="i-p-graph-stats" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1.8 13.9H14.2"/>
+      <path d="M4.6 13.9V9.6M8 13.9V5.9M11.4 13.9V2.4"/>
+    </symbol>
+    <!-- REVISION 5. THE CENTRE DOT IS DELETED. A rounded square with a filled centre dot is the
+         topbar's `⊡ Original`, and it is a FOURTH member of the `⊙ terminal` / `◉ actor` family
+         this study already requires be separated. The revision 4 rationale — that a dot-in-square
+         is what the canvas draws for a node — was precisely the collision. An EMPTY interior is the
+         entire differentiator, and it is the Figma / Camunda Modeler properties-panel mark.
+         Consequence: the set now carries NO fills at all. -->
+    <symbol id="i-p-inspector" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1.6" y="4" width="8" height="8" rx="2"/>
+      <path d="M11.5 6.4h3M11.5 9.6h3"/>
+    </symbol>
+    <symbol id="i-p-activity" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M1.7 8.9H4.5L6.5 4.2L9 12.4L10.9 8.9H14.3"/>
+    </symbol>
+    <!-- A speech bubble, which is the one conversational mark in common use and — checked
+         against the seven already here — collides with none of them: the Inspector's rounded rect
+         carries two rules to its RIGHT and stops at x=9.6, this one spans the full box and has a
+         TAIL, which no other mark in the set has. Stroke-only with no fill, per the revision 5
+         ruling above that the set carries no fills at all. -->
+    <symbol id="i-p-assistant" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="1.6" y="2.8" width="12.8" height="9" rx="2.2"/>
+      <path d="M5.2 11.8v2.6l3.2-2.6"/>
+    </symbol>
+  </defs>
+</svg>
+
+<!-- ══ TOP BAR ══════════════════════════════════════════════════ -->
+<div id="topbar">
+  <div class="logo" role="img" aria-label="Ravenroot Flow Editor">
+    <img class="logo-mark" src="/assets/brand/ravenroot-nav-raven-ice.svg" alt="" aria-hidden="true">
+    <span class="logo-wordmark">Ravenroot Flow Editor</span>
+  </div>
+  <div class="vr"></div>
+  <nav class="application-menubar" id="application-menubar" role="menubar" aria-label="Application menu">
+    <button id="menu-file" type="button" role="menuitem" tabindex="0" data-menu="file"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">File</button>
+    <button id="menu-edit" type="button" role="menuitem" tabindex="-1" data-menu="edit"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">Edit</button>
+    <button id="menu-view" type="button" role="menuitem" tabindex="-1" data-menu="view"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">View</button>
+    <button id="menu-layout" type="button" role="menuitem" tabindex="-1" data-menu="layout"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">Layout</button>
+    <button id="menu-run" type="button" role="menuitem" tabindex="-1" data-menu="run"
+            aria-haspopup="menu" aria-expanded="false" aria-controls="application-menu">Run</button>
+  </nav>
+  <button class="document-switcher" id="document-switcher" type="button"
+          data-action="document-switcher"
+          aria-haspopup="dialog" aria-expanded="false" aria-controls="document-switcher-dialog"
+          aria-label="No open documents" title="No open documents" disabled>
+    <span id="graph-title">No graph loaded</span>
+    <span id="document-position" aria-hidden="true"></span>
+    <span class="document-switcher-chevron" aria-hidden="true">▾</span>
+  </button>
+  <span id="dirty-state" class="dirty-state" role="status" aria-live="polite">saved</span>
+  <div class="spacer"></div>
+
+  <!-- Semantic rendering modes. Algorithm names stay internal. -->
+  <div class="btn-group command-mirrors layout-mirrors" role="radiogroup" aria-label="Graph view">
+    <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-design"
+            data-command-id="layout.design" title="Arrange every node for workflow design and editing">✎ Design</button>
+    <button class="btn" role="radio" aria-checked="false" tabindex="-1" id="btn-monitoring"
+            data-command-id="layout.monitoring" title="Continuously visualize live workflow activity">◉ Monitoring</button>
+  </div>
+  <div class="vr command-mirrors view-mirrors"></div>
+  <div class="command-mirrors view-mirrors btn-group">
+    <button class="btn" data-command-id="view.fit" title="Fit to screen (F)">⤢ Fit</button>
+    <button class="btn" data-command-id="view.keyboardShortcuts" title="Keyboard shortcuts">?</button>
+  </div>
+  <div class="vr command-mirrors view-mirrors"></div>
+  <!-- Font size control -->
+  <div id="font-ctrl" title="Label text size">
+    <span id="font-icon">𝐴</span>
+    <input id="font-slider" type="range" min="8" max="28" value="20" step="1" data-input-action="font-size">
+    <span id="font-val">20</span>
+  </div>
+  <!-- Global screen-space size of the node action minibar. Unlike graph zoom, this preference
+       changes the actual interactive geometry and follows the author across documents/sessions. -->
+  <div id="node-action-scale-ctrl" title="Node minibar size">
+    <span id="node-action-scale-icon" aria-hidden="true">⋮</span>
+    <input id="node-action-scale-slider" type="range" min="75" max="175" value="115" step="5"
+           aria-label="Node minibar size" aria-describedby="node-action-scale-val">
+    <output id="node-action-scale-val" for="node-action-scale-slider">115</output>
+  </div>
+  <!-- Monitoring repulsion + attraction controls. -->
+  <div id="elastic-ctrl" title="Monitoring forces — node spacing and link attraction">
+    <span id="rep-icon" title="Node spacing">⇔</span>
+    <input id="rep-slider" type="range" min="30" max="1200" value="320" step="10" data-input-action="elastic-repulsion">
+    <span id="rep-val">320</span>
+    <span style="width:1px;height:14px;background:var(--bd);margin:0 6px;flex-shrink:0"></span>
+    <span id="attr-icon" title="Link attraction">⇕</span>
+    <input id="attr-slider" type="range" min="5" max="150" value="30" step="5" data-input-action="elastic-attraction">
+    <span id="attr-val">0.30</span>
+  </div>
+  <div class="vr command-mirrors file-mirrors"></div>
+  <button class="btn primary command-mirrors file-mirrors" id="btn-open" data-command-id="file.open"
+          title="Open a GraphML or Graphify file as a new document">📂 Open file</button>
+  <input type="file" id="file-inp" accept=".graphml,.xml,.json" class="visually-hidden">
+  <button class="btn play" id="btn-play" data-command-id="run.play"
+          title="Test this graph with pass-through execution; node side effects are bypassed">▶ Test</button>
+  <div class="btn-group graph-lifecycle-controls" aria-label="Current graph lifecycle">
+    <button class="btn" id="btn-run" data-command-id="run.start"
+            title="Execute real node behavior in a transient operational run">▶ Run</button>
+    <button class="btn" id="btn-pause" data-command-id="run.pause"
+            title="Pause the current graph at a safe node boundary">Ⅱ Pause</button>
+    <button class="btn danger" id="btn-stop" data-command-id="run.stop"
+            title="Cooperatively stop the current graph only">■ Stop</button>
+    <button class="btn danger" id="btn-force-stop" data-command-id="run.forceStop"
+            title="Force-kill isolated work for the current graph only">✖ Force stop</button>
+  </div>
+  <span id="source-session-status" class="source-session-status" role="status" aria-live="polite" hidden></span>
+</div>
+
+<div id="application-menu" class="application-menu" role="menu" hidden></div>
+
+<!-- ══ WORKFLOW COMMAND BAR ═════════════════════════════════════ -->
+<div id="workflowbar">
+  <div class="btn-group command-mirrors editor-mirrors">
+    <button class="btn" id="btn-new" data-command-id="file.new" title="Create a new document">＋ New document</button>
+    <button class="btn" id="btn-connect" type="button" data-command-id="edit.connect"
+            aria-pressed="false" disabled title="Connect a source node directly to a target node">↗ Connect</button>
+    <button class="btn" id="btn-add-node" data-command-id="edit.addNode" title="Add a flow node">⬡ Node</button>
+    <button class="btn" id="btn-add-edge" data-command-id="edit.addEdge" title="Connect two nodes">↗ Edge</button>
+    <button class="btn" id="btn-undo" data-command-id="edit.undo" disabled
+            aria-label="Undo the last change" title="Nothing to undo">↶ Undo</button>
+    <button class="btn" id="btn-redo" data-command-id="edit.redo" disabled
+            aria-label="Redo the last undone change" title="Nothing to redo">↷ Redo</button>
+    <button class="btn" id="btn-autosave" type="button" data-command-id="edit.autosave"
+            data-command-label aria-pressed="true"></button>
+    <button class="btn" id="btn-export" data-command-id="file.save" title="Save the current workflow as GraphML">⇩ Save GraphML</button>
+  </div>
+  <div class="spacer"></div>
+  <!-- One ordered unit so the unique runtime controls wrap together instead of being clipped one
+       by one after the editor mirrors. DOM and keyboard order remain Service → Token → Play.
+
+       ── WHAT THIS BAR IS, SAID WHERE IT IS READ ──────────────────────────────────────────────
+       This group signs THIS EDITOR IN TO THE AUTHOR'S OWN RAVENROOT SERVICE. It has never had
+       anything to do with the credentials a node uses to reach a third party — but it was labelled
+       "Access token" next to a Service URL, which is exactly what a model-provider key box would
+       look like, and adds a window that really does take one. Two boxes that look alike and
+       mean different things is the confusion this renaming exists to remove.
+
+       WHAT CHANGED IS THE WORDING AND THE GROUPING, AND NOTHING ELSE. No field was removed, no id
+       was changed, and `run.authenticate` / `run.forgetToken` behave exactly as before: this bar is
+       what calls `runtimeClient.connect(...)` and loads the node catalog, so removing any of it
+       would disconnect the application. The visible label now reads "Service token", which pairs
+       with the "Service" label beside it, and the group carries a name and a description of its own
+       for anyone who meets it through assistive technology or a tooltip rather than by position.
+       The caption is `visually-hidden` rather than drawn: `application-menus.spec.js` pins this bar
+       against horizontal overflow at 1280, 1440 and 1920, and a drawn caption spends that budget on
+       a sentence the two labels beside it already carry. -->
+  <div class="runtime-controls" role="group" aria-labelledby="runtime-controls-caption"
+       aria-describedby="runtime-controls-scope"
+       title="Connects this editor to your own Ravenroot service. Credentials that nodes use are stored in the Credentials window.">
+    <span id="runtime-controls-caption" class="visually-hidden">Your Ravenroot service connection</span>
+    <span id="runtime-controls-scope" class="visually-hidden">These fields sign this editor in to your
+      own Ravenroot service. They are not a model provider credential: credentials that nodes use are
+      stored in the Credentials window, on the Run menu.</span>
+    <label class="command-field service-field">
+      <span>Service</span>
+      <input id="service-url" value="" placeholder="same origin" aria-label="Ravenroot service URL">
+    </label>
+    <label class="command-field token-field">
+      <span>Service token</span>
+      <input id="access-token" type="password" value="" autocomplete="off" placeholder="memory only"
+             aria-label="Ravenroot service token — signs this editor in to your own service, not to a model provider">
+    </label>
+    <button class="btn" id="btn-authenticate" data-command-id="run.authenticate"
+            title="Sign in to the Ravenroot service named above">Authenticate</button>
+    <button class="btn" id="btn-revoke" data-command-id="run.forgetToken" disabled
+            title="Forget the service token held in memory">Forget token</button>
+    <span id="runtime-connection" class="connection-state authentication-required" role="status"
+          aria-live="polite">authentication required</span>
+    <label class="command-field payload-field">
+      <span>Payload</span>
+      <input id="execution-payload" value="hello ravenroot" aria-label="Initial execution payload">
+    </label>
+  </div>
+  <input type="file" id="replace-file-inp" accept=".graphml,.xml,.json" class="visually-hidden">
+</div>
+
+<!-- ══ MAIN ══════════════════════════════════════════════════════ -->
+<div id="main">
+
+  <!-- ── Left column (zone) ───────────── -->
+  <!-- Every panel in the product now has the same shape: a `.panel` with a `.panel-hd` carrying a
+       title, and a `.panel-body` carrying its content. The five sections here
+       are unchanged in content and order; what changed is that they are panels in the same
+       vocabulary as the Inspector and Runtime activity, rather than a private `.sec` layout.
+
+       HEADERS ARE TITLE ONLY UNTIL REORDERING IS AVAILABLE. Without reordering, a grip would be an
+       affordance with nothing to afford — the same defect as the dead `#info.on` toggle this very
+       change retires. It returns with reordering. -->
+  <div id="sidebar" class="zone zone--left">
+    <!-- THE RAIL. 28px, carved out of the column's existing width rather than added to it, and
+         PERSISTENT: it is what guarantees a collapsed column can always be brought back, and what
+         makes closing a panel safe rather than a trap. It never collapses to zero, and the route
+         back is never hover-only. -->
+    <div class="rail" data-rail-zone="left">
+      <button class="rail-btn rail-toggle" type="button" data-action="zone-toggle" data-zone="left"
+              aria-expanded="true" aria-controls="sidebar-scroll"
+              aria-label="Collapse left toolbox" data-tooltip="Collapse left toolbox">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-zone-left"/></svg>
+      </button>
+      <!-- One icon per panel in this zone uses the panel identity marks. The rail's two
+           application-level controls work without them, so the route back does not wait. -->
+      <div class="rail-panels" data-rail-panels="left"></div>
+      <button class="rail-btn rail-index" type="button" data-action="panels-index" data-zone="left"
+              aria-haspopup="dialog" aria-expanded="false"
+              aria-label="Panels" data-tooltip="Open panels index">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-index"/></svg>
+      </button>
+    </div>
+    <div id="sidebar-scroll" class="zone-body">
+      <section class="panel" data-panel-id="search" data-panel-zone="left" aria-labelledby="panel-search-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-search-t">Search</h2>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="search"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Search panel options" data-tooltip="Search panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="search"
+                aria-label="Close Search panel" data-tooltip="Close Search panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body"><div class="panel-content">
+          <input id="search-inp" type="text" placeholder="Search nodes…" aria-label="Search nodes"
+                 data-input-action="search" data-tooltip-short="Search nodes"
+                 data-tooltip-exempt="persistent-placeholder">
+        </div></div>
+      </section>
+
+      <section class="panel" data-panel-id="node-types" data-panel-zone="left" aria-labelledby="panel-nodetypes-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-nodetypes-t">Node Types</h2>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-types"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Node Types panel options" data-tooltip="Node Types panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-types"
+                aria-label="Close Node Types panel" data-tooltip="Close Node Types panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body"><div class="panel-content"><div id="leg-nodes"></div></div></div>
+      </section>
+
+      <section class="panel" data-panel-id="node-catalog" data-panel-zone="left" aria-labelledby="panel-catalog-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-catalog-t">Node Catalog</h2>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="node-catalog"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Node Catalog panel options" data-tooltip="Node Catalog panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="node-catalog"
+                aria-label="Close Node Catalog panel" data-tooltip="Close Node Catalog panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body"><div class="panel-content">
+          <div id="node-catalog" class="node-catalog"><div class="catalog-empty">Connect to the service to load programmable nodes.</div></div>
+        </div></div>
+      </section>
+
+      <section class="panel" data-panel-id="edge-types" data-panel-zone="left" aria-labelledby="panel-edgetypes-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-edgetypes-t">Edge Types</h2>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="edge-types"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Edge Types panel options" data-tooltip="Edge Types panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="edge-types"
+                aria-label="Close Edge Types panel" data-tooltip="Close Edge Types panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body"><div class="panel-content"><div id="leg-edges"></div></div></div>
+      </section>
+
+      <section class="panel" data-panel-id="graph-stats" data-panel-zone="left" aria-labelledby="panel-stats-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-stats-t">Graph Stats</h2>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="graph-stats"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Graph Stats panel options" data-tooltip="Graph Stats panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="graph-stats"
+                aria-label="Close Graph Stats panel" data-tooltip="Close Graph Stats panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body"><div class="panel-content"><div id="graph-stats">—</div></div></div>
+      </section>
+    </div>
+    <!-- The hover convenience the contract requires, on the column's INNER edge. It is ADDITIVE: the
+         rail toggle is the guaranteed, always-visible, always-focusable route, and this never
+         becomes the only way back. Pointer-only, and suppressed entirely where hover does not
+         exist. -->
+    <div class="zone-hover" data-zone="left" aria-hidden="true">
+      <button class="zone-hover-btn" type="button" data-action="zone-toggle" data-zone="left"
+              tabindex="-1" aria-hidden="true" data-tooltip-exempt="redundant-pointer-shortcut">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-zone-left"/></svg>
+      </button>
+    </div>
+  </div>
+
+  <div class="pane-separator layout-splitter layout-splitter--vertical"
+       data-layout-splitter="left" data-splitter-kind="workspace" role="separator" tabindex="0"
+       aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="16"
+       aria-controls="sidebar stage" aria-label="Resize left toolbox and graph stage"
+       data-tooltip="Resize left toolbox"></div>
+
+  <!-- ── Stage column: the graph, and the bottom dock beneath it ────────────────────────────────
+       The dock is a SIBLING of #cy-wrap inside this column, not an overlay over it. #minimap and
+       #zoom-ctrl are `position:absolute; bottom:16px` INSIDE #cy-wrap, so a dock that overlaid the
+       stage would bury both; a dock that PUSHES shrinks #cy-wrap and the controls ride up with it.
+       The column spans the stage only, so the dock never meets a column edge at a corner. -->
+  <div id="stage">
+
+  <!-- ── Canvas ────────────────────────── -->
+  <!-- The graph is drawn to a canvas, which is invisible to assistive technology and unreachable by
+       Tab. `role="application"` plus a tabindex makes it one focusable widget that owns its arrow
+       keys, and #graph-live narrates every move and every edge gesture, so the keyboard route is a
+       real path to the same edits rather than a reduced one (UI-02). -->
+  <div id="cy-wrap" tabindex="0" role="application"
+       aria-label="Workflow graph. Drag empty space to select; press H for Navigation and panning. Arrow keys move between nodes, E starts an edge, R reconnects, Enter confirms, Escape cancels."
+       aria-describedby="graph-live">
+    <div id="cy"></div>
+    <div class="graph-interaction-tools" aria-label="Graph interaction mode">
+      <span id="graph-mode-label" class="graph-mode-label" role="status">Viewer</span>
+      <button class="btn modify-toggle" id="btn-modify" type="button" data-command-id="edit.modify"
+              aria-pressed="false" aria-label="Switch to Editing mode">✎ Editing</button>
+      <button class="btn navigation-toggle" id="btn-navigation" type="button" data-command-id="view.navigation"
+              aria-pressed="false" aria-keyshortcuts="H" title="Pan the canvas (H)">✋ Navigation</button>
+    </div>
+    <div id="graph-live" class="visually-hidden" role="status" aria-live="polite"></div>
+    <!-- Empty state -->
+    <div id="empty">
+      <svg width="72" height="72" viewBox="0 0 72 72" fill="none">
+        <circle cx="12" cy="36" r="8" stroke="#8b949e" stroke-width="2"/>
+        <circle cx="60" cy="18" r="8" stroke="#8b949e" stroke-width="2"/>
+        <circle cx="60" cy="54" r="8" stroke="#8b949e" stroke-width="2"/>
+        <line x1="20" y1="32" x2="52" y2="21" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="4 3"/>
+        <line x1="20" y1="40" x2="52" y2="51" stroke="#8b949e" stroke-width="1.5" stroke-dasharray="4 3"/>
+      </svg>
+      <p>No graph loaded</p>
+      <small>Drag & drop a .graphml or .json (graphify) file, or use Load</small>
+    </div>
+
+    <!-- Drop zone -->
+    <div id="dropzone">
+      <span style="font-size:28px">📂</span>
+      Drop .graphml or .json (graphify) file here
+    </div>
+
+    <!-- Loading spinner -->
+    <div id="loading" class="off">
+      <div class="spin"></div>
+      <span style="font-size:13px; color:var(--tx-2)">Parsing graph…</span>
+    </div>
+
+    <!-- Zoom controls -->
+    <div id="zoom-ctrl">
+      <button class="zbtn" data-command-id="view.zoomIn" aria-label="Zoom in" title="Zoom in (+)">+</button>
+      <button class="zbtn" data-command-id="view.fit" aria-label="Fit graph" title="Fit (F)">⤢</button>
+      <button class="zbtn" data-command-id="view.zoomOut" aria-label="Zoom out" title="Zoom out (-)">−</button>
+    </div>
+
+    <!-- Shared active-document overview. The canvas is a real keyboard/pointer control; the label
+         remains visible so tiled workspaces never make ownership depend on focus colour alone. -->
+    <div id="minimap" data-renderer-kind="cytoscape">
+      <span id="minimap-label">Overview</span>
+      <canvas id="minimap-canvas" tabindex="0" role="application"
+              aria-roledescription="graph overview"
+              aria-keyshortcuts="ArrowLeft ArrowRight ArrowUp ArrowDown Home Escape"></canvas>
+    </div>
+  </div>
+
+    <!-- ── Bottom dock (zone) ──────────────────────────────────────────────────────────────────
+         Runtime activity lives here rather than under the Inspector. That is the one deliberate
+         deliberate relocation, and it carries its measurement: with Activity out of the
+         right column the Modify-mode node editor's overflow goes to ZERO at 1280x800 and 1440x900,
+         where it was 205px and 112px — the Save/Cancel row was entirely below the fold. -->
+    <div class="pane-separator layout-splitter layout-splitter--horizontal"
+         data-layout-splitter="bottom" data-splitter-kind="workspace" role="separator" tabindex="0"
+         aria-orientation="horizontal" aria-valuemin="0" aria-valuemax="100" aria-valuenow="80"
+         aria-controls="cy-wrap dock" aria-label="Resize graph stage and bottom dock"
+         data-tooltip="Resize bottom dock"></div>
+    <div id="dock" class="zone zone--bottom">
+      <section class="panel" data-panel-id="activity" data-panel-zone="bottom" aria-labelledby="panel-activity-t">
+        <header class="panel-hd">
+          <span class="panel-grip" aria-hidden="true"></span>
+          <h2 class="panel-title" id="panel-activity-t">Runtime activity</h2>
+          <span id="activity-summary">Waiting for events</span>
+          <button class="activity-clear" data-action="clear-activity" data-tooltip-exempt="persistent-text">Clear</button>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="activity"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Runtime activity panel options" data-tooltip="Runtime activity panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="activity"
+                aria-label="Close Runtime activity panel" data-tooltip="Close Runtime activity panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+        </header>
+        <div class="panel-body">
+          <div id="activity-log" role="log" aria-live="polite"></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Only present while a panel is being dragged AND the dock is absent. An absent dock has no
+         target otherwise, which would make drag strictly weaker than the menu it enhances. -->
+    <div id="dock-drop-band" aria-hidden="true">Drop here to dock</div>
+
+  </div><!-- /#stage -->
+
+  <div class="pane-separator layout-splitter layout-splitter--vertical"
+       data-layout-splitter="right" data-splitter-kind="workspace" role="separator" tabindex="0"
+       aria-orientation="vertical" aria-valuemin="0" aria-valuemax="100" aria-valuenow="75"
+       aria-controls="stage info" aria-label="Resize graph stage and right sidebar"
+       data-tooltip="Resize right sidebar"></div>
+
+  <!-- ── Right column (zone) ───────────── -->
+  <!-- The Inspector now owns this column outright. `#info` no longer carries a hardcoded `on`
+       class: its visibility was a dead toggle — nothing in app.js ever read or wrote it — and the
+       split is what makes it meaningless, so it is retired here rather than left for someone to
+       rediscover. -->
+  <div id="info" class="zone zone--right">
+    <div id="info-body-zone" class="zone-body">
+    <section class="panel" data-panel-id="inspector" data-panel-zone="right" aria-labelledby="info-title">
+      <header class="panel-hd">
+        <span class="panel-grip" aria-hidden="true"></span>
+        <h2 class="panel-title" id="info-title">Inspector</h2>
+        <!-- CLEARS the inspector; it does not close the panel. It was a ✕ until the panel ✕
+             arrived beside it, and two identical glyphs one control apart meaning different things
+             is a defect however well each is labelled. It becomes a word, matching `.activity-clear`
+             in the sibling panel — the product's own existing pattern for a content command in a
+             panel header, so this is consistency rather than invention. Id, action and behaviour
+             are untouched. -->
+        <button id="info-close" class="panel-text-ctl" data-action="close-info"
+                aria-label="Clear inspector" data-tooltip-exempt="persistent-text">Clear</button>
+      <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="inspector"
+              aria-haspopup="menu" aria-expanded="false"
+              aria-label="Inspector panel options" data-tooltip="Inspector panel options">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+      </button>
+      <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="inspector"
+              aria-label="Close Inspector panel" data-tooltip="Close Inspector panel">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+      </button>
+      </header>
+      <div class="panel-body">
+        <div id="info-body"><div class="info-empty">Select a node or edge, or create a new one.</div></div>
+      </div>
+    </section>
+
+    <!-- ── Authoring assistant (ADR 0025) ──────────────────────────────────────────────────
+         Under the Inspector, so the column reads "what is selected, then what you can ask about
+         it". Graph proposals remain inert until the author confirms the individual preview; runtime
+         actions remain unavailable.
+
+         THREE ACCESSIBILITY PROPERTIES ARE STRUCTURAL HERE, NOT STYLISTIC.
+         1. Both live regions are POLITE. An assistant reply is not an emergency, and `role="alert"`
+            (implicitly assertive) would interrupt a screen-reader user mid-sentence every time a
+            turn landed. The composer's error is `role="status"` for the same reason, and is bound
+            to the textarea through `aria-errormessage` so it is reachable from the control that
+            caused it rather than only announced once and lost.
+         2. THE TRANSCRIPT'S STRUCTURE NEVER MUTATES. `#assistant-transcript` is declared here,
+            once, and app.js only ever APPENDS flat siblings into it. A live region which regroups
+            or re-parents as content arrives destroys focus
+            stability and over-announces; this is the same kind of region, so it follows the same
+            rule rather than rediscovering it.
+         3. Focus is never moved by an arriving turn. The composer keeps it, so a user typing a
+            second question is not thrown out of the field by the answer to the first. -->
+    <section class="panel" data-panel-id="assistant" data-panel-zone="right" aria-labelledby="assistant-title">
+      <header class="panel-hd">
+        <span class="panel-grip" aria-hidden="true"></span>
+        <h2 class="panel-title" id="assistant-title">Assistant</h2>
+        <!-- Clears the conversation; it does not close the panel. A word rather than a ✕, matching
+             the Inspector's `Clear` and `.activity-clear` — the product's existing pattern for a
+             content command in a panel header. -->
+        <button id="assistant-clear" class="panel-text-ctl" type="button" data-action="clear-assistant"
+                aria-label="Clear assistant conversation" data-tooltip-exempt="persistent-text">Clear</button>
+        <button class="panel-ctl panel-menu" type="button" data-action="panel-menu" data-panel="assistant"
+                aria-haspopup="menu" aria-expanded="false"
+                aria-label="Assistant panel options" data-tooltip="Assistant panel options">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-menu"/></svg>
+        </button>
+        <button class="panel-ctl panel-close" type="button" data-action="panel-close" data-panel="assistant"
+                aria-label="Close Assistant panel" data-tooltip="Close Assistant panel">
+          <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+        </button>
+      </header>
+      <div class="panel-body">
+        <div class="assistant">
+          <!-- Always rendered, in every state. An inert panel says WHICH thing is missing; it never
+               disappears, never spins forever and never pretends. -->
+          <div id="assistant-state" class="assistant-state" role="status" aria-live="polite"
+               data-state="inert"></div>
+
+          <!-- ── THE CONNECTION ────────────────────────────────────────────────────────
+               Hidden in four of the five inert states and in every working one. It is revealed
+               only for `not-linked` — the one reason whose remedy is IN THIS PANEL — and the
+               decision is `offersConnection()` in `assistant-session.js`, not a condition written
+               out at the render site. A Connect button shown while the operator has configured no
+               provider would invite the author to perform an act that cannot fix what is wrong,
+               which is the whole reason the reasons are distinguished.
+
+               ITS STRUCTURE NEVER MUTATES. Every element ships, empty, and is revealed by `hidden`
+               alone — the same rule `#assistant-transcript` follows. The code and the
+               address arrive as text into elements that were already here, so a screen reader
+               reading this region does not have it rebuilt underneath.
+
+               AND IT SAYS NOTHING ABOUT WHERE ANYTHING IS KEPT. The panel cannot observe custody;
+               a sign-in is where that is most tempting to claim and least observable. -->
+          <div id="assistant-connection" class="assistant-connection" role="status"
+               aria-live="polite" hidden>
+            <button id="assistant-connect" class="btn" type="button"
+                    data-action="connect-assistant">Connect to the model provider</button>
+            <!-- OUTSIDE the step, deliberately. This line reports on the ATTEMPT, and an attempt
+                 that fails before a code arrives has no visible step. Placing the progress line
+                 inside that hidden step would conceal a refused start, making the panel appear to
+                 answer a click with no visible response. -->
+            <p id="assistant-connection-progress" class="assistant-connection-progress"></p>
+            <div id="assistant-connection-step" class="assistant-connection-step" hidden>
+              <p class="assistant-connection-instruction">Open this address and enter the code:</p>
+              <!-- Filled from the service's answer, as TEXT. `app.js` sets `href` only after
+                   checking the scheme: a destination that arrives over the wire is not a
+                   destination this page follows on trust. -->
+              <a id="assistant-connection-uri" class="assistant-connection-uri"
+                 rel="noopener noreferrer" target="_blank"></a>
+              <!-- `<code>`, because it is a literal string to be transcribed by hand: the element
+                   says "reproduce this exactly" to a reader and to a screen reader alike. -->
+              <code id="assistant-connection-code" class="assistant-connection-code"></code>
+              <button id="assistant-connection-cancel" class="btn" type="button"
+                      data-action="cancel-assistant-connection">Stop waiting</button>
+            </div>
+          </div>
+
+          <div id="assistant-transcript" class="assistant-transcript" role="log" aria-live="polite"
+               aria-label="Assistant conversation" tabindex="0"></div>
+
+          <!-- The falsifiable half of the disclosure. Each chip states its class as attached or
+               unavailable, and `View payload` shows exactly what would be sent. Both are rendered
+               from the SAME composed context, so a chip cannot claim a class the payload lacks. -->
+          <div class="assistant-context">
+            <div class="assistant-context-hd">
+              <span id="assistant-context-label">Context for the next message</span>
+              <button id="assistant-payload-toggle" class="panel-text-ctl" type="button"
+                      aria-expanded="false" aria-controls="assistant-payload"
+                      data-tooltip-exempt="persistent-text">View payload</button>
+            </div>
+            <ul id="assistant-chips" class="assistant-chips"
+                aria-labelledby="assistant-context-label"></ul>
+            <pre id="assistant-payload" class="assistant-payload" tabindex="0"
+                 aria-label="Exact payload that would be sent" hidden></pre>
+          </div>
+
+          <form id="assistant-composer" class="assistant-composer" novalidate>
+            <label class="visually-hidden" for="assistant-draft">Ask about this graph</label>
+            <textarea id="assistant-draft" class="assistant-draft" rows="3"
+                      placeholder="Ask about this graph, the catalog, or the last run…"
+                      aria-describedby="assistant-composer-help"></textarea>
+            <!-- Polite, not `role="alert"`. Bound to the textarea by `aria-errormessage` in app.js
+                 together with `aria-invalid`, which is what makes it REACHABLE from the control
+                 rather than merely announced once. -->
+            <div id="assistant-error" class="assistant-error" role="status" aria-live="polite" hidden></div>
+            <div class="assistant-composer-actions">
+              <!-- The disclosure's EARLY half. Article 50(5) says "at the latest at the time of
+                   the first interaction", and the transcript disclosure lands at the first reply —
+                   which satisfies "at the latest" and nothing more. This sentence is present from
+                   the moment the panel opens, before a question is even typed, so the person
+                   deciding WHETHER to interact already knows what they would be interacting with.
+                   It is the short form of `DISCLOSURE_SHORT_TEXT` and is pinned to that constant by
+                   `assistant-disclosure.test.js`; it never substitutes for the full disclosure,
+                   which `admitTurn` emits regardless of what is written here. -->
+              <small id="assistant-composer-help">Replies are generated by an AI model. Graph proposals require your explicit confirmation; the assistant cannot start a run.</small>
+              <button id="assistant-send" class="btn primary" type="submit">Ask</button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </section>
+    </div>
+    <!-- The right column's rail sits on its OUTER edge, mirroring the left. Rails run the full
+         height of #main with the dock inset between them, so a rail and the dock never meet at a
+         corner. -->
+    <div class="rail" data-rail-zone="right">
+      <button class="rail-btn rail-toggle" type="button" data-action="zone-toggle" data-zone="right"
+              aria-expanded="true" aria-controls="info-body-zone"
+              aria-label="Collapse right sidebar" data-tooltip="Collapse right sidebar">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-zone-right"/></svg>
+      </button>
+      <div class="rail-panels" data-rail-panels="right"></div>
+      <button class="rail-btn rail-index" type="button" data-action="panels-index" data-zone="right"
+              aria-haspopup="dialog" aria-expanded="false"
+              aria-label="Panels" data-tooltip="Open panels index">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-index"/></svg>
+      </button>
+    </div>
+    <div class="zone-hover" data-zone="right" aria-hidden="true">
+      <button class="zone-hover-btn" type="button" data-action="zone-toggle" data-zone="right"
+              tabindex="-1" aria-hidden="true" data-tooltip-exempt="redundant-pointer-shortcut">
+        <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-zone-right"/></svg>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<!-- ══ PANEL OVERFLOW MENU ═══════════════════════════════════════════════════════════════════════
+     One menu, moved and refilled per panel, rather than seven in the markup. It lists only the
+     commands that would actually do something for the panel it was opened from. -->
+<div id="panel-menu" class="popover" role="menu" hidden></div>
+
+<!-- ══ PANELS INDEX ══════════════════════════════════════════════════════════════════════════════
+     The route back. Every panel that exists, its zone, whether it is open or closed, and a click to
+     bring it back — which is what makes the ✕ safe to offer at all. Reached from either rail, so it
+     survives a collapsed column, and it carries Reset layout. -->
+<div id="panels-index" class="popover" role="dialog" aria-label="Panels" hidden></div>
+
+<!-- One shared, delegated tooltip for the panel system. Its text and relationship are populated
+     only while it is visible, so accessible names remain owned by the controls themselves. -->
+<div id="visual-tooltip" role="tooltip" hidden></div>
+
+<!-- One shared non-modal surface for stable explanatory text. Every contextual-help button points
+     here with aria-controls; the delegated controller fills it with textContent and guarantees
+     that only one trigger can have aria-expanded=true. -->
+<section id="contextual-help-popover" class="contextual-help-popover" role="region"
+         aria-labelledby="contextual-help-heading" tabindex="-1" hidden>
+  <header class="contextual-help-header">
+    <h2 id="contextual-help-heading" data-contextual-help-heading></h2>
+    <button class="contextual-help-close" type="button" data-contextual-help-close
+            aria-label="Close contextual help" data-tooltip="Close contextual help">
+      <svg class="ctl-glyph" aria-hidden="true" focusable="false"><use href="#i-close"/></svg>
+    </button>
+  </header>
+  <p data-contextual-help-body></p>
+</section>
+
+<!-- One stable route to every open document, including documents hidden by narrow pane fallback. -->
+<div id="document-switcher-dialog" class="popover document-switcher-dialog" role="dialog"
+     aria-label="Open documents" hidden>
+  <div class="popover-title">Open documents</div>
+  <ul class="document-switcher-list"></ul>
+</div>
+
+<!-- Native modal focus containment. Copy and action labels are filled for Close or Replace. -->
+<dialog id="unsaved-document-dialog" class="unsaved-document-dialog"
+        aria-labelledby="unsaved-document-title" aria-describedby="unsaved-document-description">
+  <h2 id="unsaved-document-title">Save changes?</h2>
+  <p id="unsaved-document-description">Closing will discard changes that have not been downloaded.</p>
+  <div class="unsaved-document-actions">
+    <button class="btn primary" type="button" data-unsaved-action="save">Save and Close</button>
+    <button class="btn danger" type="button" data-unsaved-action="discard">Discard</button>
+    <button class="btn" type="button" data-unsaved-action="cancel">Cancel</button>
+  </div>
+</dialog>
+
+<!-- Closing a document is NOT Stop: the process-local deployment (or source-session listener)
+     this document started keeps running in this server process, owned by the server, until an
+     explicit Stop. Without this dialog that distinction lived only in a code comment on
+     `closeDocument` -- invisible to the person actually closing the tab. Shown only when the
+     document being closed has an active session; a document with none closes immediately, as
+     before. -->
+<dialog id="active-deployment-dialog" class="unsaved-document-dialog active-deployment-dialog"
+        aria-labelledby="active-deployment-title" aria-describedby="active-deployment-description">
+  <h2 id="active-deployment-title">Close this document?</h2>
+  <p id="active-deployment-description">Closing only stops watching this deployment from this browser tab. It keeps running in this server process until you Stop it.</p>
+  <div class="unsaved-document-actions">
+    <button class="btn danger" type="button" data-active-deployment-action="stop-and-close">Stop and Close</button>
+    <button class="btn" type="button" data-active-deployment-action="close">Close (keep running)</button>
+    <button class="btn" type="button" data-active-deployment-action="cancel">Cancel</button>
+  </div>
+</dialog>
+
+<dialog id="inspector-unsaved-dialog" class="unsaved-document-dialog inspector-unsaved-dialog"
+        aria-labelledby="inspector-unsaved-title" aria-describedby="inspector-unsaved-description">
+  <h2 id="inspector-unsaved-title"></h2>
+  <p id="inspector-unsaved-description"></p>
+  <div class="unsaved-document-actions">
+    <button class="btn primary" type="button" data-inspector-unsaved-action="save"></button>
+    <button class="btn danger" type="button" data-inspector-unsaved-action="discard"></button>
+    <button class="btn" type="button" data-inspector-unsaved-action="cancel"></button>
+  </div>
+</dialog>
+
+<!-- ══ CREDENTIALS ═════════════════════════════════════════════════════════════════════════
+     THE ONE PLACE IN THIS PRODUCT WHERE A CREDENTIAL VALUE IS TYPED, and a native modal `<dialog>`
+     for exactly that reason: the claim "only here" is checkable only if the place is a single,
+     named, bounded thing that takes the screen while it is open. See `credential-panel.js`'s header
+     for why this is not an eighth panel.
+
+     FOUR PROPERTIES BELOW ARE STRUCTURAL RATHER THAN STYLISTIC.
+     1. THE VALUE INPUT IS `type="password"` WITH `autocomplete="off"` and `spellcheck="false"`,
+        matching `#access-token` — the product's existing spelling for "this value is not for
+        keeping". It is never given a `value` attribute here, and `credential-panel.js` clears it on
+        every outcome, so there is nothing for a browser or a restored form state to repopulate.
+     2. THERE IS NO FIELD, ANYWHERE BELOW, FOR A REFERENCE. The service mints it and refuses a body
+        that proposes one; a control here would be an interface inviting a request built to fail.
+     3. EVERY ERROR SLOT SHIPS PRESENT, EMPTY AND HIDDEN, and is bound to its control by
+        `aria-errormessage` only once it has something to say.
+     4. THE LIVE REGION IS POLITE. A stored credential is not an emergency, and `role="alert"` would
+        interrupt a screen-reader user mid-sentence. -->
+<dialog id="credentials-dialog" class="credentials-dialog" aria-labelledby="credentials-title">
+  <header class="credentials-hd">
+    <h2 id="credentials-title">Credentials</h2>
+    <button id="credential-close" class="btn" type="button">Close</button>
+  </header>
+  <!-- Filled from `CREDENTIAL_SCOPE_TEXT` rather than written here, so the one sentence separating
+       this window from the command bar's service token cannot exist in two versions. -->
+  <p id="credential-scope" class="credential-note"></p>
+
+  <form id="credential-form" class="credential-form" novalidate autocomplete="off">
+    <div class="editor-field full">
+      <label for="credential-label">Label *</label>
+      <input id="credential-label" type="text" autocomplete="off" spellcheck="false"
+             maxlength="120" aria-describedby="credential-label-hint">
+      <small id="credential-label-hint">What you will recognise this credential by when a node asks for one. At most 120 characters.</small>
+      <p id="credential-label-error" class="credential-error" hidden></p>
+    </div>
+    <div class="editor-field full">
+      <label for="credential-scheme">Kind</label>
+      <!-- Options are written by `credential-panel.js` from the client's own scheme vocabulary, so
+           the service's spelling and the reader's wording cannot drift apart here. -->
+      <select id="credential-scheme" aria-describedby="credential-scheme-hint"></select>
+      <small id="credential-scheme-hint">What the service does with the value when a node uses it.</small>
+      <p id="credential-scheme-error" class="credential-error" hidden></p>
+    </div>
+    <div class="editor-field full" id="credential-username-field" hidden>
+      <label for="credential-username">Username *</label>
+      <input id="credential-username" type="text" autocomplete="off" spellcheck="false"
+             aria-describedby="credential-username-hint">
+      <small id="credential-username-hint">Only a username-and-password credential carries one. It is stored beside the value, not inside it.</small>
+      <p id="credential-username-error" class="credential-error" hidden></p>
+    </div>
+    <div class="editor-field full">
+      <label for="credential-value">Value *</label>
+      <input id="credential-value" type="password" autocomplete="off" spellcheck="false"
+             aria-describedby="credential-value-hint">
+      <small id="credential-value-hint">Sent once to your service and never shown again — not here, not in a node, not masked. This field is cleared the moment the attempt finishes, whether it succeeded or not.</small>
+      <p id="credential-value-error" class="credential-error" hidden></p>
+    </div>
+    <div class="credential-actions">
+      <button id="credential-save" class="btn primary" type="submit">Store credential</button>
+    </div>
+    <p id="credential-status" class="credential-status" role="status" aria-live="polite"></p>
+  </form>
+
+  <section class="credentials-listing" aria-labelledby="credentials-list-title">
+    <h3 id="credentials-list-title">Credentials you hold</h3>
+    <p id="credential-empty" class="credential-note"></p>
+    <!-- No value column, and none masked: there is nothing to mask. The reference is what a node's
+         property stores, so it is the one identifier shown, verbatim and copyable. -->
+    <ul id="credential-list" class="credential-list" aria-labelledby="credentials-list-title" hidden></ul>
+  </section>
+</dialog>
+
+<!-- ══ DEPLOYMENTS ═════════════════════════════════════════════════════════════════════
+     This window owns local-deployment registration and control: the
+     tenant's whole `/v1/deployments` surface (list, register-and-start from the active document,
+     inspect, stop, restart, undeploy), reusing the credentials window's own reasoning for a bounded
+     native `<dialog>` rather than an eighth panel -- see `deployment-panel.js`'s header. Run and Stop
+     are UNCHANGED by this window's existence: a graph with an effective SOURCE still starts a
+     listener session there, and every other graph still submits a real one-shot execution.
+
+     STATES SHOWN ARE THE SERVER'S OWN WORDS -- REGISTERED, STARTING, READY, DEGRADED, STOPPING,
+     STOPPED, FAILED -- never a UI-invented approximation. Every row also names scope=LOCAL_PROCESS: no durability,
+     failover or cluster claim is made anywhere in this window. -->
+<dialog id="deployments-dialog" class="credentials-dialog deployments-dialog" aria-labelledby="deployments-title">
+  <header class="credentials-hd">
+    <h2 id="deployments-title">Deployments</h2>
+    <button id="deployment-close" class="btn" type="button">Close</button>
+  </header>
+  <p id="deployment-scope" class="credential-note"></p>
+
+  <form id="deployment-register-form" class="credential-form" novalidate autocomplete="off">
+    <div class="editor-field full">
+      <label for="deployment-id-input">Deployment id *</label>
+      <input id="deployment-id-input" type="text" autocomplete="off" spellcheck="false"
+             aria-describedby="deployment-id-hint">
+      <small id="deployment-id-hint">Addresses this deployment here and in the CLI (`ravenroot deployments`). Registering the same id with the same graph again is a no-op; a different graph is refused.</small>
+      <p id="deployment-id-error" class="credential-error" hidden></p>
+    </div>
+    <div class="credential-actions">
+      <button id="deployment-register" class="btn primary" type="submit">Register and start from active document</button>
+    </div>
+    <p id="deployment-status" class="credential-status" role="status" aria-live="polite"></p>
+  </form>
+
+  <section class="credentials-listing" aria-labelledby="deployments-list-title">
+    <h3 id="deployments-list-title">Deployments you hold</h3>
+    <p id="deployment-empty" class="credential-note"></p>
+    <ul id="deployment-list" class="credential-list deployment-list" aria-labelledby="deployments-list-title" hidden></ul>
+  </section>
+</dialog>
+
+<!-- ══ DRAG CARRIER ══════════════════════════════════════════════════════════════════════════════
+     A 200x32 chip, not the panel itself: dragging a full-width panel across a stage that is
+     already 46% chrome hides the target being aimed at. `pointer-events: none` so it can never
+     become its own drop target. -->
+<div id="panel-carrier" class="panel-carrier" aria-hidden="true" hidden></div>
+
+<!-- ══ BOTTOM BAR ════════════════════════════════════════════════ -->
+<div id="bot">
+  <div class="stat">🔵 <b id="b-nodes">0</b> nodes</div>
+  <div class="stat">➔  <b id="b-edges">0</b> edges</div>
+  <div class="spacer"></div>
+  <div class="stat">Zoom: <b id="b-zoom">100%</b></div>
+  <div class="stat">Selected: <b id="b-sel">—</b></div>
+</div>
+
+<!-- ══ KEYBOARD HELP ════════════════════════════════════════════= -->
+<div id="help-overlay" data-command-id="view.keyboardShortcuts">
+  <div id="help-box">
+    <h2>⌨ Keyboard Shortcuts</h2>
+    <div id="shortcut-help-list"></div>
+    <br>
+    <button class="btn help-close" data-command-id="view.keyboardShortcuts">Close</button>
+  </div>
+</div>
+
+<!-- ══ LIBRARIES ═════════════════════════════════════════════════ -->
+<!-- Cytoscape.js – MIT license -->
+<script type="module" src="./src/app.js"></script>
+</body>
+</html>

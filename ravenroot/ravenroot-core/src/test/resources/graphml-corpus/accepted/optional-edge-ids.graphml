@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string">
+    <default>continue</default>
+  </key>
+  <key id="edge-owner" for="edge" attr.name="owner" attr.type="string">
+    <default>edge-default</default>
+  </key>
+  <graph id="optional-edge-id-workflow" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="worker"><data key="kind">PASSTHROUGH</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge source="start" target="worker"/>
+    <edge source="worker" target="end">
+      <data key="edge-owner">explicit-owner</data>
+    </edge>
+    <edge id="ravenroot-synthesized-edge-0" source="start" target="end">
+      <data key="outcome">shortcut</data>
+    </edge>
+  </graph>
+</graphml>

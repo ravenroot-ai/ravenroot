@@ -1,0 +1,6 @@
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <graph id="late-key" edgedefault="directed">
+    <node id="start"><data key="label">value</data></node>
+  </graph>
+  <key id="label" for="node" attr.name="label" attr.type="string"/>
+</graphml>

@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Ravenroot Anthropic model adapter — an OPTIONAL, SEPARATELY INSTALLED artifact.
+
+    THIS MODULE IS DELIBERATELY NOT A MEMBER OF ravenroot/pom.xml's <modules>, AND MUST NEVER BE
+    ADDED TO IT. That is not a packaging preference; it is the shape ADR 0017 requires,
+    stated in those exact terms by the three checks that enforce it —
+    ravenroot-distribution's DefaultDistributionModelAdapterBoundaryTest,
+    ReleaseArtifactModelAdapterBoundaryIT and ReleaseArtifactBoundaryGate:
+
+        "Move this class to an optional, separately-installed adapter artifact with its own Maven
+         coordinates, excluded from the release reactor - a Maven profile of ravenroot-distribution
+         is not sufficient."
+
+    Ravenroot's qualification as an upstream component under EU AI Act recital 89, rather than a
+    provider of an AI system under art. 3(3), rests on the DEFAULT distribution shipping no concrete,
+    registered ModelProvider. This file is a concrete ModelProvider. Its own groupId
+    (ai.ravenroot.adapters, not ai.ravenroot) and its absence from the release reactor are what make
+    "additional artifact, not part of the default distribution" a fact about the build rather than a
+    sentence in a document.
+
+    Consequence for building it: the reactor must be installed first, because this project resolves
+    its Ravenroot dependencies from the local repository rather than from a reactor sibling.
+
+        ./dev.sh          <- performs this step and every other one, selecting a JDK 21..25 itself
+
+    The command above is the recommended approach: dev.sh finds a supported JDK instead of
+    depending on an absolute path from the machine that wrote this line. For anyone who wants to
+    run the sequence manually with JAVA_HOME already in range:
+
+        mvn -f ravenroot/pom.xml install -pl ravenroot-core -am
+        mvn -f ravenroot-adapter-anthropic/pom.xml clean verify
+
+    ravenroot-sample is the existing precedent for a root-level project outside the reactor that
+    depends on installed Ravenroot coordinates. Verify both with the same install-then-build
+    sequence: "outside the reactor" does not mean "outside repository verification."
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ai.ravenroot.adapters</groupId>
+    <artifactId>ravenroot-adapter-anthropic</artifactId>
+    <version>0.1.0-alpha.1</version>
+    <name>Ravenroot Anthropic Model Adapter</name>
+    <description>
+        Optional ModelProvider adapter for the Anthropic Messages API, on the operator-key credential
+        path (answer A3). Not part of the Ravenroot default distribution.
+    </description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <ravenroot.version>0.1.0-alpha.1</ravenroot.version>
+        <junit.version>6.1.2</junit.version>
+    </properties>
+
+    <dependencies>
+        <!--
+            The SPI itself: ModelProvider, ModelRequest, ModelResponse, CredentialResolver,
+            SecretValue, and the bounded JSON reader/writer (PayloadJson, PayloadValue,
+            PayloadLimits) this adapter reads and writes the wire with.
+        -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+            <version>${ravenroot.version}</version>
+        </dependency>
+        <!--
+            SEC-10 requires this graph-driven egress adapter to use the shared controls in
+            ravenroot-core:
+
+              - EgressHttpClients is "the one way Ravenroot builds an HTTP client for graph-driven
+                egress", with Redirect.NEVER pinned by EgressProxyAbsenceTest;
+              - BoundedBodyHandlers refuses an oversized response WHILE STREAMING, cancelling the
+                subscription rather than buffering to the end.
+
+            An llm-prompt node is graph-driven egress. So this adapter obeys SEC-10 by USING the
+            SEC-10 client rather than by resembling it, which is the whole point of a control being
+            universal: a second client with its own network rules is how a future security fix
+            reaches one of them and not the other.
+
+            provided, not compile, and that scope is an assertion rather than a saving: the only way
+            to install this adapter is to hand it to ModelProviderRegistry, which is itself a
+            ravenroot-core class, so any JVM that can register this provider already has core on its
+            classpath. Nothing here ships a second copy.
+
+            KNOWN and deliberate: this drags tinkergraph-gremlin and cel-standalone onto the compile
+            and test classpath as transitive provided dependencies, for one utility class and one
+            body handler that need neither. The right shape is for the SEC-10 egress constructor to
+            live in the published SPI artifact, where an out-of-reactor adapter can obey it without
+            depending on the engine — see docs/architecture/model-provider-adapters.md, "What the two
+            clients can actually share".
+        -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-core</artifactId>
+            <version>${ravenroot.version}</version>
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-java-version</id>
+                        <phase>validate</phase>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <!-- Same supported JDK window as the reactor. -->
+                                <requireJavaVersion>
+                                    <version>[21,26)</version>
+                                    <message>Ravenroot builds on JDK 21 through 25; JDK 26 is not a supported build platform.</message>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.6</version>
+            </plugin>
+        </plugins>
+    </build>
+</project>

@@ -1,0 +1,240 @@
+:root {
+  color-scheme: dark;
+  --surface-canvas: #0d1117;
+  --surface-primary: #161b22;
+  --surface-raised: #21262d;
+  --surface-hover: #2d333b;
+  --border-default: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #a9b4c0;
+  --text-muted: #8b949e;
+  --accent: #58a6ff;
+  --focus-ring: #79b8ff;
+  --minimap-scrim: rgba(13, 17, 23, .92);
+  --skip-surface: #f0f6fc;
+  --skip-text: #0d1117;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--surface-canvas);
+  color: var(--text-primary);
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --surface-canvas: #f6f8fa;
+  --surface-primary: #ffffff;
+  --surface-raised: #f3f4f6;
+  --surface-hover: #eaeef2;
+  --border-default: #d0d7de;
+  --text-primary: #1f2328;
+  --text-secondary: #3d444d;
+  --text-muted: #59636e;
+  --accent: #0969da;
+  --focus-ring: #8250df;
+  --minimap-scrim: rgba(255, 255, 255, .92);
+  --skip-surface: #1f2328;
+  --skip-text: #ffffff;
+}
+
+/* With no authoritative session override, CSS resolves the system preference before first paint. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+    --surface-canvas: #f6f8fa;
+    --surface-primary: #ffffff;
+    --surface-raised: #f3f4f6;
+    --surface-hover: #eaeef2;
+    --border-default: #d0d7de;
+    --text-primary: #1f2328;
+    --text-secondary: #3d444d;
+    --text-muted: #59636e;
+    --accent: #0969da;
+    --focus-ring: #8250df;
+    --minimap-scrim: rgba(255, 255, 255, .92);
+    --skip-surface: #1f2328;
+    --skip-text: #ffffff;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { width: 100%; min-width: 0; min-height: 100%; margin: 0; }
+
+body { min-block-size: 18rem; background: var(--surface-canvas); }
+
+.embed-skip-link {
+  position: fixed;
+  inset-block-start: .5rem;
+  inset-inline-start: .5rem;
+  z-index: 10;
+  transform: translateY(-200%);
+  padding: .65rem .85rem;
+  border-radius: .4rem;
+  background: var(--skip-surface);
+  color: var(--skip-text);
+}
+
+.embed-skip-link:focus { transform: none; }
+
+.embed-viewer {
+  display: grid;
+  grid-template-rows: auto minmax(14rem, 1fr) auto;
+  min-block-size: 18rem;
+  block-size: 100vh;
+  overflow: hidden;
+}
+
+.embed-viewer-header {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  min-width: 0;
+  padding: .6rem .75rem;
+  border-block-end: 1px solid var(--border-default);
+  background: var(--surface-primary);
+}
+
+.embed-viewer-title { margin: 0; font-size: 1rem; line-height: 1.35; }
+.embed-viewer-metadata { margin: 0 auto 0 0; color: var(--text-muted); font-size: .8125rem; }
+.embed-viewer-controls { display: flex; gap: .35rem; }
+
+.embed-mode-label { display: inline-flex; align-items: center; gap: .3rem; font-size: .8125rem; }
+.embed-mode-label select {
+  min-block-size: 2.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: .45rem;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+}
+
+.embed-viewer-controls button {
+  min-inline-size: 2.75rem;
+  min-block-size: 2.75rem;
+  border: 1px solid var(--border-default);
+  border-radius: .45rem;
+  background: var(--surface-raised);
+  color: var(--text-primary);
+  font: inherit;
+  font-weight: 650;
+  touch-action: manipulation;
+}
+
+.embed-viewer-controls button:hover { background: var(--surface-hover); }
+
+:focus-visible { outline: 3px solid var(--focus-ring); outline-offset: 2px; }
+
+.embed-viewer-canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-canvas);
+  touch-action: none;
+}
+
+.embed-viewer-elastic {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  background: var(--surface-canvas);
+}
+
+.embed-viewer-elastic[hidden] { display: none; }
+.embed-viewer-canvas[data-active-renderer="elastic"] canvas { visibility: hidden; }
+
+.embed-viewer-status {
+  margin: 0;
+  padding: .45rem .75rem;
+  border-block-start: 1px solid var(--border-default);
+  background: var(--surface-primary);
+  color: var(--text-secondary);
+  font-size: .8125rem;
+}
+
+.embed-viewer-minimap {
+  position: absolute;
+  z-index: 3;
+  inset-inline-end: .75rem;
+  inset-block-end: 2.8rem;
+  inline-size: 10rem;
+  block-size: 6.5rem;
+  border: 1px solid var(--border-default);
+  border-radius: .45rem;
+  background: var(--minimap-scrim);
+  touch-action: none;
+}
+
+.embed-viewer-minimap[hidden] { display: none; }
+
+.embed-focus-sentinel {
+  position: fixed;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+}
+
+.embed-viewer[data-viewer-state="loading"] .embed-viewer-canvas::after,
+.embed-viewer[data-viewer-state="error"] .embed-viewer-canvas::after,
+.embed-viewer[data-viewer-state="incompatible"] .embed-viewer-canvas::after,
+.embed-viewer[data-viewer-state="expired"] .embed-viewer-canvas::after {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: var(--surface-canvas);
+  color: var(--text-secondary);
+  content: "Loading graph…";
+  text-align: center;
+}
+
+.embed-viewer[data-viewer-state="error"] .embed-viewer-canvas::after { content: "Graph unavailable"; }
+.embed-viewer[data-viewer-state="incompatible"] .embed-viewer-canvas::after { content: "Incompatible graph"; }
+.embed-viewer[data-viewer-state="expired"] .embed-viewer-canvas::after { content: "Session expired"; }
+
+.embed-viewer-alternative {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.embed-node-kind::before { content: " — "; }
+
+@media (max-width: 32rem) {
+  .embed-viewer-header { flex-wrap: wrap; }
+  .embed-viewer-metadata { flex: 1 1 calc(100% - 8rem); }
+  .embed-viewer-controls { margin-inline-start: auto; }
+  .embed-viewer-minimap { inline-size: 7.5rem; block-size: 5rem; }
+}
+
+@media (pointer: coarse) {
+  .embed-viewer-controls button, .embed-mode-label select { min-inline-size: 3rem; min-block-size: 3rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; transition: none !important; }
+}
+
+@media print {
+  :root, body, .embed-viewer { color: #111; background: #fff; }
+  html, body, .embed-viewer { block-size: auto; min-block-size: 0; overflow: visible; }
+  .embed-viewer { display: block; }
+  .embed-viewer-controls, .embed-viewer-status, .embed-skip-link,
+  .embed-viewer-minimap, .embed-focus-sentinel, .embed-viewer-canvas { display: none; }
+  .embed-viewer-header { border-color: #777; background: #fff; }
+  .embed-viewer-alternative {
+    position: static;
+    display: block;
+    inline-size: auto;
+    block-size: auto;
+    overflow: visible;
+    clip-path: none;
+    white-space: normal;
+  }
+}

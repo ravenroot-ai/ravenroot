@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="node-behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="failure.route" for="edge" attr.name="failure.route" attr.type="string"/>
+  <graph id="embedded-sample" edgedefault="directed">
+    <node id="start"><data key="node-kind">START</data></node>
+    <node id="input"><data key="node-kind">PASSTHROUGH</data></node>
+    <node id="uppercase">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">uppercase-text</data>
+    </node>
+    <node id="end"><data key="node-kind">END</data></node>
+    <!-- The error terminal is part of a graph's minimum structure. It is wired, not merely
+         declared: when 'uppercase' fails, traversal reaches it instead of stopping, which is where
+         a failed run can be inspected. -->
+    <node id="error"><data key="node-kind">ERROR</data></node>
+    <edge id="start-input" source="start" target="input">
+      <data key="edge-outcome">continue</data>
+    </edge>
+    <edge id="input-uppercase" source="input" target="uppercase">
+      <data key="edge-outcome">continue</data>
+    </edge>
+    <edge id="uppercase-end" source="uppercase" target="end">
+      <data key="edge-outcome">continue</data>
+    </edge>
+    <edge id="uppercase-error" source="uppercase" target="error">
+      <data key="failure.route">true</data>
+    </edge>
+  </graph>
+</graphml>

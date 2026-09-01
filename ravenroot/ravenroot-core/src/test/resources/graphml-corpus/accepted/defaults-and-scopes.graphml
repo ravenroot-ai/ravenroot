@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string">
+    <default>PASSTHROUGH</default>
+  </key>
+  <key id="node-owner" for="node" attr.name="owner" attr.type="string">
+    <default>node-default</default>
+  </key>
+  <key id="edge-owner" for="edge" attr.name="owner" attr.type="string">
+    <default>edge-default</default>
+  </key>
+  <key id="region" for="all" attr.name="region" attr.type="string">
+    <default>eu-central</default>
+  </key>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string">
+    <default>continue</default>
+  </key>
+  <graph id="defaults-workflow" edgedefault="directed">
+    <node id="start"><data key="kind">START</data><data key="node-owner">explicit-owner</data></node>
+    <node id="worker"/>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="default-edge" source="start" target="worker"/>
+    <edge id="explicit-edge" source="worker" target="end">
+      <data key="outcome">done</data>
+      <data key="edge-owner">explicit-edge-owner</data>
+    </edge>
+  </graph>
+</graphml>

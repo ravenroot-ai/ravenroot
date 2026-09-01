@@ -1,0 +1,409 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ai.ravenroot</groupId>
+    <artifactId>ravenroot-parent</artifactId>
+    <version>0.1.0-alpha.1</version>
+    <packaging>pom</packaging>
+    <name>Ravenroot</name>
+    <description>Graph-governed orchestration platform.</description>
+
+    <modules>
+        <module>ravenroot-application-api</module>
+        <module>ravenroot-core</module>
+        <module>ravenroot-programming-graalvm</module>
+        <module>ravenroot-api-testkit</module>
+        <!--
+          SEC-11b acceptance evidence: the sandbox supervisor conformance suite an integrator runs
+          against their OWN SandboxSupervisorLauncher implementation. In the reactor so the suite
+          and its own red/green self-tests (a deliberately non-compliant fake per declared limit)
+          run on every build; NOT a dependency of ravenroot-distribution, so it does not ship;
+          the OS sandbox supervisor stays integrator-provided (SEC-11, option B).
+        -->
+        <module>ravenroot-sandbox-supervisor-testkit</module>
+        <!--
+          CORE-06 acceptance evidence: a third-party node package that depends on the Node SDK and
+          nothing else. In the reactor so that the SDK boundary is verified by every build; NOT a
+          dependency of ravenroot-distribution, so it does not ship.
+        -->
+        <module>ravenroot-node-starter</module>
+        <module>ravenroot-extensions</module>
+        <!--
+          Manifest schema, checksum, path-safety and reserved-namespace
+          validation for drop-in plugin bundles. Depends only on ravenroot-application-api (reuses
+          PayloadJson/PayloadValue/PayloadLimits rather than adding a YAML or JSON Schema library);
+          deliberately not a dependency of ravenroot-core or ravenroot-distribution yet, and not
+          itself capable of loading a class: that boundary is a later increment.
+        -->
+        <module>ravenroot-plugin-bundle</module>
+        <module>ravenroot-engine-testkit</module>
+        <module>ravenroot-persistence-testkit</module>
+        <module>ravenroot-persistence-sqlite</module>
+        <module>ravenroot-pekko</module>
+        <!--
+          The OpenTelemetry export bridge. Depends only on
+          ravenroot-application-api (ExecutionEvent) and ravenroot-core (ExecutionMonitor.subscribe);
+          NOT a dependency of either, and NOT a dependency of ravenroot-application-api, so no
+          third-party node package that compiles against the application API ever sees an
+          OpenTelemetry class on its compile classpath (ADR 0018's "no interior consumer" test,
+          applied here: the only caller of this module is a composition root). Consumed by
+          ravenroot-server and ravenroot-cli, disabled unless RAVENROOT_OTEL_ENABLED is set.
+        -->
+        <module>ravenroot-observability-otel</module>
+        <module>ravenroot-server</module>
+        <module>ravenroot-cli</module>
+        <module>ravenroot-distribution</module>
+    </modules>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <!--
+            Default locale of the forked test JVM. Overridable so a locale-sensitive defect can be
+            reproduced on demand, e.g.
+            mvn test -Dtest.locale.language=it -Dtest.locale.country=IT
+        -->
+        <test.locale.language>en</test.locale.language>
+        <test.locale.country>US</test.locale.country>
+        <!--
+            Composable surefire argLine. Do not add a second literal <argLine> anywhere else in
+            this reactor (scripts/check_argline.py fails the build if one appears): a child pom's
+            own <configuration><argLine> element fully replaces this one rather than adding to
+            it: that is plain XML inheritance, not a bug, and no parent-side trick prevents it.
+            To add JVM flags (memory, module opens, a future javaagent, ...) without losing the
+            locale pin, set ravenroot.surefire.extraArgLine instead, e.g.
+            mvn test -Dravenroot.surefire.extraArgLine="-Xmx2048m"
+            The late-substitution form @{argLine} was tried first and rejected on evidence: it left
+            @{argLine} as literal, unresolved text in the forked command line ('@{argLine}' passed
+            straight to java, which then tried to read it
+            as an @-argfile and failed to start) whether or not -DargLine was set on the command
+            line. Maven only resolves that deferred token when a plugin sets the "argLine"
+            project property programmatically during the build (this is how jacoco:prepare-agent
+            makes it work), not from a plain CLI override. This repository has no such plugin.
+            Verified empirically: a bare literal <argLine>, or -DargLine=... on
+            the command line, either silently does nothing or silently replaces this value
+            depending on where it is applied; only composing through this dedicated property is
+            reliable in this Maven/surefire combination.
+        -->
+        <ravenroot.surefire.extraArgLine></ravenroot.surefire.extraArgLine>
+        <ravenroot.surefire.localeArgLine>-Duser.language=${test.locale.language} -Duser.country=${test.locale.country}</ravenroot.surefire.localeArgLine>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <maven.javadoc.plugin.version>3.12.0</maven.javadoc.plugin.version>
+        <junit.version>6.1.2</junit.version>
+        <jqwik.version>1.9.3</jqwik.version>
+        <pekko.version>1.6.0</pekko.version>
+        <akka.version>2.10.20</akka.version>
+        <scala.binary.version>2.13</scala.binary.version>
+        <tinkerpop.version>3.8.1</tinkerpop.version>
+        <cel.version>0.6.0</cel.version>
+        <!-- Linear-time regular expressions for RFC 9535 match/search. BSD-3-Clause. -->
+        <re2j.version>1.8</re2j.version>
+        <!--
+          One property controls two language components: js-community and python-community are
+          released together and must be moved together. Version 25.2.4 is the stable release that
+          first satisfies the required Python support. Moving it for Python therefore also
+          moves JavaScript off 25.0.3, which is why the bump is verified on its own before Python is
+          added rather than assumed to be free.
+
+          The Python language level is distinct from the component version: on this component,
+          `sys.version` reports 3.12.8. That is the level artifacts are written against.
+        -->
+        <graalvm.polyglot.version>25.2.4</graalvm.polyglot.version>
+        <nimbus-jose-jwt.version>10.9.1</nimbus-jose-jwt.version>
+        <sqlite-jdbc.version>3.53.2.1</sqlite-jdbc.version>
+        <!-- Pinned for ravenroot-observability-otel only. -->
+        <opentelemetry.version>1.65.0</opentelemetry.version>
+        <!-- Test-scope only: bytecode header inspection for
+             ravenroot-distribution's DefaultDistributionModelAdapterBoundaryTest. Never
+             a compile/runtime dependency, so it is never shaded into ravenroot.jar. -->
+        <asm.version>9.8</asm.version>
+    </properties>
+
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-application-api</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-core</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-plugin-bundle</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-programming-graalvm</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-pekko</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-akka</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-api-testkit</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-engine-testkit</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-persistence-testkit</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-sandbox-supervisor-testkit</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-persistence-sqlite</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>ai.ravenroot</groupId>
+                <artifactId>ravenroot-observability-otel</artifactId>
+                <version>${project.version}</version>
+            </dependency>
+            <dependency>
+                <groupId>org.junit</groupId>
+                <artifactId>junit-bom</artifactId>
+                <version>${junit.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <!-- Apache 2.0, imported so ravenroot-observability-otel's own
+                 pom can declare individual artifacts without repeating a version. Not imported by, or
+                 visible to, any other module unless that module adds its own dependency. -->
+            <dependency>
+                <groupId>io.opentelemetry</groupId>
+                <artifactId>opentelemetry-bom</artifactId>
+                <version>${opentelemetry.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+            <dependency>
+                <groupId>net.jqwik</groupId>
+                <artifactId>jqwik</artifactId>
+                <version>${jqwik.version}</version>
+                <scope>test</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-supported-jdk</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!--
+                                    The supported build JDK is 21 through the 25 LTS. This bounds the
+                                    JDK that COMPILES; it says nothing about the JVM that runs the
+                                    result, which may be newer because the bytecode targets 21.
+
+                                    maven.compiler.release does NOT make this rule redundant. It pins
+                                    the bytecode target, not the language and resolution rules of the
+                                    compiler producing it: under JDK 26 the reactor fails to compile
+                                    at TerminalNodeHistory.java:83 with release=21 set, on a name
+                                    clash for removeEldestEntry. Without this rule that arrives as an
+                                    obscure compiler error halfway through the build; with it, the
+                                    reactor stops at validate and says why.
+                                -->
+                                <requireJavaVersion>
+                                    <version>[21,26)</version>
+                                    <message>Ravenroot builds on JDK 21 through the 25 LTS. JDK 26 is not supported: it fails to compile the reactor (TerminalNodeHistory, name clash on removeEldestEntry), and maven.compiler.release=21 does not prevent that because it pins the bytecode target, not the compiler. Point JAVA_HOME at a supported JDK, for example: JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home mvn ...</message>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+                <configuration>
+                    <release>${maven.compiler.release}</release>
+                </configuration>
+            </plugin>
+            <!--
+                The API documentation profile below opts into this pinned configuration. It is not
+                part of the default build because generated HTML/JARs are release evidence, not a
+                prerequisite for a contributor editing an unrelated module.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-javadoc-plugin</artifactId>
+                <version>${maven.javadoc.plugin.version}</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.6</version>
+                <configuration>
+                    <!--
+                        Pin the forked JVM's default locale. Developer machines here run it-IT while
+                        CI runs en-US, and JDK diagnostics are localized: a test that is sensitive to
+                        them passes locally and fails in CI, or the reverse. Pinning makes a local
+                        run exercise the same branch CI does. The locale must be a JVM argument -
+                        systemPropertyVariables is applied after Locale.getDefault() is already
+                        resolved, so it would have no effect. Tests that must assert locale
+                        independence set the locale themselves at runtime and restore it.
+
+                        Composable: ravenroot.surefire.extraArgLine (see the properties block
+                        above) is prepended rather than clobbered. This is the ONLY <argLine>
+                        declaration in the reactor; keep it that way. A second one, in this file
+                        or in a child module's pom.xml, silently replaces whichever of the two
+                        Maven happens to apply last, dropping the locale pin with no error. See
+                        scripts/check_argline.py, wired into CI, which fails the build if a second
+                        <argLine> appears anywhere in the reactor.
+                    -->
+                    <argLine>${ravenroot.surefire.extraArgLine} ${ravenroot.surefire.localeArgLine}</argLine>
+                    <!--
+                        Tests tagged "fuzz" are excluded from the default run. They are
+                        the new, expensive, jqwik-driven fuzz suites, deliberately not part of every
+                        PR (see the "fuzz" profile below, which is the only place this exclusion is
+                        lifted). This does NOT apply retroactively to fuzzing that already ran in the
+                        default suite before the tagged fuzz suites were added: GraphManagerSecurityTest's own
+                        deterministicMutationCorpusNeverEscapesTypedFailuresOrHangs is a
+                        three-second, already-load-bearing security assertion and is deliberately
+                        left untagged, so it keeps running here exactly as before. Tagging it would
+                        remove an existing security check from every pull request while looking like
+                        tidy consolidation - see that method's Javadoc for the one-line proof that it
+                        still executes by default.
+                    -->
+                    <excludedGroups>fuzz</excludedGroups>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>api-docs</id>
+            <build>
+                <pluginManagement>
+                    <plugins>
+                        <plugin>
+                            <groupId>org.apache.maven.plugins</groupId>
+                            <artifactId>maven-javadoc-plugin</artifactId>
+                            <configuration>
+                                <!-- Stable bytes and English output on every supported build host. -->
+                                <encoding>UTF-8</encoding>
+                                <docencoding>UTF-8</docencoding>
+                                <charset>UTF-8</charset>
+                                <locale>en_US</locale>
+                                <forceRootLocale>true</forceRootLocale>
+                                <release>${maven.compiler.release}</release>
+                                <!-- This applies only to generated API docs, not to unrelated
+                                     runtime artifacts. -->
+                                <outputTimestamp>2026-08-28T00:00:00Z</outputTimestamp>
+                                <!-- Full DocLint is part of the supported-SDK contract. Do not weaken
+                                     this: callers receive the same complete API documentation that
+                                     CI validates. -->
+                                <doclint>all</doclint>
+                                <failOnWarnings>true</failOnWarnings>
+                                <failOnError>true</failOnError>
+                                <detectLinks>false</detectLinks>
+                                <detectOfflineLinks>false</detectOfflineLinks>
+                            </configuration>
+                        </plugin>
+                    </plugins>
+                </pluginManagement>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <!-- Aggregate-specific parameters are not valid for the child `jar` goal. -->
+                        <inherited>false</inherited>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/artifacts/api</outputDirectory>
+                            <!-- This is deliberately an allow-list. Application API is the
+                                 framework-neutral public SDK; all adapters, implementation modules,
+                                 testkits and extension packages remain absent even if they contain
+                                 public Java types. -->
+                            <sourcepath>${project.basedir}/ravenroot-application-api/src/main/java</sourcepath>
+                            <subpackages>ai.ravenroot.api</subpackages>
+                            <!-- Guard future implementation namespaces even inside the SDK. -->
+                            <excludePackageNames>*.internal:*.internal.*:*.impl:*.impl.*</excludePackageNames>
+                            <groups>
+                                <group>
+                                    <title>Application and execution</title>
+                                    <packages>ai.ravenroot.api.application*:ai.ravenroot.api.execution*:ai.ravenroot.api.catalog*:ai.ravenroot.api.payload*:ai.ravenroot.api.error*</packages>
+                                </group>
+                                <group>
+                                    <title>Node SDK and integrations</title>
+                                    <packages>ai.ravenroot.api.node*:ai.ravenroot.api.ai*:ai.ravenroot.api.ingress*:ai.ravenroot.api.programming*:ai.ravenroot.api.plugin*</packages>
+                                </group>
+                                <group>
+                                    <title>Platform contracts</title>
+                                    <packages>ai.ravenroot.api.audit*:ai.ravenroot.api.deployment*:ai.ravenroot.api.embed*:ai.ravenroot.api.persistence*:ai.ravenroot.api.provenance*:ai.ravenroot.api.security*</packages>
+                                </group>
+                            </groups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        <profile>
+            <id>akka</id>
+            <modules>
+                <module>ravenroot-akka</module>
+            </modules>
+        </profile>
+        <profile>
+            <!--
+                `mvn test -Pfuzz` runs ONLY the tests tagged "fuzz" - the jqwik-driven
+                fuzz suites selected by this profile - instead of the default suite. Deliberately not
+                wired into a workflow: this profile is built to run locally and is ready for a
+                future scheduled job.
+
+                <groups> must name every "fuzz" test individually reachable from the reactor;
+                <excludedGroups> is cleared (Maven's default profile-over-parent merge would
+                otherwise still exclude "fuzz" from the base plugin configuration above, which
+                would make <groups>fuzz</groups> select nothing).
+            -->
+            <id>fuzz</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <groups>fuzz</groups>
+                            <excludedGroups combine.self="override"></excludedGroups>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

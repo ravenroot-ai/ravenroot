@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="topology-workflow" edgedefault="directed">
+    <edge id="parallel-a" source="start" target="worker"><data key="outcome">a</data></edge>
+    <edge id="parallel-b" source="start" target="worker"><data key="outcome">b</data></edge>
+    <edge id="self-loop" source="worker" target="worker"><data key="outcome">retry</data></edge>
+    <edge id="finish" source="worker" target="end"><data key="outcome">continue</data></edge>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="worker"><data key="kind">PASSTHROUGH</data></node>
+    <node id="end"><data key="kind">END</data></node>
+  </graph>
+</graphml>

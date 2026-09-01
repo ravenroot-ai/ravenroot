@@ -1,0 +1,7 @@
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="label" for="node" attr.name="label" attr.type="string"/>
+  <data key="label">orphan</data>
+  <graph id="orphan-data" edgedefault="directed">
+    <node id="start"/>
+  </graph>
+</graphml>

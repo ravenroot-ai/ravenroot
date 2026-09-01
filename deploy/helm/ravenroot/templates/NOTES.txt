@@ -1,0 +1,4 @@
+Ravenroot is installed as {{ include "ravenroot.fullname" . }} in namespace {{ .Release.Namespace }}.
+
+For a local connection:
+  kubectl --namespace {{ .Release.Namespace }} port-forward service/{{ include "ravenroot.fullname" . }} 8080:8080

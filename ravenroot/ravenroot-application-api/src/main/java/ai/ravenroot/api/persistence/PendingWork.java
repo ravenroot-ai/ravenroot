@@ -1,0 +1,134 @@
+package ai.ravenroot.api.persistence;
+
+import java.time.Instant;
+import java.util.UUID;
+
+/**
+ * A claimed unit of outstanding work (ADR 0010 sections 7 and 9).
+ *
+ * <p>A claim returns a <strong>projection</strong> — identities, kind, fence, lease and delivery
+ * counter — and deliberately not the aggregate: returning the aggregate would force a remote adapter
+ * to ship an entire causal graph on every claim. The caller loads the aggregate explicitly when it
+ * needs it.</p>
+ *
+ * <p>Delivery is <strong>at-least-once</strong> and there is <strong>no ordering guarantee</strong>
+ * across kinds. Anything stronger cannot be honoured by a distributed adapter, so promising it in
+ * the port would make the conformance suite unsatisfiable rather than making the system stronger.</p>
+ *
+ * <p>Fan-in is deliberately <em>not</em> a kind here. It is state, not work, and it models arrivals
+ * that precede invocation creation; CORE-03 adds it as a separately keyed compare-and-set resource.</p>
+ */
+public sealed interface PendingWork {
+
+/**
+ * Returns the execution aggregate to which the claimed work belongs.
+ * @return durable execution key.
+ */
+    ExecutionKey key();
+
+/**
+ * Stable identity of this work item, used to acknowledge it.
+ * @return identifier used to acknowledge this particular delivery.
+ */
+    UUID workItemId();
+
+/**
+ * Token that must be presented on any write derived from this work item.
+ * @return token required by writes derived from this claim.
+ */
+    long fencingToken();
+
+/**
+ * When this claim's visibility window ends, on the store's clock.
+ * @return store-clock deadline after which the claim may be redelivered.
+ */
+    Instant leaseExpiresAt();
+
+/**
+ * How many times this item has been claimed, starting at one. Rising values indicate redelivery.
+ * @return one-based delivery count for redelivery diagnosis.
+ */
+    int deliveryAttempt();
+
+/**
+ * A scheduled node attempt is ready to be dispatched to the engine.
+ * @param key the stable key used to identify the requested resource.
+ * @param workItemId the stable work item id used to identify the requested resource.
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param invocationId the stable invocation id used to identify the requested resource.
+ * @param attemptId the stable attempt id used to identify the requested resource.
+ * @param attemptOrdinal the attempt ordinal constraint applied while processing the request.
+ * @param fencingToken the stable fencing token used to identify the requested resource.
+ * @param leaseExpiresAt instant at which the pending-work lease expires.
+ * @param deliveryAttempt number of earlier delivery attempts.
+ * @param command command awaiting delivery.
+ */
+    record AttemptDispatch(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
+                           UUID attemptId, int attemptOrdinal, long fencingToken,
+                           Instant leaseExpiresAt, int deliveryAttempt,
+                           ai.ravenroot.api.execution.NodeCommand command) implements PendingWork {
+        /** Normalizes the command delivered for a claimed node attempt. */
+        public AttemptDispatch {
+            command = command == null ? ai.ravenroot.api.execution.NodeCommand.PROCESS : command;
+        }
+
+/**
+ * Compatibility constructor for work recorded before structural commands.
+ * @param key the stable key used to identify the requested resource.
+ * @param workItemId the stable work item id used to identify the requested resource.
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param invocationId the stable invocation id used to identify the requested resource.
+ * @param attemptId the stable attempt id used to identify the requested resource.
+ * @param attemptOrdinal the attempt ordinal constraint applied while processing the request.
+ * @param fencingToken the stable fencing token used to identify the requested resource.
+ * @param leaseExpiresAt instant at which the pending-work lease expires.
+ * @param deliveryAttempt number of earlier delivery attempts.
+ */
+        public AttemptDispatch(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
+                               UUID attemptId, int attemptOrdinal, long fencingToken,
+                               Instant leaseExpiresAt, int deliveryAttempt) {
+            this(key, workItemId, traversalId, invocationId, attemptId, attemptOrdinal, fencingToken,
+                    leaseExpiresAt, deliveryAttempt, ai.ravenroot.api.execution.NodeCommand.PROCESS);
+        }
+    }
+
+    /**
+     * A durable timer has come due on the store's clock.
+     *
+     * @param dueAt the original due instant rather than an opaque handle, so scheduling lag is
+     *              computable by the runtime and by operators
+ * @param key the stable key used to identify the requested resource.
+ * @param workItemId the stable work item id used to identify the requested resource.
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param invocationId the stable invocation id used to identify the requested resource.
+ * @param payload bounded payload carried by the pending work.
+ * @param fencingToken the stable fencing token used to identify the requested resource.
+ * @param leaseExpiresAt instant at which the pending-work lease expires.
+ * @param deliveryAttempt number of earlier delivery attempts.
+     */
+    record TimerDue(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
+                    Instant dueAt, OpaquePayload payload, long fencingToken,
+                    Instant leaseExpiresAt, int deliveryAttempt) implements PendingWork {
+    }
+
+    /**
+     * An authorized external trigger correlated to a waiting invocation.
+     *
+     * <p>PERS-02 defines this kind but produces none: there is no handler registration surface until
+     * It is declared now so PERS-05 is additive rather than a breaking change to a sealed
+     * type that adapters have already switched over exhaustively.</p>
+ * @param key the stable key used to identify the requested resource.
+ * @param workItemId the stable work item id used to identify the requested resource.
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param invocationId the stable invocation id used to identify the requested resource.
+ * @param handlerName handler selected to process the pending work.
+ * @param payload bounded payload carried by the pending work.
+ * @param fencingToken the stable fencing token used to identify the requested resource.
+ * @param leaseExpiresAt instant at which the pending-work lease expires.
+ * @param deliveryAttempt number of earlier delivery attempts.
+     */
+    record HandlerTrigger(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
+                          String handlerName, OpaquePayload payload, long fencingToken,
+                          Instant leaseExpiresAt, int deliveryAttempt) implements PendingWork {
+    }
+}

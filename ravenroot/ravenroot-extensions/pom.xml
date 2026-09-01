@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent><groupId>ai.ravenroot</groupId><artifactId>ravenroot-parent</artifactId><version>0.1.0-alpha.1</version></parent>
+    <artifactId>ravenroot-extensions</artifactId><packaging>pom</packaging>
+    <name>Ravenroot extensions</name>
+    <modules><module>ravenroot-mail</module><module>ravenroot-telegram</module><module>ravenroot-amqp091</module><module>ravenroot-kafka</module><module>ravenroot-filesystem</module><module>ravenroot-ocr</module><module>ravenroot-spel</module><module>ravenroot-jdbc</module><module>ravenroot-openapi-client</module><module>ravenroot-openapi-server</module><module>ravenroot-object-storage</module><module>ravenroot-websocket</module><module>ravenroot-ai</module></modules>
+</project>

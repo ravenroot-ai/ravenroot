@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://graphml.graphdrawing.org/xmlns http://graphml.graphdrawing.org/xmlns/1.0/graphml.xsd">
+  <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="node-behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="node-custom" for="node" attr.name="customAttribute" attr.type="string"/>
+  <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="edge-route" for="edge" attr.name="routeLabel" attr.type="string"/>
+  <graph id="engine-conformance" edgedefault="directed">
+    <node id="start">
+      <data key="node-kind">START</data>
+    </node>
+    <node id="known">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">append-a</data>
+    </node>
+    <node id="future">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">not-implemented-yet</data>
+      <data key="node-custom">retained-by-core</data>
+    </node>
+    <node id="join">
+      <data key="node-kind">PASSTHROUGH</data>
+    </node>
+    <node id="end">
+      <data key="node-kind">END</data>
+    </node>
+    <!-- The error terminal is part of a graph's minimal structure. Declared but not wired to
+         anything here on purpose: this fixture's subject is engine conformance over a fan-out and a
+         rejoin, and giving one of its two branches a failure route would change what the conformance
+         suite is measuring. An unreached terminal is reported dead at traversal start, which is the
+         behaviour every other unreachable node already gets. -->
+    <node id="error">
+      <data key="node-kind">ERROR</data>
+    </node>
+    <edge id="start-known" source="start" target="known">
+      <data key="edge-outcome">continue</data>
+      <data key="edge-route">branch-a</data>
+    </edge>
+    <edge id="start-future" source="start" target="future">
+      <data key="edge-outcome">continue</data>
+      <data key="edge-route">branch-future</data>
+    </edge>
+    <edge id="known-join" source="known" target="join">
+      <data key="edge-outcome">continue</data>
+    </edge>
+    <edge id="future-join" source="future" target="join">
+      <data key="edge-outcome">continue</data>
+    </edge>
+    <edge id="join-end" source="join" target="end">
+      <data key="edge-outcome">continue</data>
+    </edge>
+  </graph>
+</graphml>

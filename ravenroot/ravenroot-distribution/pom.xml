@@ -1,0 +1,286 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+    <artifactId>ravenroot-distribution</artifactId>
+    <packaging>jar</packaging>
+    <name>Ravenroot Distribution</name>
+    <description>Binary assembly for Ravenroot server and CLI.</description>
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-server</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-programming-graalvm</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-cli</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-pekko</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Test-scope only, for DefaultDistributionModelAdapterBoundaryTest's classpath scan.
+             Must never move to compile/runtime scope: that would shade it into
+             ravenroot.jar itself. -->
+        <dependency>
+            <groupId>org.ow2.asm</groupId>
+            <artifactId>asm</artifactId>
+            <version>${asm.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+    <build>
+        <finalName>ravenroot</finalName>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+                <filtering>false</filtering>
+            </resource>
+            <resource>
+                <directory>${project.basedir}/../ravenroot-ui/dist</directory>
+                <targetPath>ui</targetPath>
+                <filtering>false</filtering>
+            </resource>
+        </resources>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-assembly-plugin</artifactId>
+                <version>3.8.0</version>
+                <configuration>
+                    <descriptors>
+                        <descriptor>src/assembly/ravenroot.xml</descriptor>
+                    </descriptors>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>distribution</id>
+                        <phase>package</phase>
+                        <goals><goal>single</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>3.6.2</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals><goal>shade</goal></goals>
+                        <configuration>
+                            <createDependencyReducedPom>false</createDependencyReducedPom>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>reference.conf</resource>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>version.conf</resource>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <mainClass>ai.ravenroot.server.RavenrootServerMain</mainClass>
+                                    <manifestEntries>
+                                        <Multi-Release>true</Multi-Release>
+                                    </manifestEntries>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Runs ReleaseArtifactModelAdapterBoundaryIT against the artifacts the two
+                 plugins above just produced (ravenroot.jar, ravenroot-bin.zip). Bound to its default
+                 integration-test/verify phases, both after package, so both artifacts already exist -
+                 see that class's Javadoc for why the check needed to move here instead of staying at
+                 the ordinary test phase. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-failsafe-plugin</artifactId>
+                <version>3.2.5</version>
+                <executions>
+                    <execution>
+                        <goals>
+                            <goal>integration-test</goal>
+                            <goal>verify</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Non-skippable form of the release condition - see
+                 ReleaseArtifactBoundaryGate's Javadoc. Bound to package itself, after the assembly and
+                 shade executions above (same phase, later in this file, so it runs after both -
+                 Maven executes same-phase plugin executions in POM declaration order), so both
+                 ravenroot.jar and ravenroot-bin.zip already exist. Deliberately exec-maven-plugin's
+                 `exec` goal, not `java`: exec forks a real `java` process, so the gate's
+                 System.exit(1) on a violation sets that process's exit code and fails this Maven
+                 execution the ordinary way, rather than risking a call to System.exit() inside
+                 Maven's own JVM (exec:java's historical SecurityManager-based interception of
+                 System.exit() is not something to depend on on a modern JDK). classpathScope=test
+                 because the gate and its ClassGraphIndex/GraphResourceInspector dependencies -
+                 including asm - live in src/test/java precisely so asm is never a compile/runtime
+                 dependency that would get shaded into ravenroot.jar itself; -DskipTests still
+                 compiles test sources (only -Dmaven.test.skip=true would not), so target/test-classes
+                 exists for this to run against regardless of -DskipTests. exec-maven-plugin does not
+                 participate in the skipTests/maven.test.skip convention, so no test-skipping flag
+                 silences this execution - but that is not the whole guarantee, and this comment used
+                 to imply it was. exec-maven-plugin's `exec` goal has its own, generic
+                 skip property, `${exec.skip}` (see this plugin's own plugin.xml, `<skip>` parameter on
+                 the `exec` mojo, `since 1.0.1`) - unrelated to skipTests/maven.test.skip, and setting
+                 -Dexec.skip=true silences this execution specifically while leaving every test-skip
+                 flag alone. That is a real, measured bypass: `mvn -Dexec.skip=true -DskipTests clean
+                 package` completes with exit 0 and produces a ravenroot.jar this gate never inspected.
+                 The redundant maven-antrun-plugin execution below (id
+                 release-artifact-boundary-gate-redundant) exists specifically to close that: it runs
+                 the same check, but is bound to a mechanism whose skip property
+                 (`${maven.antrun.skip}`, verified independently against maven-antrun-plugin's own
+                 plugin.xml) is a different Java system property from `exec.skip`, so no single flag
+                 silences both. -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.5.0</version>
+                <executions>
+                    <execution>
+                        <id>release-artifact-boundary-gate</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>${java.home}/bin/java</executable>
+                            <classpathScope>test</classpathScope>
+                            <arguments>
+                                <argument>-cp</argument>
+                                <classpath/>
+                                <argument>ai.ravenroot.distribution.ReleaseArtifactBoundaryGate</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <!-- Redundant second control: exec-maven-plugin's `exec` goal (above) is
+                 bypassable with its own generic skip property, `-Dexec.skip=true` - see the comment on
+                 that plugin's execution for the measured bypass and why the plugin's own Javadoc
+                 previously did not say so. This execution reruns the exact same check -
+                 ai.ravenroot.distribution.ReleaseArtifactBoundaryGate, via the same shared
+                 BuiltArtifactIndices/ReleaseArtifactBoundaryChecks code the exec-maven-plugin execution
+                 and ReleaseArtifactModelAdapterBoundaryIT also use - through maven-antrun-plugin's Ant
+                 `<java>` task instead, deliberately reusing the check's own logic rather than writing a
+                 second, independent detection implementation that could drift from it (three prior
+                 false-greens in this file's history, most recently the invokedynamic gap the regression analysis found
+                 in the P3 regression fix, all came from divergent or unverified detection code, not from this
+                 kind of binding-only redundancy).
+
+                 Why this is a genuinely independent control and not the same flag twice: verified
+                 against maven-antrun-plugin-3.1.0's own plugin.xml (`<skip>` parameter on the `run`
+                 mojo, bound to `${maven.antrun.skip}`), a property distinct from exec-maven-plugin's
+                 `${exec.skip}`. Setting -Dexec.skip=true alone leaves this execution running; setting
+                 -Dmaven.antrun.skip=true alone leaves the exec-maven-plugin execution above running;
+                 neither flag by itself silences the release condition.
+
+                 fork="true" + failonerror="true" mirror exactly why the exec-maven-plugin execution
+                 above uses the `exec` goal rather than `java`: the check forks a real `java` process,
+                 so ReleaseArtifactBoundaryGate's System.exit(1) on a violation sets that process's exit
+                 code, which Ant's `<java failonerror="true">` turns into a BuildException and antrun
+                 turns into an ordinary Maven build failure - never a System.exit() call inside Maven's
+                 own JVM. classpath uses the `maven.test.classpath` Ant reference maven-antrun-plugin
+                 defines automatically (empirically confirmed: a forked class present only in
+                 target/test-classes resolves and its exit code propagates correctly through this exact
+                 configuration), matching exec-maven-plugin's classpathScope=test above for the same
+                 reason: the gate and its ClassGraphIndex/GraphResourceInspector/asm dependencies live
+                 in src/test/java so asm is never shaded into ravenroot.jar itself.
+
+                 Deliberately the LAST plugin declared in this module (after assembly, shade and
+                 exec-maven-plugin above) so this package-phase execution runs after both
+                 ravenroot.jar and ravenroot-bin.zip already exist - Maven executes same-phase
+                 executions from different plugins in POM declaration order, confirmed empirically
+                 against this exact ordering rule before relying on it. refuse-maven-test-skip below is
+                 bound to the process-test-classes phase specifically so its position in this module's
+                 plugin list no longer matters for correctness: process-test-classes always runs before
+                 package regardless of declaration order, so it still fails fast - before assembly and
+                 shade do any work on a build that used -Dmaven.test.skip=true - even from here at the
+                 bottom of the file. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-antrun-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>refuse-maven-test-skip</id>
+                        <phase>process-test-classes</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <available
+                                    file="${project.build.testOutputDirectory}/ai/ravenroot/distribution/ReleaseArtifactBoundaryGate.class"
+                                    property="ravenroot.releaseArtifactBoundaryGate.compiled"/>
+                                <fail unless="ravenroot.releaseArtifactBoundaryGate.compiled">
+Release-artifact boundary gate cannot run: ReleaseArtifactBoundaryGate.class was not compiled into target/test-classes. This build used a flag that skips compiling test sources (most likely -Dmaven.test.skip=true) rather than only skipping their execution. Doing that would let ravenroot-distribution finish package without the EU AI Act art. 50 release-condition check this module enforces (see ReleaseArtifactBoundaryGate's Javadoc) - the build refuses to do that silently. Use -DskipTests instead: it still compiles test sources (which this gate needs) and only skips running the ordinary test suite.
+                                </fail>
+                            </target>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>release-artifact-boundary-gate-redundant</id>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>run</goal>
+                        </goals>
+                        <configuration>
+                            <target>
+                                <java classname="ai.ravenroot.distribution.ReleaseArtifactBoundaryGate"
+                                      fork="true" failonerror="true">
+                                    <classpath refid="maven.test.classpath"/>
+                                </java>
+                            </target>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+    <profiles>
+        <profile>
+            <id>akka</id>
+            <dependencies>
+                <dependency>
+                    <groupId>ai.ravenroot</groupId>
+                    <artifactId>ravenroot-akka</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+            </dependencies>
+        </profile>
+    </profiles>
+</project>

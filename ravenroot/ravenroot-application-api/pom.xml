@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+    <artifactId>ravenroot-application-api</artifactId>
+    <name>Ravenroot Application API</name>
+    <description>Framework-neutral use-case and execution-engine contracts.</description>
+    <dependencies>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>enforce-vendor-free-sdk</id>
+                        <goals>
+                            <goal>enforce</goal>
+                        </goals>
+                        <configuration>
+                            <rules>
+                                <!--
+                                    INT-01, "SPI without vendor dependencies", turned from a
+                                    convention into a build failure.
+
+                                    This module is the Node SDK: what a third party compiles against
+                                    to publish a node type. Anything it hands on to a consumer becomes
+                                    a dependency every external node inherits, and one <dependency>
+                                    added without a <scope>test</scope> would do exactly that —
+                                    silently, and visibly only to whoever next read this file.
+                                    ravenroot-node-starter does not catch it: that module proves the
+                                    SDK is SUFFICIENT to write a node against, which stays true when
+                                    the SDK drags a vendor jar along with it.
+
+                                    What this rule enforces is "nothing an external consumer
+                                    inherits", NOT "nothing on the compile classpath". The two are
+                                    different and only the first is the requirement: Maven propagates
+                                    compile and runtime to consumers and propagates neither provided
+                                    nor test, so those two scopes are banned and the other two are
+                                    deliberately left alone. That is also why the junit and jqwik
+                                    entries above remain legal.
+
+                                    The gap that leaves is intended, but it is not free. A provided
+                                    dependency IS on this module's own compile classpath, so a vendor
+                                    type can reach the SDK's exported signatures and nothing here
+                                    checks that it has not. An external node would compile against
+                                    such a signature and then fail at runtime with
+                                    NoClassDefFoundError — the precise damage this requirement exists to
+                                    prevent, reached through the one scope the rule permits. So: if a
+                                    provided dependency is ever added here, it must not appear in any
+                                    public signature of the SDK.
+
+                                    Banning by scope rather than by name is deliberate. A denylist of
+                                    known vendors only refuses the vendors somebody thought of, which
+                                    is a weaker statement than the one this rule makes.
+
+                                    If a genuine need for a compile dependency ever arises, this rule
+                                    is what forces that to be an explicit decision recorded here,
+                                    rather than a line in <dependencies> that reads like all the
+                                    others.
+                                -->
+                                <bannedDependencies>
+                                    <searchTransitive>true</searchTransitive>
+                                    <excludes>
+                                        <exclude>*:*:*:*:compile</exclude>
+                                        <exclude>*:*:*:*:runtime</exclude>
+                                    </excludes>
+                                    <message>ravenroot-application-api is the Node SDK and must have an empty compile classpath: it is what third-party node packages compile against, so anything here becomes a dependency every external node inherits. The dependency listed above is compile- or runtime-scope. Add &lt;scope&gt;test&lt;/scope&gt; if it is only needed to build this module's own tests; otherwise the SDK boundary (INT-01 / CORE-06) is being widened and that belongs in a reviewed decision, not in a dependency entry.</message>
+                                </bannedDependencies>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+        <profile>
+            <id>api-docs</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <configuration>
+                            <!-- Keep the attached SDK Javadoc archive on the same public package
+                                 boundary as the aggregate HTML. -->
+                            <excludePackageNames>*.internal:*.internal.*:*.impl:*.impl.*</excludePackageNames>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-public-sdk-javadocs</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
+</project>

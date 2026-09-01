@@ -1,0 +1,203 @@
+name: ravenroot
+
+services:
+  ravenroot:
+    image: ${RAVENROOT_IMAGE:-ravenroot:local}
+    build:
+      context: .
+      args:
+        VERSION: ${RAVENROOT_VERSION:-local}
+        REVISION: ${RAVENROOT_REVISION:-working-tree}
+        MAVEN_PROFILES: ${RAVENROOT_MAVEN_PROFILES:-}
+        DEFAULT_ENGINE: ${RAVENROOT_ENGINE:-pekko}
+        # Lets a local Compose build point at a different plugin bundle convention
+        # directory. A value escaping the build context is not refused by Docker itself -- it is
+        # clamped to the context root, silently -- so the Dockerfile validates this argument
+        # explicitly (rejects empty, absolute, or ".."-bearing values) before any expensive work
+        # runs. That check, not Docker's own context handling, is the actual protection.
+        RAVENROOT_PLUGINS_DIR: ${RAVENROOT_PLUGINS_DIR:-ravenroot-plugins}
+    init: true
+    ports:
+      # The local Compose mode is intentionally IPv4-loopback-only. The same
+      # value is passed to the runtime guard below, so changing it to a
+      # non-loopback address makes disabled authentication fail before startup.
+      - "${RAVENROOT_HOST_BIND_ADDRESS:-127.0.0.1}:${RAVENROOT_HOST_PORT:-8080}:8080"
+    environment:
+      # Compose is a genuine local-only development mode. Docker publishes only
+      # the host loopback address above; the runtime accepts its wildcard
+      # container bind only when this marker and the same 127.0.0.1 host bind
+      # are present. Helm never sets these values and stays OIDC-only.
+      RAVENROOT_PORT: "8080"
+      # Compose runs one server process; managed ingress refuses a value above one before bind.
+      RAVENROOT_REPLICAS: "1"
+      RAVENROOT_BIND_ADDRESS: "0.0.0.0"
+      RAVENROOT_AUTH_MODE: ${RAVENROOT_AUTH_MODE:-disabled}
+      RAVENROOT_CONTAINER_LOOPBACK_ONLY: "true"
+      RAVENROOT_LOCAL_HOST_BIND_ADDRESS: ${RAVENROOT_HOST_BIND_ADDRESS:-127.0.0.1}
+      RAVENROOT_AUTH_ISSUER: ${RAVENROOT_AUTH_ISSUER:-}
+      RAVENROOT_AUTH_AUDIENCE: ${RAVENROOT_AUTH_AUDIENCE:-}
+      RAVENROOT_AUTH_JWKS_URI: ${RAVENROOT_AUTH_JWKS_URI:-}
+      RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM: ${RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM:-token_kind}
+      # Defaults to loopback origins on the *container* port (8080). If RAVENROOT_HOST_PORT below
+      # is overridden, set this explicitly to match or the UI's own API calls will get 403.
+      RAVENROOT_BROWSER_ALLOWED_ORIGINS: ${RAVENROOT_BROWSER_ALLOWED_ORIGINS:-}
+      RAVENROOT_ENGINE: ${RAVENROOT_ENGINE:-pekko}
+      RAVENROOT_HTTP_ALLOWED_HOSTS: ${RAVENROOT_HTTP_ALLOWED_HOSTS:-}
+      # The host allowlist above was never sufficient on its own: it matches on the
+      # NAME, so an allowlisted host whose DNS an attacker controls could return a link-local
+      # metadata address. The three settings below close the rest of the reach surface. All are
+      # operator-only, read at the composition root, and unwidenable by any graph, plugin or request.
+      #
+      # Ports an allowlisted host may be reached on. Unset means 80 and 443 -- deliberately not
+      # "every port", which is what an allowlisted internal host used to expose on itself.
+      RAVENROOT_HTTP_ALLOWED_PORTS: ${RAVENROOT_HTTP_ALLOWED_PORTS:-}
+      # Hard ceiling on a response body, in bytes. Unset means 8 MiB. There is no unlimited value;
+      # the body used to be read without any bound at all. Volume policy is a separate concern.
+      RAVENROOT_HTTP_MAX_RESPONSE_BYTES: ${RAVENROOT_HTTP_MAX_RESPONSE_BYTES:-}
+      # Hard ceiling on a request body, in bytes. Unset means 1 MiB. Also has no unlimited value.
+      RAVENROOT_HTTP_MAX_REQUEST_BYTES: ${RAVENROOT_HTTP_MAX_REQUEST_BYTES:-}
+      # Names permitted to resolve into reserved address space, as name or name:NETWORK, comma
+      # separated (NETWORK is LOOPBACK, LINK_LOCAL, PRIVATE, ANY_LOCAL, MULTICAST, BROADCAST or
+      # CARRIER_GRADE_NAT). Unset means the shipped default "localhost:LOOPBACK". Exceptions are
+      # keyed on the NAME, not on the network alone: exempting a network globally would let any
+      # attacker-controlled name rebind into it. Set this when a broker, database or internal API is
+      # reached by a name that legitimately resolves to a private address -- a compose service name,
+      # a Kubernetes service DNS name. A literal IP address is unaffected: the JVM never resolves a
+      # literal, which is why the container healthcheck (http://127.0.0.1) needs no entry here.
+      RAVENROOT_EGRESS_RESERVED_EXCEPTIONS: ${RAVENROOT_EGRESS_RESERVED_EXCEPTIONS:-}
+      # Which tools nodes may invoke. The product default is EMPTY, so it denies everything;
+      # that is the correct posture for a real installation, where each tool is enabled deliberately.
+      # In development, however, that default makes the product impossible to test: a valid `program`
+      # node with an ACTIVE artifact fails with "Tool is not allowlisted: program.execute", while
+      # the traversal continues as though nothing had happened.
+      #
+      # There are four, and they are the complete set of names the runtime authorizes.
+      # TWO of them are emitted by a core node:
+      #   program.execute  `program` node
+      #   http.request     `http-request` node
+      # The other two are emitted only by generative nodes installed through the bundle route
+      # defined by ADR 0029:
+      #   model.generate   a generative node supplied from outside the artifact
+      #   agent.invoke     the same, for the agentic variant
+      #
+      # They stay listed here, and that is not inertia: the tool name is what a bundle node passes
+      # to ToolAuthorization, so an operator installing a generative bundle needs this permission
+      # and needs to find it already written. A list that dropped them would force a rediscovery.
+      RAVENROOT_ALLOWED_TOOLS: ${RAVENROOT_ALLOWED_TOOLS:-program.execute,http.request,model.generate,agent.invoke}
+      # Before executing an artifact, the registry verifies its provenance. Core ships
+      # no verifier because verification requires a key, and ADR 0018 assigns the key, TTL, rotation,
+      # and revocation to the backend implementer. Without a verifier, the default REFUSES, which is
+      # the correct posture but previously made the `program` node inoperable in every installation:
+      # the five-step lifecycle reached ACTIVE, the sandbox started, and redemption refused it.
+      #
+      # `unverified` installs a verifier that accepts everything and verifies NOTHING. It is not a
+      # weaker check; it is the declared absence of a check. The interface Javadoc requires exactly
+      # this: an installation that skips verification must say so where a reviewer can find it.
+      #
+      # This applies to the development Compose configuration, which declares itself "a genuine
+      # local-only development mode". It is not a value to carry elsewhere.
+      RAVENROOT_ARTIFACT_PROVENANCE: ${RAVENROOT_ARTIFACT_PROVENANCE:-unverified}
+      # Which installed plugin bundle ids to activate. Unset means none,
+      # the same default posture as an image with no plugins baked in at all -- presence in
+      # /opt/ravenroot/plugins never activates a bundle on its own.
+      RAVENROOT_ENABLED_PLUGINS: ${RAVENROOT_ENABLED_PLUGINS:-}
+      # Dual control refuses approval when the same principal created the artifact. With
+      # RAVENROOT_AUTH_MODE=disabled, this Compose file's default, only one principal exists, so
+      # Approve always returns 403 and workbench steps 4 and 5 are UNREACHABLE. The default is
+      # inverted here for the same reason that an unsandboxing supervisor is mounted above: this is
+      # local development mode, and without these two lines a programmable artifact cannot be built.
+      # Both apply only to a local installation; neither enters a release artifact. H31.
+      RAVENROOT_ARTIFACT_DUAL_CONTROL: ${RAVENROOT_ARTIFACT_DUAL_CONTROL:-false}
+      RAVENROOT_PROGRAM_RUNTIME: ${RAVENROOT_PROGRAM_RUNTIME:-graalvm}
+      # SEC-11 is not resolved here, and that must be clear where this variable is read.
+      # Without a configured supervisor, GraalVmProgramRuntime installs MissingLauncher and EVERY
+      # validate/test/execute operation on a programmable artifact fails with SANDBOX_LAUNCHER_MISSING:
+      # the editor workbench is unusable. The mounted file satisfies the supervisor contract and does
+      # NOT isolate anything; it is development provisioning for this Compose configuration, which
+      # declares itself "a genuine local-only development mode". It is not in the image or any release
+      # artifact. H31 in the decision register.
+      # The value is deliberately hard-coded rather than derived from the host environment: it is a
+      # path INSIDE the container. The form "${VAR:-default}" allowed a same-named host-shell variable
+      # to enter it. A host path does not exist in the container, so the launcher is absent and every
+      # validate returns 400, despite an apparently correct Compose file and correctly mounted file.
+      RAVENROOT_GRAAL_SANDBOX_SUPERVISOR: /opt/ravenroot/dev/sandbox-supervisor.sh
+      # The first Validate of a session pays GraalPy's cold-start cost: measured in this container at
+      # four seconds with the cache already extracted. The 5000 ms default leaves one second of margin,
+      # which is insufficient under load. When time expires, the worker is killed halfway through, the
+      # response is empty, and the user sees "the request was rejected as invalid", which names neither
+      # the timeout nor their code. Thirty seconds remove this variable during development; it is not a
+      # production value, where the ceiling is a capacity decision.
+      RAVENROOT_PROGRAM_TIMEOUT_MS: ${RAVENROOT_PROGRAM_TIMEOUT_MS:-30000}
+      RAVENROOT_PROGRAM_MAX_HEAP_MB: ${RAVENROOT_PROGRAM_MAX_HEAP_MB:-64}
+      # SEC-13 added a durable, hash-chained, fsync'd audit trail (ADR 0013) but
+      # never gave it anywhere to write once this file's `read_only: true` landed, so the server
+      # threw AuditTrailException before it could bind and the healthcheck never passed. The fix is
+      # the `ravenroot-audit-data` volume below, not the `/tmp` tmpfs a couple of lines down: ADR 0013
+      # deliberately fsyncs the log before advancing its watermark so a crash never loses committed
+      # entries, and a tamper-evident trail that a container restart silently erases is arguably worse
+      # than no audit trail at all, because it still looks like one. Pointed at an explicit absolute
+      # path so behavior does not depend on the process's working directory.
+      RAVENROOT_AUDIT_DIR: /opt/ravenroot/data/audit
+      # The execution store is enabled by default. Its SQLite main file and -wal/-shm sidecars must
+      # live on the same writable, persistent local volume as the audit trail; the read-only root
+      # filesystem and /tmp tmpfs are intentionally not candidates for either durable subject.
+      RAVENROOT_EXECUTION_STORE_DIR: /opt/ravenroot/data/execution-store
+      # Durable tenant-scoped source qualification authority. It shares the persistent data volume
+      # so graph readiness survives container replacement; startup never falls back to memory.
+      RAVENROOT_ARTIFACT_STORE_DIR: /opt/ravenroot/data/artifact-store
+      # GraalPy materializes its standard library -- `json`, `math`, `re`, `datetime`, and the rest --
+      # into an on-disk resource cache on first execution. It looks under $XDG_CACHE_HOME, then
+      # $HOME/.cache. Here HOME is /opt/ravenroot, which `read_only: true` below makes unwritable:
+      # extraction does not occur, sys.path lacks the standard library, and EVERY import fails with
+      # ModuleNotFoundError, including `import json`, which is not exotic but starts most examples.
+      #
+      # The symptom is misleading because the error names the module. The library is present and
+      # complete; the cache cannot be created. This is unrelated to the language sandbox: all imports
+      # pass even with IOAccess.NONE, the policy used by the worker to build the context.
+      #
+      # The cache belongs on the persistent volume rather than the /tmp tmpfs: extraction requires
+      # many tens of MB, /tmp is 64m here, and repeating it after every restart would delay the first
+      # Validate of each session. Measured: XDG_CACHE_HOME alone does NOT work; it does not even create
+      # the cache. The working path is the polyglot engine system property inherited by the worker
+      # because the supervisor starts it as a child process in the same container.
+      XDG_CACHE_HOME: /opt/ravenroot/data/cache
+      JAVA_TOOL_OPTIONS: >-
+        -XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError
+        -Dorg.sqlite.tmpdir=/opt/ravenroot/data
+        -Dpolyglot.engine.userResourceCache=/opt/ravenroot/data/cache
+    read_only: true
+    tmpfs:
+      # Scratch space only (JVM/GraalVM temp files etc.) -- deliberately NOT where the audit trail
+      # lives; anything here is expected to vanish on every restart.
+      - /tmp:size=64m,mode=1777
+    volumes:
+      # Persistent by design, unlike /tmp above: it holds the audit trail and the single-node
+      # SQLite execution and program-artifact stores. `docker compose down` (without -v) preserves it across restarts;
+      # `docker compose down -v` or `docker volume rm ravenroot_ravenroot-audit-data` discards every
+      # durable subject deliberately. This mount is writable even though the container root filesystem
+      # is read_only: true above -- that hardening is untouched.
+      #
+      # A THIRD durable subject can appear here, and only conditionally. When the deployment
+      # names an assistant provider that reaches the network (for example, `anthropic` or
+      # `openai-compatible`),
+      # the composition root opens the consent register under RAVENROOT_ASSISTANT_CONSENT_DIR, whose
+      # default `./data/assistant-consent` resolves inside this mount because the image's WORKDIR is
+      # /opt/ravenroot. This compose configures no assistant provider, so today the register is not
+      # created here -- but a deployment derived from this file that sets one gets it, and discarding
+      # the volume then discards it too. That loss is the one nobody notices in time: a lost consent
+      # does not block anything, it re-opens a question the author had already answered.
+      - ravenroot-audit-data:/opt/ravenroot/data
+      # Read-only: the development supervisor is executed, never written. See the variable above.
+      - ./deploy/dev/sandbox-supervisor.sh:/opt/ravenroot/dev/sandbox-supervisor.sh:ro
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 20s
+
+volumes:
+  # Kept under its established name for backward-compatible reuse of existing local audit volumes.
+  # The named volume now also contains the execution-store subdirectory.
+  ravenroot-audit-data: {}

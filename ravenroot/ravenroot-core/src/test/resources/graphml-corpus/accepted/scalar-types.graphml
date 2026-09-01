@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="n-string" for="node" attr.name="custom.string" attr.type="string"/>
+  <key id="n-boolean" for="node" attr.name="custom.boolean" attr.type="boolean"/>
+  <key id="n-int" for="node" attr.name="custom.int" attr.type="int"/>
+  <key id="n-long" for="node" attr.name="custom.long" attr.type="long"/>
+  <key id="n-float" for="node" attr.name="custom.float" attr.type="float"/>
+  <key id="n-double" for="node" attr.name="custom.double" attr.type="double"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="e-string" for="edge" attr.name="custom.string" attr.type="string"/>
+  <key id="e-boolean" for="edge" attr.name="custom.boolean" attr.type="boolean"/>
+  <key id="e-int" for="edge" attr.name="custom.int" attr.type="int"/>
+  <key id="e-long" for="edge" attr.name="custom.long" attr.type="long"/>
+  <key id="e-float" for="edge" attr.name="custom.float" attr.type="float"/>
+  <key id="e-double" for="edge" attr.name="custom.double" attr.type="double"/>
+  <graph id="typed-workflow" edgedefault="directed">
+    <node id="start">
+      <data key="kind">START</data>
+      <data key="n-string">  lexical whitespace retained  </data>
+      <data key="n-boolean"> true </data>
+      <data key="n-int"> -17 </data>
+      <data key="n-long"> 9223372036854775806 </data>
+      <data key="n-float"> -1.25 </data>
+      <data key="n-double"> 3.141592653589793 </data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="typed-edge" source="start" target="end">
+      <data key="outcome">continue</data>
+      <data key="e-string">edge-metadata</data>
+      <data key="e-boolean">false</data>
+      <data key="e-int">42</data>
+      <data key="e-long">-9007199254740991</data>
+      <data key="e-float">2.5</data>
+      <data key="e-double">-0.125</data>
+    </edge>
+  </graph>
+</graphml>

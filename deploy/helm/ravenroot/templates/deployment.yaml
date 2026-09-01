@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ravenroot.fullname" . }}
+  labels:
+    {{- include "ravenroot.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "ravenroot.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "ravenroot.selectorLabels" . | nindent 8 }}
+    spec:
+      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s), for
+      # the same reason and pointing at the same runbook section as the raw Kubernetes manifest
+      # (deploy/kubernetes/ravenroot.yaml): docs/runbooks/plat-02-readiness-drain-and-alerts.md §2,
+      # the pre-deployment form and, once CORE-LIFECYCLE long-lived deployments run
+      # on this pod, the Shape 2 form together with RAVENROOT_MAX_ACTIVE_DEPLOYMENTS. This
+      # chart does not pick a number for you.
+      automountServiceAccountToken: false
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: ravenroot
+          image: {{ include "ravenroot.image" . | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          env:
+            - name: RAVENROOT_PORT
+              value: "8080"
+            # Managed ingress is process-local and validates this actual workload setting before bind.
+            - name: RAVENROOT_REPLICAS
+              value: {{ .Values.replicaCount | quote }}
+            - name: RAVENROOT_BIND_ADDRESS
+              value: "0.0.0.0"
+            - name: RAVENROOT_ENGINE
+              value: {{ .Values.engine | quote }}
+            # The default execution store is SQLite/WAL. It shares this one-pod RWO volume with the
+            # durable audit trail and must never be placed on the read-only root filesystem or /tmp.
+            - name: RAVENROOT_AUDIT_DIR
+              value: /opt/ravenroot/data/audit
+            - name: RAVENROOT_EXECUTION_STORE_DIR
+              value: /opt/ravenroot/data/execution-store
+            - name: RAVENROOT_ARTIFACT_STORE_DIR
+              value: /opt/ravenroot/data/artifact-store
+            - name: RAVENROOT_AUTH_ISSUER
+              value: {{ required "auth.issuer is required" .Values.auth.issuer | quote }}
+            - name: RAVENROOT_AUTH_AUDIENCE
+              value: {{ required "auth.audience is required" .Values.auth.audience | quote }}
+            - name: RAVENROOT_AUTH_JWKS_URI
+              value: {{ required "auth.jwksUri is required" .Values.auth.jwksUri | quote }}
+            # This chart does not configure RAVENROOT_GRAAL_SANDBOX_SUPERVISOR (SEC-11 is
+            # integrator-provided by design, see docs/deployment.md), so this value only matters once
+            # an operator adds one via an overlay -- but its own default must still not be the code's
+            # 5000ms, which is unsafe against a measured Python cold start. See values.yaml for what
+            # this number is and is not.
+            - name: RAVENROOT_PROGRAM_TIMEOUT_MS
+              value: {{ .Values.programTimeoutMs | quote }}
+          # ReadinessProbe is deliberately /ready, not /health: /ready
+          # reports unready during draining and a degraded audit-trail check (ReadinessGate),
+          # which is what should pull this pod out of rotation without restarting it. See
+          # docs/runbooks/plat-02-readiness-drain-and-alerts.md for the grace-period
+          # sizing this split now makes reachable in practice.
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: http
+            {{- toYaml .Values.probes.readiness | nindent 12 }}
+          # livenessProbe stays /health deliberately: pointing it at /ready would restart the pod
+          # on drain instead of rotating it out of the load balancer, the outage this split exists
+          # to prevent.
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: http
+            {{- toYaml .Values.probes.liveness | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: temporary-files
+              mountPath: /tmp
+            - name: ravenroot-data
+              mountPath: /opt/ravenroot/data
+      volumes:
+        - name: temporary-files
+          emptyDir:
+            medium: Memory
+            sizeLimit: {{ .Values.tmpfs.sizeLimit | quote }}
+        - name: ravenroot-data
+          persistentVolumeClaim:
+            claimName: {{ include "ravenroot.fullname" . }}-data

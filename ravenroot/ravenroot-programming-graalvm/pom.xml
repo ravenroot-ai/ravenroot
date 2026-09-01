@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+    <artifactId>ravenroot-programming-graalvm</artifactId>
+    <name>Ravenroot GraalVM Programming Adapter</name>
+    <description>Process-isolated JavaScript and Python program runtime.</description>
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>polyglot</artifactId>
+            <version>${graalvm.polyglot.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>js-community</artifactId>
+            <version>${graalvm.polyglot.version}</version>
+            <type>pom</type>
+            <scope>runtime</scope>
+        </dependency>
+        <!--
+          Python, alongside JavaScript. Same property, same release train: see the comment on
+          graalvm.polyglot.version in the parent pom for why moving one moves the other.
+
+          Two distribution facts that belong next to the dependency rather than in a report, because
+          whoever adds the next language will face them too:
+
+          - The COMMUNITY packaging is deliberate. The alternative ships an
+            optimising compiler under a licence that differs from the one the rest of this
+            distribution is built on, which turns a technical choice into a legal one.
+          - This artifact brings a third-party cryptography library into the distribution that was
+            not there before — pulled in by the Python component, not by us — with its own update
+            cadence and its own advisories to track.
+
+          Its footprint is measured, not estimated: on first use the component materialises its
+          standard library into the polyglot resource cache under the user's cache directory
+          (~/Library/Caches/org.graalvm.polyglot on macOS, $XDG_CACHE_HOME or ~/.cache on Linux):
+          1,127 files in 71 directories, 20.8 MiB, for this version. That path is NOT the sandbox
+          tmpfs the tmpfsMiB limit governs, so pre-extraction would sit outside that resource bound
+          and is not implemented here.
+        -->
+        <dependency>
+            <groupId>org.graalvm.polyglot</groupId>
+            <artifactId>python-community</artifactId>
+            <version>${graalvm.polyglot.version}</version>
+            <type>pom</type>
+            <scope>runtime</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+          The ProgramRuntime conformance suite. The shipped adapter is held to the same
+          obligation a third-party adapter inherits, in the same way the SQLite store is held to
+          ExecutionStoreContract.
+        -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-api-testkit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!-- Fuzzing ProgramWireProtocol and SandboxSupervisorProtocol.
+             Version is managed by the parent, which already declares jqwik for ravenroot-core. -->
+        <dependency>
+            <groupId>net.jqwik</groupId>
+            <artifactId>jqwik</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+</project>

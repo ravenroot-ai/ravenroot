@@ -1,0 +1,2406 @@
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      color-scheme: dark;
+
+      /* Application theme vocabulary. Renderer palettes mirror these semantics in
+         `theme-palette.js`; neither layer is document or GraphML state. */
+      --surface-canvas: #0d1117;
+      --surface-primary: #161b22;
+      --surface-raised: #21262d;
+      --surface-hover: #2d333b;
+      --surface-command-bar: #11161d;
+      --surface-inset: #0b1119;
+      --surface-overlay: rgba(22,27,34,.96);
+      --border-default: #30363d;
+      --text-primary: #e6edf3;
+      --text-secondary: #a9b4c0;
+      --text-muted: #8b949e;
+      --accent: #58a6ff;
+      --accent-hover: #79b8ff;
+      --accent-soft: rgba(88,166,255,.15);
+      --focus-ring: #79b8ff;
+      --selection: #d2a8ff;
+      --selection-soft: rgba(210,168,255,.18);
+      --outcome-success: #3fb950;
+      --outcome-success-text: #7ee787;
+      --outcome-error: #f85149;
+      --outcome-error-text: #ffb3ad;
+      /* The failure route's own hue, deliberately outside the error family. `--outcome-error`
+         is what an outcome edge spelled `failed` is drawn in, and those two are precisely the pair
+         an author cannot currently tell apart -- sharing a family here would preserve that
+         confusion. Kept in step with RENDERER_PALETTES.dark.edgeType.failure in
+         theme-palette.js, which is what the canvas itself reads. */
+      --edge-failure: #f778ba;
+      --outcome-warning: #d29922;
+      --outcome-warning-text: #e3b341;
+      --outcome-info: #4ecdc4;
+      --shadow-popover: 0 12px 30px rgba(0,0,0,.45);
+      --shadow-dialog: 0 16px 48px rgba(0,0,0,.7);
+      --dialog-backdrop: rgba(1,4,9,.72);
+      --canvas-grid: #30363d;
+      --minimap-scrim: rgba(13,17,23,.85);
+
+      /* Established names remain aliases so existing components consume the same centralized set. */
+      --bg-0: var(--surface-canvas);
+      --bg-1: var(--surface-primary);
+      --bg-2: var(--surface-raised);
+      --bg-h: var(--surface-hover);
+      --bd: var(--border-default);
+      --tx-1: var(--text-primary);
+      --tx-2: var(--text-secondary);
+      --tx-3: var(--text-muted);
+      --acc: var(--accent);
+      --acc-h: var(--accent-hover);
+      --ok: var(--outcome-success);
+      --err: var(--outcome-error);
+      --warn: var(--outcome-warning);
+      --mag: var(--selection);
+      --cyan: var(--outcome-info);
+      --amber: var(--outcome-warning-text);
+
+      /* ── Panel system geometry ────────────────────────────────────────────
+         The product had no geometry tokens. Three zones need one number in one place, or the
+         header height drifts per zone and the panels stop reading as one family.
+
+         --panel-hd-h 32px: it is what carries a 24px control with 4px of air, and it is the same
+         32px as `.zbtn`, so the header height IS the product's established control unit. The 24px
+         `.doc-pane-header` cannot carry a control at all; the old 44px `#info-hd` existed once and
+         now repeats across seven panels, which is 84px of pure chrome the left column cannot pay.
+
+         --stage-min-h 204px: MEASURED, not asserted — see `panes.js` STAGE_MIN_HEIGHT for the
+         method and the arithmetic. It is the floor the dock is clamped against. */
+      --panel-hd-h:  32px;
+      --stage-min-h: 204px;
+      --stage-min-w: 360px;
+      --dock-h:      160px;
+      /* The rail. Carved out of each column's existing width, not added to it. */
+      --panel-rail-w: 28px;
+      /* A docked panel's floor: the 32px header plus 40px of body. Below this a panel is a
+         title strip with nothing under it, which is what the dock did at three occupants. */
+      --dock-panel-min-h: 72px;
+      /* The short form's grid cell. Matches `.zbtn`, and clears the 24px WCAG 2.5.8 floor
+         that the 23px full-form legend row misses by one pixel. */
+      --panel-short-cell: 32px;
+      --panel-short-pad: 8px;
+      --panel-scrollbar-w: 4px;
+      --panel-header-control-w: 24px;
+      /* Compact is a density projection, not a width. Its floor must carry BOTH of the shapes
+         inside the body: one complete grid cell with padding/scrollbar, and the visible grip plus
+         menu and Close controls. The wider requirement wins; the rail and physical column border
+         are then added exactly once. Keeping this as token arithmetic prevents splitter clamps,
+         CSS and ARIA from drifting onto separate pixel constants. */
+      --panel-compact-content-min-w: calc(
+        var(--panel-short-cell) + 2 * var(--panel-short-pad) + var(--panel-scrollbar-w)
+      );
+      --panel-compact-header-min-w: calc(
+        var(--panel-header-control-w) + var(--panel-header-control-w) + var(--panel-header-control-w)
+      );
+      --panel-compact-body-min-w: max(
+        var(--panel-compact-content-min-w), var(--panel-compact-header-min-w)
+      );
+      --panel-compact-zone-min-w: calc(
+        var(--panel-rail-w) + var(--panel-compact-body-min-w) + 1px
+      );
+
+      /* ── Multi-document workspace geometry ─────────────────────────────────────────────
+         These are the public geometry vocabulary for the document workspace. The renderer measures
+         a pane's real box, but it must not need to know whether the box came from a row, a column or
+         a grid. In particular, the hit corridor is deliberately NOT part of a grid track: only the
+         visible one-pixel rule spends graph space. */
+      --workspace-app-bar-h: 52px;
+      --workspace-command-bar-min-h: 44px;
+      --workspace-doc-header-h: 24px;
+      --workspace-pane-min-inline: 360px;
+      --workspace-pane-comfort-inline: 480px;
+      --workspace-pane-min-block: 228px;
+      --workspace-stage-min-block: 204px;
+      --workspace-splitter-rule: 1px;
+      --workspace-splitter-hit: 9px;
+      --workspace-splitter-hit-coarse: 24px;
+      --workspace-control-min: 32px;
+      --workspace-control-min-coarse: 44px;
+      --workspace-menu-item-min-block: 32px;
+      --workspace-focus-ring: 2px;
+      --workspace-fit-padding: 40px;
+      --workspace-label-screen-min: 11px;
+      --workspace-splitter-key-step: 32px;
+    }
+
+    :root[data-theme="light"] {
+      color-scheme: light;
+      --surface-canvas: #f6f8fa;
+      --surface-primary: #ffffff;
+      --surface-raised: #f3f4f6;
+      --surface-hover: #eaeef2;
+      --surface-command-bar: #f6f8fa;
+      --surface-inset: #ffffff;
+      --surface-overlay: rgba(255,255,255,.97);
+      --border-default: #d0d7de;
+      --text-primary: #1f2328;
+      --text-secondary: #3d444d;
+      --text-muted: #59636e;
+      --accent: #0969da;
+      --accent-hover: #0550ae;
+      --accent-soft: rgba(9,105,218,.12);
+      --focus-ring: #8250df;
+      --selection: #8250df;
+      --selection-soft: rgba(130,80,223,.14);
+      --outcome-success: #1a7f37;
+      --outcome-success-text: #116329;
+      --outcome-error: #cf222e;
+      --outcome-error-text: #a40e26;
+      /* Light counterpart. Matches SHARED.edgeType.failure in theme-palette.js. */
+      --edge-failure: #bf3989;
+      --outcome-warning: #9a6700;
+      --outcome-warning-text: #7d4e00;
+      --outcome-info: #007d75;
+      --shadow-popover: 0 12px 30px rgba(31,35,40,.18);
+      --shadow-dialog: 0 16px 48px rgba(31,35,40,.24);
+      --dialog-backdrop: rgba(31,35,40,.38);
+      --canvas-grid: #d8dee4;
+      --minimap-scrim: rgba(255,255,255,.9);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg-0);
+      color: var(--tx-1);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+      overflow: hidden;
+    }
+
+    body { display: flex; flex-direction: column; }
+
+    /* ── TOP BAR ─────────────────────────────── */
+    #topbar {
+      height: 52px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--bd);
+      display: flex;
+      align-items: center;
+      padding: 0 14px;
+      gap: 10px;
+      flex-shrink: 0;
+      z-index: 200;
+    }
+    .logo {
+      display: flex; align-items: center; gap: 8px;
+      font-size: 15px; font-weight: 700; letter-spacing: -.3px;
+      color: var(--tx-1); white-space: nowrap;
+    }
+    .logo-mark { width: 26px; height: 26px; object-fit: contain; flex-shrink: 0; }
+    .application-menubar { display: flex; align-items: center; gap: 1px; flex: 0 0 auto; }
+    .application-menubar > button {
+      min-height: 32px; padding: 5px 8px; border: 1px solid transparent; border-radius: 4px;
+      background: transparent; color: var(--tx-1); font: inherit; font-size: 12px; cursor: pointer;
+    }
+    .application-menubar > button:hover,
+    .application-menubar > button[aria-expanded="true"] { background: var(--bg-h); border-color: var(--bd); }
+    .application-menubar > button:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .application-menu {
+      position: fixed; z-index: 450; width: 250px; padding: 5px;
+      border: 1px solid var(--bd); border-radius: 7px; background: var(--bg-1);
+      box-shadow: var(--shadow-popover);
+    }
+    .application-menu[hidden] { display: none; }
+    .application-menu-item {
+      width: 100%; min-height: 32px; display: grid; grid-template-columns: minmax(0,1fr) auto;
+      align-items: center; gap: 18px; padding: 5px 9px 5px 26px; border: 0; border-radius: 4px;
+      background: transparent; color: var(--tx-1); font: inherit; font-size: 12px; text-align: left;
+      position: relative; cursor: pointer;
+    }
+    .application-menu-item:hover, .application-menu-item:focus-visible {
+      background: var(--bg-h); outline: 2px solid var(--focus-ring); outline-offset: -2px;
+    }
+    .application-menu-item[aria-disabled="true"] { color: var(--tx-3); cursor: default; }
+    .application-menu-item[aria-disabled="true"]:hover { background: transparent; outline: none; }
+    .application-menu-item[aria-checked="true"]::before {
+      content: '✓'; position: absolute; left: 9px; color: var(--acc); font-weight: 700;
+    }
+    .application-menu-item[role="menuitemradio"][aria-checked="true"]::before { content: '•'; font-size: 18px; }
+    .application-menu-shortcut { color: var(--tx-3); font-size: 11px; white-space: nowrap; }
+    .application-menu-separator { height: 1px; margin: 4px 6px; background: var(--bd); }
+    #topbar.density-hide-view .view-mirrors,
+    #topbar.density-hide-file .file-mirrors,
+    #topbar.density-hide-monitoring-controls #elastic-ctrl { display: none !important; }
+    #graph-title {
+      font-size: 13px; color: var(--tx-2);
+      max-width: 240px; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+    }
+    .document-switcher {
+      min-width: 32px; max-width: 360px; height: 32px; flex: 0 1 360px;
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 0 8px; border: 1px solid transparent; border-radius: 4px;
+      background: transparent; color: var(--tx-2); font: inherit; cursor: pointer;
+    }
+    .document-switcher:hover { background: var(--bg-h); border-color: var(--bd); }
+    .document-switcher:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .document-switcher:disabled { cursor: default; opacity: 1; }
+    .document-switcher #graph-title { min-width: 0; }
+    .document-switcher #document-position,
+    .document-switcher-chevron { flex: 0 0 auto; color: var(--tx-2); font-size: 11px; }
+    /* Unsaved-work indicator (UI-01): a quiet "saved" that turns into a warm, dotted
+       "unsaved changes" reusing the existing connection-state vocabulary. */
+    .dirty-state {
+      display: inline-flex; align-items: center; gap: 5px;
+      border: 1px solid var(--bd); border-radius: 10px; padding: 2px 8px;
+      color: var(--tx-2); font-size: 10px; white-space: nowrap; flex-shrink: 0;
+    }
+    .dirty-state::before {
+      content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--tx-3);
+    }
+    .dirty-state.dirty { color: var(--outcome-warning-text); border-color: var(--outcome-warning); }
+    .dirty-state.dirty::before { background: var(--warn); }
+    .vr { width: 1px; height: 24px; background: var(--bd); flex-shrink: 0; }
+    .spacer { flex: 1; }
+
+    .btn {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 5px 11px; border-radius: 6px;
+      border: 1px solid var(--bd);
+      background: var(--bg-2); color: var(--tx-1);
+      font-size: 12px; cursor: pointer; transition: all .15s;
+      white-space: nowrap; user-select: none;
+    }
+    .btn:hover { background: var(--bg-h); border-color: var(--acc); }
+    .btn.active { background: var(--accent-soft); border-color: var(--acc); color: var(--acc); }
+    .btn.primary { background: var(--acc); border-color: var(--acc); color: var(--surface-canvas); font-weight: 600; }
+    .btn.primary:hover { background: var(--acc-h); }
+    .btn-group { display: flex; gap: 3px; }
+    .source-session-status {
+      align-self: center; max-width: 15rem; padding: 4px 8px;
+      border: 1px solid var(--bd); border-radius: 999px;
+      color: var(--tx-2); font-size: 10px; line-height: 1.2;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .source-session-status.listening {
+      color: var(--outcome-success-text); border-color: color-mix(in srgb, var(--ok) 50%, var(--bd));
+    }
+    .source-session-status.degraded,
+    .source-session-status.failed,
+    .source-session-status.unknown {
+      color: var(--outcome-error-text); border-color: color-mix(in srgb, var(--err) 50%, var(--bd));
+    }
+    .btn.play {
+      background: color-mix(in srgb, var(--ok) 15%, transparent); border-color: var(--ok); color: var(--outcome-success-text);
+      font-weight: 700; padding-inline: 16px;
+    }
+    .btn.play:hover { background: color-mix(in srgb, var(--ok) 26%, transparent); }
+    .btn:disabled, .btn[aria-disabled="true"] { opacity: .45; cursor: not-allowed; }
+    .modify-toggle .modify-state {
+      min-width: 25px; padding: 1px 5px; border-radius: 9px;
+      background: color-mix(in srgb, var(--tx-2) 18%, transparent); color: var(--tx-2);
+      font-size: 9px; font-weight: 800; text-align: center;
+    }
+    .modify-toggle[aria-pressed="true"] {
+      background: var(--selection-soft); border-color: var(--mag); color: var(--mag);
+    }
+    .modify-toggle[aria-pressed="true"] .modify-state {
+      background: color-mix(in srgb, var(--selection) 25%, transparent); color: var(--selection);
+    }
+
+    #workflowbar {
+      min-height: 44px; flex-shrink: 0;
+      display: flex; align-items: center; gap: 10px;
+      padding: 5px 14px;
+      background: var(--surface-command-bar); border-bottom: 1px solid var(--bd);
+      z-index: 190;
+    }
+    .runtime-controls {
+      min-width: 0; display: flex; align-items: center; gap: 10px; flex: 0 0 auto;
+    }
+    .command-field { display: flex; align-items: center; gap: 6px; color: var(--tx-3); font-size: 10px; }
+    .command-field input, .editor-field input, .editor-field select, .editor-field textarea,
+    .property-row input, .property-row select {
+      background: var(--bg-2); border: 1px solid var(--bd); border-radius: 5px;
+      color: var(--tx-1); outline: none; font: inherit;
+    }
+    .command-field input { height: 28px; padding: 4px 8px; font-size: 11px; }
+    .command-field input:focus, .editor-field input:focus, .editor-field select:focus,
+    .editor-field textarea:focus, .property-row input:focus, .property-row select:focus { border-color: var(--acc); }
+    .service-field input { width: 180px; font-family: 'SFMono-Regular', Consolas, monospace; }
+    .token-field input { width: 150px; font-family: 'SFMono-Regular', Consolas, monospace; }
+    .payload-field input { width: 180px; }
+    .editor-validation {
+      margin: 8px 0 0; padding: 6px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--acc) 8%, transparent); border: 1px solid color-mix(in srgb, var(--acc) 25%, transparent);
+      color: var(--tx-2); font-size: 11px; line-height: 1.45;
+    }
+    .editor-validation.invalid {
+      background: color-mix(in srgb, var(--err) 10%, transparent); border-color: color-mix(in srgb, var(--err) 40%, transparent); color: var(--err);
+    }
+    .visually-hidden {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+    }
+    .connection-state {
+      display: inline-flex; align-items: center; gap: 5px;
+      border: 1px solid var(--bd); border-radius: 10px; padding: 2px 8px;
+      color: var(--tx-2); font-size: 10px; white-space: nowrap;
+    }
+    .connection-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+    .connection-state.connected { color: var(--outcome-success-text); border-color: color-mix(in srgb, var(--ok) 45%, transparent); }
+    .connection-state.connected::before { background: var(--ok); }
+    .connection-state.error::before { background: var(--err); }
+    .connection-state.revoked, .connection-state.authentication-required { color: var(--outcome-error-text); }
+    .connection-state.revoked::before, .connection-state.authentication-required::before { background: var(--err); }
+    .graph-stat-line { display: flex; justify-content: space-between; }
+    .graph-stat-separator { color: var(--tx-3); }
+
+    /* ── MAIN ─────────────────────────────────── */
+    #main { flex: 1; display: flex; overflow: hidden; min-width: 0; }
+
+    /* ── THE PANEL ────────────────────────────────────────────────────────────────────────────
+       One shape for every panel in every zone. A panel is a header that names
+       it and a body that carries its content; the zone decides whether the panel sizes to its
+       content (left column, which stacks and scrolls) or fills what it is given (right column and
+       dock, which hold one panel each).
+
+       PANELS WITHOUT RESTORATION ROUTES MUST HAVE NO CLOSE CAPABILITY. A closable panel with no
+       discoverable route back is a trap, so close is coupled to the rail and the Panels index. */
+    .panel { display: flex; flex-direction: column; min-width: 0; }
+    .panel-hd {
+      flex: 0 0 var(--panel-hd-h); height: var(--panel-hd-h);
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 8px;
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--bd);
+      user-select: none;
+    }
+    /* `--tx-2` (5.62:1), not the `--tx-3` (3.77:1) the old `.sec h3` used. The header now carries
+       the panel's identity, which makes it load-bearing text, and 3.77:1 is below the 4.5:1 floor.
+       A correction to an existing failure rather than new cost.
+
+       NOT UPPERCASED, deliberately, and this is a departure from the study's §5.3. The Inspector's
+       title is not a fixed label: app.js writes the selected element's NAME into it. Uppercasing
+       user data damages legibility of ids and is a content change, and a title that is uppercase
+       in one zone and not another would break the family worse than losing the caps does. */
+    .panel-title {
+      min-width: 0; flex: 0 1 auto;
+      font-size: 11px; font-weight: 700; letter-spacing: .4px;
+      color: var(--tx-2);
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    /* ── THE GRIP, AND IT NOW DRAGS ───────────────────────────────────────────────────────────
+       A drag handle without reordering is an affordance with nothing to afford. The grip exists
+       only together with the operation it advertises.
+
+       It is a SPAN, not a button: the drag surface is the HEADER (minus its controls), and a
+       focusable grip would add a tab stop that does nothing on Enter — the same dead affordance in
+       a different costume. The keyboard and touch route to every one of these outcomes is the `⋮`
+       menu, which satisfies WCAG 2.5.7; drag is a progressive
+       enhancement over it, never the only way. */
+    .panel-grip {
+      flex: 0 0 auto; width: 10px; height: 16px;
+      background-image:
+        radial-gradient(circle 1px at 5px 4px,  var(--tx-3) 99%, transparent 100%),
+        radial-gradient(circle 1px at 5px 8px,  var(--tx-3) 99%, transparent 100%),
+        radial-gradient(circle 1px at 5px 12px, var(--tx-3) 99%, transparent 100%);
+    }
+    .panel-hd { cursor: grab; }
+    .panel-hd:active { cursor: grabbing; }
+    /* The controls are NOT drag surface — a press on ✕ that moves one pixel must stay a click. */
+    .panel-hd .panel-ctl, .panel-hd .panel-text-ctl, .panel-hd .activity-clear { cursor: pointer; }
+
+    /* The panel being dragged stays in place and dims; the carrier is what follows the pointer.
+       Removing it from the flow mid-drag would reflow the very column the user is aiming into. */
+    .panel--dragging { opacity: .4; }
+
+    /* THE CARRIER IS A 200x32 CHIP, NOT THE PANEL. Dragging a full 332px panel across a stage that
+       is 46% chrome occludes the target being aimed at — you cannot choose a drop location you
+       cannot see. It is `position: fixed` and `pointer-events: none` so it never becomes its own
+       drop target. */
+    .panel-carrier {
+      position: fixed; z-index: 400; pointer-events: none;
+      width: 200px; height: 32px;
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 8px;
+      background: var(--bg-2);
+      border: 1px solid var(--bd); border-radius: 6px;
+      box-shadow: var(--shadow-popover);
+      color: var(--tx-1); font-size: 11px; font-weight: 700; letter-spacing: .4px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .panel-carrier[hidden] { display: none; }
+
+    /* Drop feedback carries TWO signals and the first is not colour: a GAP that was not there
+       before, which exists nowhere else in the layout, plus an accent rule inside it. */
+    .panel-drop-marker {
+      flex: 0 0 auto; height: 8px; margin: 0;
+      display: flex; align-items: center;
+    }
+    .panel-drop-marker::before {
+      content: ''; display: block; width: 100%; height: 4px;
+      background: var(--acc); border-radius: 2px;
+    }
+    /* When the dock is absent there is no zone to aim at, so one appears for the duration of the
+       drag. Without it an absent dock is unreachable by pointer and drag would be strictly weaker
+       than the menu it enhances. */
+    #dock-drop-band {
+      flex: 0 0 48px;
+      display: none; align-items: center; justify-content: center;
+      border-top: 1px solid var(--bd);
+      background: var(--bg-1);
+      color: var(--tx-3); font-size: 11px;
+    }
+    body.panels-dragging #dock[hidden] + #dock-drop-band,
+    body.panels-dragging #dock-drop-band.armed { display: flex; }
+    #dock-drop-band.over { background: var(--bg-2); color: var(--tx-1); box-shadow: inset 0 3px 0 0 var(--acc); }
+
+    .panel-body { display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+    .panel-content { padding: 14px; }
+
+    /* Zone: LEFT COLUMN. Panels stack, size to their content, and the column scrolls. */
+    .zone--left .panel { flex: 0 0 auto; }
+    /* Zone: RIGHT COLUMN and BOTTOM DOCK. Panels fill the zone and share it. */
+    .zone--right .panel, .zone--bottom .panel { flex: 1 1 auto; min-height: 0; }
+    .zone--right .panel-body, .zone--bottom .panel-body { flex: 1 1 auto; }
+    #sidebar-scroll > .panel, #info-body-zone > .panel, #dock > .panel {
+      min-height: var(--dock-panel-min-h);
+    }
+    .panel-stack--sized { display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+    .panel-stack--sized > .panel { min-height: var(--dock-panel-min-h); }
+    .panel-stack--sized > .panel > .panel-body { overflow: auto; }
+
+    /* ── THE DOCK'S CAPACITY FLOOR ────────────────────────────────────────────────────────────
+       A MEASURED DEFECT, AND A PREREQUISITE OF PERSISTENCE RATHER THAN A POLISH ITEM.
+       Dock panels divide a fixed 160px with flex. Measured at 1440x900, THREE panels get 21 / 15 /
+       27px and FOUR give one panel a box smaller than its own 32px header — four crushed title
+       strips with no bodies. Isolating a single panel showed the cause is CAPACITY, not any
+       particular panel.
+
+       It cannot wait, because THE STATE IS STORABLE: ship persistence without this and one
+       experiment leaves a user with the crushed dock restored on every launch, permanently, from a
+       single mistake. Persistence turns a recoverable arrangement into an unrecoverable one, which
+       is the exact failure the descriptor design exists to prevent.
+
+       The floor is the header plus enough body to be worth having; past that the dock scrolls, so
+       ANY occupancy stays survivable. A tabbed dock would be a different interaction model; this
+       layout preserves the current stacked-panel model while bounding its minimum height. */
+    #dock { overflow-y: auto; }
+    .zone--bottom .panel { min-height: var(--dock-panel-min-h); }
+
+    /* ── THE SHORT FORM ───────────────────────────────────────────────────────────────────────
+       ICON-ONLY ALONE SAVES NOTHING, AND THAT IS THE WHOLE POINT OF THIS BLOCK. Stripping labels
+       from a list makes each row NARROWER, NOT SHORTER — measured, it comes out WORSE than the
+       full form. The saving exists only if the layout also REFLOWS FROM A LIST INTO A WRAPPED
+       GRID, so that ten rows become two.
+
+       Geometry, and why each number is what it is:
+         * 32px cell — matches `.zbtn`, and exceeds the 24px WCAG 2.5.8 floor. The full-form `.li`
+           row is 23px tall and clickable, one pixel UNDER that floor; the short form clears it.
+         * 4px gap, 8px content padding. At a 195px body that leaves 179px, which carries
+           floor((179 + 4) / 36) = 5 cells per row. Ten node types and nine edge types both become
+           TWO ROWS: 2 x 32 + 4 = 68px of grid, 84px of content, 116px of panel against 291px and
+           268px full. The 8px padding is load-bearing — at the full form's 14px only four cells
+           fit per row, which costs a third row and gives most of the saving back.
+
+       The Node Catalog uses the same geometry below. Its server-provided glyphs need not be
+       unique, so its buttons also keep explicit accessible names and identity-bearing tooltips. */
+    .panel--short .panel-content { padding: var(--panel-short-pad); }
+    .panel--short #leg-nodes, .panel--short #leg-edges {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, var(--panel-short-cell));
+      gap: 4px;
+    }
+    .panel--short .li {
+      width: var(--panel-short-cell); height: var(--panel-short-cell);
+      padding: 0; justify-content: center; gap: 0;
+    }
+    .panel--short .li-label { display: none; }
+    /* The chip grows to carry its glyph. Below this size the mark is not legible, and the mark is
+       what replaces the label as the identity carrier. */
+    .panel--short .li-dot {
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .panel--short .li-glyph { display: block; font-size: 13px; color: var(--tx-1); line-height: 1; }
+    .li-glyph { display: none; }
+    /* Edge tiles already carry dash pattern and weight, so shape survives the label being dropped. */
+    .panel--short .li-line, .panel--short .li-dash { width: 20px; }
+
+    /* The text wrapper is removed from layout as one unit: hiding only its descendants would leave
+       an empty flex column and make the form visually icon-only without reclaiming the space.
+       Fixed cells then reflow N full-width rows into a compact wrapped grid. */
+    .panel--short #node-catalog.node-catalog--items {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, var(--panel-short-cell));
+      gap: 4px;
+    }
+    /* Toolbox/category wrappers preserve semantics in the full panel; in the icon-only projection
+       they must not each become a one-item row. Their children participate in the one catalog grid. */
+    .panel--short #node-catalog .catalog-toolbox,
+    .panel--short #node-catalog .catalog-category { display: contents; }
+    .panel--short #node-catalog .catalog-toolbox-title,
+    .panel--short #node-catalog .catalog-category > summary { display: none; }
+    .panel--short .catalog-item {
+      width: var(--panel-short-cell); height: var(--panel-short-cell);
+      padding: 0; justify-content: center; gap: 0;
+    }
+    .panel--short .catalog-item-copy { display: none; }
+    .panel--short .catalog-item-icon {
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .panel--short #leg-nodes .li:focus-visible, .panel--short #leg-edges .li:focus-visible,
+    .catalog-item:focus-visible {
+      outline: 2px solid var(--focus-ring); outline-offset: -2px;
+    }
+
+    /* ── SEARCH'S SHORT FORM ───────────────────────────────────────────────────────────
+       Search is `kind: 'control'` (panel-layout.js) — a single input, not a list, so the palette
+       rule above does not apply to it and neither does its reasoning. There is no label to strip
+       and no row to reflow into a grid; the only thing a single control HAS to give back is its
+       own padding. `.panel--short .panel-content { padding: 8px }` already applies generically
+       above and accounts for most of it; this trims the input's own vertical padding to match,
+       rather than leaving it sized for the 14px form it no longer sits inside. The input keeps its
+       full placeholder text and its full width — narrowing it would save nothing, per the same
+       "narrower is not shorter" rule the palette comment states, and would cost the one thing a
+       search box has to stay usable for: typing a query longer than a couple of characters. */
+    .panel--short #search-inp { padding: 4px 8px; }
+
+    /* ── GRAPH STATS' SHORT FORM ───────────────────────────────────────────────────────
+       `kind: 'bounded'` — a list of label:value lines, one per row, which is the SAME defect the
+       palette rule exists to fix: `.graph-stat-line` is `display:flex; justify-content:space-between`
+       and always spans the full row, so a graph with many node or edge types stacks one row per
+       type with nothing to wrap into. NARROWING THOSE ROWS SAVES NOTHING, same as a `.li` — the
+       only saving is reflowing the list from a column into a wrapped row of compact chips, so N
+       rows becomes ceil(N / cells-per-row) rows instead of N.
+
+       `inline-flex` rather than `grid` because, unlike the palette's icon chips, each chip's
+       CONTENT is variable-width text ("Nodes 12" is wider than "end 1") and a fixed cell would
+       either clip the wider labels or waste space on the narrower ones — the failure mode the
+       palette grid avoids by having no text greater than one glyph. `flex-wrap` sizes each chip to
+       its own content and only wraps where the row actually runs out of room.
+
+       The separator between node-type and edge-type counts is a bare "──" text row with no
+       semantics of its own (no aria-label, nothing else reads it) — decorative in the full form
+       and, as a flex item, would sit inline as an odd fifth "chip" rather than the full-width rule
+       it draws today. Hidden here rather than restyled: the boundary between node types and edge
+       types is still visible in the ORDER the chips render in, which is the same order the full
+       form uses, so no information is lost, only the divider's decoration. */
+    .panel--short #graph-stats {
+      display: flex; flex-wrap: wrap;
+      gap: 3px 8px;
+      line-height: 1.4;
+    }
+    .panel--short .graph-stat-line {
+      flex: 0 0 auto;
+      display: flex; gap: 4px;
+    }
+    .panel--short .graph-stat-separator { display: none; }
+
+    /* A compact SIDE ZONE changes content density, never the user's chosen width. The model
+       derives eligibility; fine+hover CSS supplies only a content-safe floor. Above that floor
+       the body consumes the whole column and its auto-fill grids add/remove cells naturally. */
+    @media (hover: hover) and (pointer: fine) {
+      #sidebar.zone--compact, #info.zone--compact {
+        --panel-column-min-w: var(--panel-compact-zone-min-w);
+      }
+      .zone--compact > .zone-body {
+        flex: 1 1 auto; width: auto; min-width: var(--panel-compact-body-min-w);
+        display: flex; flex-direction: column; min-height: 0; overflow-y: hidden;
+      }
+      /* A one-cell palette is necessarily taller. Share the column height and scroll each body,
+         preserving the established 72px header+body floor instead of moving later panels beyond
+         the viewport or crushing them to title strips. */
+      .zone--compact > .zone-body > .panel {
+        flex: 1 1 0; min-height: var(--dock-panel-min-h); overflow: hidden;
+      }
+      .zone--compact > .zone-body > .panel > .panel-body {
+        flex: 1 1 auto; min-height: 0; overflow-y: auto; overflow-x: hidden;
+      }
+      .zone--compact .panel-hd { padding: 0; gap: 0; }
+      /* Keep the heading in the accessibility tree and as the panel's aria-labelledby target.
+         It is visually absent only because the 48px track cannot honestly display it. */
+      .zone--compact .panel-title {
+        position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+        overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
+      }
+      /* Keep a visible 24px drag surface and both 24px controls. The dots are centred in the wider
+         grip so the inner-edge hover strip cannot cover the whole usable drag target. Their
+         combined width is part of `--panel-compact-body-min-w`, so none has to disappear. */
+      .zone--compact .panel-grip {
+        flex: 0 0 var(--panel-header-control-w); width: var(--panel-header-control-w);
+        height: var(--panel-hd-h);
+        background-image:
+          radial-gradient(circle 1px at 12px 12px, var(--tx-3) 99%, transparent 100%),
+          radial-gradient(circle 1px at 12px 16px, var(--tx-3) 99%, transparent 100%),
+          radial-gradient(circle 1px at 12px 20px, var(--tx-3) 99%, transparent 100%);
+      }
+      .zone--compact .panel-menu { margin-left: 0; }
+      .zone--compact .panel--short #search-inp {
+        width: 100%; min-width: 0; padding-inline: 4px;
+      }
+      .zone--compact .panel--short #graph-stats {
+        width: 100%; min-width: 0;
+      }
+      .zone--compact .panel--short .graph-stat-line {
+        flex: 0 1 auto; min-width: 0; max-width: 100%;
+        flex-wrap: wrap; overflow-wrap: anywhere;
+      }
+      .zone--compact .panel--short .graph-stat-line > span {
+        min-width: 0; overflow-wrap: anywhere;
+      }
+      .zone--compact .panel--short .catalog-empty {
+        width: 100%; min-width: 0; overflow-wrap: anywhere;
+      }
+    }
+
+    /* A closed panel is HIDDEN, NEVER REMOVED. app.js writes into `#info-body`, `#activity-log`
+       and `#activity-summary` unconditionally — six innerHTML assignments with no optional
+       chaining anywhere — so a panel detached from the document turns the next selection or
+       runtime event into a TypeError. Hiding costs nothing and keeps every one of those call sites
+       correct. */
+    .panel[hidden] { display: none; }
+
+    /* ── PANEL HEADER CONTROLS ────────────────────────────────────────────────────────────────
+       24 x 24, the WCAG 2.5.8 floor, around a 16x16 glyph box. The old `#info-close` measured
+       12.2 x 16 — half the minimum on one axis. */
+    .panel-ctl {
+      flex: 0 0 auto;
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: none; border: 0; border-radius: 4px;
+      color: var(--tx-3); cursor: pointer;
+    }
+    .panel-ctl:hover, .panel-ctl:focus-visible { color: var(--tx-1); background: var(--bg-h); }
+    .panel-menu { margin-left: auto; }
+    /* The menu button carries the margin that pushes the control group right; when a panel header
+       also holds a content control (Clear), that control claims the margin instead so the two do
+       not fight and leave the group floating mid-header. */
+    .panel-hd .panel-text-ctl ~ .panel-menu, .panel-hd .activity-clear ~ .panel-menu { margin-left: 0; }
+    .ctl-glyph { width: 16px; height: 16px; display: block; pointer-events: none; }
+
+    /* A CONTENT command in a panel header, as opposed to a PANEL command. It is a word, not a
+       glyph, precisely so it cannot be mistaken for the ✕ beside it. */
+    .panel-text-ctl {
+      flex: 0 0 auto; margin-left: auto;
+      background: transparent; border: 1px solid var(--bd); color: var(--tx-2);
+      border-radius: 4px; padding: 3px 7px; cursor: pointer; font-size: 10px;
+    }
+    .panel-text-ctl:hover, .panel-text-ctl:focus-visible { color: var(--tx-1); border-color: var(--acc); }
+
+    /* ── THE RAIL ─────────────────────────────────────────────────────────────────────────────
+       28px on each column's OUTER edge, CARVED OUT of the column's existing width rather than
+       added to it: the left column stays 224px and its body becomes 196px, a measured 28px cost.
+
+       It is what makes both hiding a column and closing a panel safe. It NEVER collapses to zero,
+       so the way back is always on screen, always focusable, and never hover-only. */
+    .rail {
+      flex: 0 0 var(--panel-rail-w);
+      display: flex; flex-direction: column; align-items: center;
+      gap: 4px; padding: 4px 0;
+      background: var(--bg-1);
+    }
+    .zone--left .rail { border-right: 1px solid var(--bd); }
+    .zone--right .rail { border-left: 1px solid var(--bd); }
+    .rail-panels { flex: 1 1 auto; display: flex; flex-direction: column; gap: 4px; min-height: 0; }
+    /* 24x24 hit area around a 16px glyph — the WCAG 2.5.8 floor.
+       RESTING TONE IS `--tx-2` (5.62:1), NOT `--tx-3` (3.77:1). Rendered side by side, the dotted
+       rule of the Edge Types mark very nearly disappears at `--tx-3`. Both clear the 3:1 non-text
+       floor, so this is a legibility judgement rather than a compliance one — and it is the SAME
+       judgement used for panel titles, for the same reason: when a column is collapsed
+       the rail mark IS the panel's title, which makes it load-bearing identity. */
+    .rail-btn {
+      position: relative;
+      flex: 0 0 auto;
+      width: 24px; height: 24px;
+      display: grid; place-items: center;
+      background: none; border: 0; border-radius: 5px;
+      color: var(--tx-2); cursor: pointer;
+    }
+    .rail-btn:hover, .rail-btn:focus-visible { color: var(--tx-1); background: var(--bg-h); }
+    .rail-btn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .rail-btn:disabled, .rail-btn[aria-disabled="true"] { opacity: .4; cursor: not-allowed; }
+    /* OPEN STATE IS NEVER COLOUR ALONE: an accent bar that appears nowhere else in the rail, the
+       mark also brightens, and `aria-expanded` carries the same fact to assistive technology. */
+    .rail-panel-btn[aria-expanded="true"] { color: var(--tx-1); }
+    .rail-panel-btn[aria-expanded="true"]::before {
+      content: ''; position: absolute; left: 0;
+      width: 2px; height: 16px; border-radius: 1px;
+      background: var(--acc);
+    }
+    /* Filled = expanded, hollow = collapsed. The state is carried by the SHAPE of the mark, not by
+       its colour, and `aria-expanded` carries the same fact to assistive technology. */
+    .rail-toggle[aria-expanded="false"] .zone-fill { display: none; }
+
+    /* ── ZONES AS COLUMNS ─────────────────────────────────────────────────────────────────────
+       Each column is a row: body and rail, with the rail on the outer edge. */
+    .zone--left, .zone--right { display: flex; flex-direction: row; position: relative; }
+    .zone-body { flex: 1 1 auto; min-width: 0; }
+    /* A collapsed column IS its rail — 28px, never zero. `#sidebar.zone--collapsed` outranks the
+       plain `#sidebar` width in both the base rules and the responsive block, so this holds at
+       every breakpoint without depending on source order. */
+    #sidebar.zone--collapsed, #info.zone--collapsed {
+      --panel-column-min-w: var(--panel-rail-w);
+      width: var(--panel-rail-w); min-width: var(--panel-rail-w);
+    }
+    .zone--collapsed > .zone-body { display: none; }
+
+    /* ── THE HOVER CONVENIENCE ────────────────────────────────────────────────────────────────
+       A 6px strip on the column's INNER edge that reveals a toggle after 200ms of hover. The delay
+       is the point: a control that flashes every time the pointer crosses the boundary on its way
+       to the graph is worse than no control at all.
+
+       IT IS ADDITIVE AND NEVER THE ONLY ROUTE. The rail toggle is the guaranteed path; this is a
+       shortcut for people already using a pointer, which is why it is removed entirely where hover
+       does not exist rather than left as a trap. */
+    .zone-hover { position: absolute; top: 0; bottom: 0; width: 6px; z-index: 20; }
+    /* Keep the hover shortcut clear of the separator's four-pixel transparent hit band. */
+    .zone--left .zone-hover { right: 4px; }
+    .zone--right .zone-hover { left: 4px; }
+    .zone-hover-btn {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: var(--bg-2); border: 1px solid var(--bd); border-radius: 4px;
+      color: var(--tx-2); cursor: pointer;
+      opacity: 0; pointer-events: none;
+      transition: opacity 120ms ease;
+    }
+    .zone--left .zone-hover-btn { right: 0; }
+    .zone--right .zone-hover-btn { left: 0; }
+    .zone-hover:hover .zone-hover-btn {
+      opacity: 1; pointer-events: auto;
+      transition-delay: 200ms;
+    }
+    .zone-hover-btn:hover { color: var(--tx-1); border-color: var(--acc); }
+    @media (hover: none) {
+      /* Unreachable without a pointer, so it is not offered rather than offered and broken. */
+      .zone-hover { display: none; }
+    }
+
+    /* ── POPOVERS: the overflow menu and the Panels index ─────────────────────────────────────
+       DELIBERATELY NOT `border-radius: 8px` WITH A FOUR-SIDED SHADOW. That pairing is reserved,
+       unclaimed anywhere in the product, so that it remains available as the unambiguous "this
+       panel is floating" signal on the day floating panels ship. A 6px radius and a downward
+       shadow say "menu" without spending the reservation.
+
+       z-index 300 clears the topbar (200) and the workflow bar (190) — a menu opened near the top
+       of a column must not slide under them — and stays below the help overlay (500). */
+    .popover {
+      position: fixed; z-index: 300;
+      min-width: 210px; max-width: 280px;
+      padding: 4px;
+      background: var(--bg-2);
+      border: 1px solid var(--bd); border-radius: 6px;
+      box-shadow: var(--shadow-popover);
+    }
+    .popover[hidden] { display: none; }
+    .popover-title {
+      padding: 6px 10px 4px;
+      color: var(--tx-3); font-size: 10px; font-weight: 700;
+      letter-spacing: .6px; text-transform: uppercase;
+    }
+    .popover-item {
+      display: flex; align-items: center; gap: 8px; width: 100%;
+      padding: 7px 10px; border: 0; border-radius: 4px;
+      background: none; color: var(--tx-1);
+      font: inherit; font-size: 12px; text-align: left; cursor: pointer;
+    }
+    .popover-item:hover, .popover-item:focus-visible { background: var(--bg-h); outline: none; }
+    .popover-item:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .popover-sep { height: 1px; margin: 4px 6px; background: var(--bd); }
+    /* The index says where each panel IS, in words. A closed panel that merely looked different
+       would leave a user guessing what clicking it does. */
+    .popover-item .popover-where {
+      margin-left: auto; flex: 0 0 auto;
+      color: var(--tx-3); font-size: 10px;
+    }
+    .popover-item[data-closed="true"] .popover-name { color: var(--tx-3); }
+
+    /* One shared tooltip for panel controls. It remains hoverable so magnification users can move
+       the pointer over supplemental content without making it disappear (WCAG 1.4.13). */
+    #visual-tooltip {
+      position: fixed; z-index: 280;
+      max-width: min(240px, calc(100vw - 16px));
+      padding: 6px 8px;
+      background: var(--bg-2); border: 1px solid var(--bd); border-radius: 4px;
+      box-shadow: var(--shadow-popover);
+      color: var(--tx-1); font-size: 11px; font-weight: 600; line-height: 1.35;
+      white-space: normal; pointer-events: auto;
+      opacity: 1; transition: opacity 80ms ease;
+    }
+    #visual-tooltip[hidden] { display: none; }
+    #visual-tooltip::after {
+      content: ''; position: absolute; width: 7px; height: 7px;
+      background: var(--bg-2); border: solid var(--bd); transform: rotate(45deg);
+    }
+    #visual-tooltip[data-placement="top"]::after {
+      left: calc(50% - 4px); bottom: -5px; border-width: 0 1px 1px 0;
+    }
+    #visual-tooltip[data-placement="bottom"]::after {
+      left: calc(50% - 4px); top: -5px; border-width: 1px 0 0 1px;
+    }
+    #visual-tooltip[data-placement="left"]::after {
+      top: calc(50% - 4px); right: -5px; border-width: 1px 1px 0 0;
+    }
+    #visual-tooltip[data-placement="right"]::after {
+      top: calc(50% - 4px); left: -5px; border-width: 0 0 1px 1px;
+    }
+    #visual-tooltip[data-reduced-motion="true"] { transition-duration: 0ms; }
+
+    /* Long, stable explanations use one deliberate disclosure surface; they do not compete
+       with current values, warnings and validation in the persistent Inspector hierarchy. The
+       trigger is a real button with the same vector/control-token vocabulary as panel chrome.
+       Unlike the hover/focus tooltip above, this surface opens only on activation and therefore has
+       identical pointer, touch and keyboard availability. */
+    .contextual-help-trigger {
+      display: inline-flex; align-items: center; justify-content: center;
+      flex: 0 0 auto; width: 20px; height: 20px; margin: -3px -3px -3px 1px; padding: 2px;
+      border: 1px solid transparent; border-radius: 4px;
+      background: transparent; color: var(--tx-3); cursor: pointer;
+    }
+    .contextual-help-trigger:hover, .contextual-help-trigger[aria-expanded="true"] {
+      color: var(--acc); background: var(--accent-soft); border-color: var(--bd);
+    }
+    .contextual-help-trigger:focus-visible,
+    .contextual-help-popover:focus-visible,
+    .contextual-help-close:focus-visible {
+      outline: 2px solid var(--focus-ring); outline-offset: 2px;
+    }
+    .contextual-help-trigger .ctl-glyph { width: 14px; height: 14px; }
+    .editor-label-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0;
+    }
+    .editor-label-row > label { min-width: 0; }
+    .editor-section-title > .contextual-help-trigger { margin-left: auto; }
+    .contextual-help-popover {
+      position: fixed; z-index: 320;
+      width: min(340px, calc(100vw - 16px)); max-height: min(360px, calc(100vh - 16px));
+      overflow: auto; padding: 0;
+      background: var(--bg-2); color: var(--tx-1);
+      border: 1px solid var(--bd); border-radius: 6px;
+      box-shadow: var(--shadow-popover);
+    }
+    .contextual-help-popover[hidden] { display: none; }
+    .contextual-help-header {
+      position: sticky; top: 0; z-index: 1;
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 10px 7px; background: var(--bg-2); border-bottom: 1px solid var(--bd);
+    }
+    .contextual-help-header h2 {
+      flex: 1; min-width: 0; margin: 0;
+      color: var(--tx-1); font-size: 12px; line-height: 1.3;
+    }
+    .contextual-help-close {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 28px; height: 28px; padding: 5px; border: 1px solid transparent; border-radius: 4px;
+      background: transparent; color: var(--tx-2); cursor: pointer;
+    }
+    .contextual-help-close:hover { background: var(--bg-h); color: var(--tx-1); }
+    .contextual-help-popover > p {
+      margin: 0; padding: 10px 12px 12px;
+      color: var(--tx-2); font-size: 11px; line-height: 1.55; white-space: pre-line;
+    }
+    @media (hover: none), (pointer: coarse) {
+      .contextual-help-trigger { width: 32px; height: 32px; margin: -8px -6px -8px 1px; }
+      .contextual-help-close { width: 36px; height: 36px; }
+    }
+
+    .document-switcher-dialog { width: min(360px, calc(100vw - 16px)); max-width: 360px; }
+    .document-switcher-list { list-style: none; max-height: min(420px, calc(100vh - 80px)); overflow: auto; }
+    .document-switcher-row {
+      display: grid; grid-template-columns: minmax(0, 1fr) 32px; align-items: stretch; gap: 4px;
+    }
+    .document-switcher-activate, .document-switcher-close {
+      min-height: 32px; border: 0; border-radius: 4px;
+      background: transparent; color: var(--tx-1); font: inherit; cursor: pointer;
+    }
+    .document-switcher-activate {
+      min-width: 0; display: flex; align-items: center; gap: 8px; padding: 6px 10px; text-align: left;
+    }
+    .document-switcher-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .document-switcher-state { margin-left: auto; flex: 0 0 auto; color: var(--tx-2); font-size: 10px; }
+    .document-switcher-activate[aria-current="true"] {
+      background: var(--bg-h); box-shadow: inset 3px 0 0 var(--acc); font-weight: 600;
+    }
+    .document-switcher-close { width: 32px; padding: 0; color: var(--tx-2); font-size: 15px; }
+    .document-switcher-activate:hover, .document-switcher-close:hover { background: var(--bg-h); }
+    .document-switcher-activate:focus-visible, .document-switcher-close:focus-visible {
+      outline: 2px solid var(--focus-ring); outline-offset: -2px;
+    }
+
+    .unsaved-document-dialog {
+      width: min(480px, calc(100vw - 32px)); margin: auto;
+      padding: 20px; border: 1px solid var(--bd); border-radius: 6px;
+      background: var(--bg-2); color: var(--tx-1);
+      box-shadow: var(--shadow-dialog);
+    }
+    .unsaved-document-dialog::backdrop { background: var(--dialog-backdrop); }
+    .unsaved-document-dialog h2 { margin-bottom: 8px; font-size: 16px; }
+    .unsaved-document-dialog p { color: var(--tx-2); font-size: 12px; line-height: 1.5; }
+    .inspector-unsaved-dialog { max-width: min(420px, calc(100vw - 32px)); }
+    .inspector-unsaved-dialog .unsaved-document-actions { flex-wrap: wrap; }
+    .unsaved-document-actions {
+      display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px;
+    }
+    .unsaved-document-actions .btn { min-height: 32px; }
+
+    @media (pointer: coarse) {
+      .document-switcher, .document-switcher-activate, .document-switcher-close,
+      .unsaved-document-actions .btn { min-height: 44px; }
+      .document-switcher-close { width: 44px; }
+      .document-switcher-row { grid-template-columns: minmax(0, 1fr) 44px; }
+    }
+
+    /* ── LEFT SIDEBAR ─────────────────────────── */
+    /* The column is a ROW — body plus rail — so `flex-direction` is left to `.zone--left`. */
+    #sidebar {
+      --panel-column-min-w: 148px;
+      width: 224px; flex-shrink: 0;
+      min-width: var(--panel-column-min-w);
+      background: var(--bg-1);
+      border-right: 1px solid var(--bd);
+      overflow: hidden;
+    }
+    #sidebar-scroll { overflow-y: auto; }
+    #sidebar-scroll::-webkit-scrollbar { width: var(--panel-scrollbar-w); }
+    #sidebar-scroll::-webkit-scrollbar-thumb { background: var(--bd); border-radius: 2px; }
+
+    /* Search */
+    #search-inp {
+      width: 100%;
+      background: var(--bg-2); border: 1px solid var(--bd);
+      border-radius: 6px; padding: 6px 10px;
+      color: var(--tx-1); font-size: 12px; outline: none;
+      transition: border-color .15s;
+    }
+    #search-inp:focus { border-color: var(--acc); }
+    #search-inp::placeholder { color: var(--tx-3); }
+
+    /* Legend items */
+    .li {
+      display: flex; align-items: center; gap: 8px;
+      width: 100%; border: 0; background: none; color: inherit; font: inherit; text-align: left;
+      padding: 4px 6px; border-radius: 5px;
+      font-size: 12px; cursor: pointer; transition: background .12s;
+    }
+    .li:hover, .li:focus-visible { background: var(--bg-h); }
+    .li:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .li.filt { background: var(--accent-soft); }
+    .li-dot {
+      width: 13px; height: 13px; flex-shrink: 0;
+      border-radius: 3px;
+    }
+    .li-line {
+      height: 3px; flex-shrink: 0; width: 22px;
+      border-radius: 2px;
+    }
+    .li-dash {
+      flex-shrink: 0; width: 22px; height: 3px;
+      background: repeating-linear-gradient(90deg,currentColor 0,currentColor 4px,transparent 4px,transparent 8px);
+      border-radius: 2px;
+    }
+
+    /* Stats */
+    #graph-stats { font-size: 12px; color: var(--tx-2); line-height: 1.9; }
+    #graph-stats span { color: var(--tx-1); font-weight: 600; }
+
+    .node-catalog { display:flex; flex-direction:column; gap:5px; }
+    .catalog-toolbox { display:flex; flex-direction:column; gap:5px; }
+    .catalog-toolbox + .catalog-toolbox { margin-top:8px; padding-top:8px; border-top:1px solid var(--bd); }
+    .catalog-toolbox-title { margin:0; color:var(--tx-1); font-size:11px; font-weight:700; }
+    .catalog-category { display:flex; flex-direction:column; gap:5px; }
+    .catalog-category summary { color:var(--tx-2); cursor:pointer; font-size:10px; font-weight:600; padding:2px 1px; }
+    .catalog-category[open] summary { margin-bottom:5px; }
+    .catalog-category .catalog-item + .catalog-item { margin-top:5px; }
+    .catalog-empty { color:var(--tx-2); font-size:11px; line-height:1.45; }
+    .catalog-item {
+      width:100%; display:flex; align-items:center; gap:8px; padding:7px 8px;
+      border:1px solid var(--bd); border-radius:6px; background:var(--bg-2);
+      color:var(--tx-1); cursor:pointer; text-align:left;
+    }
+    .catalog-item:hover, .catalog-item:focus-visible { border-color:var(--acc); background:var(--accent-soft); }
+    .catalog-item.selected, .catalog-item[aria-pressed="true"] {
+      border-color: var(--acc); background: var(--accent-soft); box-shadow: inset 3px 0 var(--acc);
+    }
+    .catalog-item-icon { width:20px; flex:0 0 auto; text-align:center; color:var(--acc); }
+    .catalog-item-copy { min-width:0; display:flex; flex-direction:column; gap:1px; }
+    .catalog-item b { font-size:11px; overflow:hidden; text-overflow:ellipsis; }
+    .catalog-item small { color:var(--tx-2); font-size:9px; }
+    .catalog-property small { color:var(--tx-2); font-size:10px; line-height:1.35; }
+    /* An adapter-bound property left blank is UNCONFIGURED, not invalid — the browser no
+       longer blocks saving on it (no native `required`), so this is the only visual signal that
+       distinguishes it from an ordinary required-and-missing field, which still gets the browser's
+       native :invalid red outline. Amber, not red: this is a warning to configure later, not a
+       blocked save. */
+    .catalog-property--unconfigured input, .catalog-property--unconfigured select,
+    .catalog-property--unconfigured textarea { border-color: var(--warn); }
+    .catalog-property--unconfigured small { color: var(--amber); }
+    /* `.editor-field { display: flex; }` above is an author rule at the same specificity as
+       the `[hidden]` attribute selector below it here, and author rules beat the user-agent
+       stylesheet's own `[hidden] { display: none }` regardless of specificity — so the `hidden`
+       attribute alone would NOT visually hide a conditional property without this rule. Every other
+       `[hidden]`-toggled element in this file already carries its own such rule (`.panel[hidden]`,
+       `#dock[hidden]`, `.popover[hidden]`, …); this is the same pattern for the same reason. */
+    .catalog-property[hidden] { display: none; }
+
+    /* The execution-bypass switch follows the same rules as the two controls below it — the state is
+       carried in TEXT (`.bypass-state`) and not by the checkbox's tick alone, and the section title
+       gets the same halved top margin so it costs the Inspector the same height as the others.
+
+       `.bypass-consequence` is amber for the same reason `.nature-risk` and `.join-end-warning` are:
+       it is a consequence to read before relying on the graph's routing, not a blocked save — no
+       control in this Inspector blocks a save the server would accept. `.bypass-refused` is the one
+       statement here that IS about a document the runtime will reject, so it takes the red `--err`
+       family that `#edge-validation` already owns for that meaning. Two boxes that say different
+       things must not look alike: an advisory drawn as a refusal teaches an author to dismiss
+       refusals. */
+    #node-bypass-section .editor-section-title { margin: 6px 0 3px; }
+    .bypass-toggle {
+      display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; cursor: pointer;
+    }
+    .bypass-toggle input { margin: 0; accent-color: var(--warn); }
+    .bypass-state { color: var(--tx-2); font-size: 10px; font-weight: 400; }
+    .bypass-consequence {
+      margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid var(--warn); color: var(--amber);
+      font-size: 10px; line-height: 1.45;
+    }
+    /* `.editor-field { display: flex }` is an author rule that beats the user-agent `[hidden]`, the
+       same trap `.catalog-property[hidden]` documents — but these two are plain blocks, so this line
+       is belt-and-braces rather than load-bearing. Kept so that giving either an author `display`
+       later cannot silently leave an empty box on screen. */
+    .bypass-consequence[hidden], .node-bypass-fixed[hidden] { display: none; }
+    .node-bypass-fixed { padding: 0 0 2px; }
+    .bypass-refused {
+      margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--err) 12%, transparent); border: 1px solid var(--err);
+      /* `--outcome-error-text`, not `--err`: the border and the prose need different values in the
+         light theme, where the border red (#cf222e) does not clear 4.5:1 as body text on this tint
+         and the text red (#a40e26) does. Same split `.credential-error` and `.connection-state.error`
+         already use. */
+      color: var(--outcome-error-text);
+      font-size: 10px; line-height: 1.45;
+    }
+    .bypass-refused code { font-family: 'SFMono-Regular', Consolas, monospace; }
+
+    /* The runtime-nature control. `.nature-state` carries the declared/inherited
+       distinction in TEXT, not color alone, so it survives being read aloud or printed in
+       grayscale — color is a second, non-load-bearing cue on top.
+
+       This section is a full-width row like `.editor-actions` below — the same class of height
+       that extra COLUMN width cannot reflow away. The control therefore takes real height out of
+       the row itself rather than relying on reflow:
+       the section title's top margin is halved (only for this section — the generic
+       `.editor-section-title` rule below is untouched, so "Additional properties" and every other
+       section keeps its normal spacing), and the fixed-nature row is a tight single COLUMN instead
+       of a `baseline` row. The row layout was the actual defect: `.nature-value` ("WORKER") and
+       its `gap` ate into the row's width before `.nature-state` ever got it, so the long sentence
+       was wrapping inside a narrower box than the field actually has — 246px instead of the ~300px
+       the field is given elsewhere. Full width removes that self-inflicted wrap, which
+       `panel-system.spec.js`'s "fits the Inspector at 1280x800" protects:
+       revert this rule and that assertion goes back to failing by the same 12px. */
+    #node-nature-section .editor-section-title { margin: 6px 0 3px; }
+    .node-nature label { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .nature-state { color: var(--tx-2); font-size: 10px; font-weight: 400; }
+    .node-nature-fixed {
+      display: flex; flex-direction: column; gap: 0; padding: 0 0 2px; font-size: 11px; line-height: 1.25;
+    }
+    .node-nature-fixed .nature-value { color: var(--tx-1); font-weight: 600; }
+    .node-nature-fixed .nature-state { color: var(--tx-2); display: block; }
+    /* Amber, matching `.catalog-property--unconfigured`: AUTHORITY/KEYED are a warning to read before
+       deploying, not a blocked save — the controls never block a save the server would accept. */
+    .nature-risk {
+      margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid var(--warn); color: var(--amber);
+      font-size: 10px; line-height: 1.45;
+    }
+    .nature-risk[hidden] { display: none; }
+
+    /* Runtime concurrency follows the same compact state/help hierarchy as runtime nature. The
+       fixed catalog state is status text, not a form control, and must not inherit 16px body text. */
+    #node-max-concurrency-section .editor-section-title { margin: 6px 0 3px; }
+    .node-max-concurrency-fixed {
+      padding: 0 0 2px; color: var(--tx-2); font-size: 11px; line-height: 1.25;
+    }
+    .node-max-concurrency label {
+      display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+    }
+
+    /* The Kind-of-arrival control has the same shape and the same "state in text, not just color" rule as
+       `.nature-state`/`.nature-risk` above. */
+    #node-join-section .editor-section-title { margin: 6px 0 3px; }
+    .node-join label { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; }
+    .join-state { color: var(--tx-2); font-size: 10px; font-weight: 400; }
+    .node-join-fixed {
+      display: flex; flex-direction: column; gap: 0; padding: 0 0 2px; font-size: 11px; line-height: 1.25;
+      color: var(--tx-2);
+    }
+    .join-quorum-field, .join-timeout-field { margin-top: 6px; }
+    .join-quorum-field[hidden], .join-timeout-field[hidden] { display: none; }
+    /* Amber, matching `.nature-risk`: the END fan-in consequence is a warning to read before relying
+       on the result payload, not a blocked save. */
+    .join-end-warning {
+      margin-top: 6px; padding: 6px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid var(--warn); color: var(--amber);
+      font-size: 10px; line-height: 1.45;
+    }
+
+    /* An edge whose outcome the source node cannot emit is amber, not red, and uses the same box as
+       `.nature-risk`/`.join-end-warning` above, because it is the same KIND of statement: read this
+       before deploying. `#edge-validation` stays the red one, and it is the only one that disables
+       Save. The two must not look alike -- an advisory drawn as a refusal teaches an author to
+       dismiss refusals.
+       The `[hidden]` line below is belt-and-braces, and NOT the case `.catalog-property[hidden]` and
+       `.nature-risk[hidden]` document: those elements carry their own author `display`, which beats
+       the user-agent stylesheet's `[hidden] { display: none }` and so must be overridden by hand.
+       This block sets no `display`, so the user-agent rule already hides it -- asserted in a real
+       browser by `edge-outcome-unreachable.spec.js` ("shows nothing at all before the author types"),
+       which is where an author `display` on this element would show up as an empty amber box. The
+       line below is kept so that adding one to the block above cannot make that happen silently. */
+    .edge-outcome-warning {
+      margin: 6px 0 0; padding: 6px 8px; border-radius: 6px;
+      background: color-mix(in srgb, var(--warn) 10%, transparent); border: 1px solid var(--warn); color: var(--amber);
+      font-size: 10px; line-height: 1.45;
+    }
+    .edge-outcome-warning[hidden] { display: none; }
+
+    /* ── CREDENTIALS WINDOW ────────────────────────────────────────────────────────────
+       Wider than `.unsaved-document-dialog` because it carries a form AND a list, and capped in
+       height so a long list scrolls inside the window rather than pushing the form off screen —
+       the form is the reason the window was opened. */
+    .credentials-dialog {
+      width: min(560px, calc(100vw - 32px)); max-height: calc(100vh - 64px); margin: auto;
+      padding: 20px; border: 1px solid var(--bd); border-radius: 6px;
+      background: var(--bg-2); color: var(--tx-1); font-size: 11px;
+      box-shadow: var(--shadow-dialog);
+      overflow-y: auto;
+    }
+    .credentials-dialog::backdrop { background: var(--dialog-backdrop); }
+    .credentials-hd { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+    .credentials-hd h2 { font-size: 16px; }
+    .credentials-listing { margin-top: 16px; border-top: 1px solid var(--bd); padding-top: 12px; }
+    .credentials-listing h3 { font-size: 12px; margin-bottom: 6px; }
+    .credential-note, .credential-status, .credential-error {
+      margin: 6px 0 0; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere;
+    }
+    .credential-note { color: var(--tx-2); }
+    .credential-form { display: flex; flex-direction: column; gap: 6px; margin-top: 12px; }
+    .credential-actions { display: flex; gap: 6px; margin-top: 4px; }
+    .credential-actions .btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
+    .credential-error { color: var(--outcome-error-text); }
+    .credential-status[data-state="ok"] { color: var(--outcome-success-text); }
+    .credential-status[data-state="error"] { color: var(--outcome-error-text); }
+    .credential-status[data-state="blocked"] { color: var(--amber); }
+    .credential-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+    .credential-item {
+      display: flex; flex-direction: column; gap: 3px;
+      padding: 6px 8px; border: 1px solid var(--bd); border-radius: 5px; background: var(--surface-inset);
+    }
+    .credential-item small { color: var(--tx-2); font-size: 9px; overflow-wrap: anywhere; }
+    .credential-item-reference { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .credential-reference {
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 9px;
+      color: var(--tx-2); overflow-wrap: anywhere;
+    }
+    .credential-copy { font-size: 9px; padding: 2px 6px; }
+    /* `.editor-field { display: flex }` beats the user agent's `[hidden] { display: none }`, the same
+       trap `.catalog-property[hidden]` documents above. Every `[hidden]`-toggled element here needs one. */
+    .credential-error[hidden], .credential-note[hidden], .credential-list[hidden],
+    #credential-username-field[hidden] { display: none; }
+
+    /* ── DEPLOYMENTS WINDOW ─────────────────────────────────────────────────────
+       Shares `.credentials-dialog`'s sizing, header, form and list shell (same `.credential-*`
+       classes) since it is the identical bounded-window shape with a different transport and a
+       richer per-row action set; only the state pill and the row's action buttons are new here. */
+    .deployment-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .deployment-state {
+      display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+      border: 1px solid var(--bd); color: var(--tx-2); font-size: 9px; font-weight: 700;
+      letter-spacing: .02em; text-transform: uppercase; white-space: nowrap;
+    }
+    .deployment-state-ready {
+      color: var(--outcome-success-text); border-color: color-mix(in srgb, var(--ok) 50%, var(--bd));
+    }
+    .deployment-state-degraded, .deployment-state-failed {
+      color: var(--outcome-error-text); border-color: color-mix(in srgb, var(--err) 50%, var(--bd));
+    }
+    .deployment-state-starting, .deployment-state-stopping, .deployment-state-registered {
+      color: var(--amber); border-color: color-mix(in srgb, var(--warn) 50%, var(--bd));
+    }
+    .deployment-diagnostic { color: var(--outcome-error-text); }
+    .deployment-item-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-top: 2px; }
+    .deployment-item-actions .btn { font-size: 9px; padding: 2px 8px; }
+    .deployment-item-actions small { color: var(--tx-2); font-size: 9px; }
+
+    /* ── STAGE COLUMN ─────────────────────────────────────────────────────────────────────────
+       The graph and the bottom dock, stacked. The dock is a SIBLING of #cy-wrap and it PUSHES:
+       #minimap and #zoom-ctrl are `position:absolute; bottom:16px` inside #cy-wrap, so an
+       overlaying dock would bury both, while a pushing dock shrinks #cy-wrap and the controls ride
+       up with it. The user-visible behaviour is the same; the mechanism is what decides whether
+       the zoom controls survive.
+
+       The column spans the stage only, not the full viewport, so it takes no height from the two
+       side columns and the dock never meets a rail at a corner. */
+    #stage {
+      flex: 1; display: flex; flex-direction: column;
+      min-width: var(--stage-min-w, 360px); min-height: 0;
+    }
+
+    /* ── BOTTOM DOCK (zone) ───────────────────────────────────────────────────────────────────
+       160px is the responsive default. The shared splitter may replace it with a live projection
+       of the normalized dimension stored by `panel-layout.js`; pixels never enter that descriptor.
+
+       The clamp is not decoration. A 160px dock on a short window would push the stage below the
+       height at which it can still show its own controls plus a graph, so the dock gives way
+       first — the stage floor wins. See `panes.js` STAGE_MIN_HEIGHT for how 204px was measured. */
+    #dock {
+      flex: 0 0 var(--dock-h);
+      height: var(--dock-h);
+      max-height: calc(100% - var(--stage-min-h));
+      min-height: 0;
+      display: flex; flex-direction: column;
+      background: var(--bg-1);
+      border-top: 1px solid var(--bd);
+    }
+    /* AN EMPTY DOCK IS ABSENT, NOT A 28px LIP. Always rendering the dock made sense when it COULD
+       NOT BE EMPTY — Activity was its only occupant and there
+       was no close. Close changes the premise: a user who closes the Activity panel is asking for
+       that space back, and a permanent lip would tax the scarcest axis in this UI to preserve a
+       zone with nothing in it. The worry that a zone appearing and disappearing moves the layout
+       under the user does not apply when the user themselves caused it — and the route back is the
+       Panels index on the rails, which is application-level and always present. */
+    #dock[hidden] { display: none; }
+
+    /* ── CANVAS ───────────────────────────────── */
+    #cy-wrap {
+      flex: 1 1 auto; min-height: 0; position: relative; overflow: hidden;
+    }
+    #cy-wrap::before { /* dot-grid background */
+      content: '';
+      position: absolute; inset: 0;
+      background-image: radial-gradient(circle, var(--canvas-grid) 1px, transparent 1px);
+      background-size: 30px 30px;
+      pointer-events: none; z-index: 0;
+    }
+    /* One PANE per open document. The default remains the historical horizontal row until the
+       workspace planner publishes a mode. The planner only changes CSS grid placement: canvases
+       stay inside their original pane for the lifetime of the document. */
+    #cy {
+      width: 100%; height: 100%; position: relative; z-index: 1;
+      display: flex; flex-direction: row; align-items: stretch;
+    }
+
+    #cy[data-workspace-mode] {
+      display: grid;
+      align-items: stretch;
+      min-width: 0; min-height: 0;
+      /* The planner subtracts one visible rule between tracks. Grid must reserve that same rule,
+         not let adjacent panes meet underneath an absolutely projected splitter. */
+      gap: var(--workspace-splitter-rule);
+    }
+    #cy[data-workspace-mode="horizontal"] {
+      grid-template-columns: var(--workspace-column-tracks,
+        repeat(var(--workspace-column-count, 1), minmax(0, 1fr)));
+      grid-template-rows: minmax(0, 1fr);
+    }
+    #cy[data-workspace-mode="vertical"] {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: var(--workspace-row-tracks,
+        repeat(var(--workspace-row-count, 1), minmax(0, 1fr)));
+    }
+    #cy[data-workspace-mode="grid"] {
+      grid-template-columns: var(--workspace-column-tracks,
+        repeat(var(--workspace-column-count, 1), minmax(0, 1fr)));
+      grid-template-rows: var(--workspace-row-tracks,
+        repeat(var(--workspace-row-count, 1), minmax(0, 1fr)));
+    }
+
+    .doc-pane {
+      display: none;
+      flex-direction: column;
+      flex: 1 1 0;
+      min-width: 0; min-height: 0;
+      position: relative;
+      outline: none;
+    }
+    .doc-pane--shown { display: flex; }
+    #cy[data-workspace-mode] > .doc-pane--shown {
+      grid-column: var(--workspace-column, auto);
+      grid-row: var(--workspace-row, auto);
+      position: relative;
+      width: auto; height: auto;
+      visibility: visible;
+      pointer-events: auto;
+    }
+    /* Active-only fallback must not `display:none` a Cytoscape container. Its internal resize
+       observer treats a 0×0 canvas as a real viewport and can permanently blank a document before
+       the switcher brings it back. Park hidden panes outside grid participation in a nonzero box;
+       JS already gives them tabindex=-1, and visibility/pointer-events make the state inaccessible
+       to both pointer and sequential focus without reparenting the canvas. */
+    #cy[data-workspace-mode] > .doc-pane:not(.doc-pane--shown) {
+      display: flex;
+      position: absolute;
+      left: -1px; top: -1px;
+      width: 1px; height: 1px;
+      min-width: 1px; min-height: 1px;
+      overflow: hidden;
+      visibility: hidden;
+      pointer-events: none;
+      grid-column: auto;
+      grid-row: auto;
+    }
+    /* The parked pane is only a nonzero renderer viewport. Its identity is already unavailable
+       with the pane itself, so the normal 24px presentation strip must not consume that 1px box. */
+    #cy[data-workspace-mode] > .doc-pane:not(.doc-pane--shown) > .doc-pane-header {
+      display: none;
+    }
+    .doc-pane:focus-visible { outline: var(--workspace-focus-ring) solid var(--focus-ring); outline-offset: -2px; }
+
+    /* The 24px identity strip.
+       It is not draggable window chrome and has no stacking geometry to restore. Its close button
+       is a redundant route to the existing document command, not a second lifecycle implementation.
+       It spends HEIGHT, which this product has. An overlay chip would have spent CANVAS, and spent
+       it exactly where the graph is already narrowest — the two-way split at the bottom of the
+       supported range. That trade is the reason the strip exists; see `src/panes.js`. */
+    .doc-pane-header {
+      flex: 0 0 var(--workspace-doc-header-h); height: var(--workspace-doc-header-h);
+      display: flex; align-items: center; gap: 6px;
+      padding: 0 8px;
+      font-size: 11px; line-height: 1;
+      color: var(--tx-2);
+      background: var(--bg-1);
+      border-bottom: 1px solid var(--bd);
+      overflow: hidden;
+      user-select: none; cursor: default;
+    }
+    /* With one document open there is nothing to tell apart, and the top bar already names it. The
+       strip appears the moment a second document exists — tiled beside it or hidden behind it. */
+    #cy:not(.panes-titled) .doc-pane-header { display: none; }
+    .doc-pane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .doc-pane-modified { flex: 0 0 auto; font-weight: 700; color: var(--warn); }
+    .doc-pane-close {
+      flex: 0 0 24px; width: 24px; height: 24px; margin-left: auto; padding: 0;
+      border: 0; border-radius: 3px; background: transparent; color: var(--tx-2);
+      font: inherit; font-size: 16px; line-height: 1; cursor: pointer;
+    }
+    .doc-pane-close:hover { background: var(--bg-h); color: var(--tx-1); }
+    .doc-pane-close:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    /* Between the 360px floor and the 480px comfort width the split is permitted and tight, so the
+       strip gives back what it can rather than overflowing the name that carries the identity. */
+    .doc-pane--tight .doc-pane-header { padding: 0 6px; gap: 4px; font-size: 10px; }
+
+    /* Focus is drawn with SHAPE and WEIGHT as well as colour. Identity itself is the NAME above:
+       a tint can say that two panes differ, never which is which, and says nothing at all to a user
+       who cannot see it. This is an additional signal on top of the name, never a replacement for
+       it — the accessibility line UI-02 drew for the canvas, inherited by the pane layer. */
+    .doc-pane--active > .doc-pane-header {
+      color: var(--tx-1);
+      background: var(--bg-2);
+      border-bottom-color: var(--acc);
+      box-shadow: inset 3px 0 0 0 var(--acc);
+    }
+    .doc-pane--active > .doc-pane-header .doc-pane-name { font-weight: 600; }
+
+    /* The canvas fills what the strip leaves. It is created inside its pane and never moved: moving
+       it stops Cytoscape painting, and resize/fit/forceRender do not bring it back. */
+    .doc-canvas { flex: 1 1 auto; min-width: 0; min-height: 0; position: relative; }
+    /* ELK cannot be cancelled once its worker result has entered Cytoscape's animation. The canvas
+       is therefore one accessible busy operation through final edge routing: document switching
+       remains available on the pane, while pointer edits cannot race coordinates still in flight. */
+    .doc-pane--layout-busy { cursor: progress; }
+    .doc-pane--layout-busy > .doc-canvas { pointer-events: none; }
+
+    /* Server-owned program readiness blocks the graph pane as one modal operation. The overlay is
+       a sibling of the inert pane so its live status remains exposed while every graph control,
+       pointer target and canvas descendant is unavailable. */
+    .program-readiness-overlay {
+      position: absolute; z-index: 20;
+      display: grid; place-items: center;
+      padding: 20px;
+      background: color-mix(in srgb, var(--bg-0) 78%, transparent);
+      backdrop-filter: blur(2px);
+      cursor: progress;
+      pointer-events: auto;
+    }
+    .program-readiness-overlay[hidden] { display: none; }
+    .program-readiness-card {
+      width: min(440px, calc(100% - 24px)); max-height: calc(100% - 24px); overflow: auto;
+      padding: 18px;
+      border: 1px solid var(--bd); border-radius: 9px;
+      background: var(--surface-overlay); box-shadow: var(--shadow-popover);
+    }
+    .program-readiness-card h3 { margin: 0 0 5px; font-size: 14px; }
+    .program-readiness-card p { margin: 0 0 10px; color: var(--tx-2); font-size: 11px; }
+    .program-readiness-card ul { margin: 0; padding: 0; display: grid; gap: 3px; list-style: none; }
+    .program-readiness-card li {
+      display: flex; justify-content: space-between; gap: 12px;
+      padding: 4px 6px; border-radius: 4px; background: var(--surface-inset); font-size: 10px;
+    }
+    .program-readiness-card li span { overflow: hidden; text-overflow: ellipsis; }
+    .program-readiness-spinner {
+      width: 20px; height: 20px; margin-bottom: 10px;
+      border: 2px solid var(--bd); border-top-color: var(--acc); border-radius: 50%;
+      animation: program-readiness-spin 700ms linear infinite;
+    }
+    @keyframes program-readiness-spin { to { transform: rotate(360deg); } }
+    @media (prefers-reduced-motion: reduce) { .program-readiness-spinner { animation: none; } }
+
+    /* Selection is drawn as a document-owned screen-space layer. Cytoscape keeps the native
+       node border semantic, while this deliberately stays outside the rendered body: it must not
+       change hit testing, routing, dragging, linking, or the box a layout sees. */
+    .graph-selection-overlay {
+      position: absolute; inset: 0; z-index: 4;
+      overflow: visible;
+      pointer-events: none;
+    }
+    .graph-selection-box {
+      position: absolute;
+      box-sizing: border-box;
+      border: 2px solid var(--selection);
+      pointer-events: none;
+    }
+    .graph-selection-handle {
+      position: absolute;
+      box-sizing: border-box;
+      width: 6px; height: 6px;
+      background: var(--bg-0);
+      border: 2px solid var(--selection);
+      pointer-events: none;
+    }
+    .graph-selection-handle[data-corner="nw"] { left: 0; top: 0; transform: translate(-50%, -50%); }
+    .graph-selection-handle[data-corner="ne"] { left: 100%; top: 0; transform: translate(-50%, -50%); }
+    .graph-selection-handle[data-corner="se"] { left: 100%; top: 100%; transform: translate(-50%, -50%); }
+    .graph-selection-handle[data-corner="sw"] { left: 0; top: 100%; transform: translate(-50%, -50%); }
+
+    /* The screen-space geometry is projected through the one global preference published by
+       node-action-scale.js. Real dimensions, rather than a visual transform, keep hit testing,
+       hover continuity and edge clamping aligned at every graph zoom. */
+    .graph-node-actions-overlay {
+      position: absolute; inset: 0; z-index: 5;
+      overflow: visible;
+      pointer-events: none;
+    }
+    .graph-node-actions {
+      position: absolute;
+      display: flex; flex-direction: column; gap: var(--node-action-gap);
+      padding: var(--node-action-bar-inset);
+      border: 0;
+      border-radius: var(--node-action-bar-radius);
+      background: var(--surface-overlay);
+      outline: var(--node-action-border) solid var(--bd);
+      outline-offset: calc(-1 * var(--node-action-border));
+      box-shadow: var(--shadow-popover);
+      pointer-events: auto;
+    }
+    .graph-node-actions-bridge {
+      position: absolute;
+      background: transparent;
+      pointer-events: auto;
+    }
+    .graph-node-actions[hidden], .graph-node-actions-bridge[hidden],
+    .graph-node-action-menu[hidden] { display: none; }
+    .graph-node-action-menu {
+      position: absolute;
+      display: grid;
+      min-width: var(--node-action-menu-min-w);
+      padding: var(--node-action-menu-inset);
+      border: 0;
+      border-radius: var(--node-action-menu-radius);
+      background: var(--surface-overlay);
+      outline: var(--node-action-border) solid var(--bd);
+      outline-offset: calc(-1 * var(--node-action-border));
+      box-shadow: var(--shadow-popover);
+      pointer-events: auto;
+    }
+    .graph-node-action-menu-item {
+      min-height: var(--node-action-menu-item-min-h);
+      padding: var(--node-action-menu-item-padding-block) var(--node-action-menu-item-padding-inline);
+      border: 0; border-radius: var(--node-action-menu-item-radius);
+      background: transparent; color: var(--tx-1);
+      font: inherit; text-align: left; white-space: nowrap;
+    }
+    .graph-node-action-menu-item:hover:not(:disabled),
+    .graph-node-action-menu-item:focus-visible { background: var(--bg-h); }
+    .graph-node-action-menu-item:disabled { color: var(--tx-3); }
+    .graph-node-action {
+      display: flex; align-items: center; justify-content: center;
+      width: var(--node-action-button-w); height: var(--node-action-button-h);
+      min-width: var(--node-action-button-w); min-height: var(--node-action-button-h);
+      padding: 0;
+      border: var(--node-action-border) solid transparent;
+      border-radius: var(--node-action-button-radius);
+      background: transparent; color: var(--tx-2);
+      font: inherit; cursor: pointer;
+    }
+    .graph-node-action[hidden] { display: none; }
+    .graph-node-action > span {
+      font-size: var(--node-action-glyph-size); line-height: 1; pointer-events: none;
+    }
+    .graph-node-action[data-node-action="trace"] { color: var(--acc); }
+    .graph-node-action[data-node-action="delete"] { color: var(--err); }
+    .graph-node-action:hover {
+      background: var(--bg-h); border-color: currentColor;
+    }
+    .graph-node-action:focus-visible {
+      outline: 2px solid var(--focus-ring); outline-offset: 1px;
+      background: var(--bg-h);
+    }
+    @media (pointer: coarse) {
+      .graph-node-actions {
+        display: block;
+        padding: var(--node-action-coarse-bar-inset);
+      }
+      .graph-node-action {
+        width: var(--node-action-coarse-button-w); height: var(--node-action-coarse-button-h);
+        min-width: var(--node-action-coarse-button-w); min-height: var(--node-action-coarse-button-h);
+      }
+      .graph-node-action:not([data-node-action="more"]) { display: none; }
+      .graph-node-action-menu { min-width: var(--node-action-coarse-menu-min-w); }
+      .graph-node-action-menu-item { min-height: var(--node-action-coarse-menu-item-min-h); }
+    }
+    @media (forced-colors: active) {
+      .graph-node-actions, .graph-node-action-menu {
+        background: Canvas; box-shadow: none; outline-color: CanvasText;
+      }
+      .graph-node-action { color: ButtonText; }
+      .graph-node-action:hover, .graph-node-action:focus-visible {
+        border-color: Highlight; outline-color: Highlight;
+      }
+    }
+    /* The boundary between two panes, and the only operable thing this layer adds. It is a real
+       focus stop with arrow-key resize, which is the route that needs no chord: `Alt`-bracket chords
+       cannot be typed on macOS, where Option composes characters rather than modifying them. */
+    /* Workspace document splitters are absolutely projected over the grid line. Their 1px rule is
+       the only thing that consumes layout space; the pseudo-element provides the 9px desktop hit
+       corridor without turning a dense grid into a collection of six-pixel gutters. `--workspace-
+       splitter-x/y` are written by the planner as percentages/lengths in the grid's local box. */
+    .pane-separator {
+      position: relative;
+      flex: 0 0 var(--workspace-splitter-rule); align-self: stretch;
+      background: var(--bd);
+      cursor: col-resize;
+      touch-action: none;
+    }
+    .pane-separator::before {
+      content: '';
+      position: absolute;
+      /* 1px rule + 4px on each side = the declared 9px desktop corridor. Keep this explicit:
+         division inside calc() is not portable enough for the browser baseline. */
+      inset: 0 -4px;
+    }
+    #cy[data-workspace-mode] > .workspace-splitter,
+    #cy[data-workspace-mode] > .pane-separator[data-workspace-splitter] {
+      position: absolute;
+      z-index: 4;
+      flex: none;
+    }
+    #cy[data-workspace-mode] > .workspace-splitter--vertical,
+    #cy[data-workspace-mode] > .pane-separator[data-workspace-axis="column"] {
+      left: var(--workspace-splitter-x);
+      top: 0; bottom: 0;
+      width: var(--workspace-splitter-rule);
+      height: auto;
+      cursor: col-resize;
+      transform: translateX(-0.5px);
+      z-index: 4;
+    }
+    #cy[data-workspace-mode] > .workspace-splitter--horizontal,
+    #cy[data-workspace-mode] > .pane-separator[data-workspace-axis="row"] {
+      left: 0; right: 0;
+      top: var(--workspace-splitter-y);
+      width: auto;
+      height: var(--workspace-splitter-rule);
+      cursor: row-resize;
+      transform: translateY(-0.5px);
+      /* A horizontal boundary owns the crossing. This matches the current later-DOM ordering but
+         remains true if a future renderer changes creation order. */
+      z-index: 5;
+    }
+    #cy[data-workspace-mode] > .workspace-splitter--horizontal::before,
+    #cy[data-workspace-mode] > .pane-separator[data-workspace-axis="row"]::before {
+      inset: -4px 0;
+    }
+    .pane-separator[hidden] { display: none; }
+    .layout-splitter { position: relative; z-index: 30; }
+    .layout-splitter--horizontal {
+      width: 100%; height: var(--workspace-splitter-rule); min-height: var(--workspace-splitter-rule);
+      align-self: auto;
+      cursor: row-resize;
+    }
+    .layout-splitter--horizontal::before { inset: -4px 0; }
+    .pane-separator:hover, .pane-separator:active, .pane-separator--active {
+      background: var(--acc);
+      box-shadow: 0 0 0 1px var(--acc);
+    }
+    .layout-splitter[aria-disabled="true"] { cursor: default; }
+    .layout-splitter[aria-disabled="true"]:hover { background: var(--bd); box-shadow: none; }
+    .pane-separator:focus-visible {
+      background: var(--acc); outline: var(--workspace-focus-ring) solid var(--acc-h); outline-offset: -2px;
+      box-shadow: 0 0 0 1px var(--acc);
+    }
+    .workspace-splitter--vertical:focus-visible,
+    .pane-separator[data-workspace-axis="column"]:focus-visible {
+      box-shadow: 0 0 0 1px var(--acc), inset 0 0 0 1px var(--bg-0);
+    }
+    .workspace-splitter--horizontal:focus-visible,
+    .pane-separator[data-workspace-axis="row"]:focus-visible {
+      box-shadow: 0 0 0 1px var(--acc), inset 0 0 0 1px var(--bg-0);
+    }
+
+    @media (pointer: coarse) {
+      .pane-separator::before {
+        /* 1px rule + 12px on each side = 25px, satisfying the >=24px coarse corridor. */
+        inset: 0 -12px;
+      }
+      #cy[data-workspace-mode] > .workspace-splitter--horizontal::before,
+      #cy[data-workspace-mode] > .pane-separator[data-workspace-axis="row"]::before {
+        inset: -12px 0;
+      }
+    }
+    #cy-wrap.modify-on::before {
+      background-image: radial-gradient(circle, color-mix(in srgb, var(--selection) 55%, transparent) 1px, transparent 1px);
+    }
+    #cy-wrap #cy { cursor: var(--graph-cursor, default); }
+    #cy-wrap.navigation-on #cy { cursor: grab; }
+    #cy-wrap.navigation-on #cy:active { cursor: grabbing; }
+    .graph-mode-label {
+      display: inline-flex; align-items: center; min-height: 24px; padding: 0 8px;
+      border: 1px solid var(--bd); border-radius: 5px; color: var(--tx-2); font-size: 11px;
+    }
+    .graph-interaction-tools {
+      position: absolute; z-index: 5; top: 12px; left: 12px;
+      display: flex; align-items: center; gap: 4px; padding: 4px;
+      border: 1px solid var(--bd); border-radius: 7px;
+      background: color-mix(in srgb, var(--bg-1) 94%, transparent);
+      box-shadow: var(--shadow-popover);
+    }
+
+    /* The graph is one focusable widget, so its focus ring is drawn on the container. Keyboard
+       users get it; a pointer click does not, because a ring around the whole canvas after every
+       click is noise. */
+    #cy-wrap:focus { outline: none; }
+    #cy-wrap:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+    /* The edge being dragged or composed. It is drawn over the canvas rather than inserted into the
+       graph, so an abandoned gesture leaves no element behind to clean up. */
+    .edge-ghost {
+      position: absolute; inset: 0; z-index: 3;
+      width: 100%; height: 100%;
+      display: none; pointer-events: none;
+    }
+    .edge-ghost.on { display: block; }
+    .edge-ghost .ghost-edge {
+      fill: none; stroke: var(--acc); stroke-width: 2; stroke-linecap: round;
+      marker-end: url(#edge-ghost-arrow);
+    }
+    .edge-ghost .ghost-target {
+      fill: var(--bg-1); stroke: var(--acc); stroke-width: 2;
+    }
+    .edge-ghost .ghost-target-self { stroke-width: 3; }
+    .edge-ghost.invalid .ghost-edge,
+    .edge-ghost.invalid .ghost-target { stroke: var(--err); stroke-dasharray: 5 4; }
+    .edge-ghost .ghost-arrow { fill: var(--acc); }
+    .edge-ghost.invalid .ghost-arrow { fill: var(--err); }
+
+    /* Every Elastic document owns its host, SVG and tooltip. The host is created directly in the
+       pane and never moves, just like the Cytoscape canvas beside it. Several visible panes can
+       therefore keep heterogeneous renderers alive without sharing an id or a coordinate origin. */
+    .doc-elastic-host {
+      display: none;
+      position: relative;
+      flex: 1 1 auto;
+      min-width: 0; min-height: 0;
+    }
+    .doc-elastic-host.active { display: block; }
+    .doc-elastic-host.suspended { display: none; }
+
+    /* While the elastic renderer owns a pane, that pane's OWN canvas hides — never `#cy`, which is
+       the shared parent of every pane and whose hiding would blank all the neighbours at once
+       (a limitation avoided by confining the elastic host to its pane). */
+    .doc-canvas--elastic { display: none; }
+
+    .d3-elastic {
+      position: absolute; inset: 0; z-index: 2;
+      width: 100%; height: 100%;
+      display: none;
+      background: transparent;
+      cursor: default;
+    }
+    .d3-elastic.active { display: block; }
+    .d3-edge--active { filter: drop-shadow(0 0 2px currentColor); }
+    @media (prefers-reduced-motion: reduce) {
+      .d3-edge--active { filter: none; }
+    }
+    @media (forced-colors: active) {
+      .d3-edges path { stroke: CanvasText; }
+      .d3-edge--active { stroke: Highlight; }
+      .d3-nodes circle { stroke: CanvasText; }
+    }
+
+    /* Drop zone */
+    #dropzone {
+      position: absolute; inset: 0; z-index: 50;
+      background: var(--accent-soft);
+      border: 2px dashed var(--acc);
+      display: none; align-items: center; justify-content: center;
+      font-size: 18px; color: var(--acc); gap: 10px;
+    }
+    #dropzone.on { display: flex; }
+
+    /* Loading */
+    #loading {
+      position: absolute; inset: 0; z-index: 60;
+      background: var(--minimap-scrim);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 14px;
+    }
+    #loading.off { display: none; }
+    .spin {
+      width: 36px; height: 36px;
+      border: 3px solid var(--bd); border-top-color: var(--acc);
+      border-radius: 50%; animation: spin .7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Empty state */
+    #empty {
+      position: absolute; inset: 0; z-index: 5;
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column; gap: 12px; pointer-events: none;
+    }
+    #empty.off { display: none; }
+    #empty svg { opacity: .25; }
+    #empty p { color: var(--tx-3); font-size: 14px; }
+    #empty small { color: var(--tx-3); font-size: 12px; }
+
+    /* Zoom controls */
+    #zoom-ctrl {
+      position: absolute; bottom: 16px; right: 16px;
+      display: flex; flex-direction: column; gap: 4px; z-index: 10;
+    }
+    .zbtn {
+      width: 32px; height: 32px;
+      background: var(--bg-1); border: 1px solid var(--bd);
+      border-radius: 6px; color: var(--tx-1);
+      font-size: 15px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all .15s;
+    }
+    .zbtn:hover { background: var(--bg-h); border-color: var(--acc); }
+    .zbtn:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+    /* Minimap */
+    #minimap {
+      position: absolute; bottom: 16px; left: 16px; z-index: 10;
+      width: 160px; height: 100px;
+      background: var(--surface-overlay);
+      border: 1px solid var(--bd); border-radius: 8px;
+      overflow: hidden;
+    }
+    #minimap[hidden] { display: none; }
+    #minimap canvas {
+      display: block; width: 100%; height: 100%;
+      cursor: crosshair; touch-action: none; outline: none;
+    }
+    #minimap.is-dragging canvas { cursor: grabbing; }
+    #minimap canvas:focus-visible {
+      outline: 2px solid var(--focus-ring); outline-offset: -3px;
+    }
+    #minimap-label {
+      position: absolute; z-index: 1; top: 4px; left: 6px; right: 6px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: 9px; color: var(--tx-2); pointer-events: none;
+    }
+
+    /* ── RIGHT COLUMN (zone) ──────────────────────────────────────────────────────────────────
+       Always displayed. The old `display:none` plus a hardcoded `#info.on` in the markup was a
+       toggle with NO CALLERS — nothing in app.js ever read or wrote that class — so the rule was
+       dead as a toggle and is retired with the split rather than carried forward. */
+    #info {
+      --panel-column-min-w: 228px;
+      width: 360px; flex-shrink: 0;
+      min-width: var(--panel-column-min-w);
+      background: var(--bg-1); border-left: 1px solid var(--bd);
+      overflow: hidden;
+    }
+    /* The zone body stacks its panels; the column itself is a row (body, then rail). */
+    #info > .zone-body { display: flex; flex-direction: column; min-height: 0; }
+    /* The Inspector owns the whole column: Runtime activity is in the dock, so the body takes what
+       remains instead of splitting the column 52/48 with the log. This sizing reduces the Modify-mode
+       editor's overflow from 205px at 1280 and 112px at 1440 to zero. */
+    #info-body { overflow-y: auto; flex: 1 1 auto; min-height: 0; }
+    /* A 24x24 hit area on a control that measured 12.2 x 16 — half the WCAG 2.5.8 floor on one
+       axis. The glyph is unchanged and so is what it does: this still CLEARS the inspector, and it
+       does not close the panel. Panel close exists only together with its restoration route. */
+    #info-close {
+      flex: 0 0 auto; margin-left: auto;
+      width: 24px; height: 24px;
+      display: flex; align-items: center; justify-content: center;
+      background: none; border: none; border-radius: 4px;
+      color: var(--tx-3); font-size: 14px; cursor: pointer; line-height: 1;
+    }
+    #info-close:hover, #info-close:focus-visible { color: var(--tx-1); }
+    #info-body::-webkit-scrollbar { width: 4px; }
+    #info-body::-webkit-scrollbar-thumb { background: var(--bd); }
+
+    .info-sec { padding: 12px 14px; border-bottom: 1px solid var(--bd); }
+    .info-sec h4 {
+      font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .7px;
+      color: var(--tx-3); margin-bottom: 8px;
+    }
+    .info-row {
+      display: flex; justify-content: space-between;
+      align-items: flex-start; gap: 8px;
+      margin-bottom: 6px; font-size: 12px;
+    }
+    .info-k { color: var(--tx-2); flex-shrink: 0; }
+    .info-v { color: var(--tx-1); text-align: right; word-break: break-all; }
+    .info-mono { font-family: 'SFMono-Regular', Consolas, monospace; font-size: 11px; }
+    .info-desc-row { align-items: flex-start; flex-direction: column; gap: 4px; }
+    .info-desc-row .info-k { margin-bottom: 2px; }
+    .info-desc { text-align: left !important; color: var(--tx-1); font-size: 11.5px;
+      line-height: 1.55; background: var(--surface-primary); border-left: 2px solid var(--border-default);
+      padding: 6px 8px; border-radius: 0 4px 4px 0; word-break: break-word; white-space: pre-wrap; }
+    .info-empty { padding: 22px 16px; color: var(--tx-3); font-size: 12px; line-height: 1.55; }
+
+    /* Multi-selection has no primary node: the Inspector therefore names the collection first and
+       renders only descriptor-compatible fields. States have words and borders as well as colour,
+       so a mixed value cannot be mistaken for an empty or absent property. */
+    [data-multi-node-inspector] { display: flex; flex-direction: column; min-width: 0; }
+    .multi-selection-summary .editor-label-row { margin: 12px 14px 0; }
+    [data-multi-selection-count] {
+      display: inline-flex; align-items: center; align-self: flex-start;
+      margin: 0; padding: 3px 8px;
+      border: 1px solid var(--bd); border-radius: 999px;
+      color: var(--tx-1); background: var(--bg-2); font-size: 11px; font-weight: 600;
+    }
+    [data-multi-selection-empty] {
+      margin: 12px 14px; padding: 10px;
+      border: 1px dashed var(--bd); border-radius: 6px;
+      color: var(--tx-2); background: var(--bg-0); font-size: 11px; line-height: 1.5;
+    }
+    [data-multi-node-inspector] .editor-form { padding-top: 10px; }
+    [data-multi-property] {
+      display: flex; flex-direction: column; gap: 4px;
+      min-width: 0; padding: 8px 0; border-bottom: 1px solid var(--bd);
+    }
+    [data-multi-property]:first-child { border-top: 1px solid var(--bd); }
+    [data-multi-property-state] {
+      color: var(--tx-3); font-size: 10px; line-height: 1.4;
+    }
+    [data-multi-property][data-property-state="mixed"] {
+      border-left: 2px solid var(--warn); padding-left: 8px;
+    }
+    [data-multi-property][data-property-state="mixed"] [data-multi-property-state] { color: var(--warn); }
+    [data-multi-property][data-property-state="absent"] {
+      border-left: 2px solid var(--tx-3); padding-left: 8px;
+    }
+    [data-multi-property][data-property-state="absent"] [data-multi-property-state] { font-style: italic; }
+    [data-multi-property][data-property-secret="true"] [data-multi-property-state] {
+      color: var(--tx-2); font-family: 'SFMono-Regular', Consolas, monospace;
+    }
+    [data-multi-property-input] { width: 100%; min-width: 0; }
+    [data-multi-node-inspector] .validation-list { margin: 10px 0 0; }
+    [data-multi-node-inspector] .editor-actions { margin-top: 12px; }
+    [data-multi-node-inspector] [data-apply-multi-properties] { max-width: 100%; }
+
+    @media (max-width: 720px) {
+      .multi-selection-summary .editor-label-row { margin-left: 10px; margin-right: 10px; }
+      [data-multi-selection-empty] { margin-left: 10px; margin-right: 10px; }
+      [data-multi-node-inspector] .editor-form { padding-left: 10px; padding-right: 10px; }
+      [data-multi-node-inspector] .editor-actions { margin-left: -10px; margin-right: -10px; padding-left: 10px; padding-right: 10px; }
+    }
+
+    /* Runtime activity's summary and Clear now ride in the panel header rather than in a 52px
+       block of their own. The dock is wide — 606px of message column at 1280 against 270px in the
+       old right column — so putting them on one line costs nothing and saves 20px of height. */
+    #activity-summary {
+      flex: 0 1 auto; min-width: 0;
+      color: var(--tx-3); font-size: 10px;
+      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .activity-clear { margin-left: auto; }
+    .activity-clear, .property-remove {
+      background: transparent; border: 1px solid var(--bd); color: var(--tx-2);
+      border-radius: 4px; padding: 3px 7px; cursor: pointer; font-size: 10px;
+    }
+    .activity-clear:hover, .property-remove:hover { border-color: var(--err); color: var(--outcome-error-text); }
+    /* Fills the dock panel's body instead of claiming a fixed 240px of the right column. */
+    #activity-log {
+      flex: 1 1 auto; min-width: 0; min-height: 0; max-width: 100%; overflow-y: auto;
+      padding: 8px 10px; background: var(--surface-canvas);
+      font-family: 'SFMono-Regular', Consolas, monospace; font-size: 10px;
+    }
+    .activity-entry {
+      display: grid; grid-template-columns: 52px 8px minmax(0, 1fr); gap: 5px;
+      min-width: 0; max-width: 100%;
+      padding: 4px 0; border-bottom: 1px solid color-mix(in srgb, var(--bd) 55%, transparent); line-height: 1.35;
+    }
+    .activity-time { color: var(--tx-3); }
+    .activity-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--acc); margin-top: 3px; }
+    .activity-entry.completed .activity-dot { background: var(--ok); }
+    .activity-entry.failed .activity-dot { background: var(--err); }
+    .activity-entry.fallback .activity-dot { background: var(--warn); }
+    .activity-entry.bypassed .activity-dot { background: var(--mag); }
+    .activity-content { min-width: 0; max-width: 100%; }
+    .activity-title { color: var(--tx-1); }
+    .activity-detail {
+      min-width: 0; max-width: 100%; margin-top: 2px; color: var(--tx-3);
+      white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word;
+    }
+    /* Flat, labelled identifiers per row — deliberately not a nested/collapsible group (see
+       app.js's activityIdentifiersHtml comment). Wraps rather than truncates: a truncated id the
+       user cannot read in full defeats the point of showing it separately from the others. */
+    .activity-ids { display: flex; flex-wrap: wrap; gap: 6px 10px; margin-top: 3px; }
+    .activity-id { color: var(--tx-3); font-size: 9px; }
+    .activity-id code { color: var(--tx-2); font-family: inherit; }
+
+    /* ── AUTHORING ASSISTANT (ADR 0025) ────────────────────────────────────────────────────
+       Existing tokens only, and the same vocabulary as the Inspector and the activity log — this is
+       a panel in an established system, not a new surface with its own look. The one deliberate
+       borrow is `#activity-log`'s monospace transcript treatment: both are chronological, appended,
+       and read as a record rather than as prose.
+
+       The column is scarce. The layout is a four-row grid in which ONLY THE TRANSCRIPT GROWS, so
+       the composer and the context chips can never be pushed below the fold by a long conversation
+       — which moving Activity out of this exact column prevents.
+       A Send button the user has to scroll to find is a Send button that does not work. */
+    #assistant-clear { margin-left: auto; }
+    .assistant {
+      display: grid; grid-template-rows: auto minmax(0, 1fr) auto auto;
+      min-height: 0; height: 100%;
+    }
+    .assistant-state {
+      padding: 8px 12px; font-size: 11px; line-height: 1.5; color: var(--tx-2);
+      border-bottom: 1px solid var(--bd); background: var(--bg-1);
+    }
+    /* State is carried by a word in the region's own text AND by this edge, never by colour alone. */
+    .assistant-state[data-state="inert"] { border-left: 3px solid var(--tx-3); }
+    .assistant-state[data-state="ready"] { border-left: 3px solid var(--ok); }
+    .assistant-state[data-state="degraded"] { border-left: 3px solid var(--warn); color: var(--tx-1); }
+    .assistant-state[data-state="error"] { border-left: 3px solid var(--err); color: var(--tx-1); }
+
+    /* ── THE CONNECTION ──────────────────────────────────────────────────────────────────
+       Sits under the state banner because it is the remedy to what the banner just said, and only
+       one of the five inert reasons has a remedy that lives in this panel. It reserves no height
+       when hidden: four states out of five never show it, and a permanently empty strip above the
+       transcript would cost them all the room. */
+    .assistant-connection {
+      padding: 10px 12px; border-bottom: 1px solid var(--bd); background: var(--bg-1);
+      display: flex; flex-direction: column; gap: 8px; align-items: flex-start;
+    }
+    .assistant-connection[hidden] { display: none; }
+    .assistant-connection-step {
+      display: flex; flex-direction: column; gap: 6px; width: 100%; align-items: flex-start;
+    }
+    .assistant-connection-step[hidden] { display: none; }
+    .assistant-connection-instruction { margin: 0; font-size: 11px; color: var(--tx-2); }
+    .assistant-connection-uri { font-size: 11px; color: var(--acc); word-break: break-all; }
+    /* Transcribed by hand from screen to another device, so it is set large, spaced and
+       monospaced: this is the one string in the panel whose legibility decides whether the task
+       can be completed at all. `user-select: all` makes one click select the whole code, because
+       selecting part of it is the failure this control exists to avoid. */
+    .assistant-connection-code {
+      align-self: flex-start; padding: 4px 8px; border: 1px solid var(--bd); border-radius: 3px;
+      background: var(--bg-2); color: var(--tx-1); user-select: all;
+      font-family: 'SFMono-Regular', Consolas, monospace; font-size: 15px; letter-spacing: .12em;
+    }
+    .assistant-connection-code:empty { display: none; }
+    .assistant-connection-progress { margin: 0; font-size: 11px; line-height: 1.5; color: var(--tx-2); }
+
+    .assistant-transcript {
+      min-height: 0; overflow-y: auto; padding: 10px 12px; background: var(--surface-canvas);
+      font-family: 'SFMono-Regular', Consolas, monospace; font-size: 11px; line-height: 1.5;
+    }
+    .assistant-transcript:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    /* There is deliberately NO empty-state element inside the transcript. The state banner above it
+       already says what is going on, and a placeholder that has to be removed when the first turn
+       arrives would be a live region whose structure mutates as content arrives, violating the
+       append-only accessibility invariant. Empty means empty. */
+    /* Flat siblings. No nesting, no grouping, no re-parenting: see the index.html comment. */
+    .assistant-turn { padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--bd) 55%, transparent); }
+    .assistant-turn-role { color: var(--tx-3); font-size: 9px; text-transform: uppercase; letter-spacing: .05em; }
+    .assistant-turn-text { color: var(--tx-1); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+    .assistant-turn--author .assistant-turn-text { color: var(--tx-2); }
+    .assistant-turn--notice .assistant-turn-text { color: var(--warn); }
+    /* "Clear and distinguishable" (Art. 50(5)) has to survive the two ways this panel is actually
+       read: skimmed, and read by someone who cannot see it. The rule and the inset separate it
+       from the conversation visually; `aria-describedby` carries it to the second reader. Colour
+       is NOT doing the distinguishing — the border and offset hold up in a high-contrast mode and
+       for a user who cannot separate the accent from the body text. */
+    .assistant-turn--disclosure {
+      border-left: 2px solid var(--acc); padding-left: 8px; margin: 6px 0;
+      border-bottom: 0; background: color-mix(in srgb, var(--acc) 6%, transparent);
+    }
+    .assistant-turn--disclosure .assistant-turn-text { color: var(--tx-2); font-size: 10px; }
+    .assistant-turn-attached { color: var(--tx-3); font-size: 9px; margin-top: 3px; }
+    .assistant-proposal { margin-top: 8px; padding: 8px; border: 1px solid var(--bd); border-radius: 6px; background: var(--bg-2); }
+    .assistant-proposal h3 { margin: 0; color: var(--tx-1); font-size: 11px; }
+    .assistant-proposal-summary, .assistant-proposal-status { margin: 6px 0; color: var(--tx-2); }
+    .assistant-proposal-changes { margin: 6px 0; padding-left: 18px; color: var(--tx-2); }
+    .assistant-proposal-actions { display: flex; gap: 6px; }
+
+    .assistant-context { border-top: 1px solid var(--bd); padding: 8px 12px; background: var(--bg-1); }
+    .assistant-context-hd {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      color: var(--tx-3); font-size: 10px; font-weight: 600;
+    }
+    .assistant-chips { display: flex; flex-wrap: wrap; gap: 4px 6px; margin-top: 6px; list-style: none; }
+    /* Two states, two shapes. `unavailable` is not merely dimmer — it is outlined and prefixed, so
+       the difference survives a monochrome display and a colour-vision deficiency. */
+    .assistant-chip {
+      display: inline-flex; align-items: center; gap: 4px;
+      border: 1px solid var(--bd); border-radius: 999px; padding: 2px 8px; font-size: 10px;
+    }
+    .assistant-chip[data-state="attached"] { border-color: var(--ok); color: var(--tx-1); }
+    .assistant-chip[data-state="unavailable"] { border-style: dashed; color: var(--tx-3); }
+    .assistant-chip-mark { font-size: 9px; }
+    .assistant-payload {
+      margin-top: 6px; max-height: 180px; overflow: auto; padding: 8px;
+      background: var(--bg-0); border: 1px solid var(--bd); border-radius: 6px;
+      font-family: 'SFMono-Regular', Consolas, monospace; font-size: 10px;
+      color: var(--tx-2); white-space: pre-wrap; word-break: break-word;
+    }
+    .assistant-payload:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+    .assistant-payload[hidden] { display: none; }
+
+    .assistant-composer { border-top: 1px solid var(--bd); padding: 8px 12px 10px; background: var(--bg-1); }
+    .assistant-draft {
+      width: 100%; resize: vertical; min-height: 54px; padding: 6px 8px; font: inherit; font-size: 11px;
+      background: var(--bg-0); color: var(--tx-1); border: 1px solid var(--bd); border-radius: 6px;
+    }
+    .assistant-draft:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+    .assistant-draft[aria-invalid="true"] { border-color: var(--err); }
+    .assistant-draft:disabled { color: var(--tx-3); cursor: not-allowed; }
+    .assistant-error { margin-top: 6px; color: var(--outcome-error-text); font-size: 10px; line-height: 1.45; }
+    .assistant-error[hidden] { display: none; }
+    .assistant-composer-actions {
+      display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; margin-top: 6px;
+    }
+    #assistant-composer-help { color: var(--tx-3); font-size: 10px; line-height: 1.4; }
+    #assistant-send { min-height: 28px; padding: 4px 12px; font-size: 11px; }
+    /* Coarse pointers get the same 44px target the rest of the product's controls get. */
+    @media (pointer: coarse) {
+      #assistant-send { min-height: var(--workspace-control-min-coarse); }
+    }
+
+    .editor-form { padding: 12px 14px 18px; }
+    .editor-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+    .editor-field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .editor-field.full { grid-column: 1 / -1; }
+    .editor-field label { color: var(--tx-2); font-size: 10px; font-weight: 600; }
+    .editor-field input, .editor-field select { width: 100%; height: 30px; padding: 5px 7px; font-size: 11px; }
+    /* The rule above is written for text fields and selects, and a checkbox is neither: it was
+       being stretched to the full column width and 30px tall, so it read as an empty input box with a
+       caption underneath rather than as a tick box with a label beside it. Measured on the edge
+       inspector when governed by the generic rule: 299x30. The correction belongs here rather than
+       at one control,
+       because `parallel` in the same form and every checkbox added later inherit the same defect. */
+    .editor-field input[type="checkbox"] {
+      width: auto; height: auto; margin: 0 6px 0 0; padding: 0;
+      vertical-align: -2px; accent-color: var(--acc);
+    }
+    /* A readonly field looks exactly like an editable one here, which is tolerable for the ID
+       (readonly from the moment the form opens) and not for Outcome, which BECOMES readonly in
+       response to the Failure route checkbox: without a cue the user types into it and nothing
+       happens. Dimmed surface and a not-allowed cursor, no colour-only signal — the state is also
+       carried by the checkbox beside it and by the help text the field points at. */
+    .editor-field input[readonly] {
+      background: color-mix(in srgb, var(--bg-2) 60%, transparent);
+      color: var(--tx-2); cursor: not-allowed;
+    }
+    .editor-field textarea { width: 100%; min-height: 64px; resize: vertical; padding: 7px; font-size: 11px; }
+    /* The Inspector STATES which kind an edge is instead of leaving it to be
+       inferred from an outcome that happens to be spelled `failed`. It reads as a statement, not as
+       a field label, because it describes the edge rather than naming an input — and the left rule
+       carries the kind in POSITION and TEXT before colour, since the whole defect is two things
+       that looked alike. */
+    .edge-kind {
+      flex: 1; min-width: 0; margin: 0; padding: 6px 0 6px 9px; border-left: 3px solid var(--bd);
+      color: var(--tx-2); font-size: 11px; line-height: 1.45;
+    }
+    .edge-kind-row { align-items: flex-start; }
+    .edge-kind[data-edge-kind="failure-declared"],
+    .edge-kind[data-edge-kind="failure-implicit"] { border-left-color: var(--edge-failure); }
+    [data-failure-route-control][hidden] { display: none; }
+    .editor-section-title {
+      display: flex; align-items: center; justify-content: space-between;
+      margin: 16px 0 7px; color: var(--tx-2); font-size: 10px;
+      text-transform: uppercase; letter-spacing: .6px; font-weight: 700;
+    }
+    .property-add { color: var(--acc); background: none; border: 0; cursor: pointer; font-size: 10px; }
+    .property-row { display: grid; grid-template-columns: 1fr 72px 1fr 24px; gap: 5px; margin-bottom: 6px; }
+    .property-row input, .property-row select { min-width: 0; height: 28px; padding: 4px 6px; font-size: 10px; }
+    .property-remove { padding: 0; height: 28px; }
+    /* ── The editor's action row, PINNED ──────────────────────────────────────────────────────
+       The bottom dock takes the ORDINARY node editor's overflow to zero, but the PROGRAMMABLE
+       editor is still 422px over at 1280x800 after the dock, because its height is carried by
+       full-width rows that no amount of extra column width reflows away. Without this the primary
+       action is below the fold for exactly the editor that needs it most.
+
+       Sticky rather than a fixed footer: MEASURED, it is a NO-OP WHEN THE CONTENT FITS — the row
+       sits at the same offset with the rule on and off — so the ordinary case cannot regress.
+
+       The negative margins pull the row out of `.editor-form`'s 14px side padding so its background
+       spans the full width of the scroll container; without them the form's content would show
+       through the gutters as it scrolls beneath. */
+    .editor-actions {
+      display: flex; gap: 7px;
+      position: sticky; bottom: 0; z-index: 1;
+      margin: 15px -14px -18px; padding: 12px 14px;
+      background: var(--bg-1);
+      border-top: 1px solid var(--bd);
+    }
+
+    /* ── SAFETY, NOT STYLING — this pairs with the rule above and must never be separated ──────
+       `delete-node` and `delete-edge` delete IMMEDIATELY, with no confirmation. While the row
+       scrolled away the destructive button was only occasionally on screen; pinning it in view
+       permanently raises the accidental-destruction surface, so the row may only be pinned if the
+       two actions stop being interchangeable at a glance.
+
+       Previously `flex: 1` on EVERY button gave Delete exactly the width and weight of Save. Now
+       the primary action takes the row and the destructive one shrinks to its own label, so they
+       differ in size, in position and in colour rather than in colour alone.
+
+       Whether an instant destructive action should ALSO be confirmed is a separate product
+       question and is deliberately not answered here: the action is undoable through
+       `editHistory`. */
+    .editor-actions .btn { justify-content: center; flex: 1 1 auto; }
+    .editor-actions .btn.danger { flex: 0 0 auto; }
+    /* AN UPPER BOUND ON THE COMMIT ACTION. `flex: 1` with no ceiling was sized for a 332px column.
+       Moving the Inspector into the DOCK lets the same rule produce a commit button over a
+       thousand pixels wide sitting 7px from an unconfirmed Delete. That is the destructive-action
+       exposure the weight hierarchy exists to prevent, reappearing at a width the hierarchy was
+       never measured at.
+       This hazard is reachable only because the Inspector can move into the dock.
+
+       MEASURED AT 1440x900, BOTH COLUMNS EXPANDED, INSPECTOR ALONE IN THE DOCK — the configuration
+       is named because the dock's width depends on it, and an unqualified figure sends a future
+       reader who re-measures elsewhere to the conclusion that the code changed:
+
+         zone action row primary unbound -> bound gap unbound -> bound
+         right 331px 237px -> 237px 7px -> 7px
+         left 195px 101px -> 101px 7px -> 7px
+         bottom 1188px 1094px -> 320px 7px -> 781px
+
+       ZERO change in either column is the property that makes the bound safe; the dock figures are
+       what makes it necessary. The test asserts THRESHOLDS rather than these literals, so the
+       safety property does not rest on them staying exact — keep it that way. */
+    .editor-actions .btn.primary { max-width: 320px; margin-left: auto; }
+    /* `--bd`, not `--border`: `--border` is declared NOWHERE in the product. An invalid `var()`
+       with no fallback makes border-color compute to its initial value, which is `currentColor`,
+       so this box drew its 1px border in the near-white body text colour — rgb(230,237,243)
+       against a #0b1119 fill — instead of #30363d. Confirmed by render before being changed, not
+       inferred from reading: the surface is only reachable with a live catalog serving a
+       `program` behavior, which is why it survived this long unseen. */
+    .program-workspace { margin-top: 12px; padding: 10px; border: 1px solid var(--bd); border-radius: 7px; background: var(--surface-inset); }
+    .program-source { width: 100%; min-height: 130px !important; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .program-lifecycle { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; margin-top: 9px; }
+    .program-lifecycle .btn { padding: 6px 3px; font-size: 9px; justify-content: center; }
+    .program-status { margin-top: 8px; color: var(--tx-2); font-size: 10px; overflow-wrap: anywhere; }
+    .program-timeline { margin: 7px 0 0; padding-left: 18px; color: var(--tx-2); font-size: 10px; }
+    .program-timeline [data-state="failed"] { color: var(--outcome-error-text); }
+    .program-output { display: block; margin-top: 7px; color: var(--tx-1); font-size: 10px; white-space: pre-wrap; }
+    .program-output[hidden] { display: none; }
+    .btn.danger { color: var(--outcome-error-text); border-color: color-mix(in srgb, var(--err) 55%, transparent); }
+    .validation-list { margin: 8px 0 0 18px; color: var(--outcome-error-text); font-size: 10px; line-height: 1.5; }
+
+    @media (max-width: 1180px) {
+      #sidebar { width: 188px; }
+      #info { width: 330px; }
+      .service-field span, .token-field span, .payload-field span { display: none; }
+      .service-field input { width: 150px; }
+      .token-field input { width: 130px; }
+      .payload-field input { width: 130px; }
+      #topbar .btn { padding-inline: 7px; }
+    }
+
+    /* A touch-only surface cannot disclose the identity tooltips before activation. Server
+       catalog glyphs may repeat, so an all-short zone retains labelled geometry here while its
+       compact intent remains derived for a later fine-pointer projection. */
+    @media (hover: none), (pointer: coarse) {
+      #sidebar { --panel-column-min-w: 188px; }
+      #info { --panel-column-min-w: 228px; }
+      .zone--compact .panel--short #leg-nodes,
+      .zone--compact .panel--short #leg-edges { display: block; }
+      .zone--compact .panel--short .li {
+        width: 100%; height: auto; padding: 4px 6px; justify-content: flex-start; gap: 8px;
+      }
+      .zone--compact .panel--short .li-label { display: inline; }
+      .zone--compact .panel--short .li-dot { width: 13px; height: 13px; display: block; }
+      .zone--compact .panel--short .li-glyph { display: none; }
+      .zone--compact .panel--short .li-line,
+      .zone--compact .panel--short .li-dash { width: 22px; }
+      .zone--compact .panel--short #node-catalog.node-catalog--items {
+        display: flex; grid-template-columns: none; gap: 5px;
+      }
+      .zone--compact .panel--short .catalog-item {
+        width: 100%; height: auto; padding: 7px 8px; justify-content: flex-start; gap: 8px;
+      }
+      .zone--compact .panel--short .catalog-item-copy { display: flex; }
+      .zone--compact .panel--short .catalog-item-icon {
+        width: 20px; height: auto; display: block;
+      }
+    }
+
+    /* Every hidden control below is a mirror with a stable menu route. Unique runtime controls,
+       the menubar, switcher and Play are never density candidates. */
+    @media (max-width: 1790px) {
+      #workflowbar { flex-wrap: wrap; align-content: center; row-gap: 6px; }
+      #workflowbar > .spacer { display: none; }
+      #workflowbar > .editor-mirrors, #workflowbar > .runtime-controls { flex: 1 1 100%; }
+    }
+
+    @media (max-width: 900px) {
+      /* The top bar contains global controls with no equivalent per-document route. Wrap them onto
+         additional rows instead of clipping the right edge; the flex-column body gives the extra
+         height back to the stage automatically. */
+      #topbar { height: auto; min-height: 52px; padding-block: 8px; flex-wrap: wrap; }
+      #topbar > .spacer { display: none; }
+      .editor-mirrors { display: none !important; }
+      #workflowbar > .runtime-controls { flex: 1 1 100%; }
+    }
+
+    /* Preserve the document route before decorative wordmark copy when the established top bar is
+       dense. The logo remains named; only its repeated visual text compacts to the existing mark. */
+    @media (max-width: 1350px) {
+      .logo-wordmark { display: none; }
+      .document-switcher { max-width: 250px; }
+      #font-slider, #node-action-scale-slider { width: 56px; }
+      #rep-slider, #attr-slider { width: 52px; }
+    }
+
+    .badge {
+      display: inline-flex; align-items: center;
+      padding: 2px 7px; border-radius: 10px;
+      font-size: 11px; font-weight: 500; border: 1px solid;
+    }
+    .conn-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 4px 6px; border-radius: 4px;
+      font-size: 12px; margin-bottom: 2px;
+      background: var(--bg-2); cursor: pointer;
+      transition: background .12s;
+    }
+    .conn-item:hover { background: var(--bg-h); }
+    .conn-lbl { font-size: 10px; border-radius: 4px; padding: 1px 5px; font-weight: 500; }
+
+    /* ── FONT SIZE CONTROL ────────────────────── */
+    #font-ctrl, #node-action-scale-ctrl {
+      display: flex; align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
+
+    /* ── ELASTIC REPULSION CONTROL (elastic layout only) ─── */
+    #elastic-ctrl {
+      display: none; align-items: center; gap: 6px;
+      flex-shrink: 0;
+    }
+    #elastic-ctrl.visible { display: flex; }
+    #rep-icon { font-size: 14px; color: var(--tx-2); user-select: none; line-height: 1; flex-shrink: 0; }
+    #rep-val { font-size: 11px; color: var(--tx-2); min-width: 26px;
+                text-align: right; font-variant-numeric: tabular-nums; }
+    #rep-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 80px; height: 4px;
+      background: var(--bd); border-radius: 2px; outline: none;
+      cursor: pointer;
+    }
+    #rep-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--amber); border: 2px solid var(--bg-1);
+      cursor: pointer; transition: background .15s;
+    }
+    #rep-slider::-webkit-slider-thumb:hover { background: var(--warn); }
+    #rep-slider::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--amber); border: 2px solid var(--bg-1);
+      cursor: pointer;
+    }
+    #attr-icon { font-size: 14px; color: var(--tx-2); user-select: none; line-height: 1; flex-shrink: 0; }
+    #attr-val { font-size: 11px; color: var(--tx-2); min-width: 30px;
+                 text-align: right; font-variant-numeric: tabular-nums; }
+    #attr-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 80px; height: 4px;
+      background: var(--bd); border-radius: 2px; outline: none;
+      cursor: pointer;
+    }
+    #attr-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--cyan); border: 2px solid var(--bg-1);
+      cursor: pointer; transition: background .15s;
+    }
+    #attr-slider::-webkit-slider-thumb:hover { background: var(--cyan); }
+    #attr-slider::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--cyan); border: 2px solid var(--bg-1);
+      cursor: pointer;
+    }
+    /* tooltip D3 elastic */
+    .d3-tooltip {
+      position: absolute; z-index: 10;
+      background: var(--surface-overlay); border: 1px solid var(--border-default);
+      border-radius: 6px; padding: 6px 10px;
+      font-size: 11px; color: var(--text-primary); pointer-events: none;
+      white-space: pre-line; display: none;
+      box-shadow: var(--shadow-popover); line-height: 1.6;
+    }
+    #font-icon, #node-action-scale-icon {
+      font-size: 15px; color: var(--tx-2); user-select: none;
+      line-height: 1; flex-shrink: 0;
+    }
+    #font-val, #node-action-scale-val {
+      font-size: 11px; color: var(--tx-2); min-width: 18px;
+      text-align: right; font-variant-numeric: tabular-nums;
+    }
+    #font-slider, #node-action-scale-slider {
+      -webkit-appearance: none; appearance: none;
+      width: 90px; height: 4px;
+      background: var(--bd); border-radius: 2px; outline: none;
+      cursor: pointer;
+    }
+    #font-slider::-webkit-slider-thumb, #node-action-scale-slider::-webkit-slider-thumb {
+      -webkit-appearance: none; appearance: none;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--acc); border: 2px solid var(--bg-1);
+      cursor: pointer; transition: background .15s;
+    }
+    #font-slider::-webkit-slider-thumb:hover,
+    #node-action-scale-slider::-webkit-slider-thumb:hover { background: var(--acc-h); }
+    #font-slider::-moz-range-thumb, #node-action-scale-slider::-moz-range-thumb {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--acc); border: 2px solid var(--bg-1);
+      cursor: pointer;
+    }
+
+    /* ── BOTTOM BAR ───────────────────────────── */
+    #bot {
+      height: 28px; flex-shrink: 0;
+      background: var(--bg-1); border-top: 1px solid var(--bd);
+      display: flex; align-items: center;
+      padding: 0 14px; gap: 16px;
+      font-size: 11px; color: var(--tx-2);
+    }
+    #bot .stat { display: flex; align-items: center; gap: 4px; }
+    #bot .stat b { color: var(--tx-1); }
+
+    /* ── KEYBOARD HELP OVERLAY ─────────────────── */
+    #help-overlay {
+      position: fixed; inset: 0; z-index: 500;
+      background: var(--dialog-backdrop);
+      display: none; align-items: center; justify-content: center;
+    }
+    #help-overlay.on { display: flex; }
+    #help-box {
+      background: var(--bg-1); border: 1px solid var(--bd);
+      border-radius: 10px; padding: 24px 28px; width: 420px;
+      max-height: calc(100vh - 48px); overflow: auto;
+      box-shadow: var(--shadow-dialog);
+    }
+    #help-box h2 { font-size: 15px; margin-bottom: 16px; }
+    .hk { display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 8px; }
+    .hk kbd {
+      background: var(--bg-2); border: 1px solid var(--bd);
+      border-radius: 4px; padding: 2px 7px; font-size: 11px; font-family: monospace;
+    }
+    .hk span { color: var(--tx-2); }

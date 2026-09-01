@@ -1,0 +1,129 @@
+package ai.ravenroot.extensions.openapi.server;
+
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.deployment.IngressDisposition;
+import ai.ravenroot.api.deployment.IngressOverflowPolicy;
+import ai.ravenroot.api.deployment.IngressReceipt;
+import ai.ravenroot.api.deployment.TrustedIngress;
+import ai.ravenroot.api.ingress.IngressAuthorityDeclaration;
+import ai.ravenroot.api.ingress.IngressPrincipal;
+import ai.ravenroot.api.ingress.IngressRequest;
+import ai.ravenroot.api.ingress.IngressRequestProjectionPolicy;
+import ai.ravenroot.api.ingress.IngressResponse;
+import ai.ravenroot.api.ingress.IngressRouteAuthority;
+import ai.ravenroot.api.ingress.IngressRouteHandler;
+import ai.ravenroot.api.ingress.IngressRouteLease;
+import ai.ravenroot.api.ingress.IngressRouteOwner;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.time.Duration;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+
+final class OpenApiServerTestSupport {
+    static final byte[] SPEC = fixture();
+
+    static OpenApiServerProfile profile() {
+        return new OpenApiServerProfile("orders", SPEC, sha256(SPEC), "/api",
+                Set.of("createOrder", "specialOrder"), Set.of("USER"), "idempotency-key", null,
+                4096, 128, 1_000, 2);
+    }
+
+    static OpenApiServerConfiguration configuration() {
+        return new OpenApiServerConfiguration(new IngressAuthorityDeclaration(
+                OpenApiServerConfiguration.PACKAGE_ID, "main", "/managed/openapi", Set.of("graph:execute"),
+                8, 8, 8192, 1024, Duration.ofSeconds(2)),
+                new IngressRequestProjectionPolicy(OpenApiServerConfiguration.PACKAGE_ID,
+                        Set.of("content-type", "idempotency-key", "x-trace"), "idempotency-key",
+                        1024, 32, 2048, 8, 2048, 256), Map.of("orders", profile()));
+    }
+
+    static IngressRequest request(String path, Map<String, java.util.List<String>> query,
+                                  Map<String, String> headers, byte[] body) {
+        var projected = new java.util.LinkedHashMap<>(headers);
+        if (body.length != 0) projected.putIfAbsent("content-type", "application/json");
+        return new IngressRequest(new IngressPrincipal("tenant-a", "alice", "issuer", "USER"),
+                "POST", path, query, projected, body);
+    }
+
+    static String sha256(byte[] bytes) {
+        try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
+        catch (java.security.NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+    }
+
+    private static byte[] fixture() {
+        try (var input = OpenApiServerTestSupport.class.getResourceAsStream("/orders-openapi.json")) {
+            if (input == null) throw new IllegalStateException("missing OpenAPI fixture");
+            return input.readAllBytes();
+        } catch (java.io.IOException failure) { throw new IllegalStateException(failure); }
+    }
+
+    static final class FakeIngress implements TrustedIngress {
+        final AtomicReference<Object> payload = new AtomicReference<>();
+        final AtomicReference<String> key = new AtomicReference<>();
+        final AtomicInteger calls = new AtomicInteger();
+        volatile IngressReceipt receipt = new IngressReceipt.DurablyCommitted("stored");
+        volatile Runnable onOffer = () -> { };
+        @Override public IngressDisposition offer(SecurityContext security, ai.ravenroot.api.deployment.IngressTarget target,
+                                                  Object payload) { return IngressDisposition.ACCEPTED; }
+        @Override public int bufferCapacity() { return 8; }
+        @Override public IngressOverflowPolicy overflowPolicy() { return IngressOverflowPolicy.REJECT; }
+        @Override public IngressReceipt offerDurably(SecurityContext security, ai.ravenroot.api.deployment.IngressTarget target,
+                                                     Object payload, String sourceId, String idempotentKey) {
+            calls.incrementAndGet(); this.payload.set(payload); this.key.set(idempotentKey); onOffer.run(); return receipt;
+        }
+    }
+
+    static final class FakeContext implements InboundSourceContext {
+        final FakeIngress ingress;
+        FakeContext(FakeIngress ingress) { this.ingress = ingress; }
+        @Override public DeploymentId deploymentId() { return DeploymentId.of("deployment-a"); }
+        @Override public String nodeId() { return "openapi-node"; }
+        @Override public SecurityContext identity() {
+            return new SecurityContext("request", "tenant-a", "operator", PrincipalType.WORKLOAD, "runtime");
+        }
+        @Override public TrustedIngress ingress() { return ingress; }
+        @Override public void reportDegraded(String reason) { }
+        @Override public void reportHealthy() { }
+    }
+
+    static final class FakeAuthority implements IngressRouteAuthority {
+        final AtomicInteger acquisitions = new AtomicInteger();
+        final AtomicInteger releases = new AtomicInteger();
+        volatile IngressRouteHandler handler;
+        volatile boolean refuse;
+        volatile String path;
+        volatile Set<String> methods;
+
+        @Override public IngressRouteLease acquire(String routeId, String relativePath, Set<String> methods,
+                                                   IngressRouteHandler handler) {
+            throw new AssertionError("prefix lease required");
+        }
+        @Override public IngressRouteLease acquirePrefix(String routeId, String relativePath, Set<String> methods,
+                                                         IngressRouteHandler handler) {
+            if (refuse) throw new IllegalStateException("collision detail must be sanitized");
+            acquisitions.incrementAndGet(); this.handler = handler; this.path = relativePath; this.methods = Set.copyOf(methods);
+            return new IngressRouteLease() {
+                private final java.util.concurrent.atomic.AtomicBoolean closed = new java.util.concurrent.atomic.AtomicBoolean();
+                @Override public String routeId() { return routeId; }
+                @Override public IngressRouteOwner owner() {
+                    return new IngressRouteOwner(OpenApiServerConfiguration.PACKAGE_ID, "tenant-a", "deployment-a",
+                            "openapi-node", 1);
+                }
+                @Override public void release() { if (closed.compareAndSet(false, true)) releases.incrementAndGet(); }
+            };
+        }
+
+        IngressResponse invoke(IngressRequest request) {
+            return handler.handle(request).toCompletableFuture().join();
+        }
+    }
+
+    private OpenApiServerTestSupport() { }
+}

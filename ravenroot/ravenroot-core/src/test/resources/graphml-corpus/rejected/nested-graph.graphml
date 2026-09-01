@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <graph id="outer" edgedefault="directed">
+    <node id="container">
+      <graph id="inner" edgedefault="directed">
+        <node id="nested"/>
+      </graph>
+    </node>
+  </graph>
+</graphml>

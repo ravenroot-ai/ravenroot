@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This file used to be a yEd-compatibility fixture (name/start/end-boolean keys, graph
+  id="compatibility") that had drifted into being the product's shipped first-contact example. It
+  was accepted by /v1/graphs/inspect but refused by /v1/executions, because the server's canonical
+  GraphML profile uses a single `kind` key valued START/BEHAVIOR/PASSTHROUGH/END, not
+  yEd's separate boolean `start`/`end` data.
+
+  This replacement uses only that canonical convention and only a behavior the running server
+  actually registers (`template`, see BehaviorRegistry.standard()/StandardBehaviorFactories), so
+  it is admitted for execution and produces a real, non-empty payload: see
+  ShippedExampleCorpusTest#ravenrootMinimalProducesObservableOutput.
+
+  This example carries an `Error` node wired to a real branch rather than left isolated: an
+  unreachable Error node would satisfy its structural purpose without teaching anything, exactly
+  the shape this first-contact example must not have. The happy path (continue -> end) is unchanged, so
+  ShippedExampleCorpusTest#ravenrootMinimalProducesObservableOutput still observes the same output;
+  the branch to `error` is never taken on a normal run.
+
+  The failure branch declares no outcome. An outcome is what a node that RAN produced; a node that
+  threw produced none, so `outcome=failed` would never select the Error node. Leaving the edge
+  undeclared makes it the implicit unhandled-failure route. Writing `failure.route=true` would work
+  too, but would misleadingly teach an opt-in where the Error target already supplies the route;
+  GraphDefinition also refuses that property beside an outcome.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="template" for="node" attr.name="template" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="ravenroot-minimal" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="greet">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">template</data>
+      <data key="template">Hello, {{payload}}! Ravenroot received your request.</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="e1" source="start" target="greet"><data key="outcome">continue</data></edge>
+    <edge id="e2" source="greet" target="end"><data key="outcome">continue</data></edge>
+    <edge id="e3" source="greet" target="error"/>
+  </graph>
+</graphml>

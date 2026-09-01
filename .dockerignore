@@ -1,0 +1,19 @@
+.git
+.idea
+.vscode
+.DS_Store
+**/.DS_Store
+**/node_modules
+**/dist
+**/target
+**/coverage
+**/test-results
+**/playwright-report
+**/*.log
+**/.env
+**/.env.*
+.ravenroot-local
+
+# Runtime-only CI image inputs preserve their Maven directory layout.
+!ci-artifacts/
+!ci-artifacts/**

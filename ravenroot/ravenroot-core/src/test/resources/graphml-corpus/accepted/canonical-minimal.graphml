@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="n-kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="n-owner" for="node" attr.name="owner" attr.type="string"/>
+  <key id="e-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="e-trace" for="edge" attr.name="trace.enabled" attr.type="boolean"/>
+  <graph id="canonical-workflow" edgedefault="directed">
+    <node id="start">
+      <data key="n-kind">START</data>
+      <data key="n-owner">platform</data>
+    </node>
+    <node id="end">
+      <data key="n-kind">END</data>
+    </node>
+    <node id="error">
+      <data key="n-kind">ERROR</data>
+    </node>
+    <edge id="edge-start-end" source="start" target="end">
+      <data key="e-outcome">continue</data>
+      <data key="e-trace">true</data>
+    </edge>
+  </graph>
+</graphml>

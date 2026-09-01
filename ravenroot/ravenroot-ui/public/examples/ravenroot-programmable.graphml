@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This example carries an `Error` node wired to a real branch rather than left isolated; an
+  unreachable Error node teaches nothing. `greeting` routes its failures to it, and Error itself
+  leads into `error-log` and rejoins the main flow at `end`: the full error-terminal routing pattern (an
+  Error node may lead to Log, Telegram, Alarm, Retry, or Remediation and can rejoin the flow), which
+  this richer example is the natural place to show in full; the smaller
+  ravenroot-minimal.graphml only shows the failure-routing half. `end`'s existing `joinPolicy=any`
+  already accepts this extra incoming edge with no change. The original decision branches
+  (accepted/rejected) are untouched.
+
+  E7 declares no outcome because an outcome is what a node that RAN produced, while a node that
+  threw produced none. An explicit `outcome=failed` would make the Error node, `error-log` and rejoin
+  unreachable. With no outcome, e7 is the implicit unhandled-failure route: an unhandled error goes
+  directly to that node, while a handled error follows its explicit route.
+  Note the contrast this file now draws in one drawing: e7 declares nothing and is a
+  failure route because it points AT the Error node, while e8 leaves the Error node for `error-log`
+  and is an ordinary outcome edge. What decides is the kind of the node an edge points at; nothing
+  about where it starts, and nothing about e8's `continue`, which a bare e8 would carry anyway.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="name" for="node" attr.name="name" attr.type="string"/>
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="template" for="node" attr.name="template" attr.type="string"/>
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/>
+  <key id="trueOutcome" for="node" attr.name="trueOutcome" attr.type="string"/>
+  <key id="falseOutcome" for="node" attr.name="falseOutcome" attr.type="string"/>
+  <key id="message" for="node" attr.name="message" attr.type="string"/>
+  <key id="joinPolicy" for="node" attr.name="joinPolicy" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="ravenroot-programmable-example" edgedefault="directed">
+    <node id="start">
+      <data key="name">Start</data>
+      <data key="kind">START</data>
+    </node>
+    <node id="greeting">
+      <data key="name">Build greeting</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">template</data>
+      <data key="template">Hello {{payload}}</data>
+    </node>
+    <node id="is-ravenroot">
+      <data key="name">Validate greeting</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">cel-decision</data>
+      <data key="expression">payload == 'Hello Ravenroot'</data>
+      <data key="trueOutcome">accepted</data>
+      <data key="falseOutcome">rejected</data>
+    </node>
+    <node id="accepted-log">
+      <data key="name">Accepted</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">log</data>
+      <data key="message">Accepted payload: {{payload}}</data>
+    </node>
+    <node id="rejected-log">
+      <data key="name">Rejected</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">log</data>
+      <data key="message">Rejected payload: {{payload}}</data>
+    </node>
+    <node id="end">
+      <data key="name">End</data>
+      <data key="kind">END</data>
+      <data key="joinPolicy">any</data>
+    </node>
+    <node id="error">
+      <data key="name">Error</data>
+      <data key="kind">ERROR</data>
+    </node>
+    <node id="error-log">
+      <data key="name">Log error</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">log</data>
+      <data key="message">Failed to build greeting for payload: {{payload}}</data>
+    </node>
+    <edge id="e1" source="start" target="greeting"><data key="outcome">continue</data></edge>
+    <edge id="e2" source="greeting" target="is-ravenroot"><data key="outcome">continue</data></edge>
+    <edge id="e3" source="is-ravenroot" target="accepted-log"><data key="outcome">accepted</data></edge>
+    <edge id="e4" source="is-ravenroot" target="rejected-log"><data key="outcome">rejected</data></edge>
+    <edge id="e5" source="accepted-log" target="end"><data key="outcome">continue</data></edge>
+    <edge id="e6" source="rejected-log" target="end"><data key="outcome">continue</data></edge>
+    <edge id="e7" source="greeting" target="error"/>
+    <edge id="e8" source="error" target="error-log"><data key="outcome">continue</data></edge>
+    <edge id="e9" source="error-log" target="end"><data key="outcome">continue</data></edge>
+  </graph>
+</graphml>

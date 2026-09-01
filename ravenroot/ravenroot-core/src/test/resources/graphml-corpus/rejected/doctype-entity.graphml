@@ -1,0 +1,7 @@
+<!DOCTYPE graphml [<!ENTITY synthetic "must-not-expand">]>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="label" for="node" attr.name="label" attr.type="string"/>
+  <graph id="entity" edgedefault="directed">
+    <node id="start"><data key="label">&synthetic;</data></node>
+  </graph>
+</graphml>

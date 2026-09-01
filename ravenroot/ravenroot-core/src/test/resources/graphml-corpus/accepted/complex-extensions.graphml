@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<g:graphml xmlns:g="http://graphml.graphdrawing.org/xmlns"
+           xmlns:y="http://www.yworks.com/xml/graphml"
+           xmlns:viz="urn:example:sanitized-visual">
+  <g:key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <g:key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <g:key id="node-graphics" for="node" yfiles.type="nodegraphics"/>
+  <g:key id="edge-graphics" for="edge" yfiles.type="edgegraphics"/>
+  <g:key id="node-owner" for="node" attr.name="owner" attr.type="string"/>
+  <g:key id="edge-owner" for="edge" attr.name="owner" attr.type="string"/>
+  <g:graph id="visual-workflow" edgedefault="directed" viz:revision="3">
+    <g:desc>Sanitized visual metadata fixture</g:desc>
+    <g:node id="start">
+      <g:data key="kind">START</g:data>
+      <g:data key="node-owner">workflow-team</g:data>
+      <g:data key="node-graphics">
+        before
+        <!-- comments, CDATA and namespace-qualified elements are opaque -->
+        <y:ShapeNode viz:role="entry">
+          <y:Geometry x="10.5" y="-2" width="90" height="42"/>
+          <y:NodeLabel><![CDATA[Start <sanitized>]]></y:NodeLabel>
+          <y:Shape type="roundrectangle"/>
+        </y:ShapeNode>
+        after
+      </g:data>
+    </g:node>
+    <g:node id="end">
+      <g:data key="kind">END</g:data>
+    </g:node>
+    <g:node id="error">
+      <g:data key="kind">ERROR</g:data>
+    </g:node>
+    <g:edge id="visual-edge" source="start" target="end" viz:weight="primary">
+      <g:data key="outcome">continue</g:data>
+      <g:data key="edge-owner">routing-team</g:data>
+      <g:data key="edge-graphics"><y:PolyLineEdge>
+        <y:Path sx="0.0" sy="0.0" tx="1.0" ty="1.0"/>
+        <viz:annotation importance="high">preserve me</viz:annotation>
+      </y:PolyLineEdge></g:data>
+    </g:edge>
+  </g:graph>
+</g:graphml>

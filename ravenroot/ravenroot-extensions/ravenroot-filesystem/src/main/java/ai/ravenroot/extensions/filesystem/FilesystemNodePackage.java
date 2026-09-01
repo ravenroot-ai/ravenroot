@@ -1,0 +1,22 @@
+package ai.ravenroot.extensions.filesystem;
+
+import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodePackage;
+import ai.ravenroot.api.node.NodeSdk;
+
+import java.util.List;
+
+public final class FilesystemNodePackage implements NodePackage {
+    private final List<NodeBehavior> behaviors;
+
+    public FilesystemNodePackage() { this(new EnvironmentFilesystemProfileResolver()); }
+    FilesystemNodePackage(FilesystemProfileResolver profiles) {
+        FilesystemRuntime runtime = new FilesystemRuntime(profiles);
+        behaviors = List.of(new FilesystemReadNodeBehavior(runtime), new FilesystemWriteNodeBehavior(runtime));
+    }
+
+    @Override public String id() { return "ai.ravenroot.extensions.filesystem"; }
+    @Override public String version() { return "1.0.0"; }
+    @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+    @Override public List<NodeBehavior> behaviors() { return behaviors; }
+}

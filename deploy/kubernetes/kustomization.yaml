@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ravenroot.yaml
+images:
+  - name: ravenroot
+    newName: ravenroot
+    # `local` is only for a locally loaded image. Set a release image digest
+    # with `kustomize edit set image ravenroot=registry/ravenroot@sha256:...`.
+    newTag: local

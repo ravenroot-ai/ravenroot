@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  A self-contained agent-cycle example. It demonstrates that a reply is a new event and that the
+  cycle closes across traversals, without requiring network access or an external provider.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="node-behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="expression" for="node" attr.name="expression" attr.type="string"/>
+  <key id="trueOutcome" for="node" attr.name="trueOutcome" attr.type="string"/>
+  <key id="falseOutcome" for="node" attr.name="falseOutcome" attr.type="string"/>
+  <key id="joinPolicy" for="node" attr.name="joinPolicy" attr.type="string"/>
+  <key id="template" for="node" attr.name="template" attr.type="string"/>
+  <key id="message" for="node" attr.name="message" attr.type="string"/>
+  <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="failure.route" for="edge" attr.name="failure.route" attr.type="string"/>
+
+  <graph id="agent-cycle" edgedefault="directed">
+    <node id="entry"><data key="node-kind">START</data></node>
+    <node id="normalize">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">cel-transform</data>
+      <data key="expression">payload</data>
+    </node>
+    <node id="classify">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">cel-decision</data>
+      <data key="expression">payload != ""</data>
+      <data key="trueOutcome">continue</data>
+      <data key="falseOutcome">reply</data>
+    </node>
+    <node id="query">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">cel-transform</data>
+      <data key="expression">payload + " (accepted)"</data>
+    </node>
+    <node id="resume"><data key="node-kind">PASSTHROUGH</data></node>
+    <node id="compose">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">template</data>
+      <data key="joinPolicy">any</data>
+      <data key="template">Ravenroot processed: {{payload}}. Reply to continue.</data>
+    </node>
+    <node id="respond">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">log</data>
+      <data key="message">agent-cycle: {{payload}}</data>
+    </node>
+    <node id="record">
+      <data key="node-kind">BEHAVIOR</data>
+      <data key="node-behavior">log</data>
+      <data key="message">agent-cycle: reply sent</data>
+    </node>
+    <node id="finish"><data key="node-kind">END</data></node>
+    <node id="error"><data key="node-kind">ERROR</data></node>
+
+    <edge id="e1" source="entry" target="normalize"><data key="edge-outcome">continue</data></edge>
+    <edge id="e2" source="normalize" target="classify"><data key="edge-outcome">continue</data></edge>
+    <edge id="e3" source="classify" target="query"><data key="edge-outcome">continue</data></edge>
+    <edge id="e4" source="classify" target="resume"><data key="edge-outcome">reply</data></edge>
+    <edge id="e5" source="query" target="compose"><data key="edge-outcome">continue</data></edge>
+    <edge id="e6" source="resume" target="compose"><data key="edge-outcome">continue</data></edge>
+    <edge id="e7" source="compose" target="respond"><data key="edge-outcome">continue</data></edge>
+    <edge id="e8" source="respond" target="record"><data key="edge-outcome">continue</data></edge>
+    <edge id="e9" source="record" target="finish"><data key="edge-outcome">continue</data></edge>
+    <edge id="e10" source="respond" target="error"><data key="failure.route">true</data></edge>
+  </graph>
+</graphml>

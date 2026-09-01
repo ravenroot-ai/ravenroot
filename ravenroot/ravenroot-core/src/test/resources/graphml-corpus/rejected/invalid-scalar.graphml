@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="attempts" for="node" attr.name="attempts" attr.type="int"/>
+  <graph id="invalid-scalar" edgedefault="directed">
+    <node id="start"><data key="attempts">not-an-integer</data></node>
+  </graph>
+</graphml>

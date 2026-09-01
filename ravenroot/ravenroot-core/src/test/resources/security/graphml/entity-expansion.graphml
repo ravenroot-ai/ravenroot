@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!DOCTYPE graphml [
+  <!ENTITY a "1234567890">
+  <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
+  <!ENTITY c "&b;&b;&b;&b;&b;&b;&b;&b;&b;&b;">
+]>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="value" for="node" attr.name="value" attr.type="string"/>
+  <graph id="unsafe" edgedefault="directed">
+    <node id="start"><data key="value">&c;</data></node>
+  </graph>
+</graphml>

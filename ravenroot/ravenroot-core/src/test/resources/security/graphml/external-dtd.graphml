@@ -1,0 +1,8 @@
+<?xml version="1.0"?>
+<!DOCTYPE graphml SYSTEM "https://invalid.example/ravenroot-external.dtd">
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="value" for="node" attr.name="value" attr.type="string"/>
+  <graph id="unsafe" edgedefault="directed">
+    <node id="start"><data key="value">plain</data></node>
+  </graph>
+</graphml>

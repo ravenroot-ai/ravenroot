@@ -1,0 +1,71 @@
+# syntax=docker/dockerfile:1.7
+
+# CI-only runtime assembly. Inputs are downloaded GitHub Actions artifacts; no compiler, Maven or
+# npm is present in this build, which makes accidental recompilation structurally impossible.
+ARG RUNTIME_IMAGE=eclipse-temurin:21-jre-noble@sha256:373787d1d45a87f084fda43e7de0e9acf5eedee049446efac738f13587ec4c64
+FROM ${RUNTIME_IMAGE}
+
+ARG VERSION=dev
+ARG REVISION=unknown
+ARG SOURCE_URL=""
+ARG CREATED=""
+ARG DEFAULT_ENGINE=pekko
+
+LABEL org.opencontainers.image.title="Ravenroot" \
+      org.opencontainers.image.description="Graph-governed actor-model backend automation server and UI" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.revision="${REVISION}" \
+      org.opencontainers.image.source="${SOURCE_URL}" \
+      org.opencontainers.image.created="${CREATED}"
+
+# Published-image plugin staging. ci-artifacts/backend/plugins/ must
+# exist by the time this build runs -- the artifact staging process creates it unconditionally
+# (with a .keep placeholder file when the opt-in list, PUBLISHED_PLUGINS, is empty), so this COPY
+# never fails with "source not found" for the common case of publishing nothing. It lands at a
+# root-owned scratch path, never directly at /opt/ravenroot/plugins, so the RUN below can leave zero
+# trace of it when empty: COPY itself cannot be conditional, and an empty-but-present
+# /opt/ravenroot/plugins would break the same byte-identical parity claim increments 1-2's
+# scripts/verify-empty-plugins-parity.sh proves for the LOCAL/Compose Dockerfile -- that proof does
+# not cover this file; scripts/verify-empty-plugins-parity-ci.sh is this file's own version of it. A
+# plugin bundle is never built here: it arrives as pre-built bytes from the artifact stage, exactly
+# like ravenroot.jar below -- this file still has no compiler, Maven or npm in it anywhere.
+COPY ci-artifacts/backend/plugins/ /opt/ravenroot/.plugins-staged/
+
+RUN groupadd --gid 10001 ravenroot \
+    && useradd --uid 10001 --gid 10001 --no-create-home \
+       --home-dir /opt/ravenroot --shell /usr/sbin/nologin ravenroot \
+    && mkdir -p /opt/ravenroot/data/audit /opt/ravenroot/ui-resources/ui \
+    && rm -f /opt/ravenroot/.plugins-staged/.keep \
+    && if [ -n "$(find /opt/ravenroot/.plugins-staged -mindepth 1 -maxdepth 1 2>/dev/null)" ]; then \
+         mkdir -p /opt/ravenroot/plugins \
+         && cp -a /opt/ravenroot/.plugins-staged/. /opt/ravenroot/plugins/; \
+       fi \
+    && rm -rf /opt/ravenroot/.plugins-staged \
+    && chown -R 10001:10001 /opt/ravenroot
+# /opt/ravenroot/plugins, when it exists at all, is created and populated in this same RUN layer and
+# is never declared as a volume or mounted over: it is build-time material, immutable and read-only
+# for the life of the container, exactly like ravenroot.jar below -- matching the same guarantee
+# documented in the local Dockerfile's runtime stage.
+
+WORKDIR /opt/ravenroot
+COPY --chown=10001:10001 \
+    ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar \
+    ./ravenroot.jar
+COPY --chown=10001:10001 ci-artifacts/ui/ ./ui-resources/ui/
+
+USER 10001:10001
+ENV RAVENROOT_PORT=8080 \
+    RAVENROOT_BIND_ADDRESS=0.0.0.0 \
+    RAVENROOT_AUTH_MODE=oidc \
+    RAVENROOT_ENGINE=${DEFAULT_ENGINE} \
+    JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75.0 -XX:+ExitOnOutOfMemoryError"
+
+EXPOSE 8080
+STOPSIGNAL SIGTERM
+# Deliberately still /health, not /ready -- see Dockerfile's own
+# comment on the identical HEALTHCHECK for the full reasoning (Docker restarts on unhealthy, it
+# does not drain, so pointing this at a readiness signal would restart the container on drain or
+# a transient STORE_DEGRADED instead of the process it is actually meant to detect being stuck).
+HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["java", "-cp", "/opt/ravenroot/ui-resources:/opt/ravenroot/ravenroot.jar", "ai.ravenroot.server.RavenrootHealthcheck"]
+ENTRYPOINT ["java", "-cp", "/opt/ravenroot/ui-resources:/opt/ravenroot/ravenroot.jar", "ai.ravenroot.server.RavenrootServerMain"]

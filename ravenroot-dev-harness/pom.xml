@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+    Ravenroot development harness — SOURCE ONLY. THIS MODULE IS NEVER PUBLISHED.
+
+    It exists because the shipped distribution cannot register a ModelProvider and must not be able
+    to: P3 of ravenroot-distribution's ReleaseArtifactBoundaryChecks makes a call to
+    ModelProviderRegistry#register reachable from RavenrootServerMain#main a release violation,
+    because the released artifact must not compose a model adapter into itself: the embedding seam
+    is supplied from outside the artifact, or it is not supplied. Ravenroot's qualification as an
+    upstream component under EU AI Act recital 89 rests on the shipped artifact not performing that
+    composition, as captured by ADR 0017.
+
+    THIS MODULE ALSO SUPPLIES THE NODE, not only the provider. llm-prompt is absent from the core
+    catalogue and default image, so the bench carries its own
+    ai.ravenroot.devharness.LlmPromptNodeBehaviorFactory and registers it on top of
+    BehaviorRegistry.standard(...). Without that factory the provider registry would have no
+    consumer and the bench would not exercise its advertised path.
+
+    So the composition lives here instead, in a program with its own coordinates that is never built
+    into anything anyone receives. Five conditions define this module, and THREE of them (1, 2
+    and 4) are facts enforced by the build rather than sentences in a comment. The other two are not,
+    for different reasons: condition 3 has no control that could observe it, and condition 5 is
+    itself a line in a document, which is the very thing the phrase above contrasts with. An earlier
+    revision of this header said "four", which quietly counted condition 5 as enforced:
+
+      1. NEVER PUBLISHED. maven.deploy.skip and maven.install.skip below make `mvn deploy` and
+         `mvn install` publish nothing, anywhere, including the local repository. There is no
+         registry, no GitHub Packages entry, no GHCR image, no release asset.
+      2. NEVER SERVED ON A REACHABLE NETWORK. DevHarnessMain forces the loopback address and ignores
+         RAVENROOT_BIND_ADDRESS. Serving a network would be putting into service under art. 3(11),
+         and "for testing" is not an exemption. DevHarnessMainTest pins it: every wildcard, LAN
+         address and hostname form is replaced by loopback, and the authenticator is decided from
+         that same forced value, so the socket and the auth decision cannot drift apart.
+      3. NEVER USED FOR PRODUCTION WORK. NO CONTROL HERE CAN ENFORCE THIS ONE. It is an operational
+         constraint, and it is stated as one.
+      4. STRUCTURAL, NOT DECLARED. The name says what it is; README.md says it is not a release
+         artifact; and NotAReleaseArtifactTest fails the build if these coordinates appear in any
+         release, publish or deploy surface.
+      5. EXCLUDED FROM RELEASE ARTIFACTS. The structural checks above enforce this directly.
+
+    NEVER add this module to ravenroot/pom.xml's <modules>. NotAReleaseArtifactTest checks that too.
+
+    Build order: the reactor and the adapter must be installed first, because this project resolves
+    its Ravenroot dependencies from the local repository rather than from reactor siblings.
+
+        ./dev.sh          <- performs the three steps below, selecting a JDK 21..25 itself
+
+    The command above is the recommended approach. To run the sequence manually with JAVA_HOME in range:
+
+        mvn -f ravenroot/pom.xml install -pl ravenroot-server,ravenroot-pekko -am -DskipTests
+        mvn -f ravenroot-adapter-openai-compatible/pom.xml install
+        mvn -f ravenroot-dev-harness/pom.xml verify
+
+    Note the asymmetry, which is deliberate: the ADAPTER is installed (an operator has to be able to
+    put it on a classpath), and this HARNESS is not (nobody may).
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>ai.ravenroot.devharness</groupId>
+    <artifactId>ravenroot-dev-harness</artifactId>
+    <version>0.1.0-alpha.1</version>
+    <name>Ravenroot Development Harness (never published)</name>
+    <description>
+        Source-only local bench that starts Ravenroot with an llm-prompt node it supplies itself and
+        a model provider registered, so that node can be exercised from the editor on a developer
+        machine. The core ships neither half. Not a release artifact. Never published,
+        never network-facing, never used for real work.
+    </description>
+
+    <properties>
+        <maven.compiler.release>21</maven.compiler.release>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <ravenroot.version>0.1.0-alpha.1</ravenroot.version>
+        <junit.version>6.1.2</junit.version>
+
+        <!--
+            Condition 1, as a fact about the build rather than a promise about behaviour. `mvn deploy`
+            on this module publishes nothing to any repository, and `mvn install` does not even put it
+            into the local one, so no other project on this machine can depend on it by accident,
+            which is the realistic first step towards it being used for something. Removing either
+            line is a visible edit in the file whose entire header says why they are here, and
+            NotAReleaseArtifactTest fails if either goes missing.
+        -->
+        <maven.deploy.skip>true</maven.deploy.skip>
+        <maven.install.skip>true</maven.install.skip>
+    </properties>
+
+    <dependencies>
+        <!-- The HTTP adapter and its composition types. Brings ravenroot-core transitively. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-server</artifactId>
+            <version>${ravenroot.version}</version>
+        </dependency>
+        <!-- The execution engine, chosen at runtime exactly as ravenroot-sample chooses it. -->
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-pekko</artifactId>
+            <version>${ravenroot.version}</version>
+            <scope>runtime</scope>
+        </dependency>
+        <!--
+            The thing being armed. This dependency, together with the llm-prompt factory this module
+            now carries in src/main, is the reason it may not be published: an artifact combining the
+            runtime with a generative node AND a registered ModelProvider is no longer an upstream
+            component, it is a composed AI system.
+        -->
+        <dependency>
+            <groupId>ai.ravenroot.adapters</groupId>
+            <artifactId>ravenroot-adapter-openai-compatible</artifactId>
+            <version>${ravenroot.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <version>${junit.version}</version>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-enforcer-plugin</artifactId>
+                <version>3.6.1</version>
+                <executions>
+                    <execution>
+                        <id>enforce-java-version</id>
+                        <phase>validate</phase>
+                        <goals><goal>enforce</goal></goals>
+                        <configuration>
+                            <rules>
+                                <requireJavaVersion>
+                                    <version>[21,26)</version>
+                                    <message>Ravenroot builds on JDK 21 through 25; JDK 26 is not a supported build platform.</message>
+                                </requireJavaVersion>
+                            </rules>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.15.0</version>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.6</version>
+            </plugin>
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.3.0</version>
+                <configuration>
+                    <mainClass>ai.ravenroot.devharness.DevHarnessMain</mainClass>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

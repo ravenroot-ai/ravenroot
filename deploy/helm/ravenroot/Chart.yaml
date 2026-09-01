@@ -1,0 +1,7 @@
+apiVersion: v2
+name: ravenroot
+description: Optional, single-replica Ravenroot deployment for Kubernetes and Minikube.
+type: application
+version: 0.1.0-alpha.1
+appVersion: "0.1.0-alpha.1"
+kubeVersion: ">=1.25.0-0"

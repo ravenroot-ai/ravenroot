@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+
+    <artifactId>ravenroot-observability-otel</artifactId>
+    <name>Ravenroot Observability (OpenTelemetry)</name>
+    <description>PLAT-01: the OpenTelemetry export bridge, spans, metrics and
+        log-correlation identifiers derived from ai.ravenroot.api.application.ExecutionEvent, the
+        same event ai.ravenroot.server.audit.StructuredExecutionLogger already consumes. Depends on
+        ravenroot-application-api (the event shape) and ravenroot-core (ExecutionMonitor.subscribe,
+        the only extension point this module uses) and nothing else in the ai.ravenroot tree. Neither
+        of those two modules, nor ravenroot-application-api's other consumers, every third-party
+        node package, depends on this one: the OpenTelemetry SDK is reachable from exactly one kind
+        of caller, a composition root (RavenrootServerMain, RavenrootCliMain), which is what makes
+        "no OpenTelemetry dependency in core" a property the compiler enforces rather than prose.
+        Disabled unless RAVENROOT_OTEL_ENABLED is set; see
+        TelemetryConfiguration. Every OpenTelemetry artifact here is Apache License 2.0; this module
+        has not been through the release SBOM and licence scan and should be before it
+        ships in a tagged release.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk</artifactId>
+        </dependency>
+        <!-- The zero-extra-transitive-dependency exporter: spans and metrics as log lines. This is
+             what RAVENROOT_OTEL_EXPORTER=logging selects, and it is the exporter every "enabled"
+             test in this module runs against for that reason: no network, no additional supply
+             chain surface beyond OpenTelemetry itself. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-logging</artifactId>
+        </dependency>
+        <!-- RAVENROOT_OTEL_EXPORTER=otlp. opentelemetry-exporter-otlp's default sender is
+             opentelemetry-exporter-sender-okhttp, which at 1.65.0 pulls in okhttp-jvm, okio-jvm,
+             kotlin-stdlib and org.jetbrains:annotations at RUNTIME scope: four non-OTel
+             artifacts, none visible to a compile-scope-filtered `dependency:tree`, all reaching
+             this module's runtime classpath regardless. Excluded below in favour of
+             opentelemetry-exporter-sender-jdk (java.net.http.HttpClient, JDK 11+, this project
+             targets 21), which keeps the runtime classpath entirely io.opentelemetry:*. Measured
+             with an UNFILTERED `mvn dependency:tree -pl ravenroot-observability-otel -am` (no
+             -Dscope filter this time: the earlier version of this comment used one, which is why
+             it missed a runtime-scope-only dependency chain). io.opentelemetry:* entries below this
+             module's own two ai.ravenroot ones: opentelemetry-{api,context,common,sdk,sdk-common,
+             sdk-trace,sdk-metrics,sdk-logs,exporter-logging,exporter-otlp,exporter-otlp-common
+             (runtime),exporter-sender-jdk,exporter-common (runtime)}, nothing else: no okhttp, no
+             okio, no kotlin-stdlib, no org.jetbrains:annotations. (ravenroot-core's own transitive
+             dependencies, e.g. TinkerPop, also appear in that tree; they come from ravenroot-core
+             being a dependency of this module, not from anything OpenTelemetry-related, and are out
+             of scope for this note.) Every compile- and runtime-scope dependency this module adds
+             is therefore io.opentelemetry:*, Apache License 2.0. Flagged in this module's own
+             description for the release review regardless, since this measurement is this
+             module's own and has not been through a formal SBOM/licence pass; not exercised by this
+             module's own test suite against a live collector: see TelemetryConfigurationTest for
+             what is and is not covered without one. -->
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-otlp</artifactId>
+            <exclusions>
+                <exclusion>
+                    <groupId>io.opentelemetry</groupId>
+                    <artifactId>opentelemetry-exporter-sender-okhttp</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-exporter-sender-jdk</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>io.opentelemetry</groupId>
+            <artifactId>opentelemetry-sdk-testing</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+            </plugin>
+        </plugins>
+    </build>
+</project>

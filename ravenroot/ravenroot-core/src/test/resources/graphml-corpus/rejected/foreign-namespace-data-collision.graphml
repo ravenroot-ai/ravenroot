@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Shared REJECTED-corpus fixture pinning that BOTH the core reader and the UI reader refuse
+  a foreign-namespace element that spoofs an interpreted GraphML element name, and refuse it for the
+  same documented reason.
+
+  The `<y:data key="owner">` below shares the local name "data" with the canonical vocabulary this
+  format interprets. ravenroot-core's SecureGraphMlParser already rejects this outright
+  (INTERPRETED_NAMES, "GraphML extensions cannot redefine interpreted element names") rather than
+  trying to decide whether it is inert content: identity confusion across a namespace boundary is
+  refused at ingest, not tolerated and then reasoned about. The UI's parser did not share that
+  guard, so a file the server would never accept could still be opened and edited in the browser
+  first, and its serializer's `<data>` lookups (src/graph-document.js) matched by local name alone,
+  so an edit, or even a no-op re-save, would have silently corrupted this decoy while leaving the
+  real "owner" property unset. Both paths are now protected, but not with the same test: parseGraphML
+  carries the same INTERPRETED_ELEMENT_NAMES guard as core (exercised by this file, in
+  ravenroot-ui/test/graphml-corpus.test.js's rejected-corpus loop and
+  GraphMlCorpusTest#rejectedCorpusFailsExplicitly, both refuse these exact bytes for the same
+  stated reason), and the serializer matches `<data>` by qualified name too. The write-side behavior
+  CANNOT be pinned by this file being rejected: once parseGraphML refuses it, serializeGraphML never
+  sees it through that path. serializeGraphML re-parses `graph.sourceXml` with its own DOMParser
+  call and never routes through parseGraphML, so qualified-name serialization needs its own test
+  driving that seam directly. See graphml-corpus.test.js's "serializeGraphML matches <data> by qualified
+  name..." test, which reuses these same bytes as sourceXml rather than via parseGraphML.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:y="http://www.yworks.com/xml/graphml">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="owner" for="node" attr.name="owner" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="foreign-namespace-data-collision" edgedefault="directed">
+    <node id="start">
+      <y:data key="owner">decoy-should-be-ignored</y:data>
+      <data key="kind">START</data>
+      <data key="owner">platform-team</data>
+    </node>
+    <node id="end">
+      <data key="kind">END</data>
+    </node>
+    <edge id="edge-start-end" source="start" target="end">
+      <data key="outcome">continue</data>
+    </edge>
+  </graph>
+</graphml>

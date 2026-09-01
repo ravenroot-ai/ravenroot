@@ -1,0 +1,45 @@
+name: Main pull request source policy
+
+on:
+  pull_request_target:
+    branches:
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - edited
+
+permissions: {}
+
+jobs:
+  main-source-policy:
+    name: main-source-policy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require an internal release or hotfix branch
+        env:
+          TARGET_REPOSITORY: ${{ github.repository }}
+          HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          if [ "$HEAD_REPOSITORY" != "$TARGET_REPOSITORY" ]; then
+            echo "Pull requests from forks must target dev."
+            exit 1
+          fi
+
+          if [ "$HEAD_BRANCH" = "dev" ]; then
+            echo "Internal release pull request accepted."
+            exit 0
+          fi
+
+          case "$HEAD_BRANCH" in
+            hotfix/*)
+              echo "Protected internal hotfix pull request accepted."
+              exit 0
+              ;;
+            *)
+              echo "Ordinary pull requests must target dev."
+              exit 1
+              ;;
+          esac

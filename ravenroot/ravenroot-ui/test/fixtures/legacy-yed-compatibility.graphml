@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  This fixture verifies that the UI parser remains backward compatible with yEd-style exports,
+  which use separate `name`, `start` and `end`-boolean keys instead of the server's canonical `kind`
+  key. It is not a graph the server accepts for execution; its `compatibility` id makes that purpose
+  explicit.
+
+  The fixture deliberately has no ERROR node. Requiring start, end and error nodes applies to graphs
+  passed to `validateWorkflow()`, while this fixture's consumer (`graph-parsers.test.js`) calls only
+  `parseGraphML()` and `detectAndParse()` to verify the legacy convention. Adding a third node would
+  test no additional parser behavior and would obscure the fixture's single purpose: compatibility
+  with a format that predates the `kind` key and therefore the `ERROR` value.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns"
+         xmlns:y="http://www.yworks.com/xml/graphml">
+  <key id="d4" for="node" attr.name="name" attr.type="string"/>
+  <key id="d5" for="node" attr.name="start" attr.type="boolean"/>
+  <key id="d6" for="node" attr.name="end" attr.type="boolean"/>
+  <key id="instances" for="node" attr.name="instances" attr.type="int"/>
+  <key id="d13" for="edge" attr.name="status" attr.type="int"/>
+  <graph id="compatibility" edgedefault="directed">
+    <node id="n0">
+      <data key="d4">StartActor</data>
+      <data key="d5">true</data>
+      <data key="instances">3</data>
+    </node>
+    <node id="n1">
+      <data key="d4">EndActor</data>
+      <data key="d6">true</data>
+    </node>
+    <edge id="e0" source="n0" target="n1">
+      <data key="d13">1</data>
+    </edge>
+  </graph>
+</graphml>

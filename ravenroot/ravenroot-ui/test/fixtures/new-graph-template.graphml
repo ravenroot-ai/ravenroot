@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Pinned, semantic snapshot of what `serializeGraphML(createWorkflowDocument())` produces,
+  the exact document a user gets by pressing "New" in the editor. new-graph-template.test.js
+  regenerates the real output on every run and compares it against this file, so a change to
+  graph-document.js that silently altered the default workflow fails loudly instead of shipping.
+  ShippedExampleCorpusTest reads this same file from the core side, so the editor's own template is
+  also verified as part of the accepted corpus, not just as a UI-only concern.
+
+  The template is start -> dosomething -> {end, error}. `dosomething` is a PASSTHROUGH node so the
+  template validates without the user choosing anything, exactly as
+  Start and End already do. The branch to the error terminal reports outcome `failed`, not
+  `error`: `failed` is one of the outcomes the renderer already colors red/dashed, while `error` is
+  not. This reuses the established renderer vocabulary.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="rr-node-name" for="node" attr.name="name" attr.type="string"/>
+  <key id="rr-node-kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="rr-node-classification" for="node" attr.name="classification" attr.type="string"/>
+  <key id="rr-node-layoutx" for="node" attr.name="layoutX" attr.type="double"/>
+  <key id="rr-node-layouty" for="node" attr.name="layoutY" attr.type="double"/>
+  <key id="rr-node-layoutwidth" for="node" attr.name="layoutWidth" attr.type="double"/>
+  <key id="rr-node-layoutheight" for="node" attr.name="layoutHeight" attr.type="double"/>
+  <key id="rr-edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="rr-edge-status" for="edge" attr.name="status" attr.type="int"/>
+  <key id="rr-edge-parallel" for="edge" attr.name="parallel" attr.type="boolean"/>
+  <graph id="ravenroot-workflow" edgedefault="directed">
+    <node id="start">
+      <data key="rr-node-name">Start</data>
+      <data key="rr-node-kind">START</data>
+      <data key="rr-node-classification">start</data>
+      <data key="rr-node-layoutx">120</data>
+      <data key="rr-node-layouty">220</data>
+      <data key="rr-node-layoutwidth">80</data>
+      <data key="rr-node-layoutheight">52</data>
+    </node>
+    <node id="dosomething">
+      <data key="rr-node-name">Do something</data>
+      <data key="rr-node-kind">PASSTHROUGH</data>
+      <data key="rr-node-classification">flow</data>
+      <data key="rr-node-layoutx">300</data>
+      <data key="rr-node-layouty">220</data>
+      <data key="rr-node-layoutwidth">80</data>
+      <data key="rr-node-layoutheight">52</data>
+    </node>
+    <node id="error">
+      <data key="rr-node-name">Error</data>
+      <data key="rr-node-kind">ERROR</data>
+      <data key="rr-node-classification">error</data>
+      <data key="rr-node-layoutx">300</data>
+      <data key="rr-node-layouty">380</data>
+      <data key="rr-node-layoutwidth">80</data>
+      <data key="rr-node-layoutheight">52</data>
+    </node>
+    <node id="end">
+      <data key="rr-node-name">End</data>
+      <data key="rr-node-kind">END</data>
+      <data key="rr-node-classification">end</data>
+      <data key="rr-node-layoutx">480</data>
+      <data key="rr-node-layouty">220</data>
+      <data key="rr-node-layoutwidth">80</data>
+      <data key="rr-node-layoutheight">52</data>
+    </node>
+    <edge id="edge-start-dosomething" source="start" target="dosomething">
+      <data key="rr-edge-outcome">continue</data>
+      <data key="rr-edge-status">0</data>
+      <data key="rr-edge-parallel">false</data>
+    </edge>
+    <edge id="edge-dosomething-end" source="dosomething" target="end">
+      <data key="rr-edge-outcome">continue</data>
+      <data key="rr-edge-status">0</data>
+      <data key="rr-edge-parallel">false</data>
+    </edge>
+    <edge id="edge-dosomething-error" source="dosomething" target="error">
+      <data key="rr-edge-outcome">failed</data>
+      <data key="rr-edge-status">0</data>
+      <data key="rr-edge-parallel">false</data>
+    </edge>
+  </graph>
+</graphml>

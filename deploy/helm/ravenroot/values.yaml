@@ -1,0 +1,81 @@
+# Use a registry digest for a reproducible deployment. The local tag is provided
+# solely for Minikube after `minikube image load ravenroot:local`.
+replicaCount: 1
+
+image:
+  repository: ravenroot
+  tag: local
+  digest: ""
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+# These are public OIDC endpoints/identifiers, not credentials. service.sh
+# requires all three values and passes them at deploy time; never put a token
+# or client secret in this chart.
+auth:
+  issuer: ""
+  audience: ""
+  jwksUri: ""
+
+engine: pekko
+
+# Program execution timeout. RAVENROOT_PROGRAM_TIMEOUT_MS
+# has no chart-level default at all before this: an operator who wires in their own SEC-11 sandbox
+# supervisor (RAVENROOT_GRAAL_SANDBOX_SUPERVISOR is deliberately absent from this chart -- see
+# docs/deployment.md) inherits the code's own 5000ms default, which is shorter than a measured
+# cold-start Python worker. Measured through
+# deploy/dev/sandbox-supervisor.sh under a read-only root filesystem: ~2.4-2.9s idle; F30 records a
+# much higher figure -- 8.1s -- under CI-typical load on an older component version. This is F30's
+# option (a), the bridge it names explicitly while the real fix (F30's option (c), a pre-initialized
+# native build) is undecided -- NOT a capacity number chosen for any specific deployment. An operator
+# sizing a real production timeout should read F30 and override this.
+programTimeoutMs: 15000
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+podSecurityContext:
+  runAsNonRoot: true
+  # The default PVC is empty when first attached. fsGroup gives the fixed non-root process access
+  # to the volume without making the container writable or adding a privileged init container.
+  fsGroup: 10001
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+  runAsUser: 10001
+  runAsGroup: 10001
+
+probes:
+  readiness:
+    initialDelaySeconds: 3
+    periodSeconds: 5
+  liveness:
+    initialDelaySeconds: 15
+    periodSeconds: 10
+
+tmpfs:
+  sizeLimit: 64Mi
+
+# SQLite/WAL is a one-pod local authority for executions and qualified program content. The default
+# claim is ReadWriteOnce and is deliberately not a shared/NFS authority. Keep replicaCount at 1
+# because distributed ownership is not provided.
+persistence:
+  accessModes:
+    - ReadWriteOnce
+  size: 1Gi
+  storageClass: ""

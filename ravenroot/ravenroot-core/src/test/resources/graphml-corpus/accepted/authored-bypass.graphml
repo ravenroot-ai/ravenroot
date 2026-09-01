@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="bypass" for="node" attr.name="execution.bypass" attr.type="boolean"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="authored-bypass-workflow" edgedefault="directed">
+    <node id="start"><data key="kind">START</data></node>
+    <node id="switched-off">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">http-request</data>
+      <data key="bypass">true</data>
+    </node>
+    <node id="still-running">
+      <data key="kind">BEHAVIOR</data>
+      <data key="behavior">http-request</data>
+    </node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="to-off" source="start" target="switched-off"><data key="outcome">continue</data></edge>
+    <edge id="to-on" source="switched-off" target="still-running"><data key="outcome">continue</data></edge>
+    <edge id="finish" source="still-running" target="end"><data key="outcome">continue</data></edge>
+  </graph>
+</graphml>

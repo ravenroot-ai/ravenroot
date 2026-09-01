@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns" xmlns:ext="urn:example:extension">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <graph id="collision" edgedefault="directed">
+    <node id="start"><data key="kind"><ext:value>START</ext:value></data></node>
+  </graph>
+</graphml>

@@ -76,15 +76,16 @@ final class JdbcRuntime {
             this.output = new ContractFuture(this);
         }
         void run() {
+            Object value = null;
+            JdbcFailure terminalFailure = null;
             try {
                 if (expired()) throw cancellationFailure(true);
-                Object value = work.run(control);
+                value = work.run(control);
                 if (expired()) throw cancellationFailure(true);
                 control.finishWork();
-                output.complete(value);
-            } catch (JdbcFailure failure) { output.completeExceptionally(control.resolve(failure)); }
+            } catch (JdbcFailure failure) { terminalFailure = control.resolve(failure); }
             catch (Throwable failure) {
-                output.completeExceptionally(control.resolve(new JdbcFailure(JdbcFailure.Code.EXECUTION_FAILED)));
+                terminalFailure = control.resolve(new JdbcFailure(JdbcFailure.Code.EXECUTION_FAILED));
             }
             finally {
                 Future<?> scheduled = timer;
@@ -92,6 +93,8 @@ final class JdbcRuntime {
                 control.workerSettled();
                 release();
             }
+            if (terminalFailure == null) output.complete(value);
+            else output.completeExceptionally(terminalFailure);
         }
         void timeout() { cancel(true); }
         boolean cancel(boolean deadline) {

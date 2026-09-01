@@ -332,9 +332,12 @@ class JdbcExecutorTest {
         FakeJdbc.State rotated = new FakeJdbc.State(); rotated.columns = List.of("id"); rotated.rows = List.of(List.of(1L));
         JdbcExecutor rotating = executor(tenantA, rotated);
         rotating.execute(JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
-                JdbcTestSupport.services("old", resolutions), "main", "find", JdbcStatementProfile.Kind.QUERY).join();
-        rotating.execute(JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
-                JdbcTestSupport.services("new", resolutions), "main", "find", JdbcStatementProfile.Kind.QUERY).join();
+                        JdbcTestSupport.services("old", resolutions), "main", "find", JdbcStatementProfile.Kind.QUERY)
+                .thenCompose(ignored -> rotating.execute(
+                        JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
+                        JdbcTestSupport.services("new", resolutions), "main", "find",
+                        JdbcStatementProfile.Kind.QUERY))
+                .join();
         assertEquals(2, resolutions.get()); assertEquals("new", rotated.password);
     }
 

@@ -20,12 +20,18 @@ final class FilesystemRuntime {
             Thread.ofPlatform().daemon().name("ravenroot-filesystem-deadlines").factory());
     final FilesystemProfileResolver profiles;
     final FilesystemAccess access;
+    private final DeadlineScheduler deadlineScheduler;
     private final ConcurrentHashMap<String, Gate> gates = new ConcurrentHashMap<>();
 
     FilesystemRuntime(FilesystemProfileResolver profiles) { this(profiles, new FilesystemAccess()); }
     FilesystemRuntime(FilesystemProfileResolver profiles, FilesystemAccess access) {
+        this(profiles, access, FilesystemRuntime::scheduleDeadline);
+    }
+    FilesystemRuntime(FilesystemProfileResolver profiles, FilesystemAccess access,
+                      DeadlineScheduler deadlineScheduler) {
         this.profiles = Objects.requireNonNull(profiles);
         this.access = Objects.requireNonNull(access);
+        this.deadlineScheduler = Objects.requireNonNull(deadlineScheduler);
     }
 
     CompletableFuture<NodeResult> execute(String tenant, FilesystemProfile profile, Duration timeout,
@@ -56,7 +62,7 @@ final class FilesystemRuntime {
             return CompletableFuture.failedFuture(FilesystemNodeException.of(
                     FilesystemNodeException.Reason.TEMPORARY_IO, unavailable));
         }
-        ScheduledFuture<?> deadline = DEADLINES.schedule(() -> {
+        CancellableDeadline deadline = deadlineScheduler.schedule(() -> {
                     if (state.timeout()) {
                         worker.interrupt();
                         answer.completeExceptionally(FilesystemNodeException.of(
@@ -66,9 +72,14 @@ final class FilesystemRuntime {
                         answer.completeExceptionally(FilesystemNodeException.of(
                                 FilesystemNodeException.Reason.AMBIGUOUS_FINAL_MOVE));
                     }
-                }, timeout.toNanos(), TimeUnit.NANOSECONDS);
-        answer.whenComplete((ignoredResult, ignoredFailure) -> deadline.cancel(false));
+                }, timeout);
+        answer.whenComplete((ignoredResult, ignoredFailure) -> deadline.cancel());
         return answer;
+    }
+
+    private static CancellableDeadline scheduleDeadline(Runnable action, Duration delay) {
+        ScheduledFuture<?> scheduled = DEADLINES.schedule(action, delay.toNanos(), TimeUnit.NANOSECONDS);
+        return () -> scheduled.cancel(false);
     }
 
     private Gate gate(String tenant, FilesystemProfile profile) {
@@ -86,5 +97,15 @@ final class FilesystemRuntime {
 
     private record Gate(Semaphore permits) {
         Gate(int permits) { this(new Semaphore(permits, true)); }
+    }
+
+    @FunctionalInterface
+    interface DeadlineScheduler {
+        CancellableDeadline schedule(Runnable action, Duration delay);
+    }
+
+    @FunctionalInterface
+    interface CancellableDeadline {
+        void cancel();
     }
 }

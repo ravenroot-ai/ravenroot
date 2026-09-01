@@ -49,6 +49,7 @@ import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -69,6 +70,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @Timeout(value = 90, unit = TimeUnit.SECONDS)
 class DurableSseReplayIntegrationTest {
     private static final java.time.Duration TEST_TIMEOUT = java.time.Duration.ofSeconds(10);
+    private static final java.time.Duration READER_CANCELLATION_TIMEOUT = java.time.Duration.ofSeconds(2);
+    private static final HttpClient TEST_CLIENT = HttpClient.newBuilder()
+            .connectTimeout(TEST_TIMEOUT)
+            .build();
 
     /** Synthetic key under which {@link #readAvailableEvents} records each frame's SSE {@code id:}. */
     private static final String SSE_ID = "__sseId";
@@ -332,6 +337,25 @@ class DurableSseReplayIntegrationTest {
     }
 
     /**
+     * A read deadline must close the HTTP body, not merely interrupt the thread in {@code readLine}.
+     * The JDK HTTP client's streaming body can remain blocked after an interrupt on hosted Linux;
+     * closing it cancels the underlying subscription and releases both sides of the connection.
+     */
+    @Test
+    void aSilentSseConnectionIsClosedWhenItsReadDeadlineExpires() {
+        var body = new CloseControlledInputStream();
+        long started = System.nanoTime();
+
+        AssertionError failure = assertThrows(AssertionError.class,
+                () -> readAvailableEvents(body, java.time.Duration.ofMillis(100)));
+
+        assertTrue(failure.getMessage().contains("did not reach quiescence"), failure::getMessage);
+        assertTrue(body.closed(), "the read deadline must close the body that owns the HTTP subscription");
+        assertTrue(System.nanoTime() - started < READER_CANCELLATION_TIMEOUT.toNanos(),
+                "closing an interrupt-insensitive stream must release the reader promptly");
+    }
+
+    /**
      * Submits the chain graph and waits until the traversal has actually ended.
      *
      * <p>Termination is read from the <strong>aggregate</strong> — {@code /v1/runtime}'s
@@ -346,9 +370,9 @@ class DurableSseReplayIntegrationTest {
      * before the restart" depend on that race.</p>
      */
     private static void submitAndAwaitCompletion(RavenrootServer server) throws Exception {
-        var client = HttpClient.newHttpClient();
-        var response = client.send(HttpRequest.newBuilder(
+        var response = TEST_CLIENT.send(HttpRequest.newBuilder(
                         URI.create("http://127.0.0.1:" + server.port() + "/v1/executions"))
+                        .timeout(TEST_TIMEOUT)
                         .POST(HttpRequest.BodyPublishers.ofString(CHAIN_GRAPH)).build(),
                 HttpResponse.BodyHandlers.ofString());
         assertEquals(202, response.statusCode(), response.body());
@@ -366,8 +390,9 @@ class DurableSseReplayIntegrationTest {
     }
 
     private static int activeExecutions(RavenrootServer server) throws Exception {
-        var response = HttpClient.newHttpClient().send(HttpRequest.newBuilder(
-                        URI.create("http://127.0.0.1:" + server.port() + "/v1/runtime")).GET().build(),
+        var response = TEST_CLIENT.send(HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + server.port() + "/v1/runtime"))
+                        .timeout(TEST_TIMEOUT).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
         assertEquals(200, response.statusCode(), response.body());
         var matcher = java.util.regex.Pattern.compile("\"activeExecutions\":(\\d+)").matcher(response.body());
@@ -385,9 +410,9 @@ class DurableSseReplayIntegrationTest {
     }
 
     /**
-     * Opens the SSE stream, reads only the immediate backlog (bounded read, not the live tail — a
-     * short-lived HTTP client that closes once no more bytes arrive within the idle window), and
-     * parses every {@code data:} line whose event carries a JSON object.
+     * Opens the SSE stream, reads only the immediate backlog (a bounded read, not the live tail),
+     * closes after two keepalives prove the durable journal is caught up, and parses every
+     * {@code data:} line whose event carries a JSON object.
      */
     private static List<Map<String, Object>> readFullStreamEvents(RavenrootServer server, long lastEventId)
             throws Exception {
@@ -397,8 +422,11 @@ class DurableSseReplayIntegrationTest {
     }
 
     /**
-     * Drains an already-open stream until it goes idle, parsing each frame's {@code data:} payload
-     * and carrying its preceding {@code id:} line under {@link #SSE_ID}.
+     * Drains an already-open stream until two quiet keepalives prove it is caught up, parsing each
+     * frame's {@code data:} payload and carrying its preceding {@code id:} line under
+     * {@link #SSE_ID}. The enclosing read deadline owns cancellation: it closes the HTTP body before
+     * interrupting the reader, because thread interruption alone does not reliably cancel streaming
+     * {@link HttpClient} I/O.
      *
      * <p>The {@code id:} is captured, and not merely the JSON body, because {@code id:} <em>is</em>
      * the resumption cursor: it is what a browser's {@code EventSource} sends back as
@@ -408,50 +436,89 @@ class DurableSseReplayIntegrationTest {
      */
     private static List<Map<String, Object>> readAvailableEvents(HttpResponse<InputStream> response)
             throws Exception {
-        var events = new ArrayList<Map<String, Object>>();
-        try (InputStream body = response.body()) {
-            var reader = new java.io.BufferedReader(new java.io.InputStreamReader(body, StandardCharsets.UTF_8));
-            long deadline = System.nanoTime() + TEST_TIMEOUT.toNanos();
+        return readAvailableEvents(response.body(), TEST_TIMEOUT);
+    }
+
+    private static List<Map<String, Object>> readAvailableEvents(InputStream responseBody,
+                                                                  java.time.Duration timeout)
+            throws Exception {
+        try (InputStream body = responseBody) {
             var readerThread = Executors.newVirtualThreadPerTaskExecutor();
-            Long pendingId = null;
-            // Quiescence, not idleness, is the stop condition: this endpoint never goes idle by
-            // design -- it emits a keepalive on every tick that found nothing -- so waiting for
-            // silence would wait forever and wedge the reactor. Two consecutive keepalives with no
-            // frame between them mean the server has
-            // re-polled the journal and found nothing new, which is the real "caught up" signal.
-            boolean frameSinceKeepalive = false;
-            int quietKeepalives = 0;
+            var readFuture = readerThread.submit(() -> parseAvailableEvents(body));
             try {
-                while (System.nanoTime() < deadline) {
-                    var lineFuture = readerThread.submit(reader::readLine);
-                    String line;
-                    try {
-                        line = lineFuture.get(2, TimeUnit.SECONDS);
-                    } catch (java.util.concurrent.TimeoutException idle) {
-                        break;
-                    }
-                    if (line == null) {
-                        break;
-                    }
-                    if (line.startsWith(": keepalive")) {
-                        quietKeepalives = frameSinceKeepalive ? 0 : quietKeepalives + 1;
-                        frameSinceKeepalive = false;
-                        if (quietKeepalives >= 2) {
-                            break;
-                        }
-                    } else if (line.startsWith("id: ")) {
-                        pendingId = Long.parseLong(line.substring("id: ".length()).strip());
-                    } else if (line.startsWith("data: {")
-                            || (line.startsWith("data: ") && line.contains("STREAM_RETENTION_EXCEEDED"))) {
-                        var parsed = parseJsonObject(line.substring("data: ".length()));
-                        parsed.put(SSE_ID, pendingId);
-                        pendingId = null;
-                        events.add(parsed);
-                        frameSinceKeepalive = true;
-                    }
+                return readFuture.get(timeout.toNanos(), TimeUnit.NANOSECONDS);
+            } catch (java.util.concurrent.TimeoutException deadlineExpired) {
+                // Interrupting a thread in HttpClient's streaming read is not a portable cancellation
+                // mechanism. Close the body first: BodyHandlers.ofInputStream specifies that this
+                // cancels the HTTP subscription and therefore releases the blocked reader and server.
+                IOException closeFailure = null;
+                try {
+                    body.close();
+                } catch (IOException failure) {
+                    closeFailure = failure;
                 }
+
+                boolean readerReleased = false;
+                try {
+                    readFuture.get(READER_CANCELLATION_TIMEOUT.toNanos(), TimeUnit.NANOSECONDS);
+                    readerReleased = true;
+                } catch (java.util.concurrent.ExecutionException closedStream) {
+                    readerReleased = true;
+                } catch (java.util.concurrent.TimeoutException stillBlocked) {
+                    readFuture.cancel(true);
+                }
+
+                var failure = new AssertionError("SSE stream did not reach quiescence within " + timeout
+                        + (readerReleased ? "; the underlying HTTP body was closed"
+                        : "; the reader remained blocked after the HTTP body was closed"));
+                failure.addSuppressed(deadlineExpired);
+                if (closeFailure != null) {
+                    failure.addSuppressed(closeFailure);
+                }
+                throw failure;
+            } catch (java.util.concurrent.ExecutionException readFailure) {
+                Throwable cause = readFailure.getCause();
+                if (cause instanceof Exception exception) {
+                    throw exception;
+                }
+                if (cause instanceof Error error) {
+                    throw error;
+                }
+                throw new IllegalStateException(cause);
             } finally {
                 readerThread.shutdownNow();
+            }
+        }
+    }
+
+    private static List<Map<String, Object>> parseAvailableEvents(InputStream body) throws IOException {
+        var events = new ArrayList<Map<String, Object>>();
+        var reader = new java.io.BufferedReader(new java.io.InputStreamReader(body, StandardCharsets.UTF_8));
+        Long pendingId = null;
+        // Quiescence, not idleness, is the stop condition: this endpoint never goes idle by
+        // design -- it emits a keepalive on every tick that found nothing -- so waiting for
+        // silence would wait forever and wedge the reactor. Two consecutive keepalives with no
+        // frame between them mean the server has re-polled the journal and found nothing new,
+        // which is the real "caught up" signal.
+        boolean frameSinceKeepalive = false;
+        int quietKeepalives = 0;
+        String line;
+        while ((line = reader.readLine()) != null) {
+            if (line.startsWith(": keepalive")) {
+                quietKeepalives = frameSinceKeepalive ? 0 : quietKeepalives + 1;
+                frameSinceKeepalive = false;
+                if (quietKeepalives >= 2) {
+                    break;
+                }
+            } else if (line.startsWith("id: ")) {
+                pendingId = Long.parseLong(line.substring("id: ".length()).strip());
+            } else if (line.startsWith("data: {")
+                    || (line.startsWith("data: ") && line.contains("STREAM_RETENTION_EXCEEDED"))) {
+                var parsed = parseJsonObject(line.substring("data: ".length()));
+                parsed.put(SSE_ID, pendingId);
+                pendingId = null;
+                events.add(parsed);
+                frameSinceKeepalive = true;
             }
         }
         return events;
@@ -459,11 +526,12 @@ class DurableSseReplayIntegrationTest {
 
     private static HttpResponse<InputStream> get(RavenrootServer server, String path, long lastEventId)
             throws Exception {
-        var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path)).GET();
+        var builder = HttpRequest.newBuilder(URI.create("http://127.0.0.1:" + server.port() + path))
+                .timeout(TEST_TIMEOUT).GET();
         if (lastEventId > 0) {
             builder.header("Last-Event-ID", Long.toString(lastEventId));
         }
-        return HttpClient.newHttpClient().send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
+        return TEST_CLIENT.send(builder.build(), HttpResponse.BodyHandlers.ofInputStream());
     }
 
     /** Minimal hand-rolled JSON object parser: flat, string/number/null values only -- exactly this
@@ -520,6 +588,33 @@ class DurableSseReplayIntegrationTest {
         return new RavenrootServer(application,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
                 new DisabledLoopbackAuthenticator());
+    }
+
+    /** A stream that ignores interruption and can only be released by closing its owner. */
+    private static final class CloseControlledInputStream extends InputStream {
+        private final java.util.concurrent.CountDownLatch closed = new java.util.concurrent.CountDownLatch(1);
+
+        @Override
+        public int read() {
+            while (closed.getCount() != 0) {
+                try {
+                    closed.await();
+                } catch (InterruptedException ignored) {
+                    // Deliberately model a blocking I/O implementation that does not use thread
+                    // interruption as its cancellation protocol.
+                }
+            }
+            return -1;
+        }
+
+        @Override
+        public void close() {
+            closed.countDown();
+        }
+
+        boolean closed() {
+            return closed.getCount() == 0;
+        }
     }
 
     /**

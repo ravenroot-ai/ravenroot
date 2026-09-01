@@ -508,7 +508,9 @@ class ManagedIngressRegistryTest {
             }
         };
         var registry = ManagedIngressRegistry.prepareWithLifecycleHooks(List.of(AUTHORITY), true, hooks);
-        try (registry; var releases = Executors.newVirtualThreadPerTaskExecutor()) {
+        var initiatingReleases = Executors.newSingleThreadExecutor();
+        var repeatedReleases = Executors.newVirtualThreadPerTaskExecutor();
+        try {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
@@ -530,22 +532,30 @@ class ManagedIngressRegistryTest {
                     .POST(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.ofByteArray());
             assertTrue(permitAcquired.await(1, TimeUnit.SECONDS));
 
-            var initiatingRelease = releases.submit(oldLease::release);
+            // Keep the winner on a platform thread: even if repeated virtual-thread callers pin
+            // their scheduler, this test can release the lifecycle hook and clean up deterministically.
+            var initiatingRelease = initiatingReleases.submit(oldLease::release);
             assertTrue(removalStarted.await(1, TimeUnit.SECONDS));
             var returned = new AtomicInteger();
-            var repeated = java.util.stream.IntStream.range(0, 8)
-                    .mapToObj(index -> releases.submit(() -> {
+            int repeatedCallers = virtualThreadSchedulerParallelism() + 1;
+            var repeatedStarted = new CountDownLatch(repeatedCallers);
+            var repeated = java.util.stream.IntStream.range(0, repeatedCallers)
+                    .mapToObj(index -> repeatedReleases.submit(() -> {
+                        repeatedStarted.countDown();
                         oldLease.release();
                         returned.incrementAndGet();
                     })).toList();
-            Thread.sleep(50);
+            assertTrue(repeatedStarted.await(2, TimeUnit.SECONDS),
+                    "all repeated release callers must reach the contested lifecycle");
+            repeatedReleases.submit(() -> { }).get(1, TimeUnit.SECONDS);
             assertEquals(0, returned.get(),
-                    "idempotent release callers cannot return while the old context still exists");
+                    "idempotent release callers cannot return while the old context still exists, "
+                            + "but they must not pin the virtual-thread scheduler while waiting");
 
             allowContextRemoval.countDown();
             initiatingRelease.get(1, TimeUnit.SECONDS);
             for (var release : repeated) release.get(1, TimeUnit.SECONDS);
-            assertEquals(8, returned.get());
+            assertEquals(repeatedCallers, returned.get());
             assertTrue(registry.inventory().isEmpty(), "context removal also removes old inventory");
 
             registry.authorityFor(new IngressRouteOwner("example.oas", "tenant", "deployment", "node", 2))
@@ -566,6 +576,9 @@ class ManagedIngressRegistryTest {
         } finally {
             allowContextRemoval.countDown();
             allowPublication.countDown();
+            shutdown(initiatingReleases);
+            shutdown(repeatedReleases);
+            registry.close();
         }
     }
 
@@ -809,6 +822,26 @@ class ManagedIngressRegistryTest {
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new AssertionError("test lifecycle hook interrupted", interrupted);
+        }
+    }
+
+    private static int virtualThreadSchedulerParallelism() {
+        return Integer.getInteger("jdk.virtualThreadScheduler.parallelism",
+                Runtime.getRuntime().availableProcessors());
+    }
+
+    private static void shutdown(java.util.concurrent.ExecutorService executor) {
+        executor.shutdown();
+        try {
+            if (!executor.awaitTermination(2, TimeUnit.SECONDS)) {
+                executor.shutdownNow();
+                assertTrue(executor.awaitTermination(2, TimeUnit.SECONDS),
+                        "test executor must terminate within its cleanup budget");
+            }
+        } catch (InterruptedException interrupted) {
+            executor.shutdownNow();
+            Thread.currentThread().interrupt();
+            throw new AssertionError("test executor cleanup was interrupted", interrupted);
         }
     }
 }

@@ -1,0 +1,33 @@
+title: Ravenroot documentation
+description: Documentation for building, running, integrating, and operating Ravenroot.
+url: https://docs.ravenroot.ai
+baseurl: ""
+repository: ravenroot-ai/ravenroot
+repository_url: https://github.com/ravenroot-ai/ravenroot
+
+lang: en
+markdown: kramdown
+kramdown:
+  input: GFM
+
+plugins:
+  - jekyll-relative-links
+  - jekyll-titles-from-headings
+
+relative_links:
+  enabled: true
+  collections: true
+
+titles_from_headings:
+  enabled: true
+  strip_title: false
+  collections: true
+
+defaults:
+  - scope:
+      path: ""
+    values:
+      layout: default
+
+sass:
+  style: compressed

@@ -35,6 +35,15 @@ const graphState = page => page.evaluate(() => ({
   historyDepth: window.ravenroot.activeDocument().history.depth(),
 }));
 
+async function pressReadyUndoShortcut(page) {
+  const control = page.locator('#btn-undo');
+  await expect(control).toBeEnabled();
+  await expect(control).toHaveAttribute('title', /^Undo /);
+  const shortcut = await control.getAttribute('aria-keyshortcuts');
+  expect(shortcut).toMatch(/^(Meta|Control)\+z$/i);
+  await page.keyboard.press(shortcut);
+}
+
 const overlayState = page => page.evaluate(() => {
   const owner = window.ravenroot.activeDocument();
   const root = owner.cy.container().querySelector('.graph-node-actions-overlay');
@@ -483,7 +492,7 @@ test('a delayed sequence stays owned through hide and releases on its matching t
     historyDepth: beforeStage.historyDepth + 1,
   });
   expect((await graphState(page)).nodes).toHaveLength(beforeStage.nodes.length + 1);
-  await page.keyboard.press('Meta+z');
+  await pressReadyUndoShortcut(page);
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: beforeStage.nodes, edges: beforeStage.edges, historyDepth: beforeStage.historyDepth,
   });
@@ -680,7 +689,7 @@ test.describe('coarse pointer node actions', () => {
       edges: before.edges,
       historyDepth: before.historyDepth + 1,
     });
-    await page.keyboard.press('Meta+z');
+    await pressReadyUndoShortcut(page);
     await expect.poll(() => graphState(page)).toMatchObject({
       nodes: before.nodes, edges: before.edges, historyDepth: before.historyDepth,
     });

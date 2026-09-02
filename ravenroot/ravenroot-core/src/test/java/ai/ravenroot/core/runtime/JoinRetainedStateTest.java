@@ -14,6 +14,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -174,8 +175,11 @@ class JoinRetainedStateTest {
      * held the coordinator, its payloads and the traversal's security context for the entire
      * configured duration of a traversal that had already been shut down.</p>
      *
-     * <p>The scheduler double blocks inside {@code schedule} so the window is entered deliberately
-     * rather than occasionally.</p>
+     * <p>The scheduler blocks inside {@code schedule}, and the package-private runner seam holds
+     * {@code close()} immediately after it has relinquished the timeout under the handoff lock.
+     * Releasing the scheduler only after that observation constructs the contested interleaving:
+     * the arming side must return a handle after terminal relinquishment and therefore cancel it
+     * rather than publish it.</p>
      *
      * <p><strong>No wall clock, and no negative half here.</strong> This test used to sleep 200ms and
      * then assert that {@code close()} was still running. That assertion was a bet on a build
@@ -197,24 +201,41 @@ class JoinRetainedStateTest {
         var store = new InMemoryJoinStore();
         var blocked = new CompletableFuture<NodeResult>();
         var graph = JoinMiniGraphs.fanIn(2, JoinMiniGraphs.quorumWithTimeout(2, "PT30S"));
+        var timeoutRelinquished = new CountDownLatch(1);
+        var releaseRelinquishment = new CountDownLatch(1);
 
         engine.manualScheduler().blockInsideSchedule();
 
         var manager = GraphManager.from(graph);
         var runner = new GraphRunner(manager, engine, gated(blocked), monitor,
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store,
-                java.time.Clock.systemUTC());
+                java.time.Clock.systemUTC(), GraphRunner.DEFAULT_SHUTDOWN_BOUND, () -> {
+                    timeoutRelinquished.countDown();
+                    try {
+                        releaseRelinquishment.await();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                });
         var execution = runner.execute(TestIdentities.TENANT_A, "in").toCompletableFuture();
 
         assertTrue(engine.manualScheduler().awaitInsideSchedule(5_000),
                 "the runtime must have reached the scheduler");
 
         var closing = new Thread(runner::close, "close-during-schedule");
-        closing.start();
-        engine.manualScheduler().releaseSchedule();
-        closing.join(10_000);
+        try {
+            closing.start();
+            assertTrue(timeoutRelinquished.await(5, TimeUnit.SECONDS),
+                    "close() must relinquish the timeout before scheduling can return");
+            engine.manualScheduler().releaseSchedule();
+        } finally {
+            // A failed rendezvous must not leave either test thread holding the engine for later tests.
+            engine.manualScheduler().releaseSchedule();
+            releaseRelinquishment.countDown();
+            closing.join(10_000);
+            manager.close();
+        }
         assertFalse(closing.isAlive(), "close() must complete once the scheduler returns");
-        manager.close();
 
         assertEquals(0, engine.manualScheduler().liveCount(),
                 "a timeout created inside close()'s window must still be cancelled, not left to hold the traversal");
@@ -222,7 +243,8 @@ class JoinRetainedStateTest {
                 "no timeout may still be counted live once close() has returned");
         assertEquals(0, store.totalRecordCount());
         assertEquals(0, runner.liveCoordinatorCount());
-        assertThrows(Exception.class, () -> execution.get(5, TimeUnit.SECONDS));
+        assertFalse(execution.isDone() && !execution.isCompletedExceptionally(),
+                "close() must not make a traversal with a blocked branch report success");
         blocked.complete(NodeResult.continueWith("from-b1"));
     }
 

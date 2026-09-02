@@ -83,6 +83,7 @@ final class JoinCoordinator {
     private final UUID processInstanceId;
     private final UUID traversalId;
     private final String tenantId;
+    private final Runnable timeoutRelinquishedObserver;
 
     /**
      * In-memory state for the joins this traversal has actually reached.
@@ -225,6 +226,12 @@ final class JoinCoordinator {
 
     JoinCoordinator(JoinStore store, Scheduler scheduler, ExecutionMonitor monitor,
                     ExecutionMonitor.ExecutionIdentity identity, Map<String, JoinSpec> specs, Clock clock) {
+        this(store, scheduler, monitor, identity, specs, clock, () -> { });
+    }
+
+    JoinCoordinator(JoinStore store, Scheduler scheduler, ExecutionMonitor monitor,
+                    ExecutionMonitor.ExecutionIdentity identity, Map<String, JoinSpec> specs, Clock clock,
+                    Runnable timeoutRelinquishedObserver) {
         this.store = store;
         this.scheduler = scheduler;
         this.monitor = monitor;
@@ -234,6 +241,8 @@ final class JoinCoordinator {
         this.processInstanceId = identity.processInstanceId();
         this.traversalId = identity.traversalId();
         this.tenantId = identity.security().tenantId();
+        this.timeoutRelinquishedObserver = java.util.Objects.requireNonNull(timeoutRelinquishedObserver,
+                "timeoutRelinquishedObserver");
     }
 
     boolean isJoin(String nodeId) {
@@ -1316,6 +1325,7 @@ final class JoinCoordinator {
                 timeoutGeneration++;
                 task = timeout;
                 timeout = null;
+                timeoutRelinquishedObserver.run();
             }
             if (task != null && task.cancel()) {
                 liveTimeouts.decrementAndGet();

@@ -121,15 +121,138 @@ intent and, for a version-changing release:
 8. mark alpha GitHub Releases as prereleases and verify that every publication channel resolves to the
    same version and commit.
 
-Tag creation and delivery happen in the same workflow. A maintainer does not create the tag manually,
+Tag creation and delivery happen in one protected automation chain. A maintainer does not create the tag manually,
 so a released `main` commit cannot be silently skipped. For `release:none`, the workflow records the
 classification and exits successfully without changing the version, creating a tag, or building and
 publishing deliverables. The workflow must be concurrency-protected, use minimum permissions, and be
 safe to rerun after a partial failure without replacing an immutable artifact.
 
-The publishing workflow is tracked separately from this CI classification. It must remain disabled
-until the registry credentials, immutable-publication controls, and complete release gate are ready.
-Until then, this document defines the process but a merge to `main` does not create deliverables.
+The publishing workflow is separate from CI classification and has no authority on pull requests or
+ordinary branch pushes. A qualifying merge to `main` is checked against its merged pull request and
+exact-commit CI run before automation creates an annotated tag. Because events created by the
+repository `GITHUB_TOKEN` do not recursively start ordinary tag-push workflows, the authorization
+workflow explicitly dispatches the publication workflow on that newly created tag ref. A manual
+dispatch is only a recovery entry point: it is rejected unless the workflow itself is running on the
+same existing tag ref.
+
+## Release automation and operator runbook
+
+### Publication boundary
+
+Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains:
+
+- `ravenroot-parent`, `ravenroot-application-api`, `ravenroot-core`,
+  `ravenroot-programming-graalvm`, `ravenroot-plugin-bundle`, `ravenroot-persistence-sqlite`,
+  `ravenroot-pekko`, `ravenroot-observability-otel`, `ravenroot-server`, `ravenroot-cli`, and
+  `ravenroot-distribution`;
+- the reusable `ravenroot-api-testkit`, `ravenroot-engine-testkit`, and
+  `ravenroot-persistence-testkit` conformance artifacts;
+- the `ravenroot-extensions` parent and the `ravenroot-ai`, `ravenroot-amqp091`,
+  `ravenroot-filesystem`, `ravenroot-jdbc`, `ravenroot-kafka`, `ravenroot-mail`,
+  `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
+  `ravenroot-openapi-server`, `ravenroot-spel`, `ravenroot-telegram`, and
+  `ravenroot-websocket` extensions.
+
+The example node project, sandbox-supervisor conformance fixture, optional Akka build, development
+harness, sample application, and out-of-reactor adapter builds are not Central publications. The OCI
+image name is `ghcr.io/ravenroot-ai/ravenroot:<version>`. Prereleases never create or move `latest`.
+
+### Protected environment and signing identity
+
+The GitHub Environment is named `release`. It requires owner review and accepts only `v*` tag refs.
+The active `Protect immutable release tags` tag ruleset allows authorized automation to create a new
+`v*` ref but permits no actor to update or delete one after creation.
+Its environment-scoped secrets are:
+
+- `CENTRAL_USERNAME`
+- `CENTRAL_TOKEN`
+- `MAVEN_GPG_PRIVATE_KEY`
+- `MAVEN_GPG_PASSPHRASE`
+
+Do not create repository-level copies of these secrets. The release signing identity is
+`Ravenroot Release Signing <releases@ravenroot.ai>` and its fingerprint is
+`31841485DE6D55A504CAC4B2DB18FAA6B85083EA`. The key expires on 2028-09-01; begin rotation at least
+90 days before expiry, publish the replacement key, update the protected secret, and land the new
+public fingerprint through normal review before using it. The armored
+[public release key](../security/release-signing-key.asc) is tracked in this repository and published
+through `keyserver.ubuntu.com`.
+
+Verify a downloaded Central artifact with:
+
+```sh
+gpg --keyserver keyserver.ubuntu.com --recv-keys 31841485DE6D55A504CAC4B2DB18FAA6B85083EA
+gpg --fingerprint 31841485DE6D55A504CAC4B2DB18FAA6B85083EA
+gpg --verify artifact.jar.asc artifact.jar
+```
+
+### Maintainer procedure
+
+1. On `dev`, choose the version from the highest-impact unconsumed fragment. Update the root Maven
+   version, every child POM, the UI package and lockfile versions, and both Helm version fields. Run
+   `python3 scripts/check_product_version.py`.
+2. Assemble the changelog and commit reviewed GitHub Release notes at
+   `docs/releases/v<version>.md`; remove only the fragments consumed by that release.
+3. Open the internal `dev` to `main` pull request. Apply exactly one of `release:patch`,
+   `release:minor`, or `release:major`. The first `0.1.0-alpha.1` promotion uses `release:minor`.
+   Never add an automated or post-merge version-bump commit.
+4. Obtain the required review and merge with a merge commit. The resulting merge commit is the exact
+   source that authorization validates and tags.
+5. Wait for `authorize-release` to confirm the merged pull request, version transition, absence of a
+   reused version, and the exact-commit `ci.yml` result. It then creates `v<version>` once and starts
+   publication on that tag ref.
+6. Review the pending `release` Environment deployment. Confirm the tag, commit, version, release
+   notes, and hosted gates, then approve it.
+7. After completion, verify the Maven coordinates on Central, pull the GHCR image by version and by
+   reported digest without authentication, inspect its SBOM/provenance attestations, verify the
+   GitHub prerelease assets against `SHA256SUMS`, and confirm the release points at the peeled tag
+   commit.
+8. Fast-forward `dev` to the released `main` merge commit before accepting more integration work.
+
+### Retry and partial-publication recovery
+
+Never delete, replace, or reuse a released version. Re-run **Publish immutable release** from the
+existing tag ref and provide that same tag as the input. The workflow rebuilds deterministic payloads
+from the tag, then follows these rules:
+
+- if no Central component exists, it uploads and automatically publishes one complete signed bundle;
+- if every Central component exists, it rebuilds locally without uploading and compares every immutable
+  payload byte-for-byte with Central;
+- if only part of the Central coordinate set is visible, or any payload differs, it stops for human
+  investigation;
+- if the GHCR version tag exists, its Linux AMD64 image-manifest digest must match the normalized
+  rebuilt image and its SBOM and provenance attestation manifests must be present, or the retry stops;
+  a matching image is retained without moving `latest`;
+- existing GitHub Release assets are downloaded and hashed; matching assets are retained, missing
+  assets are added, and mismatches stop the run.
+
+If Central reports `PUBLISHING` or `VALIDATING`, wait for the portal deployment to reach a terminal
+state before retrying. If one registry succeeded and another failed, preserve the successful
+immutable publication and resume from the same tag. Open a focused public issue for a reproducible
+pipeline defect; do not relax ancestry, version, review, signature, content-identity, or provenance
+checks.
+
+### First-release checklist
+
+Before approving `v0.1.0-alpha.1`, confirm all of the following:
+
+- the `ai.ravenroot` namespace remains verified and the four `release` Environment secrets have a
+  current update timestamp;
+- `docs/releases/v0.1.0-alpha.1.md`, the changelog, and all version surfaces were reviewed in the
+  release pull request;
+- the signing fingerprint above resolves from the public keyserver and matches the tracked key;
+- no Maven coordinate, Git tag, GitHub Release, or GHCR version tag already uses this version;
+- exact-commit hosted CI and the non-secret tag gates are green;
+- the owner approves the Environment only after matching the proposed tag and commit;
+- after publication, Central signatures, anonymous GHCR pulls by version and digest, attestations,
+  checksums, and prerelease status are verified and recorded in the release pull request.
+
+The implementation follows the official
+[Central Publisher Portal Maven plugin](https://central.sonatype.org/publish/publish-portal-maven/)
+and [Central signing](https://central.sonatype.org/publish/requirements/gpg/) guidance, together with
+GitHub's documentation for
+[deployment environments](https://docs.github.com/actions/reference/deployments-and-environments),
+[publishing container images](https://docs.github.com/actions/tutorials/publish-packages/publish-docker-images),
+and [artifact attestations](https://docs.github.com/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations).
 
 ## Synchronizing after a release
 

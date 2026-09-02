@@ -131,6 +131,8 @@
       url: /governance/
     - title: Releasing Ravenroot
       url: /governance/releasing.html
+    - title: Ravenroot 0.1.0-alpha.1 release notes
+      url: /releases/v0.1.0-alpha.1.html
     - title: Compatibility and release policy
       url: /governance/compatibility-releases.html
     - title: Support, disclosure, and legal

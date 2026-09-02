@@ -1,0 +1,139 @@
+- title: Start here
+  items:
+    - title: Documentation home
+      url: /
+    - title: Get started
+      url: /get-started/
+    - title: Install and start
+      url: /get-started/install-start.html
+    - title: Build your first graph
+      url: /get-started/first-graph.html
+    - title: Test, run, and inspect
+      url: /get-started/first-execution.html
+
+- title: User guide
+  items:
+    - title: User guide overview
+      url: /user-guide/
+    - title: Workspace and graph authoring
+      url: /user-guide/workspace-authoring.html
+    - title: Payloads, outcomes, and routing
+      url: /user-guide/payload-routing.html
+    - title: Test, Run, and execution control
+      url: /user-guide/test-run-observe.html
+    - title: Credentials, providers, and artifacts
+      url: /user-guide/integrations-artifacts.html
+    - title: Embedded viewing and accessibility
+      url: /user-guide/embed-accessibility.html
+
+- title: Operator guide
+  items:
+    - title: Operator guide overview
+      url: /operator-guide/
+    - title: Deployment and startup
+      url: /operator-guide/deployment-startup.html
+    - title: Identity and browser boundary
+      url: /operator-guide/identity-browser.html
+    - title: Persistence, lifecycle, and recovery
+      url: /operator-guide/persistence-lifecycle.html
+    - title: Credentials, connectors, and egress
+      url: /operator-guide/credentials-egress.html
+    - title: Embedded-viewer operations
+      url: /operator-guide/embed-operations.html
+
+- title: Integrator guide
+  items:
+    - title: Integrator guide overview
+      url: /integrator-guide/
+    - title: Application, HTTP, SSE, and CLI
+      url: /integrator-guide/application-http.html
+    - title: Embedded-viewer protocol
+      url: /integrator-guide/embed-protocol.html
+    - title: Nodes, plugins, and adapters
+      url: /integrator-guide/extensions-adapters.html
+    - title: Model, agent, and program integration
+      url: /integrator-guide/ai-programs.html
+
+- title: Architecture and security
+  items:
+    - title: Architecture overview
+      url: /architecture/
+    - title: Product boundaries and authority
+      url: /architecture/product-boundaries.html
+    - title: Graph and GraphML semantics
+      url: /architecture/graph-semantics.html
+    - title: Execution and actor model
+      url: /architecture/execution-actor-model.html
+    - title: Durability, events, and recovery
+      url: /architecture/durability-events.html
+    - title: AI, programs, and extensions
+      url: /architecture/ai-extension-boundaries.html
+    - title: Embedded projection security model
+      url: /architecture/embed-security-model.html
+    - title: Security guide
+      url: /security/
+    - title: Threat model and identity
+      url: /security/trust-identity.html
+    - title: Graph input, credentials, and egress
+      url: /security/input-secrets-egress.html
+    - title: AI, tools, and programmable code
+      url: /security/ai-code.html
+    - title: Embed, privacy, and audit
+      url: /security/embed-privacy.html
+
+- title: Reference
+  items:
+    - title: Reference overview
+      url: /reference/
+    - title: GraphML profile
+      url: /reference/graphml.html
+    - title: Node catalog, payloads, and limits
+      url: /reference/nodes-payload-limits.html
+    - title: Executions, outcomes, and events
+      url: /reference/execution-events.html
+    - title: HTTP API and CLI
+      url: /reference/api-cli.html
+    - title: Configuration and defaults
+      url: /reference/configuration.html
+    - title: Embed and extension contracts
+      url: /reference/embed-extension-contracts.html
+    - title: Backup and recovery bundle
+      url: /reference/backup-recovery.html
+
+- title: Troubleshooting
+  items:
+    - title: Troubleshooting overview
+      url: /troubleshooting/
+    - title: Startup and readiness
+      url: /troubleshooting/startup-readiness.html
+    - title: Authentication and browser access
+      url: /troubleshooting/identity-browser.html
+    - title: Graph validation and execution
+      url: /troubleshooting/graph-execution.html
+    - title: Events and persistence
+      url: /troubleshooting/events-persistence.html
+    - title: AI, artifacts, plugins, and connectors
+      url: /troubleshooting/ai-extensions.html
+    - title: Embed access, backup, and recovery
+      url: /troubleshooting/embed-backup.html
+
+- title: Contributing and governance
+  items:
+    - title: Developer guide
+      url: /developer-guide/
+    - title: Build, harness, and tests
+      url: /developer-guide/build-test.html
+    - title: Extensions and adapters
+      url: /developer-guide/extension-development.html
+    - title: API, documentation, and releases
+      url: /developer-guide/api-doc-release.html
+    - title: Governance and releases
+      url: /governance/
+    - title: Releasing Ravenroot
+      url: /governance/releasing.html
+    - title: Compatibility and release policy
+      url: /governance/compatibility-releases.html
+    - title: Support, disclosure, and legal
+      url: /governance/support-legal.html
+    - title: Documentation editorial guide
+      url: /editorial-guide.html

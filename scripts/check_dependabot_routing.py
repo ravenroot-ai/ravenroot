@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 import sys
 from pathlib import Path
@@ -20,6 +21,10 @@ EXPECTED_UPDATES = {
     ("maven", "/ravenroot-sample"),
     ("npm", "/ravenroot/ravenroot-ui"),
     ("npm", "/scripts/mermaid-renderer"),
+}
+PINNED_WORKFLOWS = {
+    "authorize-dependabot.yml": "99b182673d357c731613b69c9caa3dc3c0f7fdcfc07cd8b02a09696ca98afa6d",
+    "route-dependabot.yml": "f03811987d81ec32b9b657bea949aaf24afa493d062c4375b7d4f3ccc8369aaf",
 }
 
 
@@ -79,57 +84,52 @@ def check_dependabot_config(contents: str) -> None:
             )
 
 
-def check_routing_workflow(contents: str) -> None:
-    required = (
-        "pull_request_target:",
-        "branches: [main]",
-        "types: [opened, reopened, edited]",
-        "permissions: {}",
-        "github.event.pull_request.base.ref == 'main'",
-        "github.event.pull_request.user.login == 'dependabot[bot]'",
-        "github.event.pull_request.head.repo.full_name == github.repository",
-        "startsWith(github.event.pull_request.head.ref, 'dependabot/')",
-        "GH_TOKEN: ${{ github.token }}",
-        "PR_NUMBER: ${{ github.event.pull_request.number }}",
-        "gh api --method PATCH",
-        '"repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"',
-        "-f base=dev --silent",
-    )
-    for fragment in required:
-        if fragment not in contents:
-            raise RoutingPolicyError(f"Dependabot routing workflow is missing: {fragment}")
-
-    if "uses:" in contents or "actions/checkout" in contents:
-        raise RoutingPolicyError("Dependabot routing must not check out or execute pull request code")
-    if "secrets." in contents:
-        raise RoutingPolicyError("Dependabot routing must not reference repository secrets")
-    write_permissions = re.findall(r"(?m)^\s+([a-z-]+): write\s*$", contents)
-    if write_permissions != ["pull-requests"]:
+def check_pinned_workflow(name: str, contents: str) -> None:
+    expected = PINNED_WORKFLOWS[name]
+    actual = hashlib.sha256(contents.encode("utf-8")).hexdigest()
+    if actual != expected:
         raise RoutingPolicyError(
-            f"Dependabot routing write permissions changed: {write_permissions}"
+            f"{name} must receive explicit security review before its pinned contract changes"
         )
 
 
 def check_ci_workflow(contents: str) -> None:
-    pull_request_trigger = contents.partition("\n  push:\n")[0]
-    if "types: [opened, synchronize, reopened, edited, labeled, unlabeled]" not in pull_request_trigger:
-        raise RoutingPolicyError("ordinary pull request CI must run after a base-branch edit")
-    if "secrets." in contents or "packages: write" in contents:
+    write_permissions = re.findall(r"(?m)^\s+[a-z-]+: write\s*$", contents)
+    if "secrets." in contents or write_permissions:
         raise RoutingPolicyError("ordinary pull request CI must remain secretless and non-publishing")
+
+    required = (
+        "routing_run_id:",
+        "routed_pr_number:",
+        "Validate an explicitly routed Dependabot run",
+        "actions: read",
+        "pull-requests: read",
+        '.path == ".github/workflows/authorize-dependabot.yml"',
+        '.name == "authorize-dependabot-routing" and .conclusion == "success"',
+        '.base.ref == "dev"',
+        '.user.login == "dependabot[bot]"',
+        'test "$GITHUB_SHA" = "$ROUTED_HEAD_SHA"',
+        "inputs.routing_run_id != '' && 'pull_request' || github.event_name",
+        "inputs.routing_run_id != '' && 'dev' || github.base_ref",
+    )
+    for fragment in required:
+        if fragment not in contents:
+            raise RoutingPolicyError(f"ordinary CI routing contract is missing: {fragment}")
 
 
 def check_repository(root: Path = ROOT) -> None:
     check_dependabot_config((root / ".github/dependabot.yml").read_text(encoding="utf-8"))
-    check_routing_workflow(
-        (root / ".github/workflows/route-dependabot.yml").read_text(encoding="utf-8")
-    )
+    for name in PINNED_WORKFLOWS:
+        check_pinned_workflow(
+            name, (root / ".github/workflows" / name).read_text(encoding="utf-8")
+        )
     check_ci_workflow((root / ".github/workflows/ci.yml").read_text(encoding="utf-8"))
 
 
 def main() -> int:
     try:
         check_repository()
-    except (OSError, RoutingPolicyError) as exc:
+    except (KeyError, OSError, RoutingPolicyError) as exc:
         print(f"Dependabot routing check failed: {exc}", file=sys.stderr)
         return 1
     print("Dependabot updates are routed to secretless dev pull request CI.")

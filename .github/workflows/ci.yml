@@ -7,6 +7,23 @@ on:
   push:
     branches: [dev, main]
   workflow_dispatch:
+    inputs:
+      routing_run_id:
+        description: Trusted Dependabot authorization workflow run
+        required: false
+        type: string
+      routed_pr_number:
+        description: Dependabot pull request routed from main
+        required: false
+        type: string
+      base_sha:
+        description: Development base commit captured after routing
+        required: false
+        type: string
+      head_sha:
+        description: Dependabot head commit to verify
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -43,6 +60,10 @@ jobs:
     name: release-classification
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
     outputs:
       tier: ${{ steps.classify.outputs.tier }}
       release-intent: ${{ steps.classify.outputs.release_intent }}
@@ -52,14 +73,56 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+      - name: Validate an explicitly routed Dependabot run
+        if: github.event_name == 'workflow_dispatch' && inputs.routing_run_id != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ROUTING_RUN_ID: ${{ inputs.routing_run_id }}
+          ROUTED_PR_NUMBER: ${{ inputs.routed_pr_number }}
+          ROUTED_BASE_SHA: ${{ inputs.base_sha }}
+          ROUTED_HEAD_SHA: ${{ inputs.head_sha }}
+        run: |
+          set -euo pipefail
+          [[ "$ROUTING_RUN_ID" =~ ^[0-9]+$ ]]
+          [[ "$ROUTED_PR_NUMBER" =~ ^[0-9]+$ ]]
+          [[ "$ROUTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ROUTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+
+          run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ROUTING_RUN_ID")
+          jq -e --argjson number "$ROUTED_PR_NUMBER" '
+            .path == ".github/workflows/authorize-dependabot.yml" and
+            .event == "pull_request_target" and
+            .conclusion == "success" and
+            (.pull_requests | length) == 1 and
+            .pull_requests[0].number == $number and
+            .pull_requests[0].base.ref == "main"
+          ' <<<"$run_json" >/dev/null
+
+          jobs_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ROUTING_RUN_ID/jobs")
+          jq -e '
+            [.jobs[] | select(
+              .name == "authorize-dependabot-routing" and .conclusion == "success"
+            )] | length == 1
+          ' <<<"$jobs_json" >/dev/null
+
+          pr_json=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$ROUTED_PR_NUMBER")
+          jq -e --arg repository "$GITHUB_REPOSITORY" --arg head "$ROUTED_HEAD_SHA" '
+            .state == "open" and
+            .base.ref == "dev" and
+            .user.login == "dependabot[bot]" and
+            .head.repo.full_name == $repository and
+            (.head.ref | startswith("dependabot/")) and
+            .head.sha == $head
+          ' <<<"$pr_json" >/dev/null
+          test "$GITHUB_SHA" = "$ROUTED_HEAD_SHA"
       - name: Classify the CI and release tier
         id: classify
         env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
+          EVENT_NAME: ${{ inputs.routing_run_id != '' && 'pull_request' || github.event_name }}
+          BASE_REF: ${{ inputs.routing_run_id != '' && 'dev' || github.base_ref }}
           REF_NAME: ${{ github.ref_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ inputs.routing_run_id != '' && inputs.base_sha || github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ inputs.routing_run_id != '' && inputs.head_sha || github.event.pull_request.head.sha || github.sha }}
           PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
         run: python3 scripts/classify_main_change.py
 

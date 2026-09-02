@@ -1,30 +1,76 @@
-name: Route Dependabot pull requests
+name: Route authorized Dependabot pull requests
 
 on:
-  pull_request_target:
-    branches: [main]
-    types: [opened, reopened, edited]
+  workflow_run:
+    workflows: ["Authorize Dependabot routing"]
+    types: [completed]
 
 permissions: {}
 
 jobs:
   route-to-dev:
     name: route-dependabot-to-dev
-    if: >-
-      github.event.pull_request.base.ref == 'main' &&
-      github.event.pull_request.user.login == 'dependabot[bot]' &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      startsWith(github.event.pull_request.head.ref, 'dependabot/')
+    if: github.event.workflow_run.event == 'pull_request_target'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
+      actions: write
       pull-requests: write
     steps:
-      - name: Retarget the Dependabot pull request to dev
+      - name: Revalidate, retarget, and dispatch secretless CI
         env:
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: >-
-          gh api --method PATCH
-          "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
-          -f base=dev --silent
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+
+          run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID")
+          if ! jq -e '
+            .path == ".github/workflows/authorize-dependabot.yml" and
+            .event == "pull_request_target" and
+            .conclusion == "success" and
+            (.pull_requests | length) == 1 and
+            .pull_requests[0].base.ref == "main"
+          ' <<<"$run_json" >/dev/null; then
+            echo "The source run is not an eligible main pull request authorization."
+            exit 0
+          fi
+
+          jobs_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/jobs")
+          if ! jq -e '
+            [.jobs[] | select(
+              .name == "authorize-dependabot-routing" and .conclusion == "success"
+            )] | length == 1
+          ' <<<"$jobs_json" >/dev/null; then
+            echo "Dependabot routing was not authorized."
+            exit 0
+          fi
+
+          pr_number=$(jq -r '.pull_requests[0].number' <<<"$run_json")
+          pr_json=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")
+          jq -e --arg repository "$GITHUB_REPOSITORY" '
+            .state == "open" and
+            .user.login == "dependabot[bot]" and
+            .head.repo.full_name == $repository and
+            (.head.ref | startswith("dependabot/")) and
+            (.base.ref == "main" or .base.ref == "dev")
+          ' <<<"$pr_json" >/dev/null
+
+          if [ "$(jq -r '.base.ref' <<<"$pr_json")" = main ]; then
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$pr_number" \
+              -f base=dev --silent
+          fi
+
+          pr_json=$(gh api "repos/$GITHUB_REPOSITORY/pulls/$pr_number")
+          jq -e '.base.ref == "dev"' <<<"$pr_json" >/dev/null
+          head_ref=$(jq -r '.head.ref' <<<"$pr_json")
+          head_sha=$(jq -r '.head.sha' <<<"$pr_json")
+          base_sha=$(jq -r '.base.sha' <<<"$pr_json")
+
+          gh api --method POST \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/dispatches" \
+            -f ref="$head_ref" \
+            -f "inputs[routing_run_id]=$SOURCE_RUN_ID" \
+            -f "inputs[routed_pr_number]=$pr_number" \
+            -f "inputs[base_sha]=$base_sha" \
+            -f "inputs[head_sha]=$head_sha"

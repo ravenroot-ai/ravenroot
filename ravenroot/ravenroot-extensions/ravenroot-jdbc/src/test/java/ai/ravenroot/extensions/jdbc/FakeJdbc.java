@@ -61,9 +61,13 @@ final class FakeJdbc implements Driver {
                         if (state.commitFailure) throw new SQLException("secret vendor commit detail"); yield null;
                     }
                     case "rollback" -> { state.rollbacks.incrementAndGet(); yield null; }
-                    case "abort" -> { state.aborts.incrementAndGet(); state.release.countDown(); state.commitRelease.countDown(); yield null; }
+                    case "abort" -> {
+                        state.aborts.incrementAndGet(); state.abortEntered.countDown();
+                        state.release.countDown(); state.commitRelease.countDown(); yield null;
+                    }
                     case "close" -> {
-                        state.closes.incrementAndGet(); state.release.countDown(); state.commitRelease.countDown();
+                        state.closes.incrementAndGet(); state.closeEntered.countDown();
+                        state.release.countDown(); state.commitRelease.countDown();
                         if (state.closeFailure) throw new SQLException("secret close after commit"); yield null;
                     }
                     case "isClosed" -> false;
@@ -197,6 +201,8 @@ final class FakeJdbc implements Driver {
         CountDownLatch commitRelease = new CountDownLatch(0);
         CountDownLatch cancelEntered = new CountDownLatch(0);
         CountDownLatch cancelRelease = new CountDownLatch(0);
+        CountDownLatch abortEntered = new CountDownLatch(0);
+        CountDownLatch closeEntered = new CountDownLatch(0);
         CountDownLatch keyCloseEntered = new CountDownLatch(0);
         CountDownLatch keyCloseRelease = new CountDownLatch(0);
         final AtomicInteger commits = new AtomicInteger(), rollbacks = new AtomicInteger(), closes = new AtomicInteger();
@@ -208,6 +214,11 @@ final class FakeJdbc implements Driver {
         }
         void blockCommit() { commitEntered = new CountDownLatch(1); commitRelease = new CountDownLatch(1); }
         void blockCancel() { cancelEntered = new CountDownLatch(1); cancelRelease = new CountDownLatch(1); }
+        void observeCancellationCleanup() {
+            cancelEntered = new CountDownLatch(1);
+            abortEntered = new CountDownLatch(1);
+            closeEntered = new CountDownLatch(1);
+        }
         void blockGeneratedKeyClose() {
             keyCloseEntered = new CountDownLatch(1); keyCloseRelease = new CountDownLatch(1);
         }

@@ -10,7 +10,7 @@ test('lost terminal SSE plus failed GET becomes actionable without permitting a 
     body: '[]',
   }));
   // Deliberately no terminal frame: completion must come from reconciliation, not SSE.
-  await page.route('**/v1/events', route => route.fulfill({
+  await page.route('**/v1/events**', route => route.fulfill({
     status: 200,
     contentType: 'text/event-stream; charset=utf-8',
     body: '',
@@ -82,7 +82,7 @@ async function installDelayedUnknownRuntime(page) {
   let releaseTerminal;
   const terminalGate = new Promise(resolve => { releaseTerminal = resolve; });
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }));
+  await page.route('**/v1/events**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }));
   await page.route('**/v1/executions**', async route => {
     if (route.request().method() === 'POST') {
       postCount += 1;
@@ -156,7 +156,7 @@ for (const invalidation of ['switch', 'close']) {
 test('ordinary terminal polling reports handled and bypassed outcome fields once without diagnostics', async ({ page }) => {
   let postCount = 0;
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }));
+  await page.route('**/v1/events**', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' }));
   await page.route('**/v1/executions**', route => {
     if (route.request().method() === 'POST') {
       postCount += 1;
@@ -184,12 +184,14 @@ test('ordinary terminal polling reports handled and bypassed outcome fields once
 async function installSseTerminalRace(page) {
   let postCount = 0;
   let getCount = 0;
+  let eventConnections = 0;
   let releaseSse;
   let resolveOutcomeGate;
   const sseGate = new Promise(resolve => { releaseSse = resolve; });
   const outcomeGate = new Promise(resolve => { resolveOutcomeGate = resolve; });
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', async route => {
+  await page.route('**/v1/events**', async route => {
+    eventConnections += 1;
     await sseGate;
     const event = {
       type: 'EXECUTION_COMPLETED', executionId: 'sse-execution', graphVersion: 'sse-graph',
@@ -217,6 +219,7 @@ async function installSseTerminalRace(page) {
   });
   return {
     get postCount() { return postCount; }, get getCount() { return getCount; },
+    get eventConnections() { return eventConnections; },
     sendTerminal() { releaseSse(); }, releaseOutcome() { resolveOutcomeGate(); },
   };
 }
@@ -224,6 +227,7 @@ async function installSseTerminalRace(page) {
 test('SSE replay wins the terminal race but performs one bound outcome report', async ({ page }) => {
   const runtime = await installSseTerminalRace(page);
   await page.goto('/');
+  await expect.poll(() => runtime.eventConnections).toBeGreaterThanOrEqual(1);
   await page.locator('#btn-play').click();
   await expect.poll(() => runtime.postCount).toBe(1);
   runtime.sendTerminal();
@@ -236,6 +240,7 @@ test('SSE replay wins the terminal race but performs one bound outcome report', 
 test('SSE and an unknown-state preflight racing to terminal still report and submit once', async ({ page }) => {
   let postCount = 0;
   let terminalLookups = 0;
+  let eventConnections = 0;
   let terminalPhase = false;
   let releaseSse;
   let releasePreflight;
@@ -244,7 +249,8 @@ test('SSE and an unknown-state preflight racing to terminal still report and sub
   const preflightGate = new Promise(resolve => { releasePreflight = resolve; });
   const outcomeGate = new Promise(resolve => { releaseOutcome = resolve; });
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', async route => {
+  await page.route('**/v1/events**', async route => {
+    eventConnections += 1;
     await sseGate;
     const event = {
       type: 'EXECUTION_COMPLETED', executionId: 'race-execution-1', graphVersion: 'race-graph-1',
@@ -276,6 +282,7 @@ test('SSE and an unknown-state preflight racing to terminal still report and sub
   });
 
   await page.goto('/');
+  await expect.poll(() => eventConnections).toBeGreaterThanOrEqual(1);
   await page.locator('#btn-play').click();
   await expect(page.locator('#activity-summary')).toContainText('Status unknown', { timeout: 6_000 });
   terminalPhase = true;
@@ -293,6 +300,7 @@ test('SSE and an unknown-state preflight racing to terminal still report and sub
 test('SSE outcome finishing after a document switch does not report into the active document', async ({ page }) => {
   const runtime = await installSseTerminalRace(page);
   await page.goto('/');
+  await expect.poll(() => runtime.eventConnections).toBeGreaterThanOrEqual(1);
   await page.locator('#btn-play').click();
   await expect.poll(() => runtime.postCount).toBe(1);
   runtime.sendTerminal();
@@ -319,7 +327,7 @@ test('three rapid runs abort the oldest hanging outcome lookup without blocking 
   const failedRequests = [];
   page.on('requestfailed', request => failedRequests.push(request));
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', async route => {
+  await page.route('**/v1/events**', async route => {
     const index = eventConnection++;
     if (index >= eventGates.length) {
       return route.fulfill({ status: 200, contentType: 'text/event-stream', body: '' });
@@ -369,6 +377,7 @@ test('three rapid runs abort the oldest hanging outcome lookup without blocking 
   });
 
   await page.goto('/');
+  await expect.poll(() => eventConnection).toBeGreaterThanOrEqual(1);
   await page.locator('#btn-play').click();
   await expect.poll(() => postCount).toBe(1);
   await expect.poll(() => eventConnection).toBe(1);
@@ -399,13 +408,15 @@ test('three rapid runs abort the oldest hanging outcome lookup without blocking 
 
 test('closing a rebound document aborts and releases its hanging retired outcome lookup', async ({ page }) => {
   let postCount = 0;
+  let eventConnections = 0;
   const eventGate = deferred();
   const outcomeGate = deferred();
   let getCount = 0;
   const failedRequests = [];
   page.on('requestfailed', request => failedRequests.push(request.url()));
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', async route => {
+  await page.route('**/v1/events**', async route => {
+    eventConnections += 1;
     await eventGate.promise;
     const event = {
       type: 'EXECUTION_COMPLETED', executionId: 'close-1', graphVersion: 'close-graph-1',
@@ -432,6 +443,7 @@ test('closing a rebound document aborts and releases its hanging retired outcome
   });
 
   await page.goto('/');
+  await expect.poll(() => eventConnections).toBeGreaterThanOrEqual(1);
   await page.locator('#btn-play').click();
   await expect.poll(() => postCount).toBe(1);
   eventGate.resolve();
@@ -449,12 +461,14 @@ for (const [label, includeDelayedOld] of [
 ]) {
 test(`identical id/client/version rebinding ${label}`, async ({ page }) => {
   let postCount = 0;
+  let eventConnections = 0;
   let allowTerminalPreflight = false;
   let runTwoGetCount = 0;
   const eventsGate = deferred();
   const hangingPollGate = deferred();
   await page.route('**/v1/node-types', route => route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }));
-  await page.route('**/v1/events', async route => {
+  await page.route('**/v1/events**', async route => {
+    eventConnections += 1;
     await eventsGate.promise;
     const oldEvent = {
       type: 'EXECUTION_COMPLETED', executionId: 'same-execution', graphVersion: 'same-graph',
@@ -509,6 +523,7 @@ test(`identical id/client/version rebinding ${label}`, async ({ page }) => {
   });
 
   await page.goto('/');
+  await expect.poll(() => eventConnections).toBeGreaterThanOrEqual(1);
   await page.locator('#btn-play').click();
   await expect(page.locator('#activity-summary')).toContainText('Status unknown', { timeout: 6_000 });
   allowTerminalPreflight = true;

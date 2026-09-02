@@ -373,7 +373,7 @@ test.describe('per-document layout ownership', () => {
       oldRendererRetired: true,
       oldGenerationRetired: true,
       hosts: 0,
-      history: emptyHistory,
+      history: { ...emptyHistory, revision: 1, lastMetadata: null },
       positions: incomingPositions,
       modelPositions: incomingPositions,
     });
@@ -401,7 +401,7 @@ test.describe('per-document layout ownership', () => {
       visualStyle: 'cyto',
       rendererKind: 'cytoscape',
       hosts: 0,
-      history: emptyHistory,
+      history: { ...emptyHistory, revision: 1, lastMetadata: null },
     });
     expect(errors).toEqual([]);
   });

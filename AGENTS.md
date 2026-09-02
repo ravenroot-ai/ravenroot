@@ -17,12 +17,16 @@ deliberately independent of any particular editor, assistant, or tool.
 
 ## Branch and release discipline
 
-- `main` is the default, release-only branch. `dev` is the integration branch for the next release.
+- `main` is the default branch for released product states and explicitly classified public-content
+  updates. `dev` is the integration branch for the next release.
 - Base ordinary topic branches on `dev`, and target `dev` from every ordinary pull request, including
   pull requests from forks.
-- Pull requests to `main` are reserved for the internal `dev` release branch and protected internal
-  `hotfix/*` branches. Repository rules restrict hotfix creation and updates to release maintainers;
-  branch protection and CODEOWNERS review authorize the merge.
+- Pull requests to `main` are reserved for the internal `dev` branch and protected internal
+  `hotfix/*` branches. They require exactly one of `release:none`, `release:patch`, `release:minor`, or
+  `release:major`. `release:none` is valid only for documentation and public content and never
+  authorizes a version increment, tag, or deliverable publication. Repository rules restrict hotfix
+  creation and updates to release maintainers; branch protection and CODEOWNERS review authorize the
+  merge.
 - Preserve a merge commit for `dev` to `main` release pull requests. Do not create release tags or
   publish deliverables outside the release workflow.
 - Follow [the release procedure](docs/governance/releasing.md) for versioning, change fragments,

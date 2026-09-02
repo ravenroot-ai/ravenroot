@@ -278,9 +278,9 @@ public abstract class SandboxSupervisorContract {
     // -- Cancellation and complete process-tree cleanup -----------------------------------------
 
     /**
-     * How long the canceller thread below is willing to wait for the probe to have recorded at
-     * least one forked PID before giving up and cancelling anyway. Generous on purpose: it is a
-     * safety net for a probe that never manages to fork at all (in which case the assertion right
+     * How long the canceller thread below is willing to wait for the probe to have recorded its
+     * complete declared process tree before giving up and cancelling anyway. Generous on purpose:
+     * it is a safety net for a probe that never finishes forking (in which case the assertion right
      * after {@code await()} reports that clearly), not the mechanism that decides when to cancel.
      */
     private static final Duration CANCEL_TRIGGER_TIMEOUT = Duration.ofSeconds(8);
@@ -304,7 +304,7 @@ public abstract class SandboxSupervisorContract {
             // actually gain a line is the real signal the guess was standing in for.
             Thread canceller = new Thread(() -> {
                 try {
-                    awaitAtLeastOnePid(marker, CANCEL_TRIGGER_TIMEOUT);
+                    awaitPidCount(marker, 3, CANCEL_TRIGGER_TIMEOUT);
                     session.terminate(SandboxTermination.CANCELLED);
                 } catch (Exception error) {
                     cancelled.set(error);
@@ -319,8 +319,9 @@ public abstract class SandboxSupervisorContract {
                             + "the workload happened to be in");
 
             List<Long> pids = readPids(marker);
-            assertFalse(pids.isEmpty(), "the probe must have recorded at least one forked child "
-                    + "PID before cancellation reached it -- otherwise this test proves nothing");
+            assertEquals(3, pids.size(), "the probe must have recorded the complete three-child "
+                    + "process tree before cancellation reached it -- otherwise the cleanup "
+                    + "assertion cannot distinguish a surviving child from one that was never forked");
             awaitAllDead(pids);
         }
     }
@@ -418,24 +419,26 @@ public abstract class SandboxSupervisorContract {
     }
 
     /**
-     * Blocks until {@code marker} names at least one recorded PID or {@code timeout} elapses,
-     * whichever comes first -- the real signal {@code cancellationStopsTheWorkloadAndReapsTheCompleteProcessTree}
-     * needs before it can meaningfully cancel a fork in progress, in place of a fixed sleep that
-     * could only ever be a guess at how long the probe's own JVM startup and first fork take on
+     * Blocks until {@code marker} names the complete expected process tree or {@code timeout}
+     * elapses, whichever comes first -- the real signal
+     * {@code cancellationStopsTheWorkloadAndReapsTheCompleteProcessTree} needs before it can
+     * meaningfully verify cleanup, in place of a fixed sleep that could only ever be a guess at how
+     * long the probe's own JVM startup and forks take on
      * whatever machine and load this suite happens to be running under. Short polling
      * interval because this is a lightweight file read, not a costly operation worth spacing out.
      */
-    private void awaitAtLeastOnePid(Path marker, Duration timeout) throws InterruptedException, IOException {
+    private void awaitPidCount(Path marker, int expected, Duration timeout)
+            throws InterruptedException, IOException {
         long deadline = System.nanoTime() + timeout.toNanos();
         while (System.nanoTime() < deadline) {
-            if (!readPids(marker).isEmpty()) {
+            if (readPids(marker).size() >= expected) {
                 return;
             }
             Thread.sleep(20);
         }
-        // Timed out without a recorded PID: proceed to cancel anyway. The assertFalse just after
-        // await() below reports this precisely (with the real cause) instead of this method
-        // silently retrying forever or masking a genuinely broken probe.
+        // Timed out without the complete tree: proceed to cancel anyway. The size assertion just
+        // after await() reports this precisely instead of this method retrying forever or masking
+        // a genuinely broken probe.
     }
 
     private void awaitAllDead(List<Long> pids) throws InterruptedException {

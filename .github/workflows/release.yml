@@ -1,0 +1,267 @@
+name: Publish immutable release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing immutable release tag to verify and resume
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: release-non-secret-gates
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      tag: ${{ steps.contract.outputs.tag }}
+      version: ${{ steps.contract.outputs.version }}
+      commit: ${{ steps.contract.outputs.commit }}
+    steps:
+      - name: Reject every non-tag invocation
+        env:
+          REQUESTED_TAG: ${{ inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_TYPE" = tag
+          test "$REQUESTED_TAG" = "$GITHUB_REF_NAME"
+      - name: Check out the immutable tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.tag || github.ref_name }}
+          fetch-depth: 0
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Validate tag ancestry and every version surface
+        id: contract
+        run: >-
+          python3 scripts/release_contract.py validate-tag
+          --tag '${{ inputs.tag || github.ref_name }}'
+          --main-ref origin/main
+      - name: Prove the tag came from an authorized release promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/$GITHUB_REPOSITORY/commits/${{ steps.contract.outputs.commit }}/pulls" \
+            --header 'Accept: application/vnd.github+json' \
+            > "$RUNNER_TEMP/associated-prs.json"
+          python3 scripts/release_contract.py validate-tag-authorization \
+            --tag '${{ steps.contract.outputs.tag }}' \
+            --prs-json "$RUNNER_TEMP/associated-prs.json"
+      - name: Verify release automation and metadata contracts
+        run: |
+          python3 scripts/check_release_configuration.py
+          python3 -m unittest scripts.tests.test_release_contract -v
+      - name: Build and test the tagged UI
+        working-directory: ravenroot/ravenroot-ui
+        run: |
+          npm ci
+          npm audit --audit-level=moderate
+          npm test
+          npm run build
+      - name: Build and test the tagged Maven reactor
+        working-directory: ravenroot
+        run: mvn -B --no-transfer-progress clean verify
+
+  publish:
+    name: publish-release
+    needs: [validate]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    environment:
+      name: release
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+      packages: write
+    steps:
+      - name: Check out the validated tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+          fetch-depth: 0
+      - name: Revalidate the exact environment-approved source
+        run: >-
+          python3 scripts/release_contract.py validate-tag
+          --tag '${{ needs.validate.outputs.tag }}'
+          --main-ref origin/main
+      - name: Set up Java and Central server mapping
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          server-id: central
+          server-username-env-var: CENTRAL_USERNAME
+          server-password-env-var: CENTRAL_TOKEN
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Check immutable Maven Central state
+        id: central
+        run: >-
+          python3 scripts/central_registry.py state
+          --version '${{ needs.validate.outputs.version }}'
+      - name: Build the release UI once
+        working-directory: ravenroot/ravenroot-ui
+        run: |
+          npm ci
+          npm run build
+      - name: Build, sign, and publish or verify the Maven release once
+        working-directory: ravenroot
+        env:
+          CENTRAL_TOKEN: ${{ secrets.CENTRAL_TOKEN }}
+          CENTRAL_USERNAME: ${{ secrets.CENTRAL_USERNAME }}
+          MAVEN_GPG_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          MAVEN_GPG_PASSPHRASE: ${{ secrets.MAVEN_GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          output_timestamp=$(git show -s --format=%cI '${{ needs.validate.outputs.commit }}')
+          phase=deploy
+          [ '${{ steps.central.outputs.central_state }}' = complete ] && phase=verify
+          mvn -B --no-transfer-progress -Prelease -DskipTests -Dgpg.signer=bc \
+            -Dravenroot.release.outputTimestamp="$output_timestamp" clean "$phase"
+      - name: Wait for Central visibility and prove immutable content
+        working-directory: ravenroot
+        run: |
+          set -euo pipefail
+          for _ in $(seq 1 60); do
+            registry_state=$(python3 ../scripts/central_registry.py state \
+              --version '${{ needs.validate.outputs.version }}' | jq -r .state)
+            [ "$registry_state" = complete ] && break
+            sleep 20
+          done
+          test "$registry_state" = complete
+          python3 ../scripts/central_registry.py compare-local \
+            --version '${{ needs.validate.outputs.version }}'
+      - name: Stage release and OCI inputs
+        run: |
+          set -euo pipefail
+          version='${{ needs.validate.outputs.version }}'
+          mkdir -p ci-artifacts/backend/plugins \
+            ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target \
+            ci-artifacts/ui release-assets
+          touch ci-artifacts/backend/plugins/.keep
+          cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
+            ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+          cp -R ravenroot/ravenroot-ui/dist/. ci-artifacts/ui/
+          cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
+            "release-assets/ravenroot-$version.jar"
+          distribution_zip=$(find ravenroot/ravenroot-distribution/target -maxdepth 1 \
+            -type f -name '*.zip' -print -quit)
+          test -n "$distribution_zip"
+          cp "$distribution_zip" "release-assets/ravenroot-$version.zip"
+          cp ravenroot/target/ravenroot-sbom.json release-assets/ravenroot-sbom.json
+          cp docs/security/release-signing-key.asc release-assets/ravenroot-release-signing-key.asc
+      - name: Build the provenance-bearing OCI layout once
+        run: |
+          set -euo pipefail
+          created=$(git show -s --format=%cI '${{ needs.validate.outputs.commit }}')
+          source_date_epoch=$(git show -s --format=%ct '${{ needs.validate.outputs.commit }}')
+          export SOURCE_DATE_EPOCH="$source_date_epoch"
+          docker buildx build --file Dockerfile.ci --platform linux/amd64 \
+            --tag 'ghcr.io/ravenroot-ai/ravenroot:${{ needs.validate.outputs.version }}' \
+            --build-arg 'VERSION=${{ needs.validate.outputs.version }}' \
+            --build-arg 'REVISION=${{ needs.validate.outputs.commit }}' \
+            --build-arg 'SOURCE_URL=https://github.com/ravenroot-ai/ravenroot' \
+            --build-arg "CREATED=$created" --build-arg "SOURCE_DATE_EPOCH=$source_date_epoch" \
+            --provenance=mode=max,reproducible=true \
+            --sbom=generator=docker.io/docker/buildkit-syft-scanner:stable-1@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9 \
+            --output type=oci,rewrite-timestamp=true,dest=ci-artifacts/ravenroot-image.tar .
+          mkdir -p ci-artifacts/oci-layout
+          tar -xf ci-artifacts/ravenroot-image.tar -C ci-artifacts/oci-layout
+      - name: Publish or verify the immutable GHCR image
+        id: image
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+          printf '%s' "$GHCR_TOKEN" | skopeo login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          image='ghcr.io/ravenroot-ai/ravenroot:${{ needs.validate.outputs.version }}'
+          local_index_digest=$(jq -er '.manifests[0].digest' ci-artifacts/oci-layout/index.json)
+          local_index="ci-artifacts/oci-layout/blobs/sha256/${local_index_digest#sha256:}"
+          local_image_digest=$(jq -er \
+            '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | if length == 1 then .[0] else error("expected one linux/amd64 image") end' \
+            "$local_index")
+          local_attestation_digest=$(jq -er --arg image "$local_image_digest" \
+            '[.manifests[] | select(.annotations["vnd.docker.reference.digest"] == $image and .annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest] | if length == 1 then .[0] else error("expected one attestation manifest") end' \
+            "$local_index")
+          local_attestation="ci-artifacts/oci-layout/blobs/sha256/${local_attestation_digest#sha256:}"
+          jq -e '[.layers[].annotations["in-toto.io/predicate-type"]] | index("https://spdx.dev/Document") != null and index("https://slsa.dev/provenance/v1") != null' \
+            "$local_attestation" >/dev/null
+          if remote_manifest=$(skopeo inspect --raw "docker://$image" 2>/dev/null); then
+            remote_image_digest=$(printf '%s' "$remote_manifest" | jq -er \
+              '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | if length == 1 then .[0] else error("expected one linux/amd64 image") end')
+            test "$remote_image_digest" = "$local_image_digest" || {
+              echo "The immutable GHCR tag contains different content." >&2
+              exit 1
+            }
+          else
+            skopeo copy --all oci-archive:ci-artifacts/ravenroot-image.tar "docker://$image"
+          fi
+          published_manifest=$(skopeo inspect --raw "docker://$image")
+          published_image_digest=$(printf '%s' "$published_manifest" | jq -er \
+            '[.manifests[] | select(.platform.os == "linux" and .platform.architecture == "amd64") | .digest] | if length == 1 then .[0] else error("expected one linux/amd64 image") end')
+          test "$published_image_digest" = "$local_image_digest"
+          published_attestation_digest=$(printf '%s' "$published_manifest" | jq -er --arg image "$published_image_digest" \
+            '[.manifests[] | select(.annotations["vnd.docker.reference.digest"] == $image and .annotations["vnd.docker.reference.type"] == "attestation-manifest") | .digest] | if length == 1 then .[0] else error("expected one attestation manifest") end')
+          skopeo inspect --raw "docker://$image@$published_attestation_digest" \
+            > "$RUNNER_TEMP/published-attestation.json"
+          jq -e '[.layers[].annotations["in-toto.io/predicate-type"]] | index("https://spdx.dev/Document") != null and index("https://slsa.dev/provenance/v1") != null' \
+            "$RUNNER_TEMP/published-attestation.json" >/dev/null
+          published_digest="sha256:$(printf '%s' "$published_manifest" | sha256sum | awk '{print $1}')"
+          echo "digest=$published_digest" >> "$GITHUB_OUTPUT"
+      - name: Create release checksums
+        run: |
+          cd release-assets
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -print0 \
+            | sort -z | xargs -0 sha256sum | sed 's# \./#  #' > "$RUNNER_TEMP/SHA256SUMS"
+          mv "$RUNNER_TEMP/SHA256SUMS" SHA256SUMS
+      - name: Attest release files
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-path: release-assets/*
+      - name: Attest the published OCI digest
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3
+        with:
+          subject-name: ghcr.io/ravenroot-ai/ravenroot
+          subject-digest: ${{ steps.image.outputs.digest }}
+          push-to-registry: true
+      - name: Create or verify the immutable GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          python3 scripts/github_release.py
+          --tag '${{ needs.validate.outputs.tag }}'
+          --commit '${{ needs.validate.outputs.commit }}'
+          --assets release-assets

@@ -10,6 +10,7 @@ import java.sql.Driver;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -20,6 +21,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcExecutorTest {
@@ -134,7 +136,7 @@ class JdbcExecutorTest {
         JdbcProfile profile = JdbcTestSupport.profile(statement);
         FakeJdbc.State state = new FakeJdbc.State();
         state.blockGeneratedKeyClose();
-        var future = executor(profile, state).execute(JdbcTestSupport.message("tenant-a",
+        var future = executorWithoutAutomaticDeadline(profile, state).execute(JdbcTestSupport.message("tenant-a",
                         JdbcTestSupport.parameters(Map.of("name", "Ada"))),
                 JdbcTestSupport.services("pw", new AtomicInteger()), "main", "add",
                 JdbcStatementProfile.Kind.INSERT);
@@ -158,7 +160,7 @@ class JdbcExecutorTest {
         JdbcProfile profile = JdbcTestSupport.profile(statement);
         FakeJdbc.State state = new FakeJdbc.State();
         state.blockCommit();
-        var future = executor(profile, state).execute(JdbcTestSupport.message("tenant-a",
+        var future = executorWithoutAutomaticDeadline(profile, state).execute(JdbcTestSupport.message("tenant-a",
                         JdbcTestSupport.parameters(Map.of("name", "Ada"))),
                 JdbcTestSupport.services("pw", new AtomicInteger()), "main", "add",
                 JdbcStatementProfile.Kind.INSERT);
@@ -332,9 +334,12 @@ class JdbcExecutorTest {
         FakeJdbc.State rotated = new FakeJdbc.State(); rotated.columns = List.of("id"); rotated.rows = List.of(List.of(1L));
         JdbcExecutor rotating = executor(tenantA, rotated);
         rotating.execute(JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
-                JdbcTestSupport.services("old", resolutions), "main", "find", JdbcStatementProfile.Kind.QUERY).join();
-        rotating.execute(JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
-                JdbcTestSupport.services("new", resolutions), "main", "find", JdbcStatementProfile.Kind.QUERY).join();
+                        JdbcTestSupport.services("old", resolutions), "main", "find", JdbcStatementProfile.Kind.QUERY)
+                .thenCompose(ignored -> rotating.execute(
+                        JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
+                        JdbcTestSupport.services("new", resolutions), "main", "find",
+                        JdbcStatementProfile.Kind.QUERY))
+                .join();
         assertEquals(2, resolutions.get()); assertEquals("new", rotated.password);
     }
 
@@ -406,7 +411,8 @@ class JdbcExecutorTest {
         JdbcStatementProfile statement = JdbcTestSupport.query("SELECT id FROM users");
         JdbcProfile profile = JdbcTestSupport.profile("tenant-a", "main", statement, 100, 1);
         FakeJdbc.State state = new FakeJdbc.State();
-        state.columns = List.of("id"); state.rows = List.of(List.of(1L)); state.block();
+        state.columns = List.of("id"); state.rows = List.of(List.of(1L));
+        state.block(); state.observeCancellationCleanup();
         AtomicInteger calls = new AtomicInteger();
         AtomicInteger mismatches = new AtomicInteger();
         try (var driverLoader = new URLClassLoader(new java.net.URL[0], getClass().getClassLoader())) {
@@ -421,9 +427,11 @@ class JdbcExecutorTest {
                     JdbcTestSupport.message("tenant-a", JdbcTestSupport.parameters(Map.of())),
                     JdbcTestSupport.services("pw", new AtomicInteger()), "main", "find",
                     JdbcStatementProfile.Kind.QUERY).join());
-            for (int attempt = 0; attempt < 100 && state.aborts.get() + state.closes.get() < 2; attempt++) {
-                Thread.sleep(5);
-            }
+            assertTimeoutPreemptively(Duration.ofSeconds(2), () -> {
+                state.cancelEntered.await();
+                state.abortEntered.await();
+                state.closeEntered.await();
+            });
 
             assertTrue(state.cancels.get() > 0);
             assertTrue(state.aborts.get() > 0);
@@ -461,5 +469,11 @@ class JdbcExecutorTest {
     private static JdbcExecutor executor(JdbcProfile profile, FakeJdbc.State state) {
         return new JdbcExecutor((tenant, name) -> tenant.equals(profile.tenant()) && name.equals(profile.name())
                 ? Optional.of(profile) : Optional.empty(), ignored -> new FakeJdbc(state), new JdbcRuntime(System::nanoTime));
+    }
+
+    private static JdbcExecutor executorWithoutAutomaticDeadline(JdbcProfile profile, FakeJdbc.State state) {
+        JdbcRuntime runtime = new JdbcRuntime(System::nanoTime, (command, delay, unit) -> null);
+        return new JdbcExecutor((tenant, name) -> tenant.equals(profile.tenant()) && name.equals(profile.name())
+                ? Optional.of(profile) : Optional.empty(), ignored -> new FakeJdbc(state), runtime);
     }
 }

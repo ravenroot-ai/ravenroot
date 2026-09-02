@@ -1,0 +1,17 @@
+<nav class="docs-nav" aria-label="{{ include.label | default: 'Documentation' }}">
+  {% for section in site.data.navigation %}
+    <section class="nav-section">
+      <h2 class="nav-heading">{{ section.title }}</h2>
+      <ul class="nav-list">
+        {% for item in section.items %}
+          <li>
+            <a
+              href="{{ item.url | relative_url }}"
+              {% if page.url == item.url %}aria-current="page"{% endif %}
+            >{{ item.title }}</a>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endfor %}
+</nav>

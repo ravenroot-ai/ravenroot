@@ -41,13 +41,23 @@ final class OcrRuntimeControls {
             executor.execute(() -> {
                 Thread current = Thread.currentThread();
                 future.runner.set(current);
+                NodeResult result = null;
+                Throwable failure = null;
+                boolean invoked = false;
                 try {
-                    if (!future.isCancelled()) future.complete(action.call());
-                } catch (Throwable failure) {
-                    future.completeExceptionally(failure);
+                    if (!future.isCancelled()) {
+                        invoked = true;
+                        result = action.call();
+                    }
+                } catch (Throwable caught) {
+                    failure = caught;
                 } finally {
                     future.runner.compareAndSet(current, null);
                     admission.release();
+                }
+                if (invoked && !future.isCancelled()) {
+                    if (failure == null) future.complete(result);
+                    else future.completeExceptionally(failure);
                 }
             });
         } catch (RuntimeException rejected) {

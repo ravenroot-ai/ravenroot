@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="{{ site.lang | default: 'en' }}">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <meta name="description" content="{{ site.description }}">
+    <title>{% if page.url == '/' %}{{ site.title }}{% else %}{{ page.title | default: site.title }} | Ravenroot{% endif %}</title>
+    <link rel="stylesheet" href="{{ '/assets/css/site.css' | relative_url }}">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+    <div class="site-shell">
+      <aside class="sidebar">
+        <header class="site-brand">
+          <a href="{{ '/' | relative_url }}" aria-label="Ravenroot documentation home">
+            <span class="brand-mark" aria-hidden="true">R</span>
+            <span>
+              <strong>Ravenroot</strong>
+              <small>Documentation</small>
+            </span>
+          </a>
+        </header>
+        {% include navigation.html label="Primary" %}
+        <a class="repository-link" href="{{ site.repository_url }}">View on GitHub</a>
+      </aside>
+
+      <main id="main-content" class="main-content" tabindex="-1">
+        <details class="mobile-nav">
+          <summary>Documentation menu</summary>
+          {% include navigation.html label="Mobile" %}
+        </details>
+
+        <article class="doc-content">
+          {{ content }}
+        </article>
+
+        <footer class="page-footer">
+          <span>This site is open source.</span>
+          <a href="{{ site.repository_url }}/edit/dev/docs/{{ page.path }}">Improve this page</a>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

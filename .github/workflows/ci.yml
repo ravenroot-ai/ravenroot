@@ -1,0 +1,512 @@
+name: Continuous integration
+
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [dev, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # This reviewed list may stage bundles for validation, but this workflow never publishes them.
+  PUBLISHED_PLUGINS: ""
+
+jobs:
+  docs-site:
+    name: docs-site
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Build the GitHub Pages documentation
+        uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
+        with:
+          source: ./docs
+          destination: ./_site
+      - name: Verify the documentation site checker
+        run: python3 -m unittest scripts.tests.test_check_docs_site -v
+      - name: Verify generated navigation, themes, links, and CNAME
+        run: python3 scripts/check_docs_site.py --site-dir _site
+
+  release-classification:
+    name: release-classification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.classify.outputs.tier }}
+      release-intent: ${{ steps.classify.outputs.release_intent }}
+      docs-only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify the CI and release tier
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
+        run: python3 scripts/classify_main_change.py
+
+  fast-product-build:
+    name: fast-product-build
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Build and package the complete product
+        env:
+          MAVEN_ARGS: -ntp -DskipTests
+        run: ./ravenroot/scripts/build-release.sh
+      - name: Verify deterministic core JVM contracts
+        run: >-
+          mvn -B --no-transfer-progress -f ravenroot/pom.xml
+          -pl ravenroot-core,ravenroot-persistence-sqlite,ravenroot-programming-graalvm,ravenroot-pekko
+          -am test -Dsurefire.rerunFailingTestsCount=1
+
+  fast-support-build:
+    name: fast-support-build
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+      - name: Prepare support modules
+        run: ./dev.sh setup --skip-ui
+      - name: Verify external model adapters
+        run: |
+          for adapter in ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible; do
+            mvn -B --no-transfer-progress -f "$adapter/pom.xml" verify
+          done
+      - name: Verify the sample project
+        run: mvn -B --no-transfer-progress -f ravenroot-sample/pom.xml verify
+
+  fast-tooling-contracts:
+    name: fast-tooling-contracts
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Verify Python tooling contracts
+        run: |
+          python3 -m unittest scripts.tests.test_check_argline
+          python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_public_docs
+          python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_release_contract
+          python3 -m unittest scripts.tests.test_verify_api_docs
+          python3 scripts/check_release_configuration.py
+      - name: Verify shell tooling contracts
+        run: |
+          ./scripts/tests/test_dev.sh
+          ./scripts/tests/test_plugin.sh
+          ./scripts/tests/test_service.sh
+          ./scripts/tests/test_execution_store_platform.sh
+          ./scripts/tests/test_execution_store_platform_regression.sh
+      - name: Validate the Compose definition
+        run: docker compose --file compose.yaml config --quiet
+      - name: Check whitespace
+        run: git diff --check HEAD^
+
+  full-policy:
+    name: full-policy
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier != 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+      - name: Set up Node.js for the pinned ADR renderer
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: scripts/mermaid-renderer/package-lock.json
+      - name: Validate public documentation links and ADR structure
+        run: python3 scripts/check_public_docs.py
+      - name: Install the integrity-locked Mermaid renderer
+        run: npm ci --ignore-scripts --prefix scripts/mermaid-renderer
+      - name: Provision the lock-pinned Mermaid browser
+        env:
+          # Keep root-provisioned browser files outside the checkout and away from repository tests.
+          PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ravenroot-puppeteer
+        run: |
+          sudo env "PATH=$PATH" "PUPPETEER_CACHE_DIR=$PUPPETEER_CACHE_DIR" \
+            npm --prefix scripts/mermaid-renderer run install-browser:ci
+          npm --prefix scripts/mermaid-renderer run verify-browser
+      - name: Render every Mermaid diagram in public documentation
+        env:
+          PUPPETEER_CACHE_DIR: ${{ runner.temp }}/ravenroot-puppeteer
+        run: >-
+          python3 scripts/check_public_docs.py --render-mermaid
+          --puppeteer-config scripts/mermaid-renderer/puppeteer-ci.json
+      - name: Validate product release identity
+        run: python3 scripts/check_product_version.py
+      - name: Verify Python tooling contracts
+        run: |
+          python3 -m unittest scripts.tests.test_check_argline
+          python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_public_docs
+          python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_release_contract
+          python3 -m unittest scripts.tests.test_verify_api_docs
+          python3 scripts/check_release_configuration.py
+      - name: Verify developer and platform shell contracts
+        run: |
+          ./scripts/tests/test_dev.sh
+          ./scripts/tests/test_plugin.sh
+          ./scripts/tests/test_service.sh
+          ./scripts/tests/test_execution_store_platform.sh
+          ./scripts/tests/test_execution_store_platform_regression.sh
+      - name: Validate source bytes and Maven argLine composition
+        run: |
+          python3 scripts/check_no_raw_control_bytes.py
+          python3 scripts/check_argline.py
+      - name: Validate the Compose definition
+        run: docker compose --file compose.yaml config --quiet
+      - name: Check whitespace
+        run: git diff --check HEAD^
+
+  full-ui:
+    name: full-ui
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ravenroot/ravenroot-ui
+        run: npm ci
+      - name: Audit the complete UI dependency tree
+        working-directory: ravenroot/ravenroot-ui
+        run: npm audit --audit-level=moderate
+      - name: Run the UI unit suite
+        working-directory: ravenroot/ravenroot-ui
+        run: npm test
+      - name: Build the UI
+        working-directory: ravenroot/ravenroot-ui
+        run: npm run build
+      - name: Cache Playwright Chromium
+        id: playwright-cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-chromium-${{ runner.os }}-${{ hashFiles('ravenroot/ravenroot-ui/package-lock.json') }}
+      - name: Install Playwright Chromium and OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: ravenroot/ravenroot-ui
+        run: npx playwright install --with-deps chromium
+      - name: Install Playwright OS dependencies
+        if: steps.playwright-cache.outputs.cache-hit == 'true'
+        working-directory: ravenroot/ravenroot-ui
+        run: npx playwright install-deps chromium
+      - name: Run the complete Playwright suite
+        working-directory: ravenroot/ravenroot-ui
+        run: npx playwright test --reporter=list,html
+      - name: Archive Playwright diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-report
+          path: |
+            ravenroot/ravenroot-ui/playwright-report
+            ravenroot/ravenroot-ui/test-results
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Archive the verified UI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ravenroot-ui
+          path: ravenroot/ravenroot-ui/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  backend-test:
+    name: full-backend
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: |
+            ravenroot/pom.xml
+            ravenroot/**/pom.xml
+            ravenroot-adapter-anthropic/pom.xml
+            ravenroot-adapter-openai-compatible/pom.xml
+            ravenroot-dev-harness/pom.xml
+            ravenroot-sample/pom.xml
+      - name: Run and locally install the complete backend unit and integration suite
+        working-directory: ravenroot
+        run: mvn -B --no-transfer-progress clean install
+      - name: Verify out-of-reactor adapters, harness, and sample
+        run: |
+          # The harness consumes the OpenAI-compatible adapter. Install both
+          # unpublished adapters into this job's local repository first so the
+          # verification result never depends on a warm Maven cache.
+          for project in ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible; do
+            mvn -B --no-transfer-progress -f "$project/pom.xml" install
+          done
+          for project in ravenroot-dev-harness ravenroot-sample; do
+            mvn -B --no-transfer-progress -f "$project/pom.xml" verify
+          done
+      - name: Run the embedded sample
+        working-directory: ravenroot-sample
+        env:
+          RAVENROOT_ENGINE: pekko
+        run: mvn -B --no-transfer-progress exec:java -Dexec.args="hello ravenroot"
+      - name: Validate the plugin distribution boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts/backend/plugins
+          touch ci-artifacts/backend/plugins/.keep
+          for extension_id in $PUBLISHED_PLUGINS; do
+            ./plugin.sh build "$extension_id" --skip-tests
+            bundle_dir=$(./plugin.sh bundle-dir "$extension_id")
+            ./plugin.sh install "$bundle_dir" --dir ci-artifacts/backend/plugins
+          done
+          ./plugin.sh check-published ci-artifacts/backend/plugins
+      - name: Stage the verified runtime artifact
+        run: |
+          mkdir -p ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target
+          cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
+            ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+      - name: Archive the verified runtime artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ravenroot-backend
+          path: ci-artifacts/backend
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  full-api-documentation:
+    name: full-api-documentation
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Build the public SDK Javadoc archive with DocLint
+        working-directory: ravenroot
+        # full-backend owns the complete test suite; this job owns Javadoc and DocLint.
+        run: mvn -B --no-transfer-progress -Papi-docs -DskipTests clean verify
+      - name: Generate aggregate public API HTML
+        working-directory: ravenroot
+        run: mvn -B --no-transfer-progress -N -Papi-docs javadoc:javadoc
+      - name: Verify API links, namespace boundaries, and archive contents
+        run: python3 scripts/verify_api_docs.py
+      - name: Verify the API documentation checker
+        run: python3 -m unittest scripts.tests.test_verify_api_docs -v
+      - name: Archive generated API documentation
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ravenroot-public-api-docs
+          path: |
+            ravenroot/target/artifacts/api
+            ravenroot/ravenroot-application-api/target/*-javadoc.jar
+          if-no-files-found: error
+          retention-days: 7
+
+  full-runtime:
+    name: full-runtime
+    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-ui, backend-test]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up runtime Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Download verified backend
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-backend
+          path: ci-artifacts/backend
+      - name: Download verified UI
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-ui
+          path: ci-artifacts/ui
+      - name: Smoke-test fail-closed authentication
+        shell: bash
+        run: |
+          jar=ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+          if timeout 15s env RAVENROOT_BIND_ADDRESS=0.0.0.0 RAVENROOT_AUTH_MODE=oidc \
+            java -jar "$jar" 2>&1 | tee /tmp/no-auth.log; then
+            echo "Application started without required authentication configuration." >&2
+            exit 1
+          fi
+          grep -q "RAVENROOT_AUTH_ISSUER is required" /tmp/no-auth.log
+      - name: Smoke-test the runnable JAR
+        shell: bash
+        env:
+          RAVENROOT_AUTH_MODE: disabled
+          RAVENROOT_BIND_ADDRESS: 127.0.0.1
+          RAVENROOT_PORT: "18080"
+        run: |
+          jar=ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+          java -jar "$jar" >/tmp/ravenroot-jar.log 2>&1 &
+          pid=$!
+          trap 'cat /tmp/ravenroot-jar.log; kill "$pid" 2>/dev/null || true' EXIT
+          for _ in {1..30}; do
+            curl --fail --silent http://127.0.0.1:18080/health >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18080/health
+          curl --fail --silent http://127.0.0.1:18080/v1/status >/dev/null
+      - name: Build the OCI image without publishing it
+        shell: bash
+        run: |
+          version=$(python3 scripts/check_product_version.py --print-version)
+          docker build --file Dockerfile.ci --tag ravenroot:ci \
+            --build-arg "VERSION=$version" \
+            --build-arg "REVISION=$GITHUB_SHA" \
+            --build-arg "SOURCE_URL=$GITHUB_SERVER_URL/$GITHUB_REPOSITORY" .
+      - name: Verify container health
+        shell: bash
+        run: |
+          container_id=$(docker run --detach --publish 127.0.0.1:18080:8080 \
+            -e RAVENROOT_AUTH_MODE=disabled \
+            -e RAVENROOT_BIND_ADDRESS=0.0.0.0 \
+            -e RAVENROOT_CONTAINER_LOOPBACK_ONLY=true \
+            -e RAVENROOT_LOCAL_HOST_BIND_ADDRESS=127.0.0.1 \
+            ravenroot:ci)
+          trap 'docker logs "$container_id"; docker rm --force "$container_id"' EXIT
+          for _ in {1..30}; do
+            curl --fail --silent http://127.0.0.1:18080/health >/dev/null && break
+            sleep 1
+          done
+          curl --fail --silent http://127.0.0.1:18080/health
+          curl --fail --silent http://127.0.0.1:18080/ | grep "Ravenroot" >/dev/null
+
+  ci-required:
+    name: ci-required
+    if: always()
+    needs:
+      - release-classification
+      - fast-product-build
+      - fast-support-build
+      - fast-tooling-contracts
+      - full-policy
+      - full-ui
+      - backend-test
+      - full-api-documentation
+      - full-runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    env:
+      CLASSIFICATION_RESULT: ${{ needs.release-classification.result }}
+      CI_TIER: ${{ needs.release-classification.outputs.tier }}
+      FAST_PRODUCT_RESULT: ${{ needs.fast-product-build.result }}
+      FAST_SUPPORT_RESULT: ${{ needs.fast-support-build.result }}
+      FAST_TOOLING_RESULT: ${{ needs.fast-tooling-contracts.result }}
+      FULL_POLICY_RESULT: ${{ needs.full-policy.result }}
+      FULL_UI_RESULT: ${{ needs.full-ui.result }}
+      FULL_BACKEND_RESULT: ${{ needs.backend-test.result }}
+      FULL_API_DOCS_RESULT: ${{ needs.full-api-documentation.result }}
+      FULL_RUNTIME_RESULT: ${{ needs.full-runtime.result }}
+    steps:
+      - name: Require the correct event tier to pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$CLASSIFICATION_RESULT" = success
+          if [ "$CI_TIER" = fast ]; then
+            test "$FAST_PRODUCT_RESULT" = success
+            test "$FAST_SUPPORT_RESULT" = success
+            test "$FAST_TOOLING_RESULT" = success
+          elif [ "$CI_TIER" = docs ]; then
+            test "$FULL_POLICY_RESULT" = success
+            test "$FULL_UI_RESULT" = skipped
+            test "$FULL_BACKEND_RESULT" = skipped
+            test "$FULL_API_DOCS_RESULT" = skipped
+            test "$FULL_RUNTIME_RESULT" = skipped
+          elif [ "$CI_TIER" = full ]; then
+            test "$FULL_POLICY_RESULT" = success
+            test "$FULL_UI_RESULT" = success
+            test "$FULL_BACKEND_RESULT" = success
+            test "$FULL_API_DOCS_RESULT" = success
+            test "$FULL_RUNTIME_RESULT" = success
+          else
+            echo "Unknown CI tier: $CI_TIER" >&2
+            exit 1
+          fi

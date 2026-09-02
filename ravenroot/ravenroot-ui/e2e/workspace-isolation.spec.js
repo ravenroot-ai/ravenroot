@@ -17,6 +17,7 @@ const EXECUTIONS = ['exec-1', 'exec-2', 'exec-3'];
 
 async function installRuntime(page) {
   let started = 0;
+  let eventConnections = 0;
   let releaseEvents;
   const events = new Promise(resolve => { releaseEvents = resolve; });
 
@@ -37,12 +38,13 @@ async function installRuntime(page) {
   // The stream is held open until the test has finished binding the runs. Without this the client's
   // first request would be answered before any execution existed, and the retry timing would decide
   // the result of the test.
-  await page.route('**/v1/events', async route => {
+  await page.route('**/v1/events**', async route => {
+    eventConnections += 1;
     const body = await events;
     await route.fulfill({ status: 200, contentType: 'text/event-stream', body });
   });
 
-  return { releaseEvents };
+  return { releaseEvents, get eventConnections() { return eventConnections; } };
 }
 
 const frame = payload => `event: execution\ndata: ${JSON.stringify(payload)}\n\n`;
@@ -75,8 +77,9 @@ async function openSecondAndThirdDocument(page) {
 }
 
 test('three simultaneous documents keep selection, viewport, layout, filters and monitoring separate', async ({ page }) => {
-  const { releaseEvents } = await installRuntime(page);
+  const runtime = await installRuntime(page);
   await page.goto('/');
+  await expect.poll(() => runtime.eventConnections).toBeGreaterThanOrEqual(1);
 
   // ── Three documents, three runs ────────────────────────────────────────────────────────────────
   const first = await page.evaluate(() => window.ravenroot.activeDocument().id);
@@ -141,7 +144,7 @@ test('three simultaneous documents keep selection, viewport, layout, filters and
   expect(view.c.filter).toEqual({ elType: 'edge', type: 'failed' });
 
   // ── Monitoring: runtime events project onto the matching graph and version only ────────────────
-  releaseEvents([
+  runtime.releaseEvents([
     // Belongs to the second document, which is not the one on screen.
     frame({ type: 'NODE_STARTED', executionId: 'exec-2', graphVersion: 'v2', nodeId: 'start', activeInstances: 3 }),
     // Right execution, stale version: dropped.

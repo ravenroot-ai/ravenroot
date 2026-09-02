@@ -85,6 +85,12 @@ class DependabotRoutingTest(unittest.TestCase):
         with self.assertRaisesRegex(RoutingPolicyError, "secretless and non-publishing"):
             check_ci_workflow(changed)
 
+    def test_every_dispatched_ci_job_checks_out_the_merge_commit(self):
+        ci = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+        changed = ci.replace("          ref: ${{ inputs.merge_sha || github.sha }}\n", "", 1)
+        with self.assertRaisesRegex(RoutingPolicyError, "every ordinary CI checkout"):
+            check_ci_workflow(changed)
+
 
 if __name__ == "__main__":
     unittest.main()

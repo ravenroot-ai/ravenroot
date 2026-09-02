@@ -24,7 +24,7 @@ EXPECTED_UPDATES = {
 }
 PINNED_WORKFLOWS = {
     "authorize-dependabot.yml": "99b182673d357c731613b69c9caa3dc3c0f7fdcfc07cd8b02a09696ca98afa6d",
-    "route-dependabot.yml": "f03811987d81ec32b9b657bea949aaf24afa493d062c4375b7d4f3ccc8369aaf",
+    "route-dependabot.yml": "673cc5de549f1eab9be3bb1dabb1ea42137ad753bb0a295d848a850f618466db",
 }
 
 
@@ -101,6 +101,7 @@ def check_ci_workflow(contents: str) -> None:
     required = (
         "routing_run_id:",
         "routed_pr_number:",
+        "merge_sha:",
         "Validate an explicitly routed Dependabot run",
         "actions: read",
         "pull-requests: read",
@@ -109,12 +110,19 @@ def check_ci_workflow(contents: str) -> None:
         '.base.ref == "dev"',
         '.user.login == "dependabot[bot]"',
         'test "$GITHUB_SHA" = "$ROUTED_HEAD_SHA"',
+        'test "$(git rev-parse HEAD)" = "$ROUTED_MERGE_SHA"',
+        'test "$(git rev-parse HEAD^1)" = "$ROUTED_BASE_SHA"',
+        'test "$(git rev-parse HEAD^2)" = "$ROUTED_HEAD_SHA"',
         "inputs.routing_run_id != '' && 'pull_request' || github.event_name",
         "inputs.routing_run_id != '' && 'dev' || github.base_ref",
     )
     for fragment in required:
         if fragment not in contents:
             raise RoutingPolicyError(f"ordinary CI routing contract is missing: {fragment}")
+    checkout_count = contents.count("uses: actions/checkout@")
+    merge_checkout_count = contents.count("ref: ${{ inputs.merge_sha || github.sha }}")
+    if merge_checkout_count != checkout_count:
+        raise RoutingPolicyError("every ordinary CI checkout must use the routed merge commit")
 
 
 def check_repository(root: Path = ROOT) -> None:

@@ -24,6 +24,10 @@ on:
         description: Dependabot head commit to verify
         required: false
         type: string
+      merge_sha:
+        description: Synthetic merge commit to test
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -44,6 +48,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
       - name: Build the GitHub Pages documentation
@@ -73,6 +79,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Validate an explicitly routed Dependabot run
         if: github.event_name == 'workflow_dispatch' && inputs.routing_run_id != ''
         env:
@@ -81,12 +88,14 @@ jobs:
           ROUTED_PR_NUMBER: ${{ inputs.routed_pr_number }}
           ROUTED_BASE_SHA: ${{ inputs.base_sha }}
           ROUTED_HEAD_SHA: ${{ inputs.head_sha }}
+          ROUTED_MERGE_SHA: ${{ inputs.merge_sha }}
         run: |
           set -euo pipefail
           [[ "$ROUTING_RUN_ID" =~ ^[0-9]+$ ]]
           [[ "$ROUTED_PR_NUMBER" =~ ^[0-9]+$ ]]
           [[ "$ROUTED_BASE_SHA" =~ ^[0-9a-f]{40}$ ]]
           [[ "$ROUTED_HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$ROUTED_MERGE_SHA" =~ ^[0-9a-f]{40}$ ]]
 
           run_json=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$ROUTING_RUN_ID")
           jq -e --argjson number "$ROUTED_PR_NUMBER" '
@@ -115,6 +124,9 @@ jobs:
             .head.sha == $head
           ' <<<"$pr_json" >/dev/null
           test "$GITHUB_SHA" = "$ROUTED_HEAD_SHA"
+          test "$(git rev-parse HEAD)" = "$ROUTED_MERGE_SHA"
+          test "$(git rev-parse HEAD^1)" = "$ROUTED_BASE_SHA"
+          test "$(git rev-parse HEAD^2)" = "$ROUTED_HEAD_SHA"
       - name: Classify the CI and release tier
         id: classify
         env:
@@ -135,6 +147,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
@@ -166,6 +180,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
@@ -197,6 +213,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Verify Python tooling contracts
         run: |
           python3 -m unittest scripts.tests.test_check_argline
@@ -230,6 +247,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 2
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up Node.js for the pinned ADR renderer
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -291,6 +309,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -353,6 +373,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
@@ -420,6 +442,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:
@@ -456,6 +480,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Set up runtime Java
         uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
         with:

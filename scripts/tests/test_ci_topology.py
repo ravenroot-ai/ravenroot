@@ -57,9 +57,9 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "full-ui-unit-tests",
             "full-ui-build",
             "full-ui-e2e",
-            "full-backend-build",
+            "backend-build",
             "full-backend-tests",
-            "full-support-modules",
+            "backend-test",
             "full-plugin-boundary",
             "full-api-documentation",
             "full-runtime-auth-smoke",
@@ -67,13 +67,16 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             "full-runtime-container-smoke",
         }
         self.assertTrue(expected.issubset(self.jobs))
-        self.assertTrue({"full-policy", "full-ui", "backend-test", "full-runtime"}.isdisjoint(self.jobs))
+        self.assertTrue({"full-policy", "full-ui", "full-runtime"}.isdisjoint(self.jobs))
+        self.assertNotIn("name: full-backend\n", self.contents)
 
     def test_builds_and_tests_are_distinct(self) -> None:
-        self.assertIn("-DskipTests clean install", self.jobs["full-backend-build"])
-        self.assertNotIn("clean verify", self.jobs["full-backend-build"])
+        self.assertIn("name: full-backend-build", self.jobs["backend-build"])
+        self.assertIn("name: full-support-modules", self.jobs["backend-test"])
+        self.assertIn("-DskipTests clean install", self.jobs["backend-build"])
+        self.assertNotIn("clean verify", self.jobs["backend-build"])
         self.assertIn("clean verify", self.jobs["full-backend-tests"])
-        self.assertIn('= ravenroot-distribution ] && continue', self.jobs["full-backend-build"])
+        self.assertIn('= ravenroot-distribution ] && continue', self.jobs["backend-build"])
         self.assertIn("npm run build", self.jobs["full-ui-build"])
         self.assertIn("npm test", self.jobs["full-ui-unit-tests"])
         self.assertNotIn("npm test", self.jobs["full-ui-build"])
@@ -85,28 +88,30 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             {"release-classification", "full-ui-build"},
         )
         self.assertEqual(
-            declared_needs(self.jobs["full-support-modules"]),
-            {"release-classification", "full-backend-build"},
+            declared_needs(self.jobs["backend-test"]),
+            {"release-classification", "backend-build"},
         )
         self.assertEqual(
             declared_needs(self.jobs["full-runtime-container-smoke"]),
             {
                 "release-classification",
                 "full-ui-build",
-                "full-backend-build",
+                "backend-build",
                 "full-plugin-boundary",
             },
         )
         self.assertIn("name: ravenroot-ui", self.jobs["full-ui-build"])
         self.assertIn("name: ravenroot-ui", self.jobs["full-ui-e2e"])
-        self.assertIn("name: ravenroot-backend-build", self.jobs["full-backend-build"])
-        self.assertIn("name: ravenroot-backend-build", self.jobs["full-support-modules"])
+        self.assertIn("name: ravenroot-backend-build", self.jobs["backend-build"])
+        self.assertIn("name: ravenroot-backend-build", self.jobs["backend-test"])
         self.assertIn("name: ravenroot-plugins", self.jobs["full-plugin-boundary"])
         self.assertIn("name: ravenroot-plugins", self.jobs["full-runtime-container-smoke"])
 
     def test_required_gate_observes_every_visible_full_job(self) -> None:
         required_needs = declared_needs(self.jobs["ci-required"])
-        visible_full_jobs = {job for job in self.jobs if job.startswith("full-")}
+        visible_full_jobs = {
+            job for job, block in self.jobs.items() if re.search(r"(?m)^    name: full-", block)
+        }
         self.assertEqual(visible_full_jobs, visible_full_jobs.intersection(required_needs))
         for job in visible_full_jobs:
             self.assertIn(job, self.jobs["ci-required"])
@@ -122,7 +127,7 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             with self.subTest(job=job):
                 self.assertIn("needs.release-classification.outputs.tier != 'fast'", self.jobs[job])
         for job, block in self.jobs.items():
-            if job.startswith("full-") and job not in policy_jobs:
+            if re.search(r"(?m)^    name: full-", block) and job not in policy_jobs:
                 with self.subTest(job=job):
                     self.assertIn("needs.release-classification.outputs.tier == 'full'", block)
 

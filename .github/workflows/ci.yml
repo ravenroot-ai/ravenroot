@@ -471,7 +471,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-  full-backend-build:
+  backend-build:
     name: full-backend-build
     needs: [release-classification]
     if: needs.release-classification.outputs.tier == 'full'
@@ -546,9 +546,9 @@ jobs:
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress clean verify
 
-  full-support-modules:
+  backend-test:
     name: full-support-modules
-    needs: [release-classification, full-backend-build]
+    needs: [release-classification, backend-build]
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -600,7 +600,7 @@ jobs:
 
   full-plugin-boundary:
     name: full-plugin-boundary
-    needs: [release-classification, full-backend-build]
+    needs: [release-classification, backend-build]
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -690,7 +690,7 @@ jobs:
   full-runtime-auth-smoke:
     name: full-runtime-auth-smoke
     if: needs.release-classification.outputs.tier == 'full'
-    needs: [release-classification, full-backend-build]
+    needs: [release-classification, backend-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -722,7 +722,7 @@ jobs:
   full-runtime-jar-smoke:
     name: full-runtime-jar-smoke
     if: needs.release-classification.outputs.tier == 'full'
-    needs: [release-classification, full-backend-build]
+    needs: [release-classification, backend-build]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -761,7 +761,7 @@ jobs:
   full-runtime-container-smoke:
     name: full-runtime-container-smoke
     if: needs.release-classification.outputs.tier == 'full'
-    needs: [release-classification, full-ui-build, full-backend-build, full-plugin-boundary]
+    needs: [release-classification, full-ui-build, backend-build, full-plugin-boundary]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -827,9 +827,9 @@ jobs:
       - full-ui-unit-tests
       - full-ui-build
       - full-ui-e2e
-      - full-backend-build
+      - backend-build
       - full-backend-tests
-      - full-support-modules
+      - backend-test
       - full-plugin-boundary
       - full-api-documentation
       - full-runtime-auth-smoke
@@ -859,7 +859,7 @@ jobs:
           fast_jobs="fast-product-build fast-support-build fast-tooling-contracts"
           policy_jobs="full-docs-policy full-python-contracts full-shell-contracts full-source-policy"
           product_jobs="full-ui-audit full-ui-unit-tests full-ui-build full-ui-e2e \
-            full-backend-build full-backend-tests full-support-modules full-plugin-boundary \
+            backend-build full-backend-tests backend-test full-plugin-boundary \
             full-api-documentation full-runtime-auth-smoke full-runtime-jar-smoke \
             full-runtime-container-smoke"
 

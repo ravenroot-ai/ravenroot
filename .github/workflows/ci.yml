@@ -3,6 +3,7 @@ name: Continuous integration
 on:
   pull_request:
     branches: [dev, main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [dev, main]
   workflow_dispatch:
@@ -19,9 +20,34 @@ env:
   PUBLISHED_PLUGINS: ""
 
 jobs:
+  release-classification:
+    name: release-classification
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tier: ${{ steps.classify.outputs.tier }}
+      release-intent: ${{ steps.classify.outputs.release_intent }}
+      docs-only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - name: Check out repository history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Classify the CI and release tier
+        id: classify
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          REF_NAME: ${{ github.ref_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels) }}
+        run: python3 scripts/classify_main_change.py
+
   fast-product-build:
     name: fast-product-build
-    if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -51,7 +77,8 @@ jobs:
 
   fast-support-build:
     name: fast-support-build
-    if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -79,7 +106,8 @@ jobs:
 
   fast-tooling-contracts:
     name: fast-tooling-contracts
-    if: github.event_name == 'pull_request' && github.base_ref == 'dev'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'fast'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -92,6 +120,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
           python3 -m unittest scripts.tests.test_check_public_docs
+          python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_verify_api_docs
       - name: Verify shell tooling contracts
         run: |
@@ -107,7 +136,8 @@ jobs:
 
   full-policy:
     name: full-policy
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier != 'fast'
     runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
@@ -146,6 +176,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
           python3 -m unittest scripts.tests.test_check_public_docs
+          python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_verify_api_docs
       - name: Verify developer and platform shell contracts
         run: |
@@ -165,7 +196,8 @@ jobs:
 
   full-ui:
     name: full-ui
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -226,7 +258,8 @@ jobs:
 
   backend-test:
     name: full-backend
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 90
     steps:
@@ -286,7 +319,8 @@ jobs:
 
   full-api-documentation:
     name: full-api-documentation
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -320,8 +354,8 @@ jobs:
 
   full-runtime:
     name: full-runtime
-    if: github.event_name != 'pull_request' || github.base_ref == 'main'
-    needs: [full-ui, backend-test]
+    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-ui, backend-test]
     runs-on: ubuntu-24.04
     timeout-minutes: 35
     steps:
@@ -398,6 +432,7 @@ jobs:
     name: ci-required
     if: always()
     needs:
+      - release-classification
       - fast-product-build
       - fast-support-build
       - fast-tooling-contracts
@@ -409,7 +444,8 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
-      FAST_TIER: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' }}
+      CLASSIFICATION_RESULT: ${{ needs.release-classification.result }}
+      CI_TIER: ${{ needs.release-classification.outputs.tier }}
       FAST_PRODUCT_RESULT: ${{ needs.fast-product-build.result }}
       FAST_SUPPORT_RESULT: ${{ needs.fast-support-build.result }}
       FAST_TOOLING_RESULT: ${{ needs.fast-tooling-contracts.result }}
@@ -423,14 +459,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [ "$FAST_TIER" = "true" ]; then
+          test "$CLASSIFICATION_RESULT" = success
+          if [ "$CI_TIER" = fast ]; then
             test "$FAST_PRODUCT_RESULT" = success
             test "$FAST_SUPPORT_RESULT" = success
             test "$FAST_TOOLING_RESULT" = success
-          else
+          elif [ "$CI_TIER" = docs ]; then
+            test "$FULL_POLICY_RESULT" = success
+            test "$FULL_UI_RESULT" = skipped
+            test "$FULL_BACKEND_RESULT" = skipped
+            test "$FULL_API_DOCS_RESULT" = skipped
+            test "$FULL_RUNTIME_RESULT" = skipped
+          elif [ "$CI_TIER" = full ]; then
             test "$FULL_POLICY_RESULT" = success
             test "$FULL_UI_RESULT" = success
             test "$FULL_BACKEND_RESULT" = success
             test "$FULL_API_DOCS_RESULT" = success
             test "$FULL_RUNTIME_RESULT" = success
+          else
+            echo "Unknown CI tier: $CI_TIER" >&2
+            exit 1
           fi

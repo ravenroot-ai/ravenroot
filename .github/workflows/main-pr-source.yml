@@ -17,7 +17,7 @@ jobs:
     name: main-source-policy
     runs-on: ubuntu-latest
     steps:
-      - name: Require an internal release or hotfix branch
+      - name: Require an internal release, content, or hotfix branch
         env:
           TARGET_REPOSITORY: ${{ github.repository }}
           HEAD_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name }}
@@ -29,7 +29,7 @@ jobs:
           fi
 
           if [ "$HEAD_BRANCH" = "dev" ]; then
-            echo "Internal release pull request accepted."
+            echo "Internal release or content-promotion pull request accepted."
             exit 0
           fi
 

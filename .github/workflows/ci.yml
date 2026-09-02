@@ -334,7 +334,8 @@ jobs:
           cache: maven
       - name: Build the public SDK Javadoc archive with DocLint
         working-directory: ravenroot
-        run: mvn -B --no-transfer-progress -Papi-docs clean verify
+        # full-backend owns the complete test suite; this job owns Javadoc and DocLint.
+        run: mvn -B --no-transfer-progress -Papi-docs -DskipTests clean verify
       - name: Generate aggregate public API HTML
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress -N -Papi-docs javadoc:javadoc

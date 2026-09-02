@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://ravenroot.ai">Website</a> ·
   <a href="https://github.com/ravenroot-ai/ravenroot/releases">Releases</a> ·
-  <a href="docs/index.md">Documentation</a> ·
+  <a href="https://docs.ravenroot.ai/">Documentation</a> ·
   <a href="https://github.com/ravenroot-ai/ravenroot/issues">Issues</a>
 </p>
 
@@ -127,7 +127,7 @@ operational responsibilities and recovery paths.*
   [architecture and concepts](docs/architecture/index.md), and
   [architecture decision records](adr/README.md)
 
-Browse the complete [Ravenroot documentation](docs/index.md).
+Browse the complete [Ravenroot documentation](https://docs.ravenroot.ai/).
 
 ## Release status
 

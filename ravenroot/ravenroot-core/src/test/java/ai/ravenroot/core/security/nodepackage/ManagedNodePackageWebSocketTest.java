@@ -588,10 +588,18 @@ class ManagedNodePackageWebSocketTest {
                         failures.incrementAndGet(); failed.countDown();
                     }
                 });
-        assertReason(NodePackageServiceException.Reason.TRANSPORT_FAILED, opening);
+        OutboundWebSocketSession session = null;
+        try {
+            session = await(opening);
+        } catch (CompletionException failure) {
+            assertEquals(NodePackageServiceException.Reason.TRANSPORT_FAILED,
+                    ((NodePackageServiceException) failure.getCause()).reason(),
+                    "a control-frame failure observed before opening completes must fail the opening call");
+        }
         assertTrue(failed.await(1, TimeUnit.SECONDS), "invalid control frame must terminate transport");
         assertEquals(1, failures.get(), "transport rejection must be reported once");
         assertEquals(0, messages.get());
+        if (session != null) session.cancel();
         server.close();
         server = null;
     }

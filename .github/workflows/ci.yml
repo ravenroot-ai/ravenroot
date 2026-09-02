@@ -283,7 +283,13 @@ jobs:
         run: mvn -B --no-transfer-progress clean install
       - name: Verify out-of-reactor adapters, harness, and sample
         run: |
-          for project in ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible ravenroot-dev-harness ravenroot-sample; do
+          # The harness consumes the OpenAI-compatible adapter. Install both
+          # unpublished adapters into this job's local repository first so the
+          # verification result never depends on a warm Maven cache.
+          for project in ravenroot-adapter-anthropic ravenroot-adapter-openai-compatible; do
+            mvn -B --no-transfer-progress -f "$project/pom.xml" install
+          done
+          for project in ravenroot-dev-harness ravenroot-sample; do
             mvn -B --no-transfer-progress -f "$project/pom.xml" verify
           done
       - name: Run the embedded sample

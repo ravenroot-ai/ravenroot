@@ -10,6 +10,52 @@
     <packaging>pom</packaging>
     <name>Ravenroot</name>
     <description>Graph-governed orchestration platform.</description>
+    <url>https://ravenroot.ai</url>
+
+    <licenses>
+        <license>
+            <name>Apache License, Version 2.0</name>
+            <url>https://www.apache.org/licenses/LICENSE-2.0.txt</url>
+            <distribution>repo</distribution>
+        </license>
+    </licenses>
+
+    <organization>
+        <name>Ravenroot</name>
+        <url>https://ravenroot.ai</url>
+    </organization>
+
+    <developers>
+        <developer>
+            <id>ravenroot-maintainers</id>
+            <name>Ravenroot Maintainers</name>
+            <organization>Ravenroot</organization>
+            <organizationUrl>https://ravenroot.ai</organizationUrl>
+            <roles>
+                <role>maintainer</role>
+            </roles>
+        </developer>
+    </developers>
+
+    <scm>
+        <connection>scm:git:https://github.com/ravenroot-ai/ravenroot.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/ravenroot-ai/ravenroot.git</developerConnection>
+        <url>https://github.com/ravenroot-ai/ravenroot</url>
+        <tag>HEAD</tag>
+    </scm>
+
+    <issueManagement>
+        <system>GitHub</system>
+        <url>https://github.com/ravenroot-ai/ravenroot/issues</url>
+    </issueManagement>
+
+    <distributionManagement>
+        <repository>
+            <id>central</id>
+            <name>Sonatype Central Publisher Portal</name>
+            <url>https://central.sonatype.com/api/v1/publisher</url>
+        </repository>
+    </distributionManagement>
 
     <modules>
         <module>ravenroot-application-api</module>
@@ -91,6 +137,8 @@
         <ravenroot.surefire.localeArgLine>-Duser.language=${test.locale.language} -Duser.country=${test.locale.country}</ravenroot.surefire.localeArgLine>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <project.build.outputTimestamp>${ravenroot.release.outputTimestamp}</project.build.outputTimestamp>
+        <ravenroot.release.outputTimestamp>2026-01-01T00:00:00Z</ravenroot.release.outputTimestamp>
         <maven.javadoc.plugin.version>3.12.0</maven.javadoc.plugin.version>
         <junit.version>6.1.2</junit.version>
         <jqwik.version>1.9.3</jqwik.version>
@@ -307,6 +355,108 @@
     </build>
 
     <profiles>
+        <profile>
+            <id>release</id>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-jar-plugin</artifactId>
+                        <version>3.5.1</version>
+                        <configuration>
+                            <outputTimestamp>${project.build.outputTimestamp}</outputTimestamp>
+                        </configuration>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.4.0</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <version>${maven.javadoc.plugin.version}</version>
+                        <configuration>
+                            <doclint>none</doclint>
+                            <failOnError>true</failOnError>
+                            <notimestamp>true</notimestamp>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>3.2.8</version>
+                        <executions>
+                            <execution>
+                                <id>sign-release-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                                <configuration>
+                                    <bestPractices>true</bestPractices>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.cyclonedx</groupId>
+                        <artifactId>cyclonedx-maven-plugin</artifactId>
+                        <version>2.9.3</version>
+                        <inherited>false</inherited>
+                        <executions>
+                            <execution>
+                                <id>aggregate-release-sbom</id>
+                                <phase>package</phase>
+                                <goals>
+                                    <goal>makeAggregateBom</goal>
+                                </goals>
+                                <configuration>
+                                    <outputFormat>json</outputFormat>
+                                    <outputName>ravenroot-sbom</outputName>
+                                    <includeBomSerialNumber>true</includeBomSerialNumber>
+                                    <skipNotDeployed>false</skipNotDeployed>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.sonatype.central</groupId>
+                        <artifactId>central-publishing-maven-plugin</artifactId>
+                        <version>0.11.0</version>
+                        <extensions>true</extensions>
+                        <configuration>
+                            <publishingServerId>central</publishingServerId>
+                            <autoPublish>true</autoPublish>
+                            <waitUntil>published</waitUntil>
+                            <waitMaxTime>3600</waitMaxTime>
+                            <checksums>all</checksums>
+                            <deploymentName>Ravenroot ${project.version}</deploymentName>
+                            <excludeArtifacts>
+                                <excludeArtifact>ravenroot-node-starter</excludeArtifact>
+                                <excludeArtifact>ravenroot-sandbox-supervisor-testkit</excludeArtifact>
+                            </excludeArtifacts>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
         <profile>
             <id>api-docs</id>
             <build>

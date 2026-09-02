@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "description": "Integrity-locked renderer for Mermaid diagrams in repository ADRs",
+  "scripts": {
+    "install-browser": "puppeteer browsers install chrome && puppeteer browsers install chrome-headless-shell",
+    "install-browser:ci": "puppeteer browsers install chrome --install-deps && puppeteer browsers install chrome-headless-shell",
+    "verify-browser": "node browser-path.mjs"
+  },
   "dependencies": {
     "@mermaid-js/mermaid-cli": "11.16.0",
     "puppeteer": "25.9.0"

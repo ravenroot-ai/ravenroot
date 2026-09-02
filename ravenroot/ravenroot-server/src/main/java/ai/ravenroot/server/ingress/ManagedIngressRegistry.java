@@ -463,12 +463,23 @@ public final class ManagedIngressRegistry implements ManagedIngress, AutoCloseab
         @Override public IngressRouteOwner owner() { return owner; }
         @Override public void release() {
             List<Admission> admitted;
+            boolean awaitRemoval;
             synchronized (admissionHandshake) {
                 if (!released.compareAndSet(false, true)) {
-                    awaitContextRemoval();
-                    return;
+                    awaitRemoval = true;
+                    admitted = List.of();
+                } else {
+                    awaitRemoval = false;
+                    admitted = List.copyOf(active);
                 }
-                admitted = List.copyOf(active);
+            }
+            // Never wait while owning the admission monitor. A group of idempotent release callers
+            // can otherwise pin every virtual-thread carrier on monitor entry while the winner is
+            // parked in a lifecycle hook, leaving no carrier on which that winner can remove the
+            // context and release the waiters.
+            if (awaitRemoval) {
+                awaitContextRemoval();
+                return;
             }
             // Remove routing first. Replacement may bind immediately; the old lease remains
             // fenced by its generation-local flag, exchange closures and isolated executor.

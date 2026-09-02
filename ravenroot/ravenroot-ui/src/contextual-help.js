@@ -124,8 +124,10 @@ export function createContextualHelp({
       { ownerRect: owner?.getBoundingClientRect(), ownerSide },
     );
     if (!placement) return false;
-    surface.style.left = `${Math.round(placement.left)}px`;
-    surface.style.top = `${Math.round(placement.top)}px`;
+    // Rounding upward can move a fractionally-sized surface beyond the viewport clamp. Always
+    // resolve toward the safe top/left side so the measured box retains the full safety margin.
+    surface.style.left = `${Math.floor(placement.left)}px`;
+    surface.style.top = `${Math.floor(placement.top)}px`;
     surface.dataset.placement = placement.placement;
     return true;
   };

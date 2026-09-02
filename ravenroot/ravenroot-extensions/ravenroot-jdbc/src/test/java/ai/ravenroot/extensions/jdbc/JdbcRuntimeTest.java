@@ -19,6 +19,25 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class JdbcRuntimeTest {
     @Test
+    void successfulTerminalReleasesAdmissionBeforeDependentContinuationRuns() {
+        JdbcRuntime runtime = new JdbcRuntime(System::nanoTime, 1,
+                JdbcRuntime.CLEANUP_LANES_PER_INVOCATION);
+        AtomicInteger invocations = new AtomicInteger();
+
+        var result = runtime.submit("tenant-a\0profile-a", 1, Duration.ofSeconds(10), ignored -> {
+                    invocations.incrementAndGet();
+                    return "first";
+                })
+                .thenCompose(first -> runtime.submit("tenant-a\0profile-a", 1, Duration.ofSeconds(10), ignored -> {
+                    invocations.incrementAndGet();
+                    return first + "-second";
+                }));
+
+        assertEquals("first-second", result.join());
+        assertEquals(2, invocations.get());
+    }
+
+    @Test
     void blockedCleanupCallbacksConsumeOneFixedReservationUntilTheyActuallySettle() throws Exception {
         JdbcRuntime runtime = new JdbcRuntime(System::nanoTime, 2,
                 JdbcRuntime.CLEANUP_LANES_PER_INVOCATION);

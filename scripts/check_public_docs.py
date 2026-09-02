@@ -71,7 +71,7 @@ def adr_errors() -> list[str]:
     return errors
 
 
-def render_mermaid(files: list[Path]) -> list[str]:
+def render_mermaid(files: list[Path], puppeteer_config: Path | None = None) -> list[str]:
     errors: list[str] = []
     renderer = ROOT / "scripts/mermaid-renderer/node_modules/.bin/mmdc"
     diagrams = [
@@ -87,26 +87,44 @@ def render_mermaid(files: list[Path]) -> list[str]:
             input_file = temp / f"diagram-{index}.mmd"
             output_file = temp / f"diagram-{index}.svg"
             input_file.write_text(source + "\n", encoding="utf-8")
+            command = [str(renderer), "--input", str(input_file), "--output", str(output_file)]
+            if puppeteer_config is not None:
+                command.extend(["--puppeteerConfigFile", str(puppeteer_config)])
             result = subprocess.run(
-                [str(renderer), "--input", str(input_file), "--output", str(output_file)],
+                command,
                 cwd=ROOT,
                 capture_output=True,
                 text=True,
             )
             if result.returncode:
-                detail = (result.stderr or result.stdout).strip().splitlines()[-1]
-                errors.append(f"{document.relative_to(ROOT)} diagram {index}: {detail}")
+                output = "\n".join(
+                    section.strip()
+                    for section in (result.stderr, result.stdout)
+                    if section and section.strip()
+                )
+                detail = output or "renderer produced no diagnostic output"
+                errors.append(
+                    f"{document.relative_to(ROOT)} diagram {index}: "
+                    f"Mermaid renderer exited with status {result.returncode}\n{detail}"
+                )
     return errors
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--render-mermaid", action="store_true")
+    parser.add_argument("--puppeteer-config", type=Path)
     args = parser.parse_args()
     files = markdown_files()
     errors = local_link_errors(files) + adr_errors()
     if args.render_mermaid:
-        errors.extend(render_mermaid(files))
+        config = args.puppeteer_config
+        if config is not None and not config.is_absolute():
+            config = ROOT / config
+        if config is not None and not config.is_file():
+            errors.append(f"Puppeteer configuration does not exist: {config}")
+        else:
+            errors.extend(render_mermaid(files, config))
     if errors:
         for error in errors:
             print(error, file=sys.stderr)

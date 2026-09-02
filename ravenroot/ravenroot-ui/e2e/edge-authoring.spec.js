@@ -20,6 +20,10 @@ async function addReviewNode(page) {
   await page.locator('#node-editor button[type="submit"]').click();
   await expect.poll(() => nodeIds(page)).toContain('node-1');
   await pinNodesApart(page);
+  // Creating a node leaves it selected so the author can continue editing. Pointer-authoring tests
+  // need the node body, not the selected-node action minibar that deliberately owns pointer input.
+  await page.evaluate(() => { window.cy.$(':selected').unselect(); });
+  await expect.poll(() => page.evaluate(() => window.cy.$(':selected').length)).toBe(0);
 }
 
 // A freshly added node lands wherever the running layout puts it, which can be a few pixels from
@@ -65,8 +69,19 @@ async function clearUnpinnedNodes(page, pinnedIds, anchor = { x: 0, y: 0 }) {
 // So the rule for this file, and the reason the guard in `test/e2e-evaluate-return.test.js` exists:
 // an evaluated callback that mutates Cytoscape uses a BLOCK body and returns nothing. Anything it
 // genuinely needs from the page comes back as a plain value it built itself.
-async function fitPinnedGraph(page) {
-  await page.evaluate(() => { window.cy.fit(undefined, 80); });
+async function fitPinnedGraph(page, pinnedIds) {
+  await page.evaluate(ids => {
+    const pinned = window.cy.collection(ids.map(id => window.cy.getElementById(id)));
+    window.cy.fit(pinned, 80);
+  }, pinnedIds);
+}
+
+async function waitForLayoutIdle(page) {
+  await expect(page.locator('.doc-pane--layout-busy')).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning'))))
+    .toBe(false);
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
 }
 
 async function pinNodesApart(page) {
@@ -88,8 +103,7 @@ async function pinNodesApart(page) {
   // `setVisualStyle`, which paints synchronously and never runs a layout, so no layoutstart is ever
   // emitted across those keypresses. Left in place rather than removed, because removing them is a
   // timing change whose consequences are not measured here.
-  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning'))))
-    .toBe(false);
+  await waitForLayoutIdle(page);
   await page.evaluate(() => {
     window.cy.stop();
     window.cy.getElementById('start').position({ x: 0, y: 0 });
@@ -99,7 +113,7 @@ async function pinNodesApart(page) {
     window.cy.getElementById('end').position({ x: 600, y: 0 });
   });
   await clearUnpinnedNodes(page, ['start', 'node-1', 'end']);
-  await fitPinnedGraph(page);
+  await fitPinnedGraph(page, ['start', 'node-1', 'end']);
   await expect.poll(async () => {
     const gap = await page.evaluate(() =>
       window.cy.getElementById('node-1').renderedPosition().x
@@ -121,8 +135,7 @@ async function useCytoAndPinNodesApart(page) {
   // Both are kept anyway, and only because removing them changes the timing of every test that
   // calls this helper, and that timing consequence has not been measured. They are dead weight with
   // a reason, not a guard: do not cite them as one.
-  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning'))))
-    .toBe(false);
+  await waitForLayoutIdle(page);
   await page.evaluate(() => {
     window.cy.stop();
     window.cy.getElementById('start').position({ x: 0, y: 0 });
@@ -130,7 +143,7 @@ async function useCytoAndPinNodesApart(page) {
     window.cy.getElementById('end').position({ x: 600, y: 0 });
   });
   await clearUnpinnedNodes(page, ['start', 'node-1', 'end']);
-  await fitPinnedGraph(page);
+  await fitPinnedGraph(page, ['start', 'node-1', 'end']);
   // Position notifications schedule Cyto edge geometry for the next frame. Wait until both that
   // frame and one paint frame have passed before measuring the invariant positions.
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
@@ -140,8 +153,7 @@ async function useCytoAndPinNodesApart(page) {
 
 async function useDesignAndPinNodesApart(page) {
   await page.locator('#btn-design').click();
-  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning'))))
-    .toBe(false);
+  await waitForLayoutIdle(page);
   await page.evaluate(() => {
     window.cy.stop();
     window.cy.getElementById('start').position({ x: 0, y: 0 });
@@ -149,7 +161,7 @@ async function useDesignAndPinNodesApart(page) {
     window.cy.getElementById('end').position({ x: 600, y: 0 });
   });
   await clearUnpinnedNodes(page, ['start', 'node-1', 'end']);
-  await fitPinnedGraph(page);
+  await fitPinnedGraph(page, ['start', 'node-1', 'end']);
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
   await expect.poll(() => page.evaluate(() =>
     window.cy.getElementById('edge-start-dosomething').style('curve-style'))).toBe('unbundled-bezier');
@@ -157,13 +169,13 @@ async function useDesignAndPinNodesApart(page) {
 
 async function useRendererAndPinNodes(page, positions) {
   await page.locator('#btn-design').click();
-  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning')))).toBe(false);
+  await waitForLayoutIdle(page);
   await page.evaluate(({ positions: next }) => {
     window.cy.stop();
     Object.entries(next).forEach(([id, position]) => window.cy.getElementById(id).position(position));
   }, { positions });
   await clearUnpinnedNodes(page, Object.keys(positions));
-  await fitPinnedGraph(page);
+  await fitPinnedGraph(page, Object.keys(positions));
   await page.evaluate(() => new Promise(resolve => requestAnimationFrame(resolve)));
 }
 
@@ -273,7 +285,7 @@ async function pinExactRoute(page, {
   target = null, portGap = null, zoom = 1,
 } = {}) {
   await page.locator('#btn-design').click();
-  await expect.poll(() => page.evaluate(() => Boolean(window.cy.scratch('_rrLayoutRunning')))).toBe(false);
+  await waitForLayoutIdle(page);
   return page.evaluate(({ sourceId: sourceKey, targetId: targetKey, source: sourcePosition,
     target: targetPosition, portGap: requestedGap, zoom: nextZoom }) => {
     const sourceNode = window.cy.getElementById(sourceKey);
@@ -739,7 +751,12 @@ test('reconnects an edge by dragging the end nearest the pointer onto another no
     window.cy.stop();
     window.cy.getElementById('dosomething').position({ x: 600, y: 0 });
     window.cy.getElementById('end').position({ x: -1200, y: -900 });
-    window.cy.fit(undefined, 80);
+    const pinned = window.cy.collection([
+      window.cy.getElementById('start'),
+      window.cy.getElementById('dosomething'),
+      window.cy.getElementById('node-1'),
+    ]);
+    window.cy.fit(pinned, 80);
   });
   await page.evaluate(() => new Promise(resolve =>
     requestAnimationFrame(() => requestAnimationFrame(resolve))));

@@ -7,7 +7,6 @@ import java.sql.Statement;
 import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.Semaphore;
@@ -23,20 +22,35 @@ final class JdbcRuntime {
     private final Semaphore global;
     private final Semaphore cleanupLanes;
     private final ConcurrentHashMap<String, Gate> gates = new ConcurrentHashMap<>();
-    private final ScheduledExecutorService deadlines = Executors.newSingleThreadScheduledExecutor(
-            Thread.ofPlatform().daemon().name("ravenroot-jdbc-deadline-", 0).factory());
+    private final DeadlineScheduler deadlines;
 
     JdbcRuntime(java.util.function.LongSupplier ticker) {
-        this(ticker, 32, GLOBAL_CLEANUP_LANES);
+        this(ticker, 32, GLOBAL_CLEANUP_LANES, productionDeadlineScheduler());
+    }
+
+    JdbcRuntime(java.util.function.LongSupplier ticker, DeadlineScheduler deadlines) {
+        this(ticker, 32, GLOBAL_CLEANUP_LANES, deadlines);
     }
 
     JdbcRuntime(java.util.function.LongSupplier ticker, int invocationLimit, int cleanupLaneLimit) {
+        this(ticker, invocationLimit, cleanupLaneLimit, productionDeadlineScheduler());
+    }
+
+    private JdbcRuntime(java.util.function.LongSupplier ticker, int invocationLimit, int cleanupLaneLimit,
+                        DeadlineScheduler deadlines) {
         this.ticker = java.util.Objects.requireNonNull(ticker);
+        this.deadlines = java.util.Objects.requireNonNull(deadlines);
         if (invocationLimit < 1 || cleanupLaneLimit < CLEANUP_LANES_PER_INVOCATION) {
             throw new IllegalArgumentException("invalid JDBC runtime limits");
         }
         global = new Semaphore(invocationLimit, true);
         cleanupLanes = new Semaphore(cleanupLaneLimit, true);
+    }
+
+    private static DeadlineScheduler productionDeadlineScheduler() {
+        ScheduledExecutorService scheduler = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(
+                Thread.ofPlatform().daemon().name("ravenroot-jdbc-deadline-", 0).factory());
+        return scheduler::schedule;
     }
     static JdbcRuntime production() { return PRODUCTION; }
 
@@ -64,6 +78,10 @@ final class JdbcRuntime {
     }
 
     interface Work { Object run(Control control) throws Exception; }
+
+    interface DeadlineScheduler {
+        Future<?> schedule(Runnable command, long delay, TimeUnit unit);
+    }
 
     final class Invocation {
         final String key; final Gate gate; final Work work; final CompletableFuture<Object> output;
@@ -101,12 +119,12 @@ final class JdbcRuntime {
             if (output.isDone()) return false;
             CancellationDecision decision = control.requestCancellation(deadline);
             if (decision.finished()) return false;
-            boolean won = output.completeExceptionally(new JdbcFailure(decision.code()));
-            if (won) {
+            output.completeExceptionally(new JdbcFailure(decision.code()));
+            if (decision.accepted()) {
                 Thread running = worker;
                 if (running != null) running.interrupt();
             }
-            return won;
+            return decision.accepted();
         }
         boolean expired() { return ticker.getAsLong() - deadline >= 0; }
         JdbcFailure cancellationFailure(boolean deadline) {
@@ -167,16 +185,19 @@ final class JdbcRuntime {
         CancellationDecision requestCancellation(boolean deadline) {
             int cancellationPhase = deadline ? TIMED_OUT : CANCELLED;
             int resolved;
+            boolean accepted = false;
             for (;;) {
                 int current = phase.get();
                 if (current == ACTIVE) {
                     if (!phase.compareAndSet(ACTIVE, cancellationPhase)) continue;
                     resolved = cancellationPhase;
+                    accepted = true;
                     break;
                 }
                 if (current == COMMITTING || current == COMMITTED) {
                     if (!phase.compareAndSet(current, AMBIGUOUS)) continue;
                     resolved = AMBIGUOUS;
+                    accepted = true;
                     break;
                 }
                 resolved = current;
@@ -185,9 +206,9 @@ final class JdbcRuntime {
             if (resolved == FINISHED) return CancellationDecision.finishedWork();
             cancelResources();
             if (resolved == AMBIGUOUS) {
-                return new CancellationDecision(false, JdbcFailure.Code.AMBIGUOUS_COMMIT);
+                return new CancellationDecision(false, accepted, JdbcFailure.Code.AMBIGUOUS_COMMIT);
             }
-            return new CancellationDecision(false, resolved == TIMED_OUT
+            return new CancellationDecision(false, accepted, resolved == TIMED_OUT
                     ? JdbcFailure.Code.DEADLINE_EXCEEDED : JdbcFailure.Code.CANCELLED);
         }
 
@@ -282,9 +303,9 @@ final class JdbcRuntime {
         }
     }
 
-    private record CancellationDecision(boolean finished, JdbcFailure.Code code) {
+    private record CancellationDecision(boolean finished, boolean accepted, JdbcFailure.Code code) {
         static CancellationDecision finishedWork() {
-            return new CancellationDecision(true, JdbcFailure.Code.EXECUTION_FAILED);
+            return new CancellationDecision(true, false, JdbcFailure.Code.EXECUTION_FAILED);
         }
     }
 

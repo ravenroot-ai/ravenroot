@@ -1,14 +1,14 @@
 # Releasing Ravenroot
 
 Ravenroot uses a simplified GitFlow model: `dev` integrates approved changes, while `main` contains
-only released states. A release pull request is the explicit decision to publish a selected set of
-changes.
+released product states and explicitly classified public-content updates. A release pull request is
+the explicit decision to publish a selected set of product changes.
 
 ## Branch roles
 
 | Branch | Purpose | Accepted changes |
 |---|---|---|
-| `main` | Default branch and released product history | Release pull requests from the internal `dev` branch; exceptionally, protected internal `hotfix/*` pull requests |
+| `main` | Default branch, released product history, and current public documentation | Release or content-promotion pull requests from the internal `dev` branch; exceptionally, protected internal `hotfix/*` pull requests |
 | `dev` | Integration branch for the next release | Reviewed topic branches and pull requests from repository branches or forks |
 | `feature/*`, `fix/*`, `docs/*`, `test/*` | Focused contribution branches based on `dev` | One bounded change returning to `dev` |
 | `hotfix/*` | Exceptional urgent correction based on `main` | Patch release returning to `main`, followed by synchronization to `dev` |
@@ -31,6 +31,30 @@ ordinary topic pull requests target `dev`.
 Source acceptance is not hotfix authorization. A repository ruleset targeting `hotfix/*` must restrict
 branch creation and updates to release maintainers. Protection on `main` must require review and
 CODEOWNERS approval before merge. Authorization is never derived from mutable pull request metadata.
+
+## Classifying pull requests to `main`
+
+Every pull request to `main` requires exactly one release-intent label. The CI classifier verifies the
+label against the changed paths before any merge is allowed.
+
+| Label | Meaning | CI tier | Version, tag, and deliverables |
+|---|---|---|---|
+| `release:none` | Documentation or public-content promotion only | Policy, documentation, and security checks | Unchanged; no tag or publication |
+| `release:patch` | Backward-compatible correction | Complete release gate | Patch increment and publication |
+| `release:minor` | Backward-compatible feature or incompatible `0.x` change | Complete release gate | Minor increment and publication |
+| `release:major` | Stable-series incompatible change | Complete release gate | Major increment and publication |
+
+`release:none` is deliberately fail-closed. Every changed path must be in the reviewed documentation
+and public-content allowlist. Product source, build configuration, deployment configuration, workflow
+automation, release metadata, and non-documentation change fragments make that label invalid. A
+documentation-only pull request must use `release:none`; it must not consume a release number merely
+to satisfy CI.
+
+The labels classify the whole diff between `main` and the pull-request head. Consequently, a
+content-only promotion is possible only when `dev` contains no unreleased product changes. If product
+changes are already accumulated on `dev`, publish them through a correctly classified release first
+or prepare the content update from the synchronized released state under the normal protected branch
+rules.
 
 ## Integrating changes on `dev`
 
@@ -81,8 +105,10 @@ Release versions are never reused. The release tag is exactly `v<version>`, such
 
 ## Tagging and publishing
 
-Merging the release pull request is the publication authorization. A single protected release workflow
-triggered by the resulting push to `main` must:
+Merging a pull request labeled `release:patch`, `release:minor`, or `release:major` is the publication
+authorization. A `release:none` merge is never publication authorization. A single protected release
+workflow triggered by the resulting push to `main` must verify the merged pull request's release
+intent and, for a version-changing release:
 
 1. run the release gates again against the exact merge commit;
 2. read and validate the authoritative product version;
@@ -96,19 +122,20 @@ triggered by the resulting push to `main` must:
    same version and commit.
 
 Tag creation and delivery happen in the same workflow. A maintainer does not create the tag manually,
-so a released `main` commit cannot be silently skipped. The workflow must be concurrency-protected,
-use minimum permissions, and be safe to rerun after a partial failure without replacing an immutable
-artifact.
+so a released `main` commit cannot be silently skipped. For `release:none`, the workflow records the
+classification and exits successfully without changing the version, creating a tag, or building and
+publishing deliverables. The workflow must be concurrency-protected, use minimum permissions, and be
+safe to rerun after a partial failure without replacing an immutable artifact.
 
-The publishing workflow is intentionally not present while this repository does not yet contain the
-product source and authoritative build configuration. It must be implemented and made a required
-release gate when those inputs arrive. Until then, this document defines the process but a merge to
-`main` does not create deliverables.
+The publishing workflow is tracked separately from this CI classification. It must remain disabled
+until the registry credentials, immutable-publication controls, and complete release gate are ready.
+Until then, this document defines the process but a merge to `main` does not create deliverables.
 
 ## Synchronizing after a release
 
-After a normal release, fast-forward `dev` to the released `main` merge commit before integrating more
-work. This gives both branches the same release boundary without replaying commits.
+After a normal release or content-only promotion, fast-forward `dev` to the resulting `main` merge
+commit before integrating more work. This gives both branches the same public boundary without
+replaying commits.
 
 For an urgent correction:
 

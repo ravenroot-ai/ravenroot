@@ -6,8 +6,8 @@ to publish.
 
 ## Start from the integration branch
 
-`main` is the default branch because it represents the latest released state. Active development is
-integrated on `dev`.
+`main` is the default branch because it represents the latest released product state and its public
+documentation. Active development is integrated on `dev`.
 
 1. Fork the repository and fetch the upstream `dev` branch.
 2. Create a focused `feature/*`, `fix/*`, `docs/*`, or `test/*` branch from the current `dev`.
@@ -15,10 +15,13 @@ integrated on `dev`.
 4. Push the topic branch to your fork and open a pull request against `ravenroot-ai/ravenroot:dev`.
 
 Ordinary pull requests from forks or repository branches must target `dev`, not `main`. Pull requests
-to `main` are reserved for the internal `dev` release branch and protected internal `hotfix/*`
-branches. Repository rules restrict hotfix creation and updates to release maintainers, while branch
-protection and CODEOWNERS review authorize the merge. If a pull request is opened against the wrong
-base, change its base branch to `dev`; the contribution does not need to be recreated.
+to `main` are reserved for the internal `dev` branch and protected internal `hotfix/*` branches. A
+maintainer classifies each such pull request with exactly one of `release:none`, `release:patch`,
+`release:minor`, or `release:major`. `release:none` is restricted to documentation and public content;
+it never advances the product version, creates a tag, or publishes deliverables. Repository rules
+restrict hotfix creation and updates to release maintainers, while branch protection and CODEOWNERS
+review authorize the merge. If a pull request is opened against the wrong base, change its base branch
+to `dev`; the contribution does not need to be recreated.
 
 ## Describe the public change
 
@@ -68,9 +71,11 @@ discoverability, terminology, links, and English-language consistency. Read the
 ## How releases are prepared
 
 Maintainers collect approved changes on `dev`. When that set is ready, a release pull request from
-`dev` to `main` updates the authoritative version, changelog, and release notes and passes the complete
-release gate. That pull request is merged with a merge commit. The exact merge commit will be tagged
-and published by the release workflow once that workflow is available.
+`dev` to `main` uses `release:patch`, `release:minor`, or `release:major`, updates the authoritative
+version, changelog, and release notes, and passes the complete release gate. That pull request is
+merged with a merge commit. The exact merge commit will be tagged and published by the release
+workflow once that workflow is available. A documentation-only promotion may instead use
+`release:none`; it passes the policy, documentation, and security gates without creating a release.
 
 Read [Releasing Ravenroot](docs/governance/releasing.md) for the complete branch, version, hotfix, and
 publication policy.

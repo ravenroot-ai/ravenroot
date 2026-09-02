@@ -3,7 +3,7 @@ name: Continuous integration
 on:
   pull_request:
     branches: [dev, main]
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
   push:
     branches: [dev, main]
   workflow_dispatch:
@@ -138,6 +138,7 @@ jobs:
         run: |
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_dependabot_routing
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_release_contract
@@ -196,6 +197,7 @@ jobs:
         run: |
           python3 -m unittest scripts.tests.test_check_argline
           python3 -m unittest scripts.tests.test_check_no_raw_control_bytes
+          python3 -m unittest scripts.tests.test_check_dependabot_routing
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_release_contract

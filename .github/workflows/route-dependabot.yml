@@ -1,0 +1,30 @@
+name: Route Dependabot pull requests
+
+on:
+  pull_request_target:
+    branches: [main]
+    types: [opened, reopened, edited]
+
+permissions: {}
+
+jobs:
+  route-to-dev:
+    name: route-dependabot-to-dev
+    if: >-
+      github.event.pull_request.base.ref == 'main' &&
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'dependabot/')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Retarget the Dependabot pull request to dev
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: >-
+          gh api --method PATCH
+          "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
+          -f base=dev --silent

@@ -57,6 +57,12 @@ function describeWithReason(type, publicReason) {
       return `Execution failed with ${reason}. Protected diagnostics may contain more detail.`;
     case 'JOIN_FAILED':
       return `Join conditions could not be satisfied: ${reason}.`;
+    // Kept in step with `PublicExecutionDescription.forType`'s NODE_RETRY_SCHEDULED branch. The
+    // classifier here is the failure's retry classification, a fixed four-member vocabulary rather
+    // than a Java type name, and it is named rather than characterised for the same reason a routed
+    // outcome is.
+    case 'NODE_RETRY_SCHEDULED':
+      return `Node attempt failed as "${reason}" and another attempt was scheduled.`;
     // Kept in step with `PublicExecutionDescription.forType`'s NODE_BYPASSED branch -- INCLUDING
     // the thing that branch deliberately does NOT do. The cases above interpolate the classifier into
     // the sentence; this one SELECTS among sentences written here, so an unrecognised token falls
@@ -88,6 +94,10 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   // which knows the outcome.
   NODE_COMPLETED: 'Node completed.',
   NODE_FAILED: 'Node failed. Protected diagnostics may contain more detail.',
+  // The no-classifier fallback, so it names neither the classification nor the wait. Both are on the
+  // event for a reader entitled to them; `describeWithReason` below adds the classification when the
+  // server sent one.
+  NODE_RETRY_SCHEDULED: 'Node attempt failed and another attempt was scheduled.',
   JOIN_SATISFIED: 'Join conditions were satisfied.',
   JOIN_ITERATION_BACKLOG: 'A join is holding state for several iterations.',
   JOIN_ARRIVAL_DISCARDED: 'A duplicate or late join arrival was ignored.',

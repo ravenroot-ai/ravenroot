@@ -1340,6 +1340,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
                             ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
                                     .orElse(null)
+                            : null,
+                    // Decoded from the body under its own media type, exactly as the edge identity
+                    // above is, so a foreign or malformed payload stays absent rather than becoming
+                    // a plausible-looking handler id attributed to a handler that may exist.
+                    ai.ravenroot.api.persistence.HandlerEventData.isHandlerEvent(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.HandlerEventData.handlerId(envelope.payload())
+                                    .orElse(null)
                             : null));
         }
         return List.copyOf(events);

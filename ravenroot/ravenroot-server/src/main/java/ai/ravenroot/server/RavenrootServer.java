@@ -3294,6 +3294,12 @@ public final class RavenrootServer implements AutoCloseable {
                     .append(",\"description\":\"").append(escape(description)).append('"')
                     .append(",\"processInstanceId\":\"").append(event.processInstanceId()).append('"')
                     .append(",\"traversalId\":\"").append(event.traversalId()).append('"')
+                    // A handler event names its handler here for the same reason the stream does:
+                    // a poller that saw HANDLER_RESOLVED and could not tell WHICH handler resolved
+                    // would have to go and ask, which is the question this projection exists to
+                    // answer. Null on every other type, and on rows written before PERS-05.
+                    .append(",\"handlerId\":")
+                    .append(event.handlerId() == null ? "null" : "\"" + event.handlerId() + "\"")
                     .append("}");
         }
         return body.append("]}").toString();
@@ -3732,6 +3738,12 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
                 + ",\"edgeId\":" + (event.edgeId() == null ? "null"
                         : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
+                // The fourth identity, beside the process, the traversal and the invocation, so a
+                // client can tell a handler event apart from a node event that shares all three
+                // instead of parsing the sentence. A UUID, so it needs no escaping and costs a fixed
+                // 36 bytes inside the projection's own reserve.
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
                 + "}";
         String frame = "id: " + event.journalOffset() + "\nevent: execution\ndata: " + body + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);

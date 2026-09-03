@@ -10097,6 +10097,15 @@ function activityIdentifiersHtml(event) {
     ['invocation', event.invocationId],
     ['attempt', event.attemptId],
   ];
+  // A fifth level, and the only one rendered conditionally. The four above are the execution
+  // hierarchy every event sits somewhere in, so an em dash for an absent one reads as "above that
+  // level". A handler is not part of that hierarchy: it is the durable wait a process is parked on,
+  // and only handler-lifecycle events carry one. Emitting an empty `handler —` on every node event
+  // would assert that every event has a handler slot, which is the opposite of the distinction this
+  // row exists to make.
+  if (event.handlerId) {
+    identifiers.push(['handler', event.handlerId]);
+  }
   return identifiers.map(([kind, value]) =>
     `<span class="activity-id" data-id-kind="${kind}">${escapeHtml(kind)} <code>${escapeHtml(shortId(value))}</code></span>`
   ).join('');

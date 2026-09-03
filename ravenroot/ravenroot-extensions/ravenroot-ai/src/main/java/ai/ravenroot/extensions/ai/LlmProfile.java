@@ -43,7 +43,7 @@ public record LlmProfile(String name, URI endpoint, String model,
      * <p>The preamble is read by the {@code agent} node only. <b>{@code llm-prompt} sends no system
      * message at all and this field does not change that</b> — the field lives on the profile, which
      * is the operator's, because the whole point of the documented contract is that the operator owns the top of
-     * the system turn and the author owns what comes after a delimiter the author cannot forge.</p>
+     * the operator-only system turn; graph-authored instructions use a separate user turn.</p>
      *
      * <p>Bounded because it is prepended to every turn of an agent loop: an unbounded preamble is
      * paid for once per turn, not once per run.</p>

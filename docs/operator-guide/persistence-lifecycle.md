@@ -11,6 +11,14 @@ Protect accepted executions and audit evidence across drain, backup, restart, an
 5. After restart or restore, the durable process inventory (`GET /v1/executions/inventory`, or `ravenroot inventory`) is queryable immediately, with no rebuild delay: it is read from the same rows the lifecycle committed, not from a projection that has to catch up. Use it, not the process-local live-execution view, to find work that outlived the restart.
 6. When an instance you expect to find is absent, compare its expected creation time against the inventory's `retainedFrom` floor in the same response before concluding the identifier is wrong: an absence at or after the floor means no such instance exists or it is not visible to your tenant; an absence before the floor means a terminal instance aged out of the configured terminal-retention window.
 
+## Graph definitions
+
+Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored. An accepted execution is therefore always one whose graph is retained, and the retained document — not a copy held by whichever process accepted it — is the authoritative record of what that execution was accepted to run.
+
+Definitions are stored with execution state, so they are inside the same backup and come back with the same restore. They are scoped to one tenant, and two executions share one stored document only when the documents are byte-identical and belong to the same tenant. Definitions hold graph content and non-secret references only; credentials are supplied at execution time and are never stored with a definition.
+
+Storing the document is what this release adds. **Ravenroot does not yet read it back to resume work**: no runtime reconstructs a graph from a stored definition, and reclaiming stored definitions is not yet an exposed operator command. Both arrive in a following change. Until then, treat these definitions as retained evidence that an accepted execution's graph is recoverable, not as a recovery procedure you can run today.
+
 ## Authority
 
 Only an operator may drain, copy or replace durable state, restore a deployment, or approve an upgrade. API consumers observe these transitions but do not perform storage mutation. Removing expired terminal rows from the durable inventory follows the same rule: nothing is deleted implicitly by a listing or a lookup, removal is an explicit operator or scheduled maintenance action, only terminal instances are ever eligible, and it advances the retention floor for the tenant it was run against and no other.
@@ -25,6 +33,7 @@ Two limits to keep in mind when reading the inventory. First, there is no durabl
 
 - [Contract](../architecture/durability-events.md)
 - [Durable process inventory](../architecture/process-inventory.md)
+- [Decision record](../../adr/0031-durable-canonical-graph-definitions.md)
 - [Runbook](../troubleshooting/embed-backup.md)
 - [Bundle format and commands](../reference/backup-recovery.md)
 - [HTTP API and CLI](../reference/api-cli.md)

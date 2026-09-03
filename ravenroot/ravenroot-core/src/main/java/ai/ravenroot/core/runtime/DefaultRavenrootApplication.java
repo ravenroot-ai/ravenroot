@@ -112,6 +112,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * before — PERS-02 does not make core durable, it makes core depend on the port.
      */
     private final ExecutionStore executionStore;
+    /**
+     * The durable authority for the graph an accepted execution replays, or {@code null} when no
+     * definition store is composed and acceptance keeps its earlier behaviour of pinning an
+     * identifier whose bytes nothing retains.
+     */
+    private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
 
     /** Identifies this process to the store, so an operator reading leases() can tell who holds one. */
     private final String workerId = "ravenroot-" + java.util.UUID.randomUUID();
@@ -274,7 +280,38 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ArtifactRegistry artifacts, ProgramRuntime programRuntime,
                                        ExecutionIdentitySource identitySource, ExecutionStore executionStore,
                                        int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, null);
+    }
+
+    /**
+     * The terminal constructor, and the only one that assigns state.
+     *
+     * <p>{@code graphDefinitionStore} is what makes an accepted execution recoverable. When one is
+     * composed, the canonical document is committed to it <em>before</em> the acceptance write that
+     * pins it, so acceptance can never succeed while the definition it names is absent. Passing
+     * {@code null} keeps the earlier behaviour, in which a pin identifies a document nothing
+     * retains; that mode is still supported and is still the only mode an embedded caller composing
+     * no persistence at all can have.</p>
+     *
+     * @param engine execution engine the application dispatches through.
+     * @param monitor monitor execution events are published to.
+     * @param behaviors behavior registry node kinds are resolved against.
+     * @param artifacts registry holding generated program artifacts.
+     * @param programRuntime runtime that executes generated program artifacts.
+     * @param identitySource source of process-instance identifiers.
+     * @param executionStore durable execution state, or {@code null} for no durable acceptance.
+     * @param maxActiveDeployments per-process cap on active long-lived deployments.
+     * @param unknownBehaviors admission stance for a node kind no behavior claims.
+     * @param graphDefinitionStore durable graph definitions, or {@code null} to retain no document.
+     */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
+        this.graphDefinitionStore = graphDefinitionStore;
         this.engine = engine;
         this.monitor = monitor;
         this.behaviors = behaviors;
@@ -1024,8 +1061,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         executionResults.started(resultKey, processInstanceId);
         java.util.concurrent.CompletionStage<GraphExecutionResult> execution;
         try {
-            // PERS-02 exercised path. Recorded before the graph starts so a rejected write cannot
-            // leave an unrecorded execution running; the surrounding catch already owns cleanup.
+            // The definition is made durable BEFORE the acceptance that pins it. The ordering is not
+            // interchangeable: a definition committed for an acceptance that then fails is an
+            // unreferenced blob that retention reclaims, while an acceptance committed for a
+            // definition that was never written is an execution that can never be recovered. Only
+            // one of the two orderings can reach the second state.
+            recordGraphDefinition(security, graphBytes);
+            // Recorded before the graph starts so a rejected write cannot leave an unrecorded
+            // execution running; the surrounding catch already owns cleanup.
             long revision = recordAcceptedExecution(security, processInstanceId, traversalId,
                     manager.start().id(), graphVersion);
             // The lease is taken *after* the instance exists — a lease on a nonexistent
@@ -1508,8 +1551,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes) {
         return deployments.computeIfAbsent(id, key -> {
+            // The definition store is threaded through, but this composition supplies no execution
+            // store, so a hosted traversal here is not durably recorded and is therefore not durably
+            // bound to a definition. That is the pre-existing shape of deployment registration and
+            // this change does not alter it; giving deployments durable execution state is separate
+            // work. Passing the store now is what keeps the two from having to be threaded twice --
+            // see DefaultGraphDeployment's constructor that takes both, which is where the binding
+            // actually happens.
             var created = new DefaultGraphDeployment(key, engine, behaviors, monitor, identitySource, graphMlBytes,
-                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, graphDefinitionStore);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });
@@ -2033,6 +2083,41 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         }
         return ExecutionRecorder.open(executionStore, new ExecutionKey(security.tenantId(), processInstanceId),
                 workerId, executionLeaseTtl, revision);
+    }
+
+    /**
+     * Commits the canonical document this submission was accepted against, so the pin written next
+     * addresses bytes the store actually holds.
+     *
+     * <p>The content address the definition store files the document under is byte-identical to the
+     * graph version reference the pin carries, which is why an execution pinned before any
+     * definition store existed still names a definition once one is composed.</p>
+     *
+     * <p>A failure here propagates and the submission is refused. That is the entire point: the
+     * alternative is an accepted execution whose graph nothing retains, which is exactly the state
+     * this ordering exists to make unreachable.</p>
+     */
+    private void recordGraphDefinition(SecurityContext security, byte[] graphBytes) {
+        if (graphDefinitionStore == null) {
+            return;
+        }
+        var canonical = ai.ravenroot.api.persistence.CanonicalGraphMl.of(graphBytes);
+        awaitDefinition(graphDefinitionStore.put(security.tenantId(),
+                ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(canonical.contentId()),
+                canonical));
+    }
+
+    /**
+     * Joins a definition-store stage and unwraps the completion wrapper, so callers observe the
+     * sealed classification rather than a wrapper that hides it.
+     */
+    private static <T> T awaitDefinition(java.util.concurrent.CompletionStage<T> stage) {
+        try {
+            return stage.toCompletableFuture().join();
+        } catch (java.util.concurrent.CompletionException wrapped) {
+            var failure = ai.ravenroot.api.persistence.GraphDefinitionStoreException.unwrap(wrapped);
+            throw failure == null ? wrapped : failure;
+        }
     }
 
     /** @return the revision the instance is at after these writes, or {@code -1} with no store */

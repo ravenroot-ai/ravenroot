@@ -3,6 +3,10 @@ package ai.ravenroot.persistence.sqlite;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
+
 import java.nio.file.Path;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -14,6 +18,8 @@ import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -155,13 +161,21 @@ class SqliteSchemaMigrationTest {
      * claim of accuracy it never had.</p>
      */
     @Test
-    void migrationFiveBackfillsCreatedAtFromUpdatedAtAndLeavesTheGenerationAtItsFloor() throws Exception {
+    void migrationSixBackfillsCreatedAtFromUpdatedAtAndLeavesTheGenerationAtItsFloor() throws Exception {
         List<SchemaMigration> throughFour = SqliteSchema.migrations().subList(0, 4);
         try (Connection connection = open("inventory-upgrade.db")) {
             assertEquals(4, SqliteSchema.migrate(connection, throughFour, CLOCK));
-            insertLegacyInstance(connection, "acme", "11111111-1111-1111-1111-111111111111", 1700, 250);
+            insertLegacyInstance(connection, "acme", "11111111-1111-1111-1111-111111111111",
+                    "RUNNING", 1700, 250);
 
-            assertEquals(5, SqliteSchema.migrate(connection, CLOCK));
+            // Straight from 4 to the head, so the row passes through the intervening definition-store
+            // migration on its way to this one. Asserting the head rather than a literal is what keeps
+            // this test honest when another migration lands in between again.
+            assertEquals(SqliteSchema.highestKnownVersion(), SqliteSchema.migrate(connection, CLOCK));
+            assertEquals(6, SqliteSchema.highestKnownVersion(),
+                    "the inventory is migration 6: two branches that both stamped user_version = 5 "
+                            + "would produce databases the downgrade guard cannot tell apart, because "
+                            + "it compares integers and nothing else");
 
             assertTrue(columnNames(connection, "process_instance").containsAll(List.of(
                     "created_at_epoch_second", "created_at_nano", "lifecycle_generation",
@@ -179,18 +193,84 @@ class SqliteSchemaMigrationTest {
             assertTrue(indexNames(connection).containsAll(List.of("idx_process_instance_inventory",
                     "idx_process_instance_status", "idx_process_instance_deployment",
                     "idx_lease_worker")));
+            assertTrue(indexNames(connection).contains("idx_process_instance_pin"),
+                    "the definition store's own index on process_instance must survive being followed "
+                            + "by another migration that alters the same table");
         }
     }
 
+    /**
+     * The upgrade path as a caller meets it: migrate a version-4 database, then open a real store on
+     * the upgraded file and <em>read</em> it.
+     *
+     * <p>The structural assertions above prove the columns exist and carry the values the backfill
+     * intended. They cannot prove the thing that actually matters, which is that
+     * {@code readInventoryRow} makes sense of a migrated row — a row whose {@code created_at} came from
+     * a backfill and whose {@code retained_until} is NULL because no migration could know the
+     * configured retention. Those are precisely the values no row written through the port ever has, so
+     * every other test in this suite reads rows the migration never touched.</p>
+     *
+     * <p>Both branches of the deadline resolution are exercised deliberately: the terminal row has to
+     * come back with a deadline computed from {@code updatedAt + terminalRetention()}, and the
+     * non-terminal one has to come back with none.</p>
+     */
+    @Test
+    void aMigratedDatabaseIsReadableThroughARealStoreAndItsRowsResolveTheirRetention() throws Exception {
+        Path file = databaseDirectory.resolve("inventory-upgrade-readable.db");
+        var terminal = UUID.fromString("22222222-2222-2222-2222-222222222222");
+        var live = UUID.fromString("33333333-3333-3333-3333-333333333333");
+        Instant terminalUpdatedAt = Instant.parse("2025-12-24T09:30:00Z");
+        Instant liveUpdatedAt = Instant.parse("2025-12-25T09:30:00Z");
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + file)) {
+            assertEquals(4, SqliteSchema.migrate(connection, SqliteSchema.migrations().subList(0, 4), CLOCK));
+            insertLegacyInstance(connection, "acme", terminal.toString(), "FAILED",
+                    terminalUpdatedAt.getEpochSecond(), 0);
+            insertLegacyInstance(connection, "acme", live.toString(), "RUNNING",
+                    liveUpdatedAt.getEpochSecond(), 0);
+        }
+
+        try (var store = new SqliteExecutionStore(file, CLOCK)) {
+            var page = store.listProcessInstances("acme", ProcessInventoryQuery.everything(10))
+                    .toCompletableFuture().join();
+            assertEquals(2, page.items().size(),
+                    "a migrated row must be listable, not merely present in the file");
+            // created_at was backfilled from updated_at, so the newest-first ordering the listing
+            // promises is the one the backfill produced rather than an accident of insertion order.
+            assertEquals(List.of(live, terminal),
+                    page.items().stream().map(item -> item.key().processInstanceId()).toList());
+
+            var terminalEntry = store.findProcessInstance(new ExecutionKey("acme", terminal))
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals(ProcessInstanceStatus.FAILED, terminalEntry.status());
+            assertEquals(terminalUpdatedAt, terminalEntry.createdAt(),
+                    "the backfilled created_at is the row's last write, and the store reports it as "
+                            + "created_at without pretending to know better");
+            assertEquals(1L, terminalEntry.lifecycleGeneration());
+            assertEquals(terminalUpdatedAt.plus(store.terminalRetention()),
+                    terminalEntry.retainedUntil().orElseThrow(),
+                    "a migrated terminal row carries no stored deadline, so the read must resolve one "
+                            + "the same way the purge does");
+
+            var liveEntry = store.findProcessInstance(new ExecutionKey("acme", live))
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals(ProcessInstanceStatus.RUNNING, liveEntry.status());
+            assertEquals(Optional.empty(), liveEntry.retainedUntil(),
+                    "retention has not started for a non-terminal row, migrated or not");
+        }
+    }
+
+    /** A row in the shape a version-4 database holds: no created_at, no generation, no retention. */
     private static void insertLegacyInstance(Connection connection, String tenant, String id,
-                                             long second, int nano) throws SQLException {
+                                             String status, long second, int nano) throws SQLException {
         try (var statement = connection.prepareStatement("INSERT INTO process_instance (tenant_id, "
                 + "process_instance_id, status, graph_version_pin, revision, fencing_token, "
-                + "updated_at_epoch_second, updated_at_nano) VALUES (?, ?, 'RUNNING', 'graph-v1', 3, 0, ?, ?)")) {
+                + "updated_at_epoch_second, updated_at_nano) VALUES (?, ?, ?, 'graph-v1', 3, 0, ?, ?)")) {
             statement.setString(1, tenant);
             statement.setString(2, id);
-            statement.setLong(3, second);
-            statement.setInt(4, nano);
+            statement.setString(3, status);
+            statement.setLong(4, second);
+            statement.setInt(5, nano);
             statement.executeUpdate();
         }
     }

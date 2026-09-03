@@ -304,6 +304,48 @@ final class SqliteSchema {
                 // upgrade and replay preserve that meaning without rewriting old rows in Java.
                 new SchemaMigration(4, "CORE-317 structural incoming node command", List.of(
                         "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")),
+                // Durable canonical graph definitions, in the same database as the executions that
+                // pin them. Co-location is not a convenience: it is what puts a definition and the
+                // execution that needs it into one backup snapshot and under one file lock, and it is
+                // what lets retention decide reachability from `process_instance` in the same
+                // transaction that removes a definition rather than across two stores that can
+                // disagree.
+                new SchemaMigration(5, "durable canonical graph definitions", List.of(
+                        """
+                        CREATE TABLE graph_definition (
+                            tenant_id         TEXT    NOT NULL,
+                            content_id        TEXT    NOT NULL,
+                            format_version    INTEGER NOT NULL,
+                            definition_bytes  BLOB    NOT NULL,
+                            digest            BLOB    NOT NULL CHECK(length(digest) = 32),
+                            byte_length       INTEGER NOT NULL,
+                            first_graph_id    TEXT    NOT NULL,
+                            first_version_id  TEXT    NOT NULL,
+                            stored_at_epoch_second INTEGER NOT NULL,
+                            stored_at_nano         INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, content_id)
+                        )
+                        """,
+                        """
+                        CREATE TABLE graph_definition_binding (
+                            tenant_id  TEXT NOT NULL,
+                            graph_id   TEXT NOT NULL,
+                            version_id TEXT NOT NULL,
+                            content_id TEXT NOT NULL,
+                            bound_at_epoch_second INTEGER NOT NULL,
+                            bound_at_nano         INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, graph_id, version_id),
+                            FOREIGN KEY (tenant_id, content_id)
+                                REFERENCES graph_definition (tenant_id, content_id) ON DELETE CASCADE
+                        )
+                        """,
+                        "CREATE INDEX idx_graph_definition_binding_content "
+                                + "ON graph_definition_binding (tenant_id, content_id)",
+                        // Retention asks, for every candidate definition, whether any instance of the
+                        // tenant still pins it. Without this index that question is a tenant-wide
+                        // scan of process_instance per candidate.
+                        "CREATE INDEX idx_process_instance_pin "
+                                + "ON process_instance (tenant_id, graph_version_pin)")),
                 // Issue 154. Additive in structure: every column is added to an existing table and no
                 // table is recreated, so an interrupted run leaves a real intermediate version and the
                 // fold of every pre-existing row is unchanged. There is no second copy of the
@@ -318,12 +360,12 @@ final class SqliteSchema {
                 // PERMANENT: for a row written before this migration, created_at is the instant of its
                 // LAST WRITE, not of its creation. It is a truthful upper bound rather than a
                 // fabrication -- the instance certainly existed by then -- and it is stable from this
-                // point on, because created_at is never written again. Rows created from version 5
+                // point on, because created_at is never written again. Rows created from version 6
                 // onwards carry the real instant.
                 //
                 // lifecycle_generation defaults to 1 for pre-existing rows and that is a FLOOR, not a
                 // count: an instance that exists has had at least the transition that created it, and
-                // no record survives of how many followed. From version 5 onwards the counter is
+                // no record survives of how many followed. From version 6 onwards the counter is
                 // incremented in the same transaction as each authoritative status transition, so it
                 // is exact for every instance created after the upgrade.
                 //
@@ -336,12 +378,20 @@ final class SqliteSchema {
                 //
                 // DOWNGRADE is safe until the first row carries a non-NULL deployment_id, workload_id,
                 // correlation_id or retained_until, or a lifecycle_generation above 1 -- that is, until
-                // the first write under version 5. A pre-PERS-05 binary does not select these columns,
-                // so it reads and writes every row correctly; what it loses is the values it cannot
-                // see, and its next upsert of that row leaves them untouched because the upsert names
-                // only the columns it knows. After the first version-5 write the file is at a version
-                // the older binary refuses to open, which is the guard doing its job.
-                new SchemaMigration(5, "issue 154 durable tenant-scoped process and traversal inventory",
+                // the first write under version 6. A binary that predates the inventory does not
+                // select these columns, so it reads and writes every row correctly; what it loses is
+                // the values it cannot see, and its next upsert of that row leaves them untouched
+                // because the upsert names only the columns it knows. After the first version-6 write
+                // the file is at a version the older binary refuses to open, which is the guard doing
+                // its job.
+                //
+                // The number itself is load-bearing and was not free to choose. Two branches that both
+                // stamped PRAGMA user_version = 5 would produce databases the downgrade guard cannot
+                // tell apart: it compares integers, so a file advanced to 5 by the other definition
+                // opens happily against this binary with the wrong shape -- exactly the silent
+                // corruption the guard exists to prevent, and invisible to it. Renumbering to 6 is
+                // what keeps the version a name for one structure rather than for two.
+                new SchemaMigration(6, "issue 154 durable tenant-scoped process and traversal inventory",
                         List.of(
                         "ALTER TABLE process_instance ADD COLUMN created_at_epoch_second "
                                 + "INTEGER NOT NULL DEFAULT 0",

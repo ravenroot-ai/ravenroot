@@ -4,12 +4,9 @@ package ai.ravenroot.api.audit;
  * The seven categories SEC-13 names: accesses, decisions, versions, tools, approvals,
  * administration and recovery.
  *
- * <p>Not every category has a producer wired into the trail yet. {@link #TOOL} and {@link #RECOVERY}
- * are declared so the port never has to change shape when a producer for them is added later, but
- * nothing constructs one: {@code AuthorizationAction.TOOL_INVOKE} is a reserved, unavailable action
- * with no call site, and no lease- or fencing-recovery event exists to audit. Wiring a real producer
- * for those two is future work, not something this port should pretend to have solved by shipping an
- * event nobody emits.</p>
+ * <p>{@link #TOOL} has a producer at the model-requested tool reference monitor. {@link #RECOVERY}
+ * remains declared ahead of its producer so the port need not change shape when lease or fencing
+ * recovery evidence is added.</p>
  *
  * <p>{@link #ADMINISTRATION} <strong>does</strong> have producers, and this Javadoc previously claimed
  * otherwise. {@code AuditTrail.redact} writes an administration tombstone naming the range it redacted,
@@ -27,7 +24,7 @@ public enum AuditCategory {
     /** An artifact or graph version lifecycle transition (create, validate, test, activate, retire). */
     VERSION,
 
-    /** A tool invocation. No in-tree producer exists yet; see the class Javadoc. */
+    /** A model-requested tool decision or terminal effect. */
     TOOL,
 
     /** An approval or dual-control gate crossing (e.g. {@code ARTIFACT_APPROVE}). */

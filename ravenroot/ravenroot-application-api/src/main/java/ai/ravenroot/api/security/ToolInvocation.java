@@ -1,5 +1,9 @@
 package ai.ravenroot.api.security;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
@@ -23,22 +27,45 @@ import java.util.UUID;
  */
 public record ToolInvocation(SecurityContext security, UUID executionId, String nodeId, String tool,
                              Map<String, Object> arguments) {
-/**
- * Rejects missing identity, execution, node, or tool fields and snapshots arguments.
- */
+    /**
+     * Rejects missing identity, execution, node, or tool fields and snapshots arguments.
+     */
     public ToolInvocation {
         Objects.requireNonNull(security, "security");
         if (executionId == null) throw new IllegalArgumentException("executionId cannot be null");
         if (nodeId == null || nodeId.isBlank()) throw new IllegalArgumentException("nodeId cannot be blank");
         if (tool == null || tool.isBlank()) throw new IllegalArgumentException("tool cannot be blank");
-        arguments = arguments == null ? Map.of() : Map.copyOf(arguments);
+        arguments = arguments == null ? Map.of() : immutableMap(arguments);
     }
 
-/**
- * The tenant on whose behalf the tool would run.
- * @return tenant selected by the trusted security context
- */
+    /**
+     * The tenant on whose behalf the tool would run.
+     * @return tenant selected by the trusted security context
+     */
     public String tenantId() {
         return security.tenantId();
+    }
+
+    private static Map<String, Object> immutableMap(Map<?, ?> source) {
+        var copied = new LinkedHashMap<String, Object>();
+        for (Map.Entry<?, ?> entry : source.entrySet()) {
+            if (!(entry.getKey() instanceof String key)) {
+                throw new IllegalArgumentException("argument keys must be strings");
+            }
+            copied.put(key, immutable(entry.getValue()));
+        }
+        return Collections.unmodifiableMap(copied);
+    }
+
+    private static Object immutable(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return immutableMap(map);
+        }
+        if (value instanceof List<?> list) {
+            var copied = new ArrayList<Object>(list.size());
+            for (Object element : list) copied.add(immutable(element));
+            return Collections.unmodifiableList(copied);
+        }
+        return value;
     }
 }

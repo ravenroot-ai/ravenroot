@@ -1,4 +1,4 @@
-# ADR 0031: The durable process inventory is authoritative rows, not a projection
+# ADR 0032: The durable process inventory is authoritative rows, not a projection
 
 - Status: Accepted
 - Date: 2026-09-03

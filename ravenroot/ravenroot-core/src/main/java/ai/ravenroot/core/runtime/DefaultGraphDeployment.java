@@ -126,6 +126,13 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     private final int ingressBufferCapacity;
     /** {@code null} means no durable store is configured; {@link #ingress} then uses volatile custody. */
     private final ai.ravenroot.api.persistence.ExecutionStore executionStore;
+    /**
+     * The durable authority for the document this deployment hosts, or {@code null} when nothing
+     * retains it. Committed once per accepted traversal, before the acceptance that pins it; the
+     * write is content-addressed and therefore idempotent, so repeating it across a long-lived
+     * deployment's many traversals converges on one stored copy.
+     */
+    private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
     private final Duration inboxRetention;
     /**
      * This pod's worker identity for lease ownership, and how long a traversal's lease lives.
@@ -166,6 +173,29 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                                   byte[] graphMl, int ingressBufferCapacity) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
                 DEFAULT_INBOX_RETENTION);
+    }
+
+    /**
+     * Composes a deployment that retains the document its hosted traversals are accepted against.
+     * Additive next to the constructor above, which every existing caller keeps using unchanged by
+     * not passing a definition store at all.
+     *
+     * @param id deployment identity.
+     * @param engine execution engine hosted traversals dispatch through.
+     * @param behaviors behavior registry node kinds are resolved against.
+     * @param monitor monitor execution events are published to.
+     * @param identitySource source of process-instance identifiers.
+     * @param graphMl the GraphML document this deployment hosts; copied defensively.
+     * @param ingressBufferCapacity fixed inbound buffer capacity for the deployment's life.
+     * @param graphDefinitionStore durable graph definitions, or {@code null} to retain no document.
+     */
+    public DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                                  ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                                  byte[] graphMl, int ingressBufferCapacity,
+                                  ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
+                DEFAULT_INBOX_RETENTION, "ravenroot-" + UUID.randomUUID(), Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), graphDefinitionStore);
     }
 
     /**
@@ -238,6 +268,20 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            ai.ravenroot.api.persistence.ExecutionStore executionStore,
                            Duration inboxRetention, String workerId, Duration executionLeaseTtl,
                            RequestReplyLimits requestReplyLimits, Clock clock) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
+                null);
+    }
+
+    /** The terminal constructor, and the only one that assigns state. */
+    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits, Clock clock,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
+        this.graphDefinitionStore = graphDefinitionStore;
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.executionLeaseTtl = Objects.requireNonNull(executionLeaseTtl, "executionLeaseTtl");
         this.requestReplyLimits = Objects.requireNonNull(requestReplyLimits, "requestReplyLimits");
@@ -956,6 +1000,11 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         if (executionStore == null) {
             return null;
         }
+        // The definition is made durable BEFORE the acceptance that pins it, for the reason the
+        // definition port states: an unreferenced definition is reclaimable, an unrecoverable
+        // execution is not. Idempotent by content, so a deployment accepting its thousandth traversal
+        // pays a lookup rather than a thousandth copy.
+        recordGraphDefinition(security);
         var key = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), processInstanceId);
         var traversal = new ai.ravenroot.api.application.Traversal(traversalId, manager.start().id(),
                 ai.ravenroot.api.application.TraversalStatus.ACCEPTED, java.util.Map.of());
@@ -982,6 +1031,26 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                         .build())).revision();
 
         return ExecutionRecorder.open(executionStore, key, workerId, executionLeaseTtl, revision);
+    }
+
+    /**
+     * Commits the document this deployment hosts, so the pin written next addresses bytes the store
+     * actually holds. A failure propagates and the traversal is not accepted.
+     */
+    private void recordGraphDefinition(SecurityContext security) {
+        if (graphDefinitionStore == null) {
+            return;
+        }
+        var canonical = ai.ravenroot.api.persistence.CanonicalGraphMl.of(graphMl);
+        try {
+            graphDefinitionStore.put(security.tenantId(),
+                            ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(
+                                    canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+        } catch (java.util.concurrent.CompletionException wrapped) {
+            var failure = ai.ravenroot.api.persistence.GraphDefinitionStoreException.unwrap(wrapped);
+            throw failure == null ? wrapped : failure;
+        }
     }
 
     /**

@@ -226,6 +226,58 @@ class InMemoryProcessInventoryTest {
                 await(store.listProcessInstances(TENANT, ProcessInventoryQuery.everything(10))).retainedFrom());
     }
 
+    /**
+     * The multi-row case a single-row purge cannot distinguish, on the reference adapter.
+     *
+     * <p>Two terminal rows whose deadlines are further apart than the retention window are what
+     * separate the earliest removed deadline from the latest. Publishing the earliest leaves the later
+     * row gone and sitting after the floor, which inverts the ambiguity into the unsafe direction: a
+     * caller reading the floor would call a genuinely completed execution one that never existed.</p>
+     */
+    @Test
+    void aPurgeRemovingSeveralRowsPublishesTheLatestDeadlineItCrossedAndNotTheEarliest() {
+        var early = new ExecutionKey(TENANT, UUID.randomUUID());
+        var late = new ExecutionKey(TENANT, UUID.randomUUID());
+        failed(early, UUID.randomUUID());
+        Instant earlyDeadline = only(early).retainedUntil().orElseThrow();
+
+        clock.advance(Duration.ofDays(20));
+        failed(late, UUID.randomUUID());
+        Instant lateDeadline = only(late).retainedUntil().orElseThrow();
+        assertTrue(lateDeadline.isAfter(earlyDeadline));
+
+        clock.advance(Duration.ofDays(8));
+        assertEquals(2L, await(store.purgeExpiredProcessInstances(TENANT)));
+
+        Instant floor = await(store.inventoryRetainedFrom(TENANT));
+        assertEquals(lateDeadline, floor,
+                "the floor must sit at the latest boundary the purge actually crossed");
+        assertFalse(lateDeadline.isAfter(floor),
+                "no removed row may have a deadline strictly after the floor; that is the guarantee, "
+                        + "and the earliest removed deadline breaks it");
+    }
+
+    @Test
+    void aSurvivingTerminalRowSitsStrictlyAfterTheFloorThePurgePublished() {
+        var expired = new ExecutionKey(TENANT, UUID.randomUUID());
+        var survivor = new ExecutionKey(TENANT, UUID.randomUUID());
+        failed(expired, UUID.randomUUID());
+        Instant expiredDeadline = only(expired).retainedUntil().orElseThrow();
+        clock.advance(Duration.ofDays(20));
+        failed(survivor, UUID.randomUUID());
+        Instant survivorDeadline = only(survivor).retainedUntil().orElseThrow();
+
+        clock.advance(Duration.ofDays(1));
+        assertEquals(1L, await(store.purgeExpiredProcessInstances(TENANT)));
+
+        Instant floor = await(store.inventoryRetainedFrom(TENANT));
+        assertEquals(expiredDeadline, floor);
+        assertTrue(survivorDeadline.isAfter(floor),
+                "the surviving row must sit strictly after the floor, which is what makes the floor's "
+                        + "claim about it true rather than accidental");
+        assertTrue(await(store.findProcessInstance(survivor)).isPresent());
+    }
+
     @Test
     void lifecycleGenerationCountsAppliedTransitionsAndTheTokenMovesIndependently() {
         var key = new ExecutionKey(TENANT, UUID.randomUUID());

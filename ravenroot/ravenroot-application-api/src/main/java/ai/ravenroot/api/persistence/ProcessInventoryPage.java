@@ -26,9 +26,13 @@ import java.util.Optional;
  * @param items        the page, in {@code (createdAt DESC, processInstanceId DESC)} order
  * @param nextCursor   opaque, versioned and tenant-bound cursor for the following page; absent when
  *                     this page is the last one
- * @param retainedFrom the tenant's inventory retention floor: every terminal instance that ended at or
- *                     after this instant is still present, and one that ended before it may have been
- *                     purged. {@link Instant#MIN} until something is purged
+ * @param retainedFrom the tenant's inventory retention floor: the latest retention deadline this
+ *                     tenant has actually crossed. Every terminal instance whose deadline is strictly
+ *                     after this instant is still present; one whose deadline is at or before it may
+ *                     have been purged. Measured in the same {@code retainedUntil} deadlines the rows
+ *                     themselves publish, and taken as the latest rather than the earliest boundary
+ *                     crossed — see {@link ExecutionStore#inventoryRetainedFrom(String)} for why both
+ *                     of those are load-bearing. {@link Instant#MIN} until something is purged
  */
 public record ProcessInventoryPage(List<ProcessInventoryEntry> items, Optional<String> nextCursor,
                                    Instant retainedFrom) {

@@ -315,6 +315,72 @@ class SqliteProcessInventoryTest {
         }
     }
 
+    /**
+     * The case a single-row purge cannot see, and the one that made the floor wrong.
+     *
+     * <p>Every retention assertion that purges exactly one row is blind to the difference between the
+     * earliest and the latest deadline removed, because for one row they are the same instant. Two rows
+     * whose deadlines are further apart than the retention window separate them, and separate them in
+     * the direction that matters: with the earliest, the later row is gone while sitting <em>after</em>
+     * the published floor, so a caller following the documented rule concludes that a genuinely
+     * completed execution never existed.</p>
+     */
+    @Test
+    void aPurgeRemovingSeveralRowsPublishesTheLatestDeadlineItCrossedAndNotTheEarliest() {
+        var clock = new MutableClock(EPOCH);
+        var early = new ExecutionKey(TENANT, UUID.randomUUID());
+        var late = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("floor-multi.db", clock)) {
+            createFailed(store, early, UUID.randomUUID());
+            Instant earlyDeadline = only(store, early).retainedUntil().orElseThrow();
+
+            // Twenty days later: far enough apart that the two deadlines cannot overlap, which is
+            // exactly the spread a single retention window hides.
+            clock.advance(Duration.ofDays(20));
+            createFailed(store, late, UUID.randomUUID());
+            Instant lateDeadline = only(store, late).retainedUntil().orElseThrow();
+            assertTrue(lateDeadline.isAfter(earlyDeadline));
+
+            clock.advance(Duration.ofDays(8));
+            assertEquals(2L, await(store.purgeExpiredProcessInstances(TENANT)));
+
+            Instant floor = await(store.inventoryRetainedFrom(TENANT));
+            assertEquals(lateDeadline, floor,
+                    "the floor must sit at the latest boundary the purge actually crossed; the "
+                            + "earliest would leave the later row gone and after the floor");
+            assertFalse(lateDeadline.isAfter(floor),
+                    "no removed row may have a deadline strictly after the floor -- that is the whole "
+                            + "of the guarantee, and the earliest deadline breaks it");
+            assertEquals(Optional.empty(), await(store.findProcessInstance(late)));
+            assertEquals(Optional.empty(), await(store.findProcessInstance(early)));
+        }
+    }
+
+    @Test
+    void aSurvivingTerminalRowSitsStrictlyAfterTheFloorThePurgePublished() {
+        var clock = new MutableClock(EPOCH);
+        var expired = new ExecutionKey(TENANT, UUID.randomUUID());
+        var survivor = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("floor-survivor.db", clock)) {
+            createFailed(store, expired, UUID.randomUUID());
+            Instant expiredDeadline = only(store, expired).retainedUntil().orElseThrow();
+            clock.advance(Duration.ofDays(20));
+            createFailed(store, survivor, UUID.randomUUID());
+            Instant survivorDeadline = only(store, survivor).retainedUntil().orElseThrow();
+
+            // Between the two deadlines: only the first is due.
+            clock.advance(Duration.ofDays(1));
+            assertEquals(1L, await(store.purgeExpiredProcessInstances(TENANT)));
+
+            Instant floor = await(store.inventoryRetainedFrom(TENANT));
+            assertEquals(expiredDeadline, floor);
+            assertTrue(survivorDeadline.isAfter(floor),
+                    "the surviving row must sit strictly after the floor, which is what makes the "
+                            + "floor's claim about it true rather than accidental");
+            assertTrue(await(store.findProcessInstance(survivor)).isPresent());
+        }
+    }
+
     @Test
     void aPurgedInstanceStaysPurgedAcrossAReopenAndSoDoesTheFloor() {
         Path file = databaseDirectory.resolve("retention-durable.db");
@@ -521,7 +587,7 @@ class SqliteProcessInventoryTest {
     }
 
     /**
-     * The migration-upgrade path: migration 5 leaves {@code retained_until_*} {@code NULL} for a
+     * The migration-upgrade path: migration 6 leaves {@code retained_until_*} {@code NULL} for a
      * pre-existing row rather than guessing a deadline the migration cannot know (see
      * {@code SqliteSchemaMigrationTest}). This asserts the read-time half of that design: when the row
      * is also terminal, the store must still resolve a deadline for it -- against
@@ -552,7 +618,7 @@ class SqliteProcessInventoryTest {
                      + "created_at_nano, lifecycle_generation) VALUES (?, ?, 'FAILED', 'graph-v1', 1, 0, "
                      + "?, 0, ?, 0, 1)")) {
             // retained_until_epoch_second / retained_until_nano are left unspecified -- NULL -- which
-            // is exactly the shape migration 5 leaves a pre-existing terminal row in.
+            // is exactly the shape migration 6 leaves a pre-existing terminal row in.
             statement.setString(1, TENANT);
             statement.setString(2, key.processInstanceId().toString());
             statement.setLong(3, updatedAt.getEpochSecond());
@@ -566,6 +632,88 @@ class SqliteProcessInventoryTest {
             assertEquals(updatedAt.plus(reopened.terminalRetention()), entry.retainedUntil().orElseThrow(),
                     "a terminal row with no stored retained_until must resolve against "
                             + "updatedAt + terminalRetention(), not report as unbounded or absent");
+        }
+    }
+
+    /**
+     * Counts, against an instance whose cardinalities are all greater than one.
+     *
+     * <p>Every other inventory test in this suite — and every one in the shared contract — builds an
+     * instance with a single traversal holding a single invocation and a single attempt. On that shape
+     * {@code traversalCount}, {@code invocationCount} and {@code parkedAttemptCount} are
+     * indistinguishable from a boolean, and the correlated subqueries and the join that produce them in
+     * SQL are indistinguishable from a query that multiplies its rows: one times one is one, whichever
+     * way the join is wrong. Two traversals, one of them holding two invocations with a parked attempt
+     * apiece, is the smallest shape on which a wrong join and a right one give different answers.</p>
+     */
+    @Test
+    void countsAreCountsAndNotFlags() {
+        var clock = new MutableClock(EPOCH);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID busy = UUID.randomUUID();
+        UUID quiet = UUID.randomUUID();
+        UUID firstInvocation = UUID.randomUUID();
+        UUID secondInvocation = UUID.randomUUID();
+
+        try (var store = open("counts.db", clock)) {
+            StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, busy)));
+            StoredProcessInstance grown = await(store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(busy, TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalAdded(new ai.ravenroot.api.application.Traversal(
+                            quiet, "second-ingress", TraversalStatus.ACCEPTED, java.util.Map.of())))
+                    .apply(new ExecutionTransition.InvocationAdded(busy,
+                            new NodeInvocation(firstInvocation, "mail.send", null,
+                                    NodeInvocationStatus.SCHEDULED)))
+                    .apply(new ExecutionTransition.InvocationAdded(busy,
+                            new NodeInvocation(secondInvocation, "mail.receipt", null,
+                                    NodeInvocationStatus.SCHEDULED)))
+                    .build()));
+
+            StoredProcessInstance withAttempts = grown;
+            for (UUID invocation : List.of(firstInvocation, secondInvocation)) {
+                UUID attempt = UUID.randomUUID();
+                withAttempts = await(store.apply(ExecutionBatch.to(key)
+                        .expecting(RevisionExpectation.exactly(withAttempts.revision()))
+                        .apply(new ExecutionTransition.InvocationTransitioned(busy, invocation,
+                                NodeInvocationStatus.RUNNING))
+                        .apply(new ExecutionTransition.AttemptAdded(busy, invocation,
+                                new NodeAttempt(attempt, 1, NodeAttemptStatus.SCHEDULED)))
+                        .build()));
+                withAttempts = await(store.apply(ExecutionBatch.to(key)
+                        .expecting(RevisionExpectation.exactly(withAttempts.revision()))
+                        .apply(new ExecutionTransition.AttemptTransitioned(busy, invocation, attempt,
+                                NodeAttemptStatus.RUNNING))
+                        .build()));
+                withAttempts = await(store.apply(ExecutionBatch.to(key)
+                        .expecting(RevisionExpectation.exactly(withAttempts.revision()))
+                        .apply(new ExecutionTransition.AttemptParked(busy, invocation, attempt,
+                                "dispatched with unknown outcome"))
+                        .build()));
+            }
+
+            assertEquals(2, only(store, key).traversalCount(),
+                    "two traversals must count as two; a subquery that joined through invocations "
+                            + "would report four here and one on every other test in this file");
+
+            List<TraversalInventoryEntry> traversals = await(store.listTraversals(key));
+            assertEquals(2, traversals.size());
+            TraversalInventoryEntry busyRow = traversals.stream()
+                    .filter(row -> row.traversalId().equals(busy)).findFirst().orElseThrow();
+            TraversalInventoryEntry quietRow = traversals.stream()
+                    .filter(row -> row.traversalId().equals(quiet)).findFirst().orElseThrow();
+
+            assertEquals(2, busyRow.invocationCount());
+            assertEquals(2, busyRow.parkedAttemptCount());
+            assertEquals(InventoryDisposition.PARKED, busyRow.disposition());
+
+            assertEquals(0, quietRow.invocationCount(),
+                    "the counts are per traversal, so an empty one stays empty rather than inheriting "
+                            + "its sibling's rows");
+            assertEquals(0, quietRow.parkedAttemptCount());
+            assertEquals(InventoryDisposition.INTERRUPTED, quietRow.disposition(),
+                    "a traversal with no parked attempt of its own is not parked because its sibling is");
         }
     }
 

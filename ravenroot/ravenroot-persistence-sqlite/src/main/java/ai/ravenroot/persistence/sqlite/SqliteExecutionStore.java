@@ -914,7 +914,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // rather than against an expression SQLite would have to evaluate per row.
             Instant lapsed = minusClamped(now, config.terminalRetention());
 
-            Instant floor = inWriteTransaction(null, () -> earliestExpiredDeadline(tenantId, now, lapsed));
+            Instant floor = inWriteTransaction(null, () -> latestExpiredDeadline(tenantId, now, lapsed));
             if (floor == null) {
                 return 0L;
             }
@@ -947,7 +947,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * <p>Only terminal rows are eligible however old a non-terminal one is: age is not evidence that
      * work has finished, and pruning a stuck instance would destroy the row an operator needs in order
      * to discover that it is stuck. The second arm of the disjunction is the upgrade path — a terminal
-     * row written before schema 5 carries no deadline, and its updated_at <em>is</em> its terminal
+     * row written before schema 6 carries no deadline, and its updated_at <em>is</em> its terminal
      * transition instant, because a terminal instance is never written again.</p>
      */
     private static String expiredInstanceIdQuery() {
@@ -977,38 +977,49 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     /**
-     * The earliest retention deadline among the rows this purge will remove, or {@code null} when none
-     * is eligible.
+     * The <strong>latest</strong> retention deadline among the rows this purge will remove, or
+     * {@code null} when none is eligible. This is the floor.
      *
-     * <p>The floor is that deadline and deliberately not {@code now}. Advancing to {@code now} would
-     * claim a gap covering every instant up to the present, including instants at which rows are still
-     * present, and a caller reading the floor would treat live terminal instances as possibly
-     * expired.</p>
+     * <p>It has to be the latest, and taking the earliest was a real defect. The floor's guarantee runs
+     * in the direction "everything past it is still here", so it must sit at or beyond every boundary
+     * the purge actually crossed. With the earliest, a run that removes two rows whose deadlines are
+     * further apart than the retention window publishes a floor the later row sits <em>after</em> — and
+     * a caller following the documented rule then concludes that a genuinely completed execution never
+     * existed. That is the ambiguity inverted into the unsafe direction, which is the exact opposite of
+     * what this method exists for. One row is the degenerate case where earliest and latest coincide,
+     * which is why the mistake survives any test that purges only one.</p>
+     *
+     * <p>It is deliberately not {@code now} either. Advancing to {@code now} would claim a gap covering
+     * every instant up to the present, including instants at which rows are still present, and a caller
+     * would treat live terminal instances as possibly expired — safe, but uselessly pessimistic. The
+     * latest crossed boundary is the tightest honest answer.</p>
      */
-    private Instant earliestExpiredDeadline(String tenantId, Instant now, Instant lapsed)
+    private Instant latestExpiredDeadline(String tenantId, Instant now, Instant lapsed)
             throws SQLException {
         String sql = "SELECT retained_until_epoch_second, retained_until_nano, "
                 + "updated_at_epoch_second, updated_at_nano FROM process_instance "
                 + "WHERE tenant_id = ? AND process_instance_id IN (" + expiredInstanceIdQuery() + ")";
-        Instant earliest = null;
+        Instant latest = null;
         try (PreparedStatement statement = connection.prepareStatement(sql)) {
             bindExpiredInstanceQuery(statement, tenantId, now, lapsed);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
+                    // The same resolution the read publishes, so the floor is expressed in deadlines a
+                    // caller has actually been shown rather than in a quantity only this method knows.
                     Instant deadline = retentionDueAt(nullableInstant(rows, "retained_until"),
                             StoredInstant.read(rows, "updated_at"));
-                    if (earliest == null || deadline.isBefore(earliest)) {
-                        earliest = deadline;
+                    if (latest == null || deadline.isAfter(latest)) {
+                        latest = deadline;
                     }
                 }
             }
         }
-        return earliest;
+        return latest;
     }
 
     /**
      * The instant a terminal row becomes purgeable: its stored deadline, or — for a row written before
-     * schema 5, which has none — its last write plus the configured retention. That fallback is exact
+     * schema 6, which has none — its last write plus the configured retention. That fallback is exact
      * rather than approximate, because a terminal instance is never written again, so its updated_at is
      * its terminal transition instant.
      */
@@ -1085,7 +1096,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
     /**
      * What a reader is told about retention, resolved the same way the purge decides it.
      *
-     * <p>The stored column is not the answer on its own. A terminal row written before schema 5 has no
+     * <p>The stored column is not the answer on its own. A terminal row written before schema 6 has no
      * deadline stored, and the purge already resolves that case through {@link #retentionDueAt} — so a
      * read that returned the raw column would report no deadline for a row the purge is about to remove
      * on schedule. Two paths disagreeing about the same fact is how a caller comes to trust the wrong
@@ -1535,11 +1546,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     /**
      * @param createdAt          write-once, and half of the inventory's sort key
-     * @param lifecycleGeneration count of authoritative status transitions, exact from schema 5 and a
+     * @param lifecycleGeneration count of authoritative status transitions, exact from schema 6 and a
      *                           floor of one for a row that predates it
      * @param retainedUntil      the <em>raw</em> stored column and not the answer a caller is given:
      *                           null while non-terminal, and also null on a terminal row written before
-     *                           schema 5. Every path that reports or acts on a deadline resolves it
+     *                           schema 6. Every path that reports or acts on a deadline resolves it
      *                           through {@link #retentionDueAt} instead, so no reader sees this value
      *                           unmediated
      */

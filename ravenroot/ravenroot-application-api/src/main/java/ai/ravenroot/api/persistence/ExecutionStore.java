@@ -603,9 +603,35 @@ public interface ExecutionStore extends AutoCloseable {
     CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key);
 
     /**
-     * The per-tenant inventory retention floor: every terminal instance that ended at or after this
-     * instant is still present, and one that ended before it may have been purged. Monotonically
+     * The per-tenant inventory retention floor: the <strong>latest retention deadline this tenant has
+     * actually crossed</strong>. Every terminal instance whose deadline is strictly after this instant
+     * is still present; one whose deadline is at or before it may have been purged. Monotonically
      * non-decreasing, never retreating, and {@link java.time.Instant#MIN} until something is purged.
+     *
+     * <h4>The floor is measured in deadlines, not in end instants</h4>
+     * <p>It lives in the same space the purge decides in — the {@code retainedUntil} that
+     * {@link #findProcessInstance(ExecutionKey)} publishes for every terminal row — and that is the
+     * point: a floor expressed in a different space than the predicate needs a conversion, and the
+     * conversion is exactly where an off-by-one or an inverted bound hides. It also matches
+     * {@link #forgottenBefore(String)}, which is stated in its records' {@code expiresAt} rather than
+     * in when they were written. A caller holding an execution it once read compares that row's own
+     * {@code retainedUntil}; one that never read the row derives the deadline from the instant the
+     * execution ended plus {@link #terminalRetention()}, both of which are published.</p>
+     *
+     * <h4>Latest, not earliest, and the boundary is exclusive</h4>
+     * <p>The guarantee runs in the direction "everything past this is still here", so the floor must
+     * sit at or beyond every boundary a purge crossed. Publishing the <em>earliest</em> deadline
+     * removed breaks it as soon as one run removes two rows whose deadlines are further apart than the
+     * retention window: the later row is gone and sits after the published floor, so a caller following
+     * this rule concludes that a genuinely completed execution never existed — the ambiguity inverted
+     * into the unsafe direction, which is the opposite of what this method is for. A run that removes
+     * exactly one row is the degenerate case where earliest and latest coincide, so no single-row test
+     * can tell the two apart.</p>
+     *
+     * <p>The boundary is exclusive because collection is inclusive: a row is purged when its deadline
+     * is at or before the store's now, so the row sitting exactly on the floor is precisely one that
+     * was removed. This is one of the store's non-uniform boundary conventions and is stated here on
+     * its own merits rather than assumed to match a neighbour's.</p>
      *
      * <p>The counterpart of {@link #forgottenBefore(String)} and {@link #journalRetainedFrom(String)},
      * and it exists for the identical reason: it is what turns an absent row from an ambiguity into an

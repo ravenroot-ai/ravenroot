@@ -798,7 +798,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             synchronized (monitor) {
                 Instant now = clock.instant();
                 var doomed = new ArrayList<ExecutionKey>();
-                Instant earliest = null;
+                Instant latest = null;
                 for (var instance : instances.entrySet()) {
                     if (!instance.getKey().tenantId().equals(tenantId)) {
                         continue;
@@ -816,8 +816,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         continue;
                     }
                     doomed.add(instance.getKey());
-                    if (earliest == null || deadline.get().isBefore(earliest)) {
-                        earliest = deadline.get();
+                    if (latest == null || deadline.get().isAfter(latest)) {
+                        latest = deadline.get();
                     }
                 }
                 if (doomed.isEmpty()) {
@@ -825,11 +825,18 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 doomed.forEach(instances::remove);
                 doomed.forEach(streamSequences::remove);
-                // The floor is the earliest instant that is no longer complete, which is the earliest
-                // retainedUntil actually removed -- not `now`. Advancing to now would claim a gap
-                // covering rows that are still present, and every caller reading the floor would treat
-                // live instances as possibly-expired.
-                Instant floor = earliest;
+                // The floor is the LATEST retention deadline this run actually crossed. It has to be
+                // the latest, because the guarantee runs in the direction "everything past it is still
+                // here": a run removing two rows whose deadlines are further apart than the retention
+                // window would, with the earliest, publish a floor the later row sits after -- and a
+                // caller following the documented rule would conclude a genuinely completed execution
+                // never existed. One row is the degenerate case where earliest and latest coincide,
+                // which is why that mistake survives any test that purges only one.
+                //
+                // Not `now` either: advancing to now would claim a gap covering rows that are still
+                // present, which is safe but uselessly pessimistic. The latest crossed boundary is the
+                // tightest honest answer.
+                Instant floor = latest;
                 inventoryRetainedFrom.merge(tenantId, floor,
                         (current, candidate) -> candidate.isAfter(current) ? candidate : current);
                 return (long) doomed.size();

@@ -6,6 +6,11 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.api.security.ToolInvocation;
+import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
+import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -90,9 +96,70 @@ class AgentMcpToolsTest {
 
         // And the result came back into the conversation as a tool message the model could read.
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        assertEquals(4, messages.size());
-        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)));
-        assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(3)));
+        assertEquals(5, messages.size());
+        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)));
+        assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(4)));
+    }
+
+    @Test
+    @DisplayName("tool audit distinguishes MCP success from every sanitized failure result")
+    void toolAuditUsesTerminalMcpOutcomeInsteadOfNonEmptyModelText() throws Exception {
+        var cases = List.of(
+                new AuditCase(new McpDouble("alpha", "search").returning("found"),
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.UNREACHABLE),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.SLOW),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.ERRORING),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search").returningError("not found"),
+                        ToolCallAuditEvent.Disposition.FAILED));
+
+        for (AuditCase testCase : cases) {
+            var events = new ArrayList<ToolCallAuditEvent>();
+            var http = new AiTestSupport.RoutedHttp(CHAT)
+                    .authorizing(authorizer(events, new AtomicReference<>()))
+                    .chatting(AiTestSupport.asksFor("call-1", "alpha__search"),
+                            AiTestSupport.answers("done"))
+                    .serving(ALPHA, testCase.server());
+
+            assertEquals("done", resultOf(agent(http, "alpha",
+                    AiTestSupport.mcpProfile("alpha", ALPHA, "search"))).payload());
+            assertAuditPair(events, testCase.terminal());
+        }
+    }
+
+    @Test
+    @DisplayName("blank model arguments are authorized and executed exactly once as canonical empty JSON")
+    void blankArgumentsRemainCompatibleAcrossPolicyAuditAndEffect() throws Exception {
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var alpha = new McpDouble("alpha", "search").returning("found");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .authorizing(authorizer(events, evaluated))
+                .chatting(AiTestSupport.asksFor("call-1", "alpha__search", "  "),
+                        AiTestSupport.answers("done"))
+                .serving(ALPHA, alpha);
+
+        assertEquals("done", resultOf(agent(http, "alpha",
+                AiTestSupport.mcpProfile("alpha", ALPHA, "search"))).payload());
+
+        assertEquals(Map.of(), evaluated.get().arguments());
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertEquals(List.of("search"), alpha.calledTools());
+        var call = (PayloadValue.MapValue) PayloadJson.read(
+                alpha.calledDocuments().get(0).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                PayloadLimits.DEFAULTS);
+        var params = assertInstanceOf(PayloadValue.MapValue.class, call.entries().get("params"));
+        var arguments = assertInstanceOf(PayloadValue.MapValue.class,
+                params.entries().get("arguments"));
+        assertEquals(Map.of(), arguments.entries());
+        assertAuditPair(events, ToolCallAuditEvent.Disposition.SUCCEEDED);
     }
 
     @Test
@@ -134,7 +201,7 @@ class AgentMcpToolsTest {
         // Nothing was sent to the server. The refusal happened here, before any byte left.
         assertEquals(List.of(), alpha.calledTools());
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        String refusal = ((PayloadValue.TextValue) contentOf(messages.get(3))).value();
+        String refusal = ((PayloadValue.TextValue) contentOf(messages.get(4))).value();
         assertFalse(refusal.isEmpty());
         assertTrue(refusal.contains("available to you"), refusal);
     }
@@ -213,7 +280,7 @@ class AgentMcpToolsTest {
 
         assertEquals("I answered without it", result.payload());
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        String told = ((PayloadValue.TextValue) contentOf(messages.get(3))).value();
+        String told = ((PayloadValue.TextValue) contentOf(messages.get(4))).value();
         assertFalse(told.isEmpty());
         assertTrue(told.contains("did not answer"));
     }
@@ -345,7 +412,8 @@ class AgentMcpToolsTest {
         // The binding is a name the runtime resolves; the bundle never holds a secret and therefore
         // has no path that could return one. Adding CREDENTIAL_RESOLUTION here would replace that
         // property with a promise.
-        assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP),
+        assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                        NodePackageCapability.TOOL_AUTHORIZATION),
                 new AgentNodeBehavior().requiredServices());
         assertTrue(new AgentNodeBehavior().descriptor().properties().stream()
                 .anyMatch(property -> "mcpServers".equals(property.name())));
@@ -388,7 +456,7 @@ class AgentMcpToolsTest {
         // And the server never had to answer 404, which is the observation that does not depend on
         // reading headers at all.
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        assertEquals(PayloadValue.of("found it"), contentOf(messages.get(3)));
+        assertEquals(PayloadValue.of("found it"), contentOf(messages.get(4)));
     }
 
     @Test
@@ -522,20 +590,20 @@ class AgentMcpToolsTest {
         // Both worlds are offered, and the built-in still comes first.
         assertEquals(List.of(LoadSkillTool.NAME, "alpha__search"),
                 toolNamesOf(http.chatBodies().get(0)));
-        // The skill's name and description reached the system turn; its body did not.
-        String system = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(0))
-                .get(0))).value();
-        assertTrue(system.contains("runbook"), system);
-        assertFalse(system.contains("step one, step two"), system);
+        // The skill's name and description reached the untrusted author turn; its body did not.
+        String author = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(0))
+                .get(1))).value();
+        assertTrue(author.contains("runbook"), author);
+        assertFalse(author.contains("step one, step two"), author);
 
         // The first load hands the body over.
         String first = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(1))
-                .get(3))).value();
+                .get(4))).value();
         assertEquals("step one, step two", first);
         // The second says "already loaded" instead of repeating it -- the duplicate-load rule holds on a node
         // that also declares an MCP server, which is the interaction worth pinning here.
         String second = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(2))
-                .get(5))).value();
+                .get(6))).value();
         assertTrue(second.contains("already loaded"), second);
         assertFalse(second.contains("step one, step two"), second);
     }
@@ -578,8 +646,8 @@ class AgentMcpToolsTest {
 
             assertEquals("answered anyway", result.payload(), mode.name());
             List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-            assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)), mode.name());
-            assertFalse(((PayloadValue.TextValue) contentOf(messages.get(3))).value().isEmpty(),
+            assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)), mode.name());
+            assertFalse(((PayloadValue.TextValue) contentOf(messages.get(4))).value().isEmpty(),
                     mode.name());
         }
     }
@@ -588,6 +656,29 @@ class AgentMcpToolsTest {
         return new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(servers))
                 .create(configuration(declared), http);
+    }
+
+    private static ai.ravenroot.api.node.service.ToolCallAuthorizationService authorizer(
+            List<ToolCallAuditEvent> events, AtomicReference<ToolInvocation> evaluated) {
+        return ManagedNodePackageServices.builder("ai.ravenroot.extension.ai",
+                        NodePackageEgressPolicy.builder().build(),
+                        (packageId, tenant, reference) -> java.util.Optional.empty())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build().toolAuthorization();
+    }
+
+    private static void assertAuditPair(List<ToolCallAuditEvent> events,
+                                        ToolCallAuditEvent.Disposition terminal) {
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT, terminal),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+    }
+
+    private record AuditCase(McpDouble server, ToolCallAuditEvent.Disposition terminal) {
     }
 
     private static ai.ravenroot.api.node.NodeConfiguration configuration(String mcpServers) {

@@ -13,6 +13,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -115,6 +116,15 @@ class LlmPromptNodeBehaviorTest {
         assertEquals(PayloadValue.of("Summarise the product"), turn.entries().get("content"));
         assertEquals("POST", services.request.get().method());
         assertEquals(java.util.Optional.empty(), services.request.get().credential());
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> provenance = (List<Map<String, Object>>)
+                result.attributes().get(ModelInputProvenance.PROMPT_ATTRIBUTE);
+        assertEquals(List.of("RENDERED_PROMPT", "INBOUND_PAYLOAD", "INBOUND_ATTRIBUTES", "MODEL_OUTPUT"),
+                provenance.stream().map(entry -> entry.get("kind")).toList());
+        assertTrue(provenance.stream().allMatch(entry -> String.valueOf(entry.get("digest"))
+                .startsWith("sha256:")));
+        assertFalse(provenance.toString().contains("the product"));
+        assertFalse(provenance.toString().contains("hello"));
     }
 
     @Test

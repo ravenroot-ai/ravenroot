@@ -112,12 +112,12 @@ final class LoadSkillTool implements AgentTool {
     }
 
     @Override
-    public CompletionStage<String> invoke(String argumentsJson) {
+    public CompletionStage<Result> invoke(String argumentsJson) {
         // Wrapped rather than made asynchronous: reading a declared skill's body touches nothing but
         // this node's own properties. AgentTool returns a stage so that a tool which
         // DOES cross a network -- an MCP one -- cannot force a block inside the completion callback of
         // the model's own call. A local tool completes immediately and loses nothing.
-        return CompletableFuture.completedFuture(answer(argumentsJson));
+        return CompletableFuture.completedFuture(Result.succeeded(answer(argumentsJson)));
     }
 
     private String answer(String argumentsJson) {

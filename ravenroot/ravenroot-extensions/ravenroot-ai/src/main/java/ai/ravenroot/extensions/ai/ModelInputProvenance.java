@@ -19,6 +19,8 @@ final class ModelInputProvenance {
         RENDERED_PROMPT,
         INBOUND_PAYLOAD,
         INBOUND_ATTRIBUTES,
+        GENERATED_SYSTEM_MESSAGE,
+        GENERATED_AUTHOR_MESSAGE,
         TOOL_DESCRIPTION,
         TOOL_RESULT,
         MODEL_OUTPUT

@@ -232,6 +232,12 @@ final class McpProtocol {
         return text.isEmpty() ? "The tool returned no content." : text.toString();
     }
 
+    /** Whether a syntactically valid tool result says the remote effect failed. */
+    static boolean isToolError(PayloadValue.MapValue result) {
+        return result.entries().get("isError") instanceof PayloadValue.BooleanValue error
+                && error.value();
+    }
+
     private static PayloadValue.MapValue emptyObjectSchema() {
         var schema = new LinkedHashMap<String, PayloadValue>();
         schema.put("type", PayloadValue.of("object"));

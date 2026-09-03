@@ -617,8 +617,14 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         LoadSkillTool.NAME,
                         Map.of("name", skill.name(), "description", skill.description()));
             }
-            messages.add(AgentTurn.systemMessage(settings.profile().systemPreamble()));
-            messages.add(AgentTurn.authorInstructionsMessage(instructions, settings.skills()));
+            PayloadValue systemMessage = AgentTurn.systemMessage(settings.profile().systemPreamble());
+            PayloadValue authorMessage = AgentTurn.authorInstructionsMessage(instructions, settings.skills());
+            provenance.add(ModelInputProvenance.Kind.GENERATED_SYSTEM_MESSAGE,
+                    "agent-system", systemMessage.toJava());
+            provenance.add(ModelInputProvenance.Kind.GENERATED_AUTHOR_MESSAGE,
+                    "agent-author", authorMessage.toJava());
+            messages.add(systemMessage);
+            messages.add(authorMessage);
             messages.add(AgentTurn.userMessage(objective));
         }
 
@@ -888,13 +894,16 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     StandardCharsets.UTF_8);
             if (authorizedTool != null) {
                 try {
-                    CompletionStage<String> effect = authorizedTool.invoke(canonicalArguments);
-                    return effect.handle((text, failure) -> {
-                        boolean succeeded = failure == null && text != null && !text.isEmpty();
+                    CompletionStage<AgentTool.Result> effect = authorizedTool.invoke(canonicalArguments);
+                    return effect.handle((toolResult, failure) -> {
+                        boolean succeeded = failure == null && toolResult != null
+                                && toolResult.succeeded();
                         authorization.complete(succeeded
                                 ? ToolCallAuthorization.Outcome.SUCCEEDED
                                 : ToolCallAuthorization.Outcome.FAILED);
-                        return succeeded ? text : TOOL_FAILED;
+                        return failure == null && toolResult != null
+                                ? toolResult.text()
+                                : TOOL_FAILED;
                     });
                 } catch (RuntimeException broken) {
                     authorization.complete(ToolCallAuthorization.Outcome.FAILED);

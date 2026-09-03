@@ -103,6 +103,39 @@ class ManagedNodePackageServicesTest {
     }
 
     @Test
+    void blankNoArgumentCallsBecomeCanonicalImmutableEmptyObjects() throws Exception {
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var services = ManagedNodePackageServices.builder("test.package",
+                        NodePackageEgressPolicy.builder().build(), OptionalSecret.none())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build();
+
+        var authorization = services.toolAuthorization().authorize(message("tenant-a", null),
+                "alpha__search", " \n\t".getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(Map.of(), evaluated.get().arguments());
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertEquals("{}", new String(authorization.canonicalArguments(), StandardCharsets.UTF_8));
+        authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.SUCCEEDED);
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT,
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+        String emptyObjectDigest = "sha256:" + java.util.HexFormat.of().formatHex(
+                java.security.MessageDigest.getInstance("SHA-256")
+                        .digest("{}".getBytes(StandardCharsets.UTF_8)));
+        assertEquals(emptyObjectDigest, authorization.argumentsDigest());
+        assertEquals(List.of(emptyObjectDigest, emptyObjectDigest),
+                events.stream().map(ToolCallAuditEvent::argumentsDigest).toList());
+    }
+
+    @Test
     void invalidOrUnconfiguredModelToolCallsFailClosedBeforePolicy() {
         var policyCalls = new AtomicInteger();
         var events = new ArrayList<ToolCallAuditEvent>();

@@ -6,6 +6,11 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.api.security.ToolInvocation;
+import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
+import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +20,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -93,6 +99,67 @@ class AgentMcpToolsTest {
         assertEquals(5, messages.size());
         assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)));
         assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(4)));
+    }
+
+    @Test
+    @DisplayName("tool audit distinguishes MCP success from every sanitized failure result")
+    void toolAuditUsesTerminalMcpOutcomeInsteadOfNonEmptyModelText() throws Exception {
+        var cases = List.of(
+                new AuditCase(new McpDouble("alpha", "search").returning("found"),
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.UNREACHABLE),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.SLOW),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search")
+                        .failingCallsWith(McpDouble.Mode.ERRORING),
+                        ToolCallAuditEvent.Disposition.FAILED),
+                new AuditCase(new McpDouble("alpha", "search").returningError("not found"),
+                        ToolCallAuditEvent.Disposition.FAILED));
+
+        for (AuditCase testCase : cases) {
+            var events = new ArrayList<ToolCallAuditEvent>();
+            var http = new AiTestSupport.RoutedHttp(CHAT)
+                    .authorizing(authorizer(events, new AtomicReference<>()))
+                    .chatting(AiTestSupport.asksFor("call-1", "alpha__search"),
+                            AiTestSupport.answers("done"))
+                    .serving(ALPHA, testCase.server());
+
+            assertEquals("done", resultOf(agent(http, "alpha",
+                    AiTestSupport.mcpProfile("alpha", ALPHA, "search"))).payload());
+            assertAuditPair(events, testCase.terminal());
+        }
+    }
+
+    @Test
+    @DisplayName("blank model arguments are authorized and executed exactly once as canonical empty JSON")
+    void blankArgumentsRemainCompatibleAcrossPolicyAuditAndEffect() throws Exception {
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var alpha = new McpDouble("alpha", "search").returning("found");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .authorizing(authorizer(events, evaluated))
+                .chatting(AiTestSupport.asksFor("call-1", "alpha__search", "  "),
+                        AiTestSupport.answers("done"))
+                .serving(ALPHA, alpha);
+
+        assertEquals("done", resultOf(agent(http, "alpha",
+                AiTestSupport.mcpProfile("alpha", ALPHA, "search"))).payload());
+
+        assertEquals(Map.of(), evaluated.get().arguments());
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertEquals(List.of("search"), alpha.calledTools());
+        var call = (PayloadValue.MapValue) PayloadJson.read(
+                alpha.calledDocuments().get(0).getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                PayloadLimits.DEFAULTS);
+        var params = assertInstanceOf(PayloadValue.MapValue.class, call.entries().get("params"));
+        var arguments = assertInstanceOf(PayloadValue.MapValue.class,
+                params.entries().get("arguments"));
+        assertEquals(Map.of(), arguments.entries());
+        assertAuditPair(events, ToolCallAuditEvent.Disposition.SUCCEEDED);
     }
 
     @Test
@@ -589,6 +656,29 @@ class AgentMcpToolsTest {
         return new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(servers))
                 .create(configuration(declared), http);
+    }
+
+    private static ai.ravenroot.api.node.service.ToolCallAuthorizationService authorizer(
+            List<ToolCallAuditEvent> events, AtomicReference<ToolInvocation> evaluated) {
+        return ManagedNodePackageServices.builder("ai.ravenroot.extension.ai",
+                        NodePackageEgressPolicy.builder().build(),
+                        (packageId, tenant, reference) -> java.util.Optional.empty())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build().toolAuthorization();
+    }
+
+    private static void assertAuditPair(List<ToolCallAuditEvent> events,
+                                        ToolCallAuditEvent.Disposition terminal) {
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT, terminal),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+    }
+
+    private record AuditCase(McpDouble server, ToolCallAuditEvent.Disposition terminal) {
     }
 
     private static ai.ravenroot.api.node.NodeConfiguration configuration(String mcpServers) {

@@ -118,10 +118,11 @@ final class McpSession {
      * Calls one tool and returns the text of its result.
      *
      * @param toolName the name as the server knows it, never the name the model was given
-     * @param argumentsJson the raw model-authored {@code arguments} string
-     * @return a stage carrying the tool's text, or failed with an {@link McpRefusal}
+     * @param argumentsJson the bounded canonical argument object returned by the reference monitor
+     * @return a stage carrying model-facing text and the server's independent success signal, or
+     *     failed with an {@link McpRefusal}
      */
-    CompletionStage<String> call(String toolName, String argumentsJson) {
+    CompletionStage<AgentTool.Result> call(String toolName, String argumentsJson) {
         PayloadValue.MapValue arguments;
         try {
             arguments = McpProtocol.readArguments(argumentsJson);
@@ -129,7 +130,9 @@ final class McpSession {
             return CompletableFuture.failedFuture(refused);
         }
         return exchange(McpProtocol.callTool(nextId.getAndIncrement(), toolName, arguments), true)
-                .thenApply(McpProtocol::readToolContent);
+                .thenApply(result -> new AgentTool.Result(McpProtocol.readToolContent(result),
+                        McpProtocol.isToolError(result)
+                                ? AgentTool.Outcome.FAILED : AgentTool.Outcome.SUCCEEDED));
     }
 
     /**

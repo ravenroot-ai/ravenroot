@@ -228,8 +228,11 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         PayloadValue.MapValue arguments;
         byte[] canonical;
         try {
-            PayloadValue parsed = PayloadJson.read(rawArguments == null ? new byte[0] : rawArguments,
-                    TOOL_ARGUMENT_LIMITS);
+            byte[] supplied = rawArguments == null ? new byte[0] : rawArguments;
+            if (blankJson(supplied)) {
+                supplied = "{}".getBytes(StandardCharsets.UTF_8);
+            }
+            PayloadValue parsed = PayloadJson.read(supplied, TOOL_ARGUMENT_LIMITS);
             if (!(parsed instanceof PayloadValue.MapValue object)) {
                 throw new IllegalArgumentException("tool arguments are not an object");
             }
@@ -291,6 +294,15 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             return "invalid-tool";
         }
         return tool;
+    }
+
+    private static boolean blankJson(byte[] document) {
+        for (byte value : document) {
+            if (value != ' ' && value != '\t' && value != '\n' && value != '\r') {
+                return false;
+            }
+        }
+        return true;
     }
 
     private static String digest(byte[] canonical) {

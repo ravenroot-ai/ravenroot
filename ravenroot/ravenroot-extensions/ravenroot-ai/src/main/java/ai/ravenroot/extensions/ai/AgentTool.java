@@ -2,6 +2,7 @@ package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.payload.PayloadValue;
 
+import java.util.Objects;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -49,10 +50,40 @@ interface AgentTool {
      *
      * @param argumentsJson the bounded canonical argument object the server-side reference monitor
      *     evaluated; never the unchecked string the model produced
-     * @return a stage carrying a non-null result or refusal; never {@code null} and never an empty
-     *     string, because an empty tool message reads to a model as a successful call that returned
-     *     nothing. The stage itself should not fail — a tool that fails it is treated by
-     *     {@link AgentNodeBehavior} as a refusal costing one turn, never as a node failure
+     * @return a stage carrying non-null model-facing text and its independent terminal effect
+     *     outcome. Text is never empty, because an empty tool message reads to a model as a
+     *     successful call that returned nothing. The stage itself should not fail — a tool that
+     *     fails it is treated by {@link AgentNodeBehavior} as a refusal costing one turn, never as a
+     *     node failure
      */
-    CompletionStage<String> invoke(String argumentsJson);
+    CompletionStage<Result> invoke(String argumentsJson);
+
+    /** Terminal status of the authorized effect, independent of what the model is told. */
+    enum Outcome {
+        SUCCEEDED,
+        FAILED
+    }
+
+    /** Model-facing text kept structurally separate from the terminal effect outcome used by audit. */
+    record Result(String text, Outcome outcome) {
+        public Result {
+            Objects.requireNonNull(text, "text");
+            Objects.requireNonNull(outcome, "outcome");
+            if (text.isEmpty()) {
+                throw new IllegalArgumentException("tool result text cannot be empty");
+            }
+        }
+
+        static Result succeeded(String text) {
+            return new Result(text, Outcome.SUCCEEDED);
+        }
+
+        static Result failed(String text) {
+            return new Result(text, Outcome.FAILED);
+        }
+
+        boolean succeeded() {
+            return outcome == Outcome.SUCCEEDED;
+        }
+    }
 }

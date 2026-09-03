@@ -1345,6 +1345,20 @@ public abstract class ExecutionStoreContract {
         // forgottenBefore watermark this test does not need to inspect directly.
     }
 
+    /**
+     * PROVISIONAL, in the same sense the class Javadoc uses for {@link StoreCapability#DURABLE} and
+     * {@link StoreCapability#CROSS_PROCESS_LEASE} before {@code SqliteExecutionStore} existed: both
+     * in-tree adapters unconditionally declare {@link StoreCapability#IDEMPOTENCY_PURGE}, so
+     * {@link Assumptions#assumeFalse} below skips this body on both of them today, and the negative
+     * branch it asserts is currently unverified for internal consistency. It is kept rather than
+     * deleted for the same reason the two capabilities above were kept while provisional: the moment a
+     * conforming adapter exists that genuinely does not offer purge -- a read-only or a remote adapter
+     * are the plausible candidates -- this assertion starts running against it for free, with no
+     * change to this file, and it is exactly the assertion that catches an adapter which forgot the
+     * {@link ExecutionStoreFailure.CapabilityNotSupported} guard on that path. Writing it now, while it
+     * costs one skip, is cheaper than reconstructing it later once such an adapter's absence is already
+     * a gap nobody notices.
+     */
     @Test
     final void purgeFailsWithCapabilityNotSupportedWhenNotDeclared() {
         Assumptions.assumeFalse(store().supports(StoreCapability.IDEMPOTENCY_PURGE),
@@ -1983,6 +1997,13 @@ public abstract class ExecutionStoreContract {
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
                 .build()));
+    }
+
+    /** Finds the one traversal row named by {@code traversalId}, failing loudly if it is not there. */
+    private static TraversalInventoryEntry traversalNamed(List<TraversalInventoryEntry> traversals,
+                                                           UUID traversalId) {
+        return traversals.stream().filter(entry -> entry.traversalId().equals(traversalId)).findFirst()
+                .orElseThrow(() -> new AssertionError("no traversal row for " + traversalId));
     }
 
     // ============================================== PERS-07: journal, outbox and inbox (ADR 0011)
@@ -2906,6 +2927,84 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.of("corr-updated"), updated.correlationId(), "a present component is written");
     }
 
+    /**
+     * {@code traversalCount}, {@code invocationCount} and {@code parkedAttemptCount} are counts, not
+     * flags, and every other fixture in this suite builds exactly one traversal holding exactly one
+     * invocation and at most one attempt -- a shape on which a count is indistinguishable from a
+     * boolean, and a join that silently multiplies its rows is indistinguishable from a correct one,
+     * because one times one is one whichever way it is wrong. This builds one instance with three
+     * traversals carrying <em>different</em> counts from one another, so a correlation dropped or
+     * widened between traversal, invocation and attempt would show up as one traversal's number
+     * leaking into another's. The third traversal has nothing in it at all: that is the row a dropped
+     * join correlation fails on, because an inner join or a missing tenant/instance predicate on the
+     * counting subquery would report it as having whatever the busiest sibling has, not zero.
+     */
+    @Test
+    final void countFieldsReflectEachTraversalsOwnContentsAndAnEmptySiblingReportsZero() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID busyTraversal = UUID.randomUUID();
+        UUID quietTraversal = UUID.randomUUID();
+        UUID emptyTraversal = UUID.randomUUID();
+        UUID invocation1 = UUID.randomUUID();
+        UUID invocation2 = UUID.randomUUID();
+        UUID invocation3 = UUID.randomUUID();
+        UUID attempt1 = UUID.randomUUID();
+
+        StoredProcessInstance created = await(store().apply(creationBatch(key, busyTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                // busyTraversal: two invocations, one attempt on the first, parked.
+                .apply(new ExecutionTransition.TraversalTransitioned(busyTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(busyTraversal,
+                        new NodeInvocation(invocation1, "work-1", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.InvocationTransitioned(busyTraversal, invocation1,
+                        NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(busyTraversal, invocation1,
+                        new NodeAttempt(attempt1, 1, NodeAttemptStatus.SCHEDULED)))
+                .apply(new ExecutionTransition.AttemptTransitioned(busyTraversal, invocation1, attempt1,
+                        NodeAttemptStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptParked(busyTraversal, invocation1, attempt1, "unknown"))
+                .apply(new ExecutionTransition.InvocationAdded(busyTraversal,
+                        new NodeInvocation(invocation2, "work-2", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                // quietTraversal: one invocation, no parked attempts -- deliberately not the busy
+                // traversal's two, so a leaked correlation is visible as the wrong number, not merely
+                // as a nonzero one.
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(quietTraversal, "quiet-start",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .apply(new ExecutionTransition.TraversalTransitioned(quietTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(quietTraversal,
+                        new NodeInvocation(invocation3, "work-3", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                // emptyTraversal: nothing at all.
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(emptyTraversal, "empty-start",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .build()));
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(3, entry.traversalCount(), "three traversals were added to this instance");
+
+        List<TraversalInventoryEntry> traversals = await(store().listTraversals(key));
+        assertEquals(3, traversals.size());
+        TraversalInventoryEntry busy = traversalNamed(traversals, busyTraversal);
+        TraversalInventoryEntry quiet = traversalNamed(traversals, quietTraversal);
+        TraversalInventoryEntry empty = traversalNamed(traversals, emptyTraversal);
+
+        assertEquals(2, busy.invocationCount(), "two invocations were added under the busy traversal");
+        assertEquals(1, busy.parkedAttemptCount(), "exactly one parked attempt, on the busy traversal");
+
+        assertEquals(1, quiet.invocationCount(), "one invocation on the quiet traversal, not the busy "
+                + "traversal's two -- a leaked correlation would surface here as the wrong count");
+        assertEquals(0, quiet.parkedAttemptCount());
+
+        assertEquals(0, empty.invocationCount(), "a sibling traversal with nothing in it must report "
+                + "zero, not the row count of a mis-joined neighbour");
+        assertEquals(0, empty.parkedAttemptCount());
+    }
+
     @Test
     final void lifecycleGenerationMovesOnTransitionsNotOnLeaseActivityWhileTheFencingTokenIsTheOpposite() {
         assumeCapability(StoreCapability.PROCESS_INVENTORY);
@@ -3094,8 +3193,16 @@ public abstract class ExecutionStoreContract {
         assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
     }
 
+    /**
+     * Selectivity: only an expired terminal row is removed; a not-yet-due terminal row and a
+     * non-terminal row of any age both survive. This purges exactly one row, so it deliberately makes
+     * no claim about which of several removed deadlines the floor publishes -- that is a different
+     * question, with its own test below, because a single-row purge cannot distinguish "publishes the
+     * earliest deadline removed" from "publishes the latest deadline removed": the two coincide
+     * whenever there is only one.
+     */
     @Test
-    final void purgeRemovesOnlyExpiredTerminalRowsAndAdvancesTheFloorToTheEarliestRemovedDeadline() {
+    final void purgeRemovesOnlyExpiredTerminalRowsAndLeavesNonTerminalAndNotYetDueRowsAlone() {
         assumeCapability(StoreCapability.PROCESS_INVENTORY);
         assumeCapability(StoreCapability.INVENTORY_RETENTION);
         String tenant = "inv-retention-floor";
@@ -3126,7 +3233,58 @@ public abstract class ExecutionStoreContract {
         assertTrue(await(store().findProcessInstance(stillRunning)).isPresent(),
                 "non-terminal work is never purged however old it is");
         assertEquals(earlyDeadline, await(store().inventoryRetainedFrom(tenant)),
-                "the floor must land exactly at the earliest deadline actually removed");
+                "with exactly one row removed, the floor must land exactly at that row's own deadline");
+    }
+
+    /**
+     * {@code inventoryRetainedFrom}'s javadoc: the floor is the <strong>latest</strong> retention
+     * deadline the tenant has actually crossed, not the earliest, and the boundary is exclusive --
+     * "everything past this is still here" -- while collection itself is inclusive, so a row sitting
+     * exactly on the published floor is one that was removed. Publishing the earliest deadline instead
+     * breaks as soon as one purge removes two rows whose deadlines are further apart than
+     * {@code terminalRetention}: the later row is genuinely gone, yet it would sit strictly after an
+     * "earliest" floor, and a caller following the documented rule would conclude a completed
+     * execution never existed -- the ambiguity inverted into the unsafe direction. This is exactly that
+     * scenario, and it requires two rows spread wider than the retention window: a single-row purge
+     * cannot tell "earliest" and "latest" apart, which is why the test above does not attempt to.
+     */
+    @Test
+    final void purgeOfMultipleRowsPublishesTheLatestDeadlineCrossedNotTheEarliest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        String tenant = "inv-retention-floor-latest";
+        Duration spread = store().terminalRetention().plusDays(1); // strictly more than terminalRetention
+
+        ExecutionKey early = keyFor(tenant);
+        failInstance(early, UUID.randomUUID());
+        Instant earlyDeadline = await(store().findProcessInstance(early)).orElseThrow()
+                .retainedUntil().orElseThrow();
+
+        clock().advance(spread);
+        ExecutionKey late = keyFor(tenant);
+        failInstance(late, UUID.randomUUID());
+        Instant lateDeadline = await(store().findProcessInstance(late)).orElseThrow()
+                .retainedUntil().orElseThrow();
+        assertTrue(lateDeadline.isAfter(earlyDeadline.plus(store().terminalRetention())),
+                "the fixture requires deadlines spread wider than the retention window, or this test "
+                        + "degenerates into the single-row case");
+
+        // Landed exactly on the later deadline: collection is inclusive, so both rows -- whose
+        // deadlines are at or before now -- are removed in one purge.
+        clock().set(lateDeadline);
+        assertEquals(2L, await(store().purgeExpiredProcessInstances(tenant)));
+        assertEquals(Optional.empty(), await(store().findProcessInstance(early)));
+        assertEquals(Optional.empty(), await(store().findProcessInstance(late)));
+
+        Instant floor = await(store().inventoryRetainedFrom(tenant));
+        assertEquals(lateDeadline, floor, "the floor must publish the LATEST deadline actually crossed, "
+                + "not the earliest -- the reviewer's exact regression");
+
+        // The property the floor exists to guarantee, stated directly against both removed rows: a
+        // row that was genuinely removed must never have a deadline strictly after the published
+        // floor. Under the reverted-to-earliest bug, lateDeadline.isAfter(floor) would be true here.
+        assertFalse(lateDeadline.isAfter(floor), "a removed row's deadline must not be strictly after the floor");
+        assertFalse(earlyDeadline.isAfter(floor), "likewise for every other row removed in the same run");
     }
 
     @Test

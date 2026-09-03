@@ -1,0 +1,561 @@
+package ai.ravenroot.persistence.sqlite;
+
+import ai.ravenroot.api.application.NodeAttempt;
+import ai.ravenroot.api.application.NodeAttemptStatus;
+import ai.ravenroot.api.application.NodeInvocation;
+import ai.ravenroot.api.application.NodeInvocationStatus;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.ExecutionBatch;
+import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
+import ai.ravenroot.api.persistence.ExecutionStoreException;
+import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.ExecutionTransition;
+import ai.ravenroot.api.persistence.InventoryDisposition;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryPage;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
+import ai.ravenroot.api.persistence.RevisionExpectation;
+import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.testkit.persistence.MutableClock;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.nio.file.Path;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+/**
+ * The durable tenant-scoped process and traversal inventory (issue 154), against the adapter that can
+ * actually lose a process.
+ *
+ * <p>These assertions live here rather than in the shared conformance suite because the property the
+ * issue is about — that an authorized tenant can rediscover its work <em>after a complete restart</em>
+ * — is only observable on an adapter that survives one. The suite gets the adapter-neutral half in the
+ * next wave; what cannot be delegated is the reopen.</p>
+ */
+class SqliteProcessInventoryTest {
+
+    private static final Instant EPOCH = Instant.parse("2026-03-01T00:00:00Z");
+    private static final Duration TTL = Duration.ofMinutes(1);
+    private static final String TENANT = "acme";
+    private static final String OTHER_TENANT = "globex";
+
+    @TempDir
+    Path databaseDirectory;
+
+    @Test
+    void theAdapterDeclaresBothInventoryCapabilitiesAndItsPublishedBounds() {
+        var clock = new MutableClock(EPOCH);
+        try (var store = open("declares.db", clock)) {
+            assertTrue(store.supports(StoreCapability.PROCESS_INVENTORY));
+            assertTrue(store.supports(StoreCapability.INVENTORY_RETENTION));
+            assertEquals(100, store.maxInventoryPageSize());
+            assertEquals(Duration.ofDays(7), store.terminalRetention());
+            assertTrue(store.terminalRetention().compareTo(store.journalRetention()) >= 0,
+                    "a terminal instance must outlive its own events, or the journal would name an "
+                            + "instance the inventory can no longer describe");
+        }
+    }
+
+    @Test
+    void everyRetainedInstanceIsRediscoverableAfterACompleteReopenWithItsTraversals() {
+        Path file = databaseDirectory.resolve("reopen.db");
+        var clock = new MutableClock(EPOCH);
+        var running = new ExecutionKey(TENANT, UUID.randomUUID());
+        var waiting = new ExecutionKey(TENANT, UUID.randomUUID());
+        var failed = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID runningTraversal = UUID.randomUUID();
+
+        try (var store = open(file, clock)) {
+            createRunning(store, running, runningTraversal);
+            clock.advance(Duration.ofSeconds(1));
+            createWaiting(store, waiting, UUID.randomUUID());
+            clock.advance(Duration.ofSeconds(1));
+            createFailed(store, failed, UUID.randomUUID());
+        }
+
+        // A complete process death: no lease was released, nothing was drained, and the only thing
+        // carried across is the file itself.
+        try (var reopened = open(file, clock)) {
+            ProcessInventoryPage page = await(reopened.listProcessInstances(TENANT,
+                    ProcessInventoryQuery.everything(10)));
+            assertEquals(3, page.items().size(), "every retained instance must be rediscoverable "
+                    + "from durable state alone; the in-memory live listing is gone by definition");
+            assertEquals(List.of(failed.processInstanceId(), waiting.processInstanceId(),
+                            running.processInstanceId()),
+                    page.items().stream().map(item -> item.key().processInstanceId()).toList(),
+                    "newest first");
+            assertEquals(Optional.empty(), page.nextCursor());
+            assertEquals(Instant.MIN, page.retainedFrom(),
+                    "nothing has been purged, so the floor has not moved");
+
+            ProcessInventoryEntry entry = only(reopened, running);
+            assertEquals(ProcessInstanceStatus.RUNNING, entry.status());
+            assertEquals(InventoryDisposition.INTERRUPTED, entry.disposition(),
+                    "a lease that nobody is renewing after a restart is exactly the recovery cohort");
+            assertEquals(Optional.empty(), entry.ownerWorkerId());
+            assertEquals(EPOCH, entry.createdAt());
+            assertEquals(1, entry.traversalCount());
+            assertEquals(Optional.empty(), entry.retainedUntil(),
+                    "retention has not started for a non-terminal instance");
+
+            List<TraversalInventoryEntry> traversals = await(reopened.listTraversals(running));
+            assertEquals(1, traversals.size());
+            assertEquals(runningTraversal, traversals.get(0).traversalId());
+            assertEquals(0, traversals.get(0).position());
+            assertEquals("start", traversals.get(0).ingressNodeId());
+            assertEquals(TraversalStatus.ACCEPTED, traversals.get(0).status());
+            assertEquals(0, traversals.get(0).parkedAttemptCount());
+        }
+    }
+
+    @Test
+    void transientAndDeploymentHostedWorkShareOneIdentityContractWithoutBeingConflated() {
+        var clock = new MutableClock(EPOCH);
+        var transientKey = new ExecutionKey(TENANT, UUID.randomUUID());
+        var hosted = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("origin.db", clock)) {
+            createRunning(store, transientKey, UUID.randomUUID());
+            clock.advance(Duration.ofSeconds(1));
+            StoredProcessInstance created = await(store.apply(ExecutionBatch
+                    .to(hosted)
+                    .expecting(RevisionExpectation.notPresent())
+                    .apply(new ExecutionTransition.ProcessCreated(
+                            Fixtures.acceptedInstance(hosted.processInstanceId(), UUID.randomUUID()),
+                            new ai.ravenroot.api.persistence.GraphVersionPin("graph-v1")))
+                    .recordOrigin(ExecutionOrigin.of("dep-7", "nightly-batch", "corr-42"))
+                    .build()));
+
+            ProcessInventoryEntry deployed = only(store, hosted);
+            assertEquals(Optional.of("dep-7"), deployed.deploymentId());
+            assertEquals(Optional.of("nightly-batch"), deployed.workloadId());
+            assertEquals(Optional.of("corr-42"), deployed.correlationId());
+            assertEquals(new ai.ravenroot.api.persistence.GraphVersionPin("graph-v1"),
+                    deployed.graphVersionPin(), "the deployment is not the graph version and the "
+                            + "inventory must keep the two identities apart");
+
+            ProcessInventoryEntry submitted = only(store, transientKey);
+            assertEquals(Optional.empty(), submitted.deploymentId(),
+                    "a transient submission has no host, and absence is how that is said");
+
+            // A later write that does not know the deployment must not erase it: annotation semantics,
+            // not a transition, so no ordering of partially-informed callers destroys information.
+            await(store.apply(ExecutionBatch.to(hosted)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .build()));
+            assertEquals(Optional.of("dep-7"), only(store, hosted).deploymentId());
+
+            assertEquals(List.of(hosted.processInstanceId()),
+                    await(store.listProcessInstances(TENANT, ProcessInventoryQuery.builder()
+                            .hostedBy("dep-7").limit(10).build()))
+                            .items().stream().map(item -> item.key().processInstanceId()).toList());
+        }
+    }
+
+    @Test
+    void paginationIsDeterministicWhileNewWorkIsAccepted() {
+        var clock = new MutableClock(EPOCH);
+        try (var store = open("pagination.db", clock)) {
+            var created = new ArrayList<UUID>();
+            for (int index = 0; index < 5; index++) {
+                var key = new ExecutionKey(TENANT, UUID.randomUUID());
+                createRunning(store, key, UUID.randomUUID());
+                created.add(key.processInstanceId());
+                clock.advance(Duration.ofSeconds(1));
+            }
+
+            var seen = new ArrayList<UUID>();
+            ProcessInventoryQuery query = ProcessInventoryQuery.outstanding(2);
+            ProcessInventoryPage page = await(store.listProcessInstances(TENANT, query));
+            page.items().forEach(item -> seen.add(item.key().processInstanceId()));
+
+            // Accepted mid-scan. It sorts BEFORE page one, so this scan must not see it -- and, more
+            // importantly, its arrival must not shift a row the scan has not reached yet.
+            var late = new ExecutionKey(TENANT, UUID.randomUUID());
+            createRunning(store, late, UUID.randomUUID());
+            clock.advance(Duration.ofSeconds(1));
+
+            while (page.nextCursor().isPresent()) {
+                page = await(store.listProcessInstances(TENANT, query.after(page.nextCursor().get())));
+                page.items().forEach(item -> seen.add(item.key().processInstanceId()));
+            }
+
+            assertEquals(5, seen.size(), "a scan in flight sees each row exactly once");
+            assertEquals(Set.copyOf(created), Set.copyOf(seen), "and never loses one");
+            assertEquals(seen.size(), Set.copyOf(seen).size(), "and never repeats one");
+            assertFalse(seen.contains(late.processInstanceId()),
+                    "work created after the scan started sorts before page one and is simply not seen "
+                            + "by that scan; asking for page one again is how a caller picks it up");
+
+            var reversed = new ArrayList<>(created);
+            java.util.Collections.reverse(reversed);
+            assertEquals(reversed, seen, "newest first, throughout");
+        }
+    }
+
+    @Test
+    void aPageThatExactlyFillsTheLimitDoesNotMintACursorForANextPageThatIsEmpty() {
+        var clock = new MutableClock(EPOCH);
+        try (var store = open("exact.db", clock)) {
+            for (int index = 0; index < 2; index++) {
+                createRunning(store, new ExecutionKey(TENANT, UUID.randomUUID()), UUID.randomUUID());
+                clock.advance(Duration.ofSeconds(1));
+            }
+            ProcessInventoryPage page = await(store.listProcessInstances(TENANT,
+                    ProcessInventoryQuery.outstanding(2)));
+            assertEquals(2, page.items().size());
+            assertEquals(Optional.empty(), page.nextCursor(), "a cursor handed back here would cost "
+                    + "every caller an empty round trip, and one that reads a present cursor as "
+                    + "'there is more' would report work that does not exist");
+        }
+    }
+
+    @Test
+    void anotherTenantsInstanceIsIndistinguishableFromAMissingOneAndNeverADenial() {
+        var clock = new MutableClock(EPOCH);
+        var mine = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("isolation.db", clock)) {
+            createRunning(store, mine, UUID.randomUUID());
+
+            var borrowed = new ExecutionKey(OTHER_TENANT, mine.processInstanceId());
+            var absent = new ExecutionKey(OTHER_TENANT, UUID.randomUUID());
+            assertEquals(Optional.empty(), await(store.findProcessInstance(borrowed)));
+            assertEquals(await(store.findProcessInstance(absent)),
+                    await(store.findProcessInstance(borrowed)),
+                    "a real instance under the wrong tenant and an id that never existed must be the "
+                            + "same answer, or the store is a cross-tenant existence oracle");
+
+            assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                    failureOf(() -> await(store.listTraversals(borrowed))));
+            assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                    failureOf(() -> await(store.listTraversals(absent))));
+
+            assertEquals(List.of(), await(store.listProcessInstances(OTHER_TENANT,
+                    ProcessInventoryQuery.everything(10))).items());
+        }
+    }
+
+    @Test
+    void aCursorMintedForOneTenantIsRefusedUnderAnother() {
+        var clock = new MutableClock(EPOCH);
+        try (var store = open("cursor-tenant.db", clock)) {
+            for (int index = 0; index < 3; index++) {
+                createRunning(store, new ExecutionKey(TENANT, UUID.randomUUID()), UUID.randomUUID());
+                clock.advance(Duration.ofSeconds(1));
+            }
+            String cursor = await(store.listProcessInstances(TENANT,
+                    ProcessInventoryQuery.outstanding(1))).nextCursor().orElseThrow();
+
+            var refused = assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                    failureOf(() -> await(store.listProcessInstances(OTHER_TENANT,
+                            ProcessInventoryQuery.outstanding(1).after(cursor)))));
+            assertFalse(refused.reason().contains(TENANT),
+                    "the rejection must not name the tenant the cursor belongs to; that would confirm "
+                            + "the other tenant exists");
+
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                    failureOf(() -> await(store.listProcessInstances(TENANT,
+                            ProcessInventoryQuery.outstanding(1).after("not-a-cursor")))));
+        }
+    }
+
+    @Test
+    void aTerminalInstanceIsRemovedOnlyByAnExplicitPurgeAndTheFloorThenSaysWhereCompletenessEnds() {
+        var clock = new MutableClock(EPOCH);
+        var terminal = new ExecutionKey(TENANT, UUID.randomUUID());
+        var live = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("retention.db", clock)) {
+            createFailed(store, terminal, UUID.randomUUID());
+            clock.advance(Duration.ofSeconds(1));
+            createRunning(store, live, UUID.randomUUID());
+
+            Instant deadline = only(store, terminal).retainedUntil().orElseThrow();
+            assertEquals(EPOCH.plus(Duration.ofDays(7)), deadline,
+                    "retention starts at the terminal transition and runs for the declared window");
+            assertEquals(InventoryDisposition.TERMINAL, only(store, terminal).disposition());
+
+            clock.advance(Duration.ofDays(7).plusSeconds(1));
+            assertTrue(await(store.findProcessInstance(terminal)).isPresent(),
+                    "nothing is deleted implicitly on a read; two identical listings must return "
+                            + "identical pages");
+            assertEquals(Instant.MIN, await(store.inventoryRetainedFrom(TENANT)));
+
+            assertEquals(1L, await(store.purgeExpiredProcessInstances(TENANT)));
+            assertEquals(Optional.empty(), await(store.findProcessInstance(terminal)));
+            assertEquals(deadline, await(store.inventoryRetainedFrom(TENANT)),
+                    "the floor is the earliest deadline actually removed, not the purge instant: "
+                            + "advancing to now would claim a gap covering rows that are still here");
+            assertTrue(await(store.findProcessInstance(live)).isPresent(),
+                    "age is not evidence that work has finished; pruning a non-terminal instance would "
+                            + "destroy the row an operator needs in order to see that it is stuck");
+
+            assertEquals(0L, await(store.purgeExpiredProcessInstances(TENANT)));
+            assertEquals(deadline, await(store.inventoryRetainedFrom(TENANT)),
+                    "a purge that forgot nothing must not move the floor, or a periodic job would "
+                            + "report a retention gap on every tick");
+        }
+    }
+
+    @Test
+    void aPurgedInstanceStaysPurgedAcrossAReopenAndSoDoesTheFloor() {
+        Path file = databaseDirectory.resolve("retention-durable.db");
+        var clock = new MutableClock(EPOCH);
+        var terminal = new ExecutionKey(TENANT, UUID.randomUUID());
+        Instant deadline;
+        try (var store = open(file, clock)) {
+            createFailed(store, terminal, UUID.randomUUID());
+            deadline = only(store, terminal).retainedUntil().orElseThrow();
+            clock.advance(Duration.ofDays(7).plusSeconds(1));
+            assertEquals(1L, await(store.purgeExpiredProcessInstances(TENANT)));
+        }
+        try (var reopened = open(file, clock)) {
+            assertEquals(Optional.empty(), await(reopened.findProcessInstance(terminal)));
+            assertEquals(deadline, await(reopened.inventoryRetainedFrom(TENANT)),
+                    "a floor derived from the surviving rows would reset to 'nothing was forgotten' "
+                            + "the moment the last purged row was gone");
+            assertEquals(Instant.MIN, await(reopened.inventoryRetainedFrom(OTHER_TENANT)),
+                    "and only the purged tenant's floor moves");
+        }
+    }
+
+    @Test
+    void dispositionSeparatesActiveFromInterruptedAndParkedOutranksTerminal() {
+        var clock = new MutableClock(EPOCH);
+        var leased = new ExecutionKey(TENANT, UUID.randomUUID());
+        var waiting = new ExecutionKey(TENANT, UUID.randomUUID());
+        var parked = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID parkedTraversal = UUID.randomUUID();
+        UUID parkedInvocation = UUID.randomUUID();
+        UUID parkedAttempt = UUID.randomUUID();
+
+        try (var store = open("disposition.db", clock)) {
+            createRunning(store, leased, UUID.randomUUID());
+            await(store.claim(leased, "worker-1", TTL));
+            assertEquals(InventoryDisposition.ACTIVE, only(store, leased).disposition());
+            assertEquals(Optional.of("worker-1"), only(store, leased).ownerWorkerId());
+
+            createWaiting(store, waiting, UUID.randomUUID());
+            assertEquals(InventoryDisposition.WAITING, only(store, waiting).disposition(),
+                    "a waiting instance holds no lease by design; classifying it as interrupted would "
+                            + "flood recovery with correctly idle work");
+
+            parkThenFail(store, parked, parkedTraversal, parkedInvocation, parkedAttempt);
+            ProcessInventoryEntry parkedEntry = only(store, parked);
+            assertEquals(ProcessInstanceStatus.FAILED, parkedEntry.status(),
+                    "the authoritative status is still reported unchanged");
+            assertEquals(InventoryDisposition.PARKED, parkedEntry.disposition(),
+                    "the instance is finished but the effect of unknown outcome is not, and a terminal "
+                            + "label would hide the only outstanding operator action -- then let "
+                            + "retention delete the sole record of it");
+            assertEquals(1, await(store.listTraversals(parked)).get(0).parkedAttemptCount());
+            assertEquals(InventoryDisposition.PARKED,
+                    await(store.listTraversals(parked)).get(0).disposition());
+
+            // The lease lapses without anything being written. That is the whole point: a disposition
+            // stored as a column could not have been corrected here, because no transaction happened.
+            clock.advance(TTL.plusSeconds(1));
+            assertEquals(InventoryDisposition.INTERRUPTED, only(store, leased).disposition());
+            assertEquals(Optional.empty(), only(store, leased).ownerWorkerId());
+            assertTrue(only(store, leased).fencingToken() > 0,
+                    "the token outlives the lease that issued it; a row with a token and no owner is "
+                            + "the normal shape of abandoned work");
+        }
+    }
+
+    @Test
+    void theOwnerFilterMatchesOnlyALiveLease() {
+        var clock = new MutableClock(EPOCH);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("owner.db", clock)) {
+            createRunning(store, key, UUID.randomUUID());
+            await(store.claim(key, "worker-1", TTL));
+
+            ProcessInventoryQuery byWorker = ProcessInventoryQuery.builder()
+                    .ownedBy("worker-1").limit(10).build();
+            assertEquals(1, await(store.listProcessInstances(TENANT, byWorker)).items().size());
+            assertEquals(0, await(store.listProcessInstances(TENANT, ProcessInventoryQuery.builder()
+                    .ownedBy("worker-2").limit(10).build())).items().size());
+
+            clock.advance(TTL.plusSeconds(1));
+            assertEquals(0, await(store.listProcessInstances(TENANT, byWorker)).items().size(),
+                    "a lapsed lease names the worker that stopped renewing; answering 'owned by w' "
+                            + "with work w has abandoned is the opposite of what a drain is asking");
+        }
+    }
+
+    @Test
+    void lifecycleGenerationCountsAppliedTransitionsAndIsNotTheFencingToken() {
+        var clock = new MutableClock(EPOCH);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("generation.db", clock)) {
+            StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, UUID.randomUUID())));
+            assertEquals(1L, only(store, key).lifecycleGeneration(),
+                    "creation is itself the first transition, into the initial status");
+            assertEquals(0L, only(store, key).fencingToken());
+
+            StoredProcessInstance moved = await(store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                    .build()));
+            assertEquals(3L, only(store, key).lifecycleGeneration(),
+                    "two transitions in one batch are two transitions; comparing the endpoints of the "
+                            + "batch would have counted none, because it started and ended non-terminal");
+
+            // Three successive claims move the token three times without moving the lifecycle at all,
+            // which is the whole reason the two identities are kept distinct.
+            long token = await(store.claim(key, "worker-1", TTL)).fencingToken();
+            clock.advance(TTL.plusSeconds(1));
+            token = await(store.claim(key, "worker-2", TTL)).fencingToken();
+            assertTrue(token > 1);
+            assertEquals(3L, only(store, key).lifecycleGeneration());
+            assertEquals(token, only(store, key).fencingToken());
+            assertEquals(moved.revision(), only(store, key).revision());
+        }
+    }
+
+    @Test
+    void aBadRequestIsRejectedRatherThanAnsweredWithAnEmptyPage() {
+        var clock = new MutableClock(EPOCH);
+        try (var store = open("rejections.db", clock)) {
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                    failureOf(() -> await(store.listProcessInstances(TENANT,
+                            ProcessInventoryQuery.outstanding(0)))));
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                    failureOf(() -> await(store.listProcessInstances(TENANT,
+                            ProcessInventoryQuery.outstanding(store.maxInventoryPageSize() + 1)))),
+                    "rejected rather than clamped: a silently shortened page is indistinguishable "
+                            + "from a last page, and a caller would stop paginating early");
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                    failureOf(() -> await(store.listProcessInstances(TENANT,
+                            ProcessInventoryQuery.builder().status(ProcessInstanceStatus.COMPLETED)
+                                    .status(ProcessInstanceStatus.FAILED).limit(5).build()))),
+                    "a filter naming only terminal statuses while excluding terminal rows can never "
+                            + "match, and an empty page would read as 'there is none'");
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                    failureOf(() -> await(store.listProcessInstances("  ",
+                            ProcessInventoryQuery.outstanding(5)))));
+        }
+    }
+
+    @Test
+    void aMixedStatusFilterExcludingTerminalRowsIsMeaningfulRatherThanContradictory() {
+        var clock = new MutableClock(EPOCH);
+        var running = new ExecutionKey(TENANT, UUID.randomUUID());
+        var failed = new ExecutionKey(TENANT, UUID.randomUUID());
+        try (var store = open("mixed.db", clock)) {
+            createRunning(store, running, UUID.randomUUID());
+            clock.advance(Duration.ofSeconds(1));
+            createFailed(store, failed, UUID.randomUUID());
+
+            ProcessInventoryPage page = await(store.listProcessInstances(TENANT,
+                    ProcessInventoryQuery.builder()
+                            .status(ProcessInstanceStatus.RUNNING)
+                            .status(ProcessInstanceStatus.FAILED)
+                            .limit(10).build()));
+            assertEquals(List.of(running.processInstanceId()),
+                    page.items().stream().map(item -> item.key().processInstanceId()).toList(),
+                    "the two axes compose as a conjunction; naming FAILED does not smuggle terminal "
+                            + "rows past includeTerminal");
+        }
+    }
+
+    // ---------------------------------------------------------------- fixtures
+
+    private ProcessInventoryEntry only(SqliteExecutionStore store, ExecutionKey key) {
+        return await(store.findProcessInstance(key)).orElseThrow();
+    }
+
+    private void createRunning(SqliteExecutionStore store, ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, traversalId)));
+        await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+    }
+
+    private void createWaiting(SqliteExecutionStore store, ExecutionKey key, UUID traversalId) {
+        createRunning(store, key, traversalId);
+        StoredProcessInstance running = await(store.load(key));
+        await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .build()));
+    }
+
+    private void createFailed(SqliteExecutionStore store, ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, traversalId)));
+        await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()));
+    }
+
+    private void parkThenFail(SqliteExecutionStore store, ExecutionKey key, UUID traversalId,
+                              UUID invocationId, UUID attemptId) {
+        StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, traversalId)));
+        StoredProcessInstance scheduled = await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                        new NodeInvocation(invocationId, "mail.send", null, NodeInvocationStatus.SCHEDULED)))
+                .apply(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                        NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(traversalId, invocationId,
+                        new NodeAttempt(attemptId, 1, NodeAttemptStatus.SCHEDULED)))
+                .build()));
+        StoredProcessInstance running = await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        StoredProcessInstance parked = await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .apply(new ExecutionTransition.AttemptParked(traversalId, invocationId, attemptId,
+                        "dispatched with unknown outcome"))
+                .build()));
+        await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(parked.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()));
+    }
+
+    private SqliteExecutionStore open(String name, MutableClock clock) {
+        return open(databaseDirectory.resolve(name), clock);
+    }
+
+    private SqliteExecutionStore open(Path file, MutableClock clock) {
+        return new SqliteExecutionStore(file, clock);
+    }
+
+    private static <T> T await(CompletionStage<T> stage) {
+        return stage.toCompletableFuture().join();
+    }
+
+    private static ExecutionStoreFailure failureOf(Runnable operation) {
+        CompletionException thrown = assertThrows(CompletionException.class, operation::run);
+        ExecutionStoreException failure = ExecutionStoreException.unwrap(thrown);
+        assertNotNull(failure, "adapters must not leak non-store exceptions: " + thrown);
+        return failure.failure();
+    }
+}

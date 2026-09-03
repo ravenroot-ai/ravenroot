@@ -483,6 +483,50 @@ class DefaultGraphDeploymentDurableIngressTest {
      * retry after the failure is a fresh commit, not a duplicate of a write that never happened.
      */
     private static final class FailingInboxStore implements ExecutionStore {
+        // Durable inventory (issue 154): pure delegation, so this double differs from the store it
+        // wraps only in the one operation it exists to perturb.
+
+        @Override
+        public int maxInventoryPageSize() {
+            return delegate.maxInventoryPageSize();
+        }
+
+        @Override
+        public Duration terminalRetention() {
+            return delegate.terminalRetention();
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<ai.ravenroot.api.persistence.ProcessInventoryPage>
+                listProcessInstances(String tenantId,
+                        ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            return delegate.listProcessInstances(tenantId, query);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry>>
+                findProcessInstance(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.findProcessInstance(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.List<ai.ravenroot.api.persistence.TraversalInventoryEntry>>
+                listTraversals(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.listTraversals(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId) {
+            return delegate.inventoryRetainedFrom(tenantId);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+            return delegate.purgeExpiredProcessInstances(tenantId);
+        }
+
         private final ExecutionStore delegate;
         private final java.util.function.BooleanSupplier shouldFail;
 
@@ -644,6 +688,50 @@ class DefaultGraphDeploymentDurableIngressTest {
      * {@code ingressEventIdDerivationIsUnchangedByTheNulByteFix} exists to pin.
      */
     private static final class EventIdCapturingStore implements ExecutionStore {
+        // Durable inventory (issue 154): pure delegation, so this double differs from the store it
+        // wraps only in the one operation it exists to perturb.
+
+        @Override
+        public int maxInventoryPageSize() {
+            return delegate.maxInventoryPageSize();
+        }
+
+        @Override
+        public Duration terminalRetention() {
+            return delegate.terminalRetention();
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<ai.ravenroot.api.persistence.ProcessInventoryPage>
+                listProcessInstances(String tenantId,
+                        ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            return delegate.listProcessInstances(tenantId, query);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry>>
+                findProcessInstance(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.findProcessInstance(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<
+                java.util.List<ai.ravenroot.api.persistence.TraversalInventoryEntry>>
+                listTraversals(ai.ravenroot.api.persistence.ExecutionKey key) {
+            return delegate.listTraversals(key);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId) {
+            return delegate.inventoryRetainedFrom(tenantId);
+        }
+
+        @Override
+        public java.util.concurrent.CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+            return delegate.purgeExpiredProcessInstances(tenantId);
+        }
+
         private final ExecutionStore delegate;
         private final java.util.function.Consumer<UUID> onEventId;
 

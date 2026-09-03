@@ -10,24 +10,32 @@ import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
+import ai.ravenroot.api.persistence.InventoryCursor;
+import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryPage;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -75,6 +83,18 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * learn how long it may be disconnected and still resume.
      */
     private static final Duration DEFAULT_JOURNAL_RETENTION = Duration.ofHours(24);
+    /**
+     * The largest inventory page this adapter returns, matching the deployment registry's own page
+     * bound so a caller does not learn two different maxima from one product.
+     */
+    private static final int DEFAULT_MAX_INVENTORY_PAGE_SIZE = 100;
+    /**
+     * Terminal-instance retention default. Seven days, matching {@code SqliteStoreConfig}, so swapping
+     * adapters does not silently change how long a completed execution stays discoverable. The reason
+     * for the number is in that record's Javadoc; it is repeated as a constant rather than shared,
+     * because core must not depend on a persistence adapter.
+     */
+    private static final Duration DEFAULT_TERMINAL_RETENTION = Duration.ofDays(7);
 
     private final Object monitor = new Object();
     private final Map<ExecutionKey, Entry> instances = new LinkedHashMap<>();
@@ -100,12 +120,19 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<ExecutionKey, Long> streamSequences = new LinkedHashMap<>();
     /** Inbox deduplication records, keyed per tenant, consumer and event, with their expiry. */
     private final Map<InboxKey, Instant> inbox = new LinkedHashMap<>();
+    /**
+     * Per-tenant inventory retention floor. Absent means nothing has been purged, which reads as
+     * {@link Instant#MIN} — the same convention {@link #forgottenBefore} uses, and for the same
+     * reason: writing a floor at store creation would record a forgetting that never happened.
+     */
+    private final Map<String, Instant> inventoryRetainedFrom = new LinkedHashMap<>();
     private final AtomicLong revisionSequence = new AtomicLong();
     private final Clock clock;
     private final Duration maxLeaseTtl;
     private final int maxPayloadBytes;
     private final Duration maxClockSkew;
     private final Duration journalRetention;
+    private final Duration terminalRetention;
 
     public InMemoryExecutionStore() {
         this(Clock.systemUTC(), DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
@@ -126,6 +153,17 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                DEFAULT_TERMINAL_RETENTION);
+    }
+
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention) {
+        this.terminalRetention = Objects.requireNonNull(terminalRetention, "terminalRetention");
+        if (terminalRetention.isZero() || terminalRetention.isNegative()) {
+            throw new IllegalArgumentException("terminalRetention must be positive");
+        }
         this.journalRetention = Objects.requireNonNull(journalRetention, "journalRetention");
         if (journalRetention.isZero() || journalRetention.isNegative()) {
             throw new IllegalArgumentException("journalRetention must be positive");
@@ -154,8 +192,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         // into invisibility. Neither capability makes a durability claim, so an in-memory adapter can
         // honour both honestly: they are about atomicity with the batch and about pruning, not about
         // surviving process death, which is what DURABLE says and what this adapter still must not say.
+        // PROCESS_INVENTORY and INVENTORY_RETENTION join them on the same rule. Neither makes a
+        // durability claim: the inventory is served from the rows this adapter already holds, ordering
+        // and tenant isolation are properties of the query rather than of the medium, and retention is
+        // an explicit purge. Declaring both here means every inventory assertion in the conformance
+        // suite executes against two adapters instead of being skipped into invisibility.
         return Set.of(StoreCapability.TRANSACTIONAL_BATCH, StoreCapability.IDEMPOTENCY_PURGE,
-                StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION);
+                StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
+                StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION);
     }
 
     @Override
@@ -248,12 +292,37 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     timers.put(schedule.timerId(), schedule);
                 }
 
+                // createdAt is written once and never rewritten. It is half of the inventory's sort
+                // key, and the whole reason that ordering is stable is that neither component of it
+                // can move while a scan is in flight.
+                Instant createdAt = existing == null ? now : existing.createdAt;
+                // One increment per authoritative status transition actually applied, counted from the
+                // batch rather than from a before/after comparison: a batch that moves an instance
+                // RUNNING -> WAITING -> RUNNING has applied two transitions, and a comparison of the
+                // endpoints would see none. Creation is itself the first transition, into the initial
+                // status. A replayed batch never reaches here, so a duplicate delivery cannot inflate
+                // the count -- which is what keeps the generation meaningful under at-least-once work
+                // delivery.
+                long generation = (existing == null ? 0L : existing.lifecycleGeneration)
+                        + (existing == null ? 1L : 0L) + processTransitionCount(batch);
+                ExecutionOrigin origin = (existing == null ? ExecutionOrigin.none() : existing.origin)
+                        .mergedWith(batch.origin());
+                // Retention starts when the instance becomes terminal and never restarts, because a
+                // terminal instance cannot transition again. A non-terminal row has no retainedUntil at
+                // all rather than a far-future one: absent means "retention has not started", and a
+                // sentinel would be a date an operator could read as a real deadline.
+                Instant retainedUntil = folded.status().terminal()
+                        ? (existing != null && existing.retainedUntil != null
+                                ? existing.retainedUntil : plusClamped(now, terminalRetention))
+                        : null;
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
                         timers,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
-                        existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged));
+                        existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
+                        createdAt, generation, origin, retainedUntil);
                 dropAcknowledgementsForRescheduledWork(next);
 
                 batch.idempotency().ifPresent(write -> idempotency.put(new IdempotencyKey(key.tenantId(), write.key()),
@@ -570,6 +639,288 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
+    // ---------------------------------------------------------------- durable execution inventory
+
+    @Override
+    public int maxInventoryPageSize() {
+        return DEFAULT_MAX_INVENTORY_PAGE_SIZE;
+    }
+
+    @Override
+    public Duration terminalRetention() {
+        return terminalRetention;
+    }
+
+    @Override
+    public CompletionStage<ProcessInventoryPage> listProcessInstances(String tenantId,
+                                                                      ProcessInventoryQuery query) {
+        return complete(() -> {
+            requireCapability(StoreCapability.PROCESS_INVENTORY);
+            requireTenantId(tenantId);
+            requireInventoryQuery(query);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                InventoryCursor.Position after = query.cursor()
+                        .map(cursor -> InventoryCursor.decode(tenantId, cursor))
+                        .orElse(null);
+
+                var matching = new ArrayList<Map.Entry<ExecutionKey, Entry>>();
+                for (var instance : instances.entrySet()) {
+                    // One tenant per call. A physically isolated adapter would not see another
+                    // tenant's rows at all; this adapter shares one map, so the filter is what makes
+                    // the two indistinguishable to a caller.
+                    if (!instance.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    if (!admits(instance.getValue(), query, now)) {
+                        continue;
+                    }
+                    matching.add(instance);
+                }
+                matching.sort(INVENTORY_ORDER);
+
+                var page = new ArrayList<ProcessInventoryEntry>(Math.min(query.limit(), matching.size()));
+                Map.Entry<ExecutionKey, Entry> last = null;
+                boolean more = false;
+                for (var instance : matching) {
+                    if (after != null && !after.precedes(instance.getValue().createdAt,
+                            instance.getKey().processInstanceId())) {
+                        continue;
+                    }
+                    if (page.size() == query.limit()) {
+                        more = true;
+                        break;
+                    }
+                    page.add(entryOf(instance.getKey(), instance.getValue(), now));
+                    last = instance;
+                }
+                // A next cursor is minted only when a further row was actually seen. Handing one back
+                // on a page that happens to be exactly `limit` long would cost every caller one empty
+                // round trip, and worse, a caller that treats a present cursor as "there is more" would
+                // report work that does not exist.
+                Optional<String> next = more && last != null
+                        ? Optional.of(InventoryCursor.encode(tenantId, last.getValue().createdAt,
+                                last.getKey().processInstanceId()))
+                        : Optional.empty();
+                return new ProcessInventoryPage(List.copyOf(page), next, inventoryFloorOf(tenantId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key) {
+        return complete(() -> {
+            requireCapability(StoreCapability.PROCESS_INVENTORY);
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                // The map is keyed by tenant AND id together, so a cross-tenant hit is not excluded by
+                // a check that could be forgotten -- it is not a lookup that can be expressed. Absent
+                // and not-yours are therefore the same answer by construction rather than by policy.
+                return entry == null ? Optional.<ProcessInventoryEntry>empty()
+                        : Optional.of(entryOf(key, entry, clock.instant()));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key) {
+        return complete(() -> {
+            requireCapability(StoreCapability.PROCESS_INVENTORY);
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                if (entry == null) {
+                    // NotFound rather than an empty list: an instance with no traversals exists and
+                    // honestly reports none, and collapsing the two would make "you asked about
+                    // nothing" indistinguishable from "it has nothing".
+                    throw failure(new ExecutionStoreFailure.NotFound(key));
+                }
+                boolean leaseLive = leaseLive(entry, clock.instant());
+                var rows = new ArrayList<TraversalInventoryEntry>(entry.state.traversals().size());
+                int position = 0;
+                for (Traversal traversal : entry.state.traversals().values()) {
+                    int invocations = traversal.invocations().size();
+                    int parked = 0;
+                    for (NodeInvocation invocation : traversal.invocations().values()) {
+                        for (NodeAttempt attempt : invocation.attempts()) {
+                            if (attempt.status() == NodeAttemptStatus.PARKED) {
+                                parked++;
+                            }
+                        }
+                    }
+                    rows.add(new TraversalInventoryEntry(key, traversal.traversalId(), position++,
+                            traversal.ingressNodeId(), traversal.status(),
+                            InventoryDisposition.ofTraversal(traversal.status(), leaseLive, parked > 0),
+                            invocations, parked));
+                }
+                return List.copyOf(rows);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> inventoryRetainedFrom(String tenantId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                return inventoryFloorOf(tenantId);
+            }
+        });
+    }
+
+    /**
+     * Removes this tenant's terminal instances whose retention window has elapsed and advances its
+     * floor, in that order and only when something was actually removed.
+     *
+     * <p>The zero guard matters in the same way it does for idempotency: a purge that removed nothing
+     * must leave the floor exactly where it was, because the floor is what a caller reads to decide
+     * whether an absent row expired or never existed, and advancing it for a tenant that lost nothing
+     * would report a retention gap that does not exist -- on every tick of a periodic job.</p>
+     */
+    @Override
+    public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.INVENTORY_RETENTION);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                var doomed = new ArrayList<ExecutionKey>();
+                Instant earliest = null;
+                for (var instance : instances.entrySet()) {
+                    if (!instance.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    Entry entry = instance.getValue();
+                    // Only terminal rows are eligible, however old a non-terminal one is. Age is not
+                    // evidence that work is finished, and pruning a stuck instance would destroy the
+                    // row an operator needs in order to discover that it is stuck.
+                    if (!entry.state.status().terminal() || entry.retainedUntil == null
+                            || entry.retainedUntil.isAfter(now)) {
+                        continue;
+                    }
+                    doomed.add(instance.getKey());
+                    if (earliest == null || entry.retainedUntil.isBefore(earliest)) {
+                        earliest = entry.retainedUntil;
+                    }
+                }
+                if (doomed.isEmpty()) {
+                    return 0L;
+                }
+                doomed.forEach(instances::remove);
+                doomed.forEach(streamSequences::remove);
+                // The floor is the earliest instant that is no longer complete, which is the earliest
+                // retainedUntil actually removed -- not `now`. Advancing to now would claim a gap
+                // covering rows that are still present, and every caller reading the floor would treat
+                // live instances as possibly-expired.
+                Instant floor = earliest;
+                inventoryRetainedFrom.merge(tenantId, floor,
+                        (current, candidate) -> candidate.isAfter(current) ? candidate : current);
+                return (long) doomed.size();
+            }
+        });
+    }
+
+    // ---------------------------------------------------------------- inventory helpers
+
+    /**
+     * {@code (createdAt DESC, processInstanceId DESC)}. The id is compared as text rather than by
+     * {@link UUID#compareTo}, which orders by signed 64-bit halves and therefore disagrees with the
+     * lexicographic order a SQL adapter gets from a TEXT column. Two adapters that ordered ties
+     * differently would hand out cursors that skip or repeat rows against each other.
+     */
+    private static final Comparator<Map.Entry<ExecutionKey, Entry>> INVENTORY_ORDER =
+            Comparator.<Map.Entry<ExecutionKey, Entry>, Instant>comparing(item -> item.getValue().createdAt)
+                    .thenComparing(item -> item.getKey().processInstanceId().toString())
+                    .reversed();
+
+    private Instant inventoryFloorOf(String tenantId) {
+        return inventoryRetainedFrom.getOrDefault(tenantId, Instant.MIN);
+    }
+
+    private static boolean leaseLive(Entry entry, Instant now) {
+        return entry.lease != null && now.isBefore(entry.lease.expiresAt());
+    }
+
+    private static boolean anyAttemptParked(Entry entry) {
+        for (Traversal traversal : entry.state.traversals().values()) {
+            for (NodeInvocation invocation : traversal.invocations().values()) {
+                for (NodeAttempt attempt : invocation.attempts()) {
+                    if (attempt.status() == NodeAttemptStatus.PARKED) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private boolean admits(Entry entry, ProcessInventoryQuery query, Instant now) {
+        if (!query.admits(entry.state.status())) {
+            return false;
+        }
+        if (query.deploymentId().isPresent()
+                && !query.deploymentId().equals(entry.origin.deploymentId())) {
+            return false;
+        }
+        if (query.ownerWorkerId().isPresent()) {
+            // An owner filter matches only a LIVE lease. A lapsed lease names the worker that is no
+            // longer renewing, and answering "owned by w" with rows w has abandoned is the opposite of
+            // what an operator draining a worker is asking.
+            if (!leaseLive(entry, now)
+                    || !entry.lease.workerId().equals(query.ownerWorkerId().get())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private ProcessInventoryEntry entryOf(ExecutionKey key, Entry entry, Instant now) {
+        boolean leaseLive = leaseLive(entry, now);
+        return new ProcessInventoryEntry(key, entry.state.status(),
+                InventoryDisposition.ofProcess(entry.state.status(), leaseLive, anyAttemptParked(entry)),
+                entry.revision, entry.lifecycleGeneration, entry.graphVersionPin,
+                entry.origin.deploymentId(), entry.origin.workloadId(), entry.origin.correlationId(),
+                leaseLive ? Optional.of(entry.lease.workerId()) : Optional.empty(),
+                entry.fencingToken,
+                leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
+                entry.state.traversals().size(), entry.createdAt, entry.updatedAt,
+                Optional.ofNullable(entry.retainedUntil));
+    }
+
+    private void requireInventoryQuery(ProcessInventoryQuery query) {
+        if (query == null) {
+            throw failure(ExecutionStoreFailure.invalid("query is mandatory"));
+        }
+        requireInventoryLimit(query.limit(), maxInventoryPageSize());
+        if (query.isSelfContradictory()) {
+            throw failure(ExecutionStoreFailure.invalid("a query that filters only for terminal "
+                    + "statuses while excluding terminal rows can never match; an empty page would be "
+                    + "indistinguishable from there being none"));
+        }
+    }
+
+    /**
+     * Rejects rather than clamps. A silently reduced page is indistinguishable from a last page, and a
+     * caller paginating on "fewer rows than I asked for means I am done" would stop early.
+     */
+    static void requireInventoryLimit(int limit, int maximum) {
+        if (limit < 1) {
+            throw new ExecutionStoreException(
+                    ExecutionStoreFailure.invalid("inventory limit must be positive"));
+        }
+        if (limit > maximum) {
+            throw new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                    "inventory limit " + limit + " exceeds the declared maximum " + maximum));
+        }
+    }
+
+    private static long processTransitionCount(ExecutionBatch batch) {
+        return batch.transitions().stream()
+                .filter(ExecutionTransition.ProcessTransitioned.class::isInstance)
+                .count();
+    }
+
     /**
      * Discards everything, which for a <strong>non-durable</strong> adapter is exactly right
      * (ADR 0010 section 13.1): retaining state across close would falsely simulate durability, which
@@ -593,6 +944,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             instances.clear();
             idempotency.clear();
             forgottenBefore.clear();
+            inventoryRetainedFrom.clear();
         }
     }
 
@@ -1213,10 +1565,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, TimerSchedule> timers;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
+        private final Instant createdAt;
+        private final long lifecycleGeneration;
+        private final ExecutionOrigin origin;
+        /** Null while the instance is non-terminal: retention has not started, rather than started far off. */
+        private final Instant retainedUntil;
 
         private Entry(ProcessInstance state, long revision, GraphVersionPin graphVersionPin, String tenantId,
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
-                      Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged) {
+                      Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
+                      long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
             this.revision = revision;
             this.graphVersionPin = graphVersionPin;
@@ -1227,6 +1585,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.timers = timers;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
+            this.createdAt = createdAt;
+            this.lifecycleGeneration = lifecycleGeneration;
+            this.origin = origin;
+            this.retainedUntil = retainedUntil;
         }
 
         private StoredProcessInstance toStored() {

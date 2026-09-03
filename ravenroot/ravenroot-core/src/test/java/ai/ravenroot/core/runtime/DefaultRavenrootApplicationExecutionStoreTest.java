@@ -271,6 +271,48 @@ class DefaultRavenrootApplicationExecutionStoreTest {
 
     /** Declares no capabilities, so composition must refuse it. */
     private static class NonTransactionalStore implements ExecutionStore {
+        // Durable inventory (issue 154). This double declares no capabilities and exists only to be
+        // refused at composition time, so every operation stays unimplemented rather than acquiring a
+        // behaviour that no assertion covers.
+
+        @Override
+        public int maxInventoryPageSize() {
+            return 1;
+        }
+
+        @Override
+        public Duration terminalRetention() {
+            return Duration.ofHours(1);
+        }
+
+        @Override
+        public CompletionStage<ai.ravenroot.api.persistence.ProcessInventoryPage> listProcessInstances(
+                String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry>>
+                findProcessInstance(ExecutionKey key) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<List<ai.ravenroot.api.persistence.TraversalInventoryEntry>> listTraversals(
+                ExecutionKey key) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
         public Set<StoreCapability> capabilities() {
             return Set.of();

@@ -303,7 +303,84 @@ final class SqliteSchema {
                 // Existing invocations were operational by definition. The non-null default makes
                 // upgrade and replay preserve that meaning without rewriting old rows in Java.
                 new SchemaMigration(4, "CORE-317 structural incoming node command", List.of(
-                        "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")));
+                        "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")),
+                // Issue 154. Additive in structure: every column is added to an existing table and no
+                // table is recreated, so an interrupted run leaves a real intermediate version and the
+                // fold of every pre-existing row is unchanged. There is no second copy of the
+                // lifecycle here and no projection offset -- the inventory is served by reading these
+                // same rows, which is what makes it atomic with the transitions for free and leaves
+                // nothing that could be rebuilt into successful work that never happened.
+                //
+                // ONE ROW REWRITE, and it is the created_at backfill. A pre-existing row has no
+                // creation instant recorded anywhere, and created_at is half of the inventory's sort
+                // key, so leaving it at the DEFAULT would collapse every old row onto epoch zero and
+                // order them by id alone. The backfill copies updated_at, and the CAVEAT IS REAL AND
+                // PERMANENT: for a row written before this migration, created_at is the instant of its
+                // LAST WRITE, not of its creation. It is a truthful upper bound rather than a
+                // fabrication -- the instance certainly existed by then -- and it is stable from this
+                // point on, because created_at is never written again. Rows created from version 5
+                // onwards carry the real instant.
+                //
+                // lifecycle_generation defaults to 1 for pre-existing rows and that is a FLOOR, not a
+                // count: an instance that exists has had at least the transition that created it, and
+                // no record survives of how many followed. From version 5 onwards the counter is
+                // incremented in the same transaction as each authoritative status transition, so it
+                // is exact for every instance created after the upgrade.
+                //
+                // retained_until is left NULL, including on rows that are already terminal, because a
+                // migration cannot know the configured terminal retention and inventing one would
+                // schedule a deletion on the strength of a guess. The store treats a terminal row with
+                // a NULL retained_until as due at updated_at + terminalRetention(), which for a
+                // terminal row is exactly its terminal transition instant, so the upgrade path needs
+                // no backfill and no row is retained forever by accident.
+                //
+                // DOWNGRADE is safe until the first row carries a non-NULL deployment_id, workload_id,
+                // correlation_id or retained_until, or a lifecycle_generation above 1 -- that is, until
+                // the first write under version 5. A pre-PERS-05 binary does not select these columns,
+                // so it reads and writes every row correctly; what it loses is the values it cannot
+                // see, and its next upsert of that row leaves them untouched because the upsert names
+                // only the columns it knows. After the first version-5 write the file is at a version
+                // the older binary refuses to open, which is the guard doing its job.
+                new SchemaMigration(5, "issue 154 durable tenant-scoped process and traversal inventory",
+                        List.of(
+                        "ALTER TABLE process_instance ADD COLUMN created_at_epoch_second "
+                                + "INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE process_instance ADD COLUMN created_at_nano INTEGER NOT NULL DEFAULT 0",
+                        "UPDATE process_instance SET created_at_epoch_second = updated_at_epoch_second, "
+                                + "created_at_nano = updated_at_nano",
+                        "ALTER TABLE process_instance ADD COLUMN lifecycle_generation "
+                                + "INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE process_instance ADD COLUMN deployment_id TEXT",
+                        "ALTER TABLE process_instance ADD COLUMN workload_id TEXT",
+                        "ALTER TABLE process_instance ADD COLUMN correlation_id TEXT",
+                        "ALTER TABLE process_instance ADD COLUMN retained_until_epoch_second INTEGER",
+                        "ALTER TABLE process_instance ADD COLUMN retained_until_nano INTEGER",
+                        // The listing walks exactly this axis and nothing else, so it is the index
+                        // that matters. tenant_id leads because it leads every key in this schema:
+                        // an index that did not would let a scan touch another tenant's pages before
+                        // the filter discarded them.
+                        "CREATE INDEX idx_process_instance_inventory ON process_instance "
+                                + "(tenant_id, created_at_epoch_second DESC, created_at_nano DESC, "
+                                + "process_instance_id DESC)",
+                        "CREATE INDEX idx_process_instance_status ON process_instance "
+                                + "(tenant_id, status)",
+                        "CREATE INDEX idx_process_instance_deployment ON process_instance "
+                                + "(tenant_id, deployment_id)",
+                        // The owner filter resolves a worker to its instances, which is the opposite
+                        // direction from the (tenant_id, process_instance_id) primary key.
+                        "CREATE INDEX idx_lease_worker ON lease (tenant_id, worker_id)",
+                        // Modelled on journal_watermark, and a table rather than a column for the same
+                        // reason: the floor must outlive every row it describes. Derived from the
+                        // surviving rows it would reset to "nothing was ever forgotten" the moment the
+                        // last purged tenant's rows were gone, and a caller reading it would treat an
+                        // expired instance as one that never existed.
+                        """
+                        CREATE TABLE inventory_watermark (
+                            tenant_id                   TEXT    NOT NULL PRIMARY KEY,
+                            retained_from_epoch_second  INTEGER NOT NULL,
+                            retained_from_nano          INTEGER NOT NULL
+                        )
+                        """)));
     }
 
     static int currentVersion() {

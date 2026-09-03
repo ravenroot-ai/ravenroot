@@ -25,6 +25,7 @@ public final class ExecutionBatch {
     private final List<UUID> timersToCancel;
     private final IdempotencyWrite idempotency;
     private final List<EventEnvelope> events;
+    private final ExecutionOrigin origin;
 
     private ExecutionBatch(Builder builder) {
         this.key = builder.key;
@@ -35,8 +36,13 @@ public final class ExecutionBatch {
         this.timersToCancel = List.copyOf(builder.timersToCancel);
         this.idempotency = builder.idempotency;
         this.events = List.copyOf(builder.events);
+        this.origin = builder.origin == null ? ExecutionOrigin.none() : builder.origin;
+        // An origin counts as an operation. Recording a deployment, workload or correlation identity
+        // changes stored state and is a legitimate write on its own, which is what lets a caller that
+        // learns the relationship after creation annotate the row without inventing a no-op transition
+        // to carry it.
         if (transitions.isEmpty() && timersToSchedule.isEmpty() && timersToCancel.isEmpty()
-                && idempotency == null && events.isEmpty()) {
+                && idempotency == null && events.isEmpty() && origin.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -147,6 +153,26 @@ public final class ExecutionBatch {
         return events;
     }
 
+    /**
+     * The deployment, workload and correlation identities this batch records on the instance's
+     * inventory row (issue 154).
+     *
+     * <p>These are descriptive relationships rather than lifecycle state, so they are annotation
+     * semantics and not a transition: every component present here is written, and every component
+     * absent leaves the stored value exactly as it was. A recovery or re-entry write that does not know
+     * the deployment therefore cannot erase what creation recorded, and there is no ordering of
+     * partially-informed callers that destroys information.</p>
+     *
+     * <p>Deliberately not the write-once rule {@link GraphVersionPin} follows: the pin is write-once
+     * because replay correctness depends on replaying against the same definition, whereas a
+     * redeployment genuinely can move hosting, so a later origin value is an update rather than a
+     * contradiction.</p>
+ * @return the origin components this batch records; {@link ExecutionOrigin#none()} when it records none.
+     */
+    public ExecutionOrigin origin() {
+        return origin;
+    }
+
 /**
  * Defines the builder contract exposed to Ravenroot integrators.
  */
@@ -159,6 +185,7 @@ public final class ExecutionBatch {
         private final List<UUID> timersToCancel = new ArrayList<>();
         private IdempotencyWrite idempotency;
         private final List<EventEnvelope> events = new ArrayList<>();
+        private ExecutionOrigin origin;
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -254,6 +281,20 @@ public final class ExecutionBatch {
         public Builder publish(EventEnvelope envelope) {
             if (envelope == null) throw new IllegalArgumentException("envelope cannot be null");
             events.add(envelope);
+            return this;
+        }
+
+        /**
+         * Records the deployment, workload and correlation identities of this execution.
+         *
+         * <p>Repeatable: a later call merges over an earlier one component by component, so a caller
+         * assembling the origin from several sources never has to know which source runs last.</p>
+ * @param value origin components to record; absent components leave stored values untouched.
+ * @return this builder.
+         */
+        public Builder recordOrigin(ExecutionOrigin value) {
+            if (value == null) throw new IllegalArgumentException("origin cannot be null");
+            this.origin = origin == null ? value : origin.mergedWith(value);
             return this;
         }
 

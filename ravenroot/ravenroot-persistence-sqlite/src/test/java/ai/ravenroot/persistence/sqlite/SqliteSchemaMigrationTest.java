@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -53,7 +54,8 @@ class SqliteSchemaMigrationTest {
             assertEquals(SqliteSchema.currentVersion(), SqliteSchema.versionOf(connection));
             assertTrue(tableNames(connection).containsAll(List.of("process_instance", "traversal",
                     "invocation", "invocation_parent", "attempt", "timer", "lease", "work_claim",
-                    "work_acknowledgement", "idempotency_record", "idempotency_watermark")));
+                    "work_acknowledgement", "idempotency_record", "idempotency_watermark",
+                    "inventory_watermark")));
         }
     }
 
@@ -139,6 +141,95 @@ class SqliteSchemaMigrationTest {
                     "the first statement of the failed migration must have rolled back with it");
             assertEquals(List.of(1), historyVersions(connection));
         }
+    }
+
+    /**
+     * The one migration in this schema that rewrites rows, and the caveat it leaves behind.
+     *
+     * <p>Everything else in version 5 is additive, so the interesting question is not whether the
+     * columns appear — it is whether a row written under version 4 comes out of the upgrade with a
+     * usable creation instant, because {@code created_at} is half of the inventory's sort key and a
+     * row left at the DEFAULT would collapse onto epoch zero. The backfill copies {@code updated_at},
+     * which for an old row is its <em>last write</em> and not its creation; that is a truthful upper
+     * bound rather than a fabrication, and this test pins it so the caveat cannot quietly become a
+     * claim of accuracy it never had.</p>
+     */
+    @Test
+    void migrationFiveBackfillsCreatedAtFromUpdatedAtAndLeavesTheGenerationAtItsFloor() throws Exception {
+        List<SchemaMigration> throughFour = SqliteSchema.migrations().subList(0, 4);
+        try (Connection connection = open("inventory-upgrade.db")) {
+            assertEquals(4, SqliteSchema.migrate(connection, throughFour, CLOCK));
+            insertLegacyInstance(connection, "acme", "11111111-1111-1111-1111-111111111111", 1700, 250);
+
+            assertEquals(5, SqliteSchema.migrate(connection, CLOCK));
+
+            assertTrue(columnNames(connection, "process_instance").containsAll(List.of(
+                    "created_at_epoch_second", "created_at_nano", "lifecycle_generation",
+                    "deployment_id", "workload_id", "correlation_id",
+                    "retained_until_epoch_second", "retained_until_nano")));
+            assertEquals(List.of(1700L, 250L, 1L),
+                    legacyInstanceRow(connection, "11111111-1111-1111-1111-111111111111"),
+                    "created_at is backfilled from updated_at -- the last write, not the true "
+                            + "creation -- and lifecycle_generation is a floor of one rather than a "
+                            + "count nobody recorded");
+            assertNull(retainedUntilOf(connection, "11111111-1111-1111-1111-111111111111"),
+                    "a migration cannot know the configured retention, so it schedules no deletion; "
+                            + "the store resolves a terminal row with no deadline against updated_at");
+            assertTrue(tableNames(connection).contains("inventory_watermark"));
+            assertTrue(indexNames(connection).containsAll(List.of("idx_process_instance_inventory",
+                    "idx_process_instance_status", "idx_process_instance_deployment",
+                    "idx_lease_worker")));
+        }
+    }
+
+    private static void insertLegacyInstance(Connection connection, String tenant, String id,
+                                             long second, int nano) throws SQLException {
+        try (var statement = connection.prepareStatement("INSERT INTO process_instance (tenant_id, "
+                + "process_instance_id, status, graph_version_pin, revision, fencing_token, "
+                + "updated_at_epoch_second, updated_at_nano) VALUES (?, ?, 'RUNNING', 'graph-v1', 3, 0, ?, ?)")) {
+            statement.setString(1, tenant);
+            statement.setString(2, id);
+            statement.setLong(3, second);
+            statement.setInt(4, nano);
+            statement.executeUpdate();
+        }
+    }
+
+    private static List<Long> legacyInstanceRow(Connection connection, String id) throws SQLException {
+        try (var statement = connection.prepareStatement("SELECT created_at_epoch_second, "
+                + "created_at_nano, lifecycle_generation FROM process_instance "
+                + "WHERE process_instance_id = ?")) {
+            statement.setString(1, id);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                return List.of(rows.getLong(1), rows.getLong(2), rows.getLong(3));
+            }
+        }
+    }
+
+    private static Long retainedUntilOf(Connection connection, String id) throws SQLException {
+        try (var statement = connection.prepareStatement("SELECT retained_until_epoch_second "
+                + "FROM process_instance WHERE process_instance_id = ?")) {
+            statement.setString(1, id);
+            try (ResultSet rows = statement.executeQuery()) {
+                assertTrue(rows.next());
+                long value = rows.getLong(1);
+                return rows.wasNull() ? null : value;
+            }
+        }
+    }
+
+    private static List<String> indexNames(Connection connection) throws SQLException {
+        var names = new ArrayList<String>();
+        try (Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery(
+                     "SELECT name FROM sqlite_master WHERE type = 'index' AND name IS NOT NULL "
+                             + "ORDER BY name")) {
+            while (rows.next()) {
+                names.add(rows.getString(1));
+            }
+        }
+        return names;
     }
 
     private Connection open(String name) throws SQLException {

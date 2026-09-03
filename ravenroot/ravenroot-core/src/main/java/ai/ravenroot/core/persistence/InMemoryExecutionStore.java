@@ -587,6 +587,26 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * expiry would never do. Fencing tokens must not reset on reopen either; a session is not a
      * fencing domain.</p>
      */
+    /**
+     * Reports which graph definitions this store's instances still pin, so a co-located definition
+     * store can decide retention without keeping a reference count of its own.
+     *
+     * <p>The pin reference is the definition's content address; that identity is shared on purpose,
+     * so a pin written before any definition store existed still names a stored definition.</p>
+     *
+     * @return oracle answering whether any instance of a tenant pins a given definition.
+     */
+    public ai.ravenroot.api.persistence.GraphDefinitionReferences graphDefinitionReferences() {
+        return key -> {
+            synchronized (monitor) {
+                return instances.entrySet().stream().anyMatch(entry ->
+                        entry.getKey().tenantId().equals(key.tenantId())
+                                && entry.getValue().graphVersionPin.reference()
+                                        .equals(key.contentId().value()));
+            }
+        };
+    }
+
     @Override
     public void close() {
         synchronized (monitor) {

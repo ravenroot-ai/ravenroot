@@ -303,7 +303,49 @@ final class SqliteSchema {
                 // Existing invocations were operational by definition. The non-null default makes
                 // upgrade and replay preserve that meaning without rewriting old rows in Java.
                 new SchemaMigration(4, "CORE-317 structural incoming node command", List.of(
-                        "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")));
+                        "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")),
+                // Durable canonical graph definitions, in the same database as the executions that
+                // pin them. Co-location is not a convenience: it is what puts a definition and the
+                // execution that needs it into one backup snapshot and under one file lock, and it is
+                // what lets retention decide reachability from `process_instance` in the same
+                // transaction that removes a definition rather than across two stores that can
+                // disagree.
+                new SchemaMigration(5, "durable canonical graph definitions", List.of(
+                        """
+                        CREATE TABLE graph_definition (
+                            tenant_id         TEXT    NOT NULL,
+                            content_id        TEXT    NOT NULL,
+                            format_version    INTEGER NOT NULL,
+                            definition_bytes  BLOB    NOT NULL,
+                            digest            BLOB    NOT NULL CHECK(length(digest) = 32),
+                            byte_length       INTEGER NOT NULL,
+                            first_graph_id    TEXT    NOT NULL,
+                            first_version_id  TEXT    NOT NULL,
+                            stored_at_epoch_second INTEGER NOT NULL,
+                            stored_at_nano         INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, content_id)
+                        )
+                        """,
+                        """
+                        CREATE TABLE graph_definition_binding (
+                            tenant_id  TEXT NOT NULL,
+                            graph_id   TEXT NOT NULL,
+                            version_id TEXT NOT NULL,
+                            content_id TEXT NOT NULL,
+                            bound_at_epoch_second INTEGER NOT NULL,
+                            bound_at_nano         INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, graph_id, version_id),
+                            FOREIGN KEY (tenant_id, content_id)
+                                REFERENCES graph_definition (tenant_id, content_id) ON DELETE CASCADE
+                        )
+                        """,
+                        "CREATE INDEX idx_graph_definition_binding_content "
+                                + "ON graph_definition_binding (tenant_id, content_id)",
+                        // Retention asks, for every candidate definition, whether any instance of the
+                        // tenant still pins it. Without this index that question is a tenant-wide
+                        // scan of process_instance per candidate.
+                        "CREATE INDEX idx_process_instance_pin "
+                                + "ON process_instance (tenant_id, graph_version_pin)")));
     }
 
     static int currentVersion() {

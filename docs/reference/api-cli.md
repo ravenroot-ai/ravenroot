@@ -21,8 +21,8 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `POST /v1/executions?mode=test\|run` | HTTP 202 plus execution ID |
 | `GET /v1/executions/live` | Current non-terminal executions, from process-local runtime state |
 | `GET /v1/executions/{id}` | State or terminal result |
-| `GET /v1/executions/inventory` | One page of the tenant's durable process inventory, read from storage and surviving a restart. Optional query parameters: `status`, `owner`, `deployment`, `includeTerminal` (excluded by default), `limit`, `cursor`. The response always carries `retainedFrom`. `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
-| `GET /v1/executions/{id}/traversals` | The durable inventory's traversals for one process instance. **`{id}` here is a `processInstanceId`, not the execution/traversal ID every other `/v1/executions` route below takes** — see the callout after this table. `404 UNKNOWN_PROCESS_INSTANCE` when the instance is absent, belongs to another tenant, or aged past its terminal-retention window; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
+| `GET /v1/executions/inventory` | One page of the tenant's durable process inventory, read from storage and surviving a restart. Optional query parameters, each named exactly like the field the response carries: `status`, `ownerWorkerId`, `deploymentId`, `includeTerminal` (excluded by default), `limit`, `cursor`. A parameter outside that set is refused as `400 INVALID_REQUEST` rather than silently dropped. The response always carries `retainedFrom` and `maxPageSize` (this deployment's declared page-size bound). `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
+| `GET /v1/executions/{id}/traversals` | The durable inventory's traversals for one process instance, alongside the same tenant's `retainedFrom` that the inventory listing carries. **`{id}` here is a `processInstanceId`, not the execution/traversal ID every other `/v1/executions` route below takes** — see the callout after this table. `404 UNKNOWN_PROCESS_INSTANCE` when the instance is absent, belongs to another tenant, or aged past its terminal-retention window; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
 | `POST /v1/executions/{id}/cancel` | Cancellation request |
 | `POST /v1/executions/{id}/pause` | Pause after in-flight work |
 | `POST /v1/executions/{id}/resume` | Resume dispatch |
@@ -65,12 +65,14 @@ Credential reads never return secret material. Governed resources remain scoped 
 | `ravenroot inspect FILE` | Inspect without effects |
 | `ravenroot validate FILE` | Validate the GraphML profile |
 | `ravenroot run FILE` | Execute with Run semantics |
-| `ravenroot inventory` | List the tenant's durable process inventory (`GET /v1/executions/inventory`); unfiltered, terminal rows **included** by default |
-| `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`); the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |
+| `ravenroot inventory` | List the tenant's whole durable process inventory (`GET /v1/executions/inventory`, paged to completion internally — never a partial page); unfiltered, terminal rows **included** by default; a trailing `retained-from=` line always prints, even for an idle tenant |
+| `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`), also followed by a trailing `retained-from=` line; the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |
 | `ravenroot-server` | Start the standalone service |
 
 CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Authentication and ownership checks are identical to HTTP because the CLI is a client, not a privileged bypass.
 
-`ravenroot inventory` defaults to including terminal rows, the opposite of the bare HTTP route's own default. An operator running `inventory` right after `ravenroot run` would otherwise stop seeing the instance the moment it finished — the exact run the verb was just used to start.
+`ravenroot inventory` defaults to including terminal rows, the opposite of the bare HTTP route's own default. An operator running `inventory` right after `ravenroot run` would otherwise stop seeing the instance the moment it finished — the exact run the verb was just used to start. Filtering is not exposed as a CLI flag yet.
+
+`ravenroot inventory` follows the HTTP route's own `nextCursor` internally until the tenant's whole answer is read, so its output is never a truncated first page; there is no `--after`-style flag because there is nothing left to continue. `ravenroot traversals` lists one instance's traversals directly — that listing is not paginated on either transport.
 
 See [Application and HTTP integration](../integrator-guide/application-http.md) and [Authentication troubleshooting](../troubleshooting/identity-browser.md).

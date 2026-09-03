@@ -3285,24 +3285,36 @@ public final class RavenrootServer implements AutoCloseable {
             if (index > 0) {
                 body.append(',');
             }
-            var event = page.get(index);
-            String description = PublicExecutionDescription.forEventType(event.eventType());
-            body.append("{\"journalOffset\":").append(event.journalOffset())
-                    .append(",\"streamSequence\":").append(event.streamSequence())
-                    .append(",\"occurredAt\":\"").append(event.occurredAt()).append('"')
-                    .append(",\"type\":\"").append(escape(event.eventType())).append('"')
-                    .append(",\"description\":\"").append(escape(description)).append('"')
-                    .append(",\"processInstanceId\":\"").append(event.processInstanceId()).append('"')
-                    .append(",\"traversalId\":\"").append(event.traversalId()).append('"')
-                    // A handler event names its handler here for the same reason the stream does:
-                    // a poller that saw HANDLER_RESOLVED and could not tell WHICH handler resolved
-                    // would have to go and ask, which is the question this projection exists to
-                    // answer. Null on every other type, and on rows written before PERS-05.
-                    .append(",\"handlerId\":")
-                    .append(event.handlerId() == null ? "null" : "\"" + event.handlerId() + "\"")
-                    .append("}");
+            body.append(durableRecentEventJson(page.get(index)));
         }
         return body.append("]}").toString();
+    }
+
+    /**
+     * One durable row of {@code /v1/events/recent}, exposed package-locally so its field set can be
+     * asserted directly.
+     *
+     * <p>Deliberately narrower than {@link #durableExecutionEventFrame}: this is the polling
+     * counterpart, and it has always carried the coarse position and identity rather than the full
+     * causal chain. {@code handlerId} is here for the same reason it is on the stream — a poller that
+     * saw {@code HANDLER_RESOLVED} and could not tell <em>which</em> handler resolved would have to go
+     * and ask, which is the question this projection exists to answer — and it is null on every other
+     * event type and on rows written before PERS-05.</p>
+     * @param event durable event to serialize.
+     * @return one JSON object, with no surrounding array or separator.
+     */
+    static String durableRecentEventJson(ai.ravenroot.api.application.DurableExecutionEvent event) {
+        String description = PublicExecutionDescription.forEventType(event.eventType());
+        return "{\"journalOffset\":" + event.journalOffset()
+                + ",\"streamSequence\":" + event.streamSequence()
+                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
+                + ",\"type\":\"" + escape(event.eventType()) + "\""
+                + ",\"description\":\"" + escape(description) + "\""
+                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
+                + ",\"traversalId\":\"" + event.traversalId() + "\""
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
+                + "}";
     }
 
     private void executionEvents(HttpExchange exchange) throws IOException {

@@ -222,8 +222,6 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
                     "A handler was denied and the process continued.";
             case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_RESOLVED ->
                     "A handler was resolved and the process re-entered.";
-            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_TRIGGER_REFUSED ->
-                    "A handler trigger was refused. Protected diagnostics may contain more detail.";
             default -> null;
         };
     }

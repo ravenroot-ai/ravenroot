@@ -104,7 +104,6 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   HANDLER_EXPIRED: "A handler's wait ended without a trigger.",
   HANDLER_DENIED: 'A handler was denied and the process continued.',
   HANDLER_RESOLVED: 'A handler was resolved and the process re-entered.',
-  HANDLER_TRIGGER_REFUSED: 'A handler trigger was refused. Protected diagnostics may contain more detail.',
 });
 
 /**

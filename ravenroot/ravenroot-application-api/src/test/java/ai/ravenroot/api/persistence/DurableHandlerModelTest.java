@@ -124,8 +124,14 @@ class DurableHandlerModelTest {
                 HandlerEventData.eventTypeFor(HandlerStatus.RESOLVED));
         assertEquals(HandlerEventData.HANDLER_REGISTERED,
                 HandlerEventData.eventTypeFor(HandlerStatus.WAITING));
-        assertTrue(HandlerEventData.isHandlerEvent(HandlerEventData.HANDLER_TRIGGER_REFUSED));
+        assertTrue(HandlerEventData.isHandlerEvent(HandlerEventData.HANDLER_DENIED));
         assertFalse(HandlerEventData.isHandlerEvent("NODE_COMPLETED"));
+        // Every status has a type and every type is recognised: the two directions together are what
+        // stop a status being added with no journal vocabulary, or a type with no status to reach it.
+        for (HandlerStatus status : HandlerStatus.values()) {
+            assertTrue(HandlerEventData.isHandlerEvent(HandlerEventData.eventTypeFor(status)),
+                    status.name());
+        }
     }
 
     @Test

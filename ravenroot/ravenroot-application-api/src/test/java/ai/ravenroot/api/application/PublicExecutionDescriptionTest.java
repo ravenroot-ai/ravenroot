@@ -44,8 +44,7 @@ class PublicExecutionDescriptionTest {
                 ai.ravenroot.api.persistence.HandlerEventData.HANDLER_ESCALATED,
                 ai.ravenroot.api.persistence.HandlerEventData.HANDLER_EXPIRED,
                 ai.ravenroot.api.persistence.HandlerEventData.HANDLER_DENIED,
-                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_RESOLVED,
-                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_TRIGGER_REFUSED)) {
+                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_RESOLVED)) {
             String description = PublicExecutionDescription.forEventType(eventType);
             assertNotEquals(PublicExecutionDescription.UNKNOWN_EVENT, description, eventType);
             assertTrue(description.endsWith("."), eventType);

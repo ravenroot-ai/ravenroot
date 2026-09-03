@@ -24,10 +24,32 @@ import java.util.UUID;
  * into the journal. The process, traversal and invocation are already envelope fields, so an event
  * read back distinguishes all four levels — process, traversal, handler, node invocation — without
  * any of them being inferred.</p>
+ *
+ * <h2>Refusals are audited, not journalled</h2>
+ * <p>There is deliberately no event type for a refused trigger, even though the fan-in vocabulary has
+ * {@code JOIN_ARRIVAL_DISCARDED} for the analogous case. Journalling one would require a write, every
+ * write bumps the process instance's revision, and a refused trigger must change nothing — that is
+ * the property {@code aPrincipalWithoutTheDeclaredRoleIsRefusedAndNothingIsWritten} pins. A revision
+ * that moved on refusal would also let anyone able to reach the trigger surface invalidate the
+ * optimistic-concurrency expectations of legitimate concurrent writers, at will. Refusals go to the
+ * {@link ai.ravenroot.api.audit.AuditTrail} instead, which is a separate chain with its own retention
+ * and exists precisely so that a decision leaves evidence without touching the thing it decided
+ * about.</p>
  */
 public final class HandlerEventData {
 
-    /** A durable handler was registered and its process began waiting. */
+    /**
+     * A durable handler was registered and its process began waiting.
+     *
+     * <p><strong>Declared ahead of its producer.</strong> Registration is authored by whatever parks
+     * the process — the runtime path that writes the {@code WAITING} transition and the
+     * {@link HandlerRegistration} in one batch — and no such path exists in this tree yet, so nothing
+     * here emits it. It is named now for the reason {@link ai.ravenroot.api.audit.AuditCategory}
+     * names {@code TOOL} and {@code RECOVERY} ahead of theirs: an event type added later is a change
+     * to the vocabulary every consumer switches on, and to the human copy that renders it. What is
+     * verified today is that {@link #eventTypeFor(HandlerStatus)} returns it for a waiting handler
+     * and that it renders as authored copy rather than as generic activity.</p>
+     */
     public static final String HANDLER_REGISTERED = "HANDLER_REGISTERED";
 
     /** A waiting handler exceeded an attention threshold and stays resolvable. */
@@ -41,18 +63,6 @@ public final class HandlerEventData {
 
     /** An authorized trigger supplied an outcome and the process re-entered. */
     public static final String HANDLER_RESOLVED = "HANDLER_RESOLVED";
-
-    /**
-     * A trigger was refused deterministically — duplicate, late, cross-tenant, unauthorized or
-     * non-conforming.
-     *
-     * <p>Journalled rather than dropped. Every one of those causes is normal on a healthy system, so
-     * none of them is a platform failure; but a handler whose refusal rate is climbing is a handler
-     * being triggered by something that believes it should be succeeding, and without an event
-     * nothing distinguishes that from nothing happening. The same reasoning
-     * {@code JOIN_ARRIVAL_DISCARDED} already records for fan-in.</p>
-     */
-    public static final String HANDLER_TRIGGER_REFUSED = "HANDLER_TRIGGER_REFUSED";
 
     /** Media type used for the strict UTF-8 handler identity. */
     public static final String CONTENT_TYPE = "application/vnd.ravenroot.handler-id; charset=utf-8";
@@ -68,7 +78,7 @@ public final class HandlerEventData {
     public static boolean isHandlerEvent(String eventType) {
         return HANDLER_REGISTERED.equals(eventType) || HANDLER_ESCALATED.equals(eventType)
                 || HANDLER_EXPIRED.equals(eventType) || HANDLER_DENIED.equals(eventType)
-                || HANDLER_RESOLVED.equals(eventType) || HANDLER_TRIGGER_REFUSED.equals(eventType);
+                || HANDLER_RESOLVED.equals(eventType);
     }
 
     /**

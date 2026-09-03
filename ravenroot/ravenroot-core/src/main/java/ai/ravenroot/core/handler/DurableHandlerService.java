@@ -314,15 +314,23 @@ public final class DurableHandlerService {
      * <p>{@link ExecutionStoreFailure.HandlerNotResolvable} is the duplicate and the late arrival at
      * once, and it is where a trigger that raced another one lands: the loser reads the winner's
      * terminal state and is refused deterministically rather than committing a second re-entry.</p>
+     *
+     * <p><strong>{@link ExecutionStoreFailure.InvalidRequest} is deliberately not mapped.</strong> By
+     * the time a batch is built here the payload has already been checked against the handler's own
+     * schema, the handler has been read from the store, and the re-entry traversal is one this method
+     * just created — so every remaining way for the store to call the request invalid is a fault on
+     * this side of the call: an unknown handler id, a re-entry traversal the batch failed to carry, a
+     * transition that contradicts itself. Reporting any of those as
+     * {@link HandlerTriggerOutcome.PayloadRefused} would tell the caller its input was wrong when the
+     * input was fine, and a caller switching on that arm would answer a person with "your submission
+     * was rejected" for a defect they cannot act on. It propagates instead, which is what an
+     * unexpected server-side fault is supposed to do.</p>
      */
     private HandlerTriggerOutcome classify(ExecutionStoreException refused, DurableHandler handler,
                                            int attempt) {
         if (refused.failure() instanceof ExecutionStoreFailure.HandlerNotResolvable notResolvable) {
             return new HandlerTriggerOutcome.AlreadySettled(notResolvable.handlerId(),
                     notResolvable.current());
-        }
-        if (refused.failure() instanceof ExecutionStoreFailure.InvalidRequest invalid) {
-            return new HandlerTriggerOutcome.PayloadRefused(invalid.reason());
         }
         if (refused.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
                 && attempt < MAX_WRITE_ATTEMPTS) {

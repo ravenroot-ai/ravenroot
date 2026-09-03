@@ -62,6 +62,9 @@ public enum StoreCapability {
      */
     DURABLE_HANDLERS,
 
+    /** Exact tool approvals can be registered and transitioned atomically with execution state. */
+    TOOL_APPROVALS,
+
     /**
      * The journal can be compacted on demand, discarding the payloads of records that are both
      * delivered to every destination and past their retention window.

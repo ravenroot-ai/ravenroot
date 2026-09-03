@@ -1,6 +1,7 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.persistence.EventEnvelope;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -11,10 +12,21 @@ import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.application.NodeAttemptStatus;
+import ai.ravenroot.api.application.NodeInvocationStatus;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.execution.NodeMessage;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
@@ -220,6 +232,63 @@ public final class ExecutionRecorder implements AutoCloseable {
             }
             throw failed;
         }
+    }
+
+    /**
+     * Commits one managed tool suspension through this recorder's live fence.
+     *
+     * <p>The approval, handler, timer, journal row, and three WAITING transitions are one batch.
+     * No independent writer can race the runner's revision between the node dispatch and this wait.</p>
+     */
+    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+                                                     HandlerRegistration handler,
+                                                     TimerSchedule timer,
+                                                     EventEnvelope event) {
+        requireFence();
+        if (!approval.traversalId().equals(handler.traversalId())
+                || !approval.invocationId().equals(handler.invocationId())
+                || !approval.approvalId().equals(handler.handlerId())) {
+            throw new IllegalArgumentException("approval and handler scope do not match");
+        }
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease)
+                .apply(new ExecutionTransition.AttemptTransitioned(approval.traversalId(),
+                        approval.invocationId(), approval.attemptId(), NodeAttemptStatus.WAITING))
+                .apply(new ExecutionTransition.InvocationTransitioned(approval.traversalId(),
+                        approval.invocationId(), NodeInvocationStatus.WAITING))
+                .apply(new ExecutionTransition.TraversalTransitioned(approval.traversalId(),
+                        TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .registerToolApproval(approval)
+                .registerHandler(handler)
+                .scheduleTimer(timer);
+        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+            batch.publish(event);
+        }
+        StoredProcessInstance applied = await(store.apply(batch.build()));
+        revision = applied.revision();
+    }
+
+    /** Confirms that a core signal names the exact invocation this recorder durably suspended. */
+    public synchronized boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
+        if (!key.tenantId().equals(message.security().tenantId())
+                || !key.processInstanceId().equals(message.processInstanceId())) {
+            return false;
+        }
+        DurableToolApproval approval = await(store.loadToolApproval(key, approvalId)).orElse(null);
+        if (approval == null || approval.status() != ToolApprovalStatus.PENDING) return false;
+        ToolApprovalRegistration request = approval.request();
+        return request.traversalId().equals(message.traversalId())
+                && request.invocationId().equals(message.invocationId())
+                && request.attemptId().equals(message.attemptId())
+                && request.nodeId().equals(message.nodeId())
+                && request.requester().equals(message.security());
+    }
+
+    /** Immutable graph pin this fenced recorder is writing under. */
+    public synchronized GraphVersionPin graphVersionPin() {
+        return await(store.load(key)).graphVersionPin();
     }
 
     private void loseFence(ExecutionStoreFailure because) {

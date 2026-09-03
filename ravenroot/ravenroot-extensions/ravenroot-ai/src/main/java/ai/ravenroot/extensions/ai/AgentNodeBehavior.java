@@ -16,6 +16,7 @@ import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.node.service.ToolCallAuthorization;
+import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadValue;
 
 import java.nio.charset.StandardCharsets;
@@ -836,6 +837,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     return;
                 }
                 try {
+                    Throwable cause = unwrap(failure);
+                    if (cause instanceof AgentApprovalSuspension suspension) {
+                        result.completeExceptionally(suspension.signal());
+                        return;
+                    }
                     // A failed stage is a tool that broke its own contract. It costs a turn and not a
                     // traversal, for the reason on AgentTool: a defect in one tool must not be able to
                     // terminate an execution the model could still finish another way. Nothing of the
@@ -887,8 +893,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         "The server denied this tool call. It performed no effect.");
             }
             if (authorization.disposition() == ToolCallAuthorization.Disposition.REQUIRE_APPROVAL) {
-                return CompletableFuture.completedFuture(
-                        "This tool call requires approval. It performed no effect.");
+                return CompletableFuture.failedFuture(new AgentApprovalSuspension(
+                        authorization.suspend(1, checkpoint(requested))));
             }
             String canonicalArguments = new String(authorization.canonicalArguments(),
                     StandardCharsets.UTF_8);
@@ -917,6 +923,46 @@ public final class AgentNodeBehavior implements NodeBehavior {
             return CompletableFuture.completedFuture(
                     "No tool by that name is available to you. The tools you may call are listed in "
                             + "this request; call one of those or answer without tools.");
+        }
+
+        /** Version-one restart checkpoint; bounded again by the managed approval service. */
+        private byte[] checkpoint(AgentTurn.ToolCall requested) {
+            var root = new LinkedHashMap<String, PayloadValue>();
+            root.put("messages", PayloadValue.list(List.copyOf(messages)));
+            root.put("requestedCall", PayloadValue.map(Map.of(
+                    "id", PayloadValue.of(requested.id()),
+                    "name", PayloadValue.of(requested.name()),
+                    "arguments", PayloadValue.of(requested.arguments()))));
+            root.put("turns", PayloadValue.of(turns));
+            root.put("toolCalls", PayloadValue.of(toolCalls));
+            root.put("tokens", PayloadValue.of(tokens));
+            root.put("finishReason", PayloadValue.of(finishReason));
+            return PayloadJson.write(PayloadValue.map(root)).getBytes(StandardCharsets.UTF_8);
+        }
+
+        private static Throwable unwrap(Throwable failure) {
+            Throwable current = failure;
+            while ((current instanceof CompletionException || current instanceof ExecutionException)
+                    && current.getCause() != null) {
+                current = current.getCause();
+            }
+            return current;
+        }
+
+
+        /** Package-private framing that distinguishes the one failure the agent must propagate. */
+        private final class AgentApprovalSuspension extends RuntimeException {
+            private static final long serialVersionUID = 1L;
+            private final RuntimeException signal;
+
+            private AgentApprovalSuspension(RuntimeException signal) {
+                super(null, null, false, false);
+                this.signal = Objects.requireNonNull(signal, "signal");
+            }
+
+            private RuntimeException signal() {
+                return signal;
+            }
         }
 
         private NodeResult answer(AgentTurn.Turn turn) {

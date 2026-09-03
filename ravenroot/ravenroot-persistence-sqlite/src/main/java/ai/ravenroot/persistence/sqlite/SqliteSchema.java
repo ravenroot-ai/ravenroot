@@ -491,7 +491,50 @@ final class SqliteSchema {
                             retained_from_epoch_second  INTEGER NOT NULL,
                             retained_from_nano          INTEGER NOT NULL
                         )
-                        """)));
+                        """)),
+                // Tool approvals build on the lifecycle/inventory shape introduced by version 7.
+                // Keeping this as a distinct migration makes each user_version name exactly one
+                // database structure and preserves the downgrade guard across independently landed
+                // features.
+                new SchemaMigration(8, "durable scoped tool approvals", List.of(
+                """
+                CREATE TABLE tool_approval (
+                    tenant_id             TEXT    NOT NULL,
+                    process_instance_id   TEXT    NOT NULL,
+                    approval_id           TEXT    NOT NULL,
+                    position              INTEGER NOT NULL,
+                    traversal_id          TEXT    NOT NULL,
+                    invocation_id         TEXT    NOT NULL,
+                    attempt_id            TEXT    NOT NULL,
+                    call_id               TEXT    NOT NULL,
+                    node_id               TEXT    NOT NULL,
+                    tool                  TEXT    NOT NULL,
+                    canonical_arguments   BLOB    NOT NULL,
+                    arguments_digest      TEXT    NOT NULL,
+                    requester_request_id  TEXT    NOT NULL,
+                    requester_subject     TEXT    NOT NULL,
+                    requester_principal_type TEXT NOT NULL,
+                    requester_issuer      TEXT    NOT NULL,
+                    graph_version_pin     TEXT    NOT NULL,
+                    policy_version        TEXT    NOT NULL,
+                    expires_at_epoch_second INTEGER NOT NULL,
+                    expires_at_nano         INTEGER NOT NULL,
+                    required_roles        TEXT    NOT NULL,
+                    required_scopes       TEXT    NOT NULL,
+                    requester_may_approve INTEGER NOT NULL CHECK(requester_may_approve IN (0, 1)),
+                    continuation_version  INTEGER NOT NULL,
+                    continuation          BLOB    NOT NULL,
+                    continuation_digest   TEXT    NOT NULL,
+                    status                TEXT    NOT NULL,
+                    actor                 TEXT    NOT NULL,
+                    revision              INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, approval_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                "CREATE INDEX tool_approval_pending_expiry ON tool_approval "
+                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")));
     }
 
     static int currentVersion() {

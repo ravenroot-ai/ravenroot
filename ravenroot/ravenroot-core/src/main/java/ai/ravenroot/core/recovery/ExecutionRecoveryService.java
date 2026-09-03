@@ -32,11 +32,11 @@ import java.util.concurrent.CompletionStage;
  * {@code claimPendingWork}, {@code claimDueTimers} and {@code ack}.
  *
  * <h2>What recovery means here</h2>
- * <p>Making outstanding items <em>dispatchable</em> with correct lease, fencing and idempotency
- * semantics — not resuming execution. Resuming would require re-parsing the graph, and the graph
- * bytes are stored nowhere; only a hash is pinned, and no definition store exists. Parked and
- * recovered state is meaningful and human-decidable without the definition, which is why this is a
- * complete unit of work even without a definition store.</p>
+ * <p>Generic attempt recovery makes outstanding items <em>dispatchable</em> with correct lease,
+ * fencing and idempotency semantics; it does not reconstruct arbitrary graph execution. Reserved
+ * handler triggers may instead carry a bounded, versioned continuation that a trusted
+ * {@link RecoveryDispatcher} understands. Unsupported continuations remain claimable and
+ * unacknowledged, so recovery fails closed without losing the durable wait.</p>
  *
  * <h2>The one rule the whole thing rests on</h2>
  * <p><strong>The {@code RUNNING} transition is committed under the fence before the engine send.</strong>
@@ -164,9 +164,12 @@ public final class ExecutionRecoveryService {
     }
 
     private RecoveryOutcome recover(PendingWork item) {
+        if (item instanceof PendingWork.HandlerTrigger trigger) {
+            return dispatchHandler(trigger);
+        }
         if (!(item instanceof PendingWork.AttemptDispatch attemptItem)) {
-            // Timers and handler triggers carry no ambiguity of their own: they are signals to a
-            // waiting invocation, not effects that may already have happened. They are left
+            // Timers carry no ambiguity of their own: they are signals to a waiting invocation,
+            // not effects that may already have happened. They are left
             // unacknowledged so nothing is lost, because a lost timer is worse than a duplicate one.
             return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
                     "no dispatcher for " + item.getClass().getSimpleName());
@@ -193,6 +196,22 @@ public final class ExecutionRecoveryService {
             case WAITING -> acknowledgeStale(attemptItem, "waiting on a timer or trigger");
             case COMPLETED, FAILED -> acknowledgeStale(attemptItem, "already terminal");
         };
+    }
+
+    private RecoveryOutcome dispatchHandler(PendingWork.HandlerTrigger trigger) {
+        if (!dispatcher.canDispatch(trigger)) {
+            return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                    "no handler re-entry dispatcher available");
+        }
+        try {
+            dispatcher.dispatch(trigger, trigger.workItemId().toString());
+            acknowledge(trigger);
+            return new RecoveryOutcome.HandlerDispatched(trigger.key(), trigger.workItemId(),
+                    trigger.traversalId());
+        } catch (RuntimeException unavailable) {
+            return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                    "handler re-entry dispatch unavailable");
+        }
     }
 
     /**

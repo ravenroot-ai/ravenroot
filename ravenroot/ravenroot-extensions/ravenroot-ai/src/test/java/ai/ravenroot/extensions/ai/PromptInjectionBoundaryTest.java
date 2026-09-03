@@ -4,6 +4,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.service.ToolCallAuthorization;
 import ai.ravenroot.api.node.service.ToolCallAuthorizationService;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -19,6 +20,7 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Direct and indirect prompt-injection fixtures for the agent authority boundary. */
@@ -119,7 +121,7 @@ class PromptInjectionBoundaryTest {
     }
 
     @Test
-    void approvalRequiredIsASanitizedNoEffectRefusal() throws Exception {
+    void approvalRequiredSuspendsFailClosedWithoutASecondTurnOrEffect() {
         var alpha = new McpDouble("alpha", "search").returning("must not be reached");
         var http = new AiTestSupport.RoutedHttp(CHAT)
                 .authorizing((message, tool, arguments) -> decision(
@@ -131,15 +133,18 @@ class PromptInjectionBoundaryTest {
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
 
-        NodeResult result = behavior.create(AiTestSupport.agentConfiguration(Map.of(
+        var result = behavior.create(AiTestSupport.agentConfiguration(Map.of(
                         "provider", "local", "instructions", "be terse", "objective", "search",
                         "mcpServers", "alpha")), http)
-                .handle(AiTestSupport.message("tenant-a", "payload", Map.of()))
-                .toCompletableFuture().get();
+                .handle(AiTestSupport.message("tenant-a", "payload", Map.of())).toCompletableFuture();
 
-        assertEquals("continued without it", result.payload());
+        var suspended = assertThrows(java.util.concurrent.CompletionException.class, result::join);
+        var unavailable = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                NodePackageServiceException.class, suspended.getCause());
+        assertEquals(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE, unavailable.reason());
         assertEquals(List.of(), alpha.calledTools());
-        assertTrue(text(messagesOf(http.chatBodies().get(1)).get(4)).contains("requires approval"));
+        assertEquals(1, http.chatBodies().size(),
+                "a required approval must tear down the run instead of becoming model-visible text");
     }
 
     private static final class AuthorizationMonitor implements ToolCallAuthorizationService {

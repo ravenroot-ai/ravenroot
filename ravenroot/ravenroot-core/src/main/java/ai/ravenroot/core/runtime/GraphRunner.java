@@ -41,6 +41,7 @@ import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.persistence.InMemoryJoinStore;
+import ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -768,6 +769,9 @@ public final class GraphRunner implements AutoCloseable {
                                 : cleanupError != null ? cleanupError : coordinator.abandonedBranchFailure()))
                 .thenCompose(error -> {
                     Throwable outcome = error;
+                    if (unwrap(outcome) instanceof VerifiedToolApprovalSuspension verified) {
+                        return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
+                    }
                     if (outcome == null) {
                         try {
                             state.executionCompleted();
@@ -1313,6 +1317,11 @@ public final class GraphRunner implements AutoCloseable {
                         workers.release(instance);
                     }
                     if (error != null) {
+                        Throwable failure = unwrap(error);
+                        if (failure instanceof DurableToolApprovalSuspension suspension
+                                && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
+                            throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
+                        }
                         // Recording stays unconditional: the attempt and invocation are FAILED
                         // whether or not the author wired anything to route from here. Only
                         // what happens *after* this point is new.
@@ -1756,6 +1765,21 @@ public final class GraphRunner implements AutoCloseable {
 
     private static Throwable unwrap(Throwable error) {
         return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    /** Marker created only after the recorder confirms the core-minted signal's durable wait. */
+    private static final class VerifiedToolApprovalSuspension extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private final DurableToolApprovalSuspension signal;
+
+        private VerifiedToolApprovalSuspension(DurableToolApprovalSuspension signal) {
+            super(null, null, false, false);
+            this.signal = signal;
+        }
+
+        private DurableToolApprovalSuspension signal() {
+            return signal;
+        }
     }
 
     /**
@@ -3016,6 +3040,11 @@ public final class GraphRunner implements AutoCloseable {
 
         private UUID traversalAcceptedEventId() {
             return traversalAcceptedEventId;
+        }
+
+        /** Accepts a suspension only when this exact delivered invocation is durably waiting. */
+        private boolean acceptsApprovalSuspension(UUID approvalId, NodeMessage delivered) {
+            return recorder != null && recorder.confirmsToolApproval(approvalId, delivered);
         }
 
         /**

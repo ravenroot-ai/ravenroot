@@ -574,6 +574,29 @@
         }
       }
     },
+    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}": {
+      "post": {
+        "summary": "Approves, denies, or cancels one exact durable tool call. The authenticated tenant and qualified approver identity are authoritative; unknown and cross-tenant approvals are indistinguishable, and the response never contains arguments or continuation state.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "approvalId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "decision", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/graphs/inspect": {
       "post": {
         "summary": "Parses and summarizes a GraphML document without executing it.",

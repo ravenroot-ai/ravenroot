@@ -6,6 +6,7 @@ import ai.ravenroot.api.application.NodeInvocation;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -34,6 +35,9 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -218,7 +222,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         return Set.of(StoreCapability.TRANSACTIONAL_BATCH, StoreCapability.IDEMPOTENCY_PURGE,
                 StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
                 StoreCapability.DURABLE_HANDLERS,
-                StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION);
+                StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
+                StoreCapability.TOOL_APPROVALS);
     }
 
     @Override
@@ -346,11 +351,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // across two batches and reopen exactly the crash window PERS-05 exists to close.
                 applyHandlerWrites(key, batch, folded, handlers, revision);
 
+                var approvals = existing == null ? new LinkedHashMap<UUID, DurableToolApproval>()
+                        : new LinkedHashMap<>(existing.approvals);
+                applyToolApprovalWrites(key, batch, folded, pin, approvals, revision, now);
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
                         timers,
                         handlers,
+                        approvals,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -1282,6 +1292,83 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     // ---------------------------------------------------------------- durable handlers
 
     @Override
+    public CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                           UUID approvalId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(approvalId, "approvalId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.approvals.get(approvalId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.approvals.values());
+            }
+        });
+    }
+
+    private void applyToolApprovalWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                         GraphVersionPin pin,
+                                         Map<UUID, DurableToolApproval> approvals, long revision,
+                                         Instant now) {
+        for (ToolApprovalRegistration registration : batch.toolApprovalsToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "tool approval " + registration.approvalId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval identity or graph pin does not match its execution"));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("tool approval expiry must be after store time"));
+            }
+            DurableToolApproval existing = approvals.get(registration.approvalId());
+            if (existing != null) {
+                if (!existing.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("tool approval " + registration.approvalId()
+                            + " is already registered with a different request"));
+                }
+                continue;
+            }
+            approvals.put(registration.approvalId(), DurableToolApproval.pending(key, registration, revision));
+        }
+        for (ToolApprovalTransition transition : batch.toolApprovalTransitions()) {
+            DurableToolApproval current = approvals.get(transition.approvalId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown tool approval "
+                        + transition.approvalId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), transition.next()));
+            }
+            if (transition.next() == ToolApprovalStatus.EXPIRED
+                    && now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            if ((transition.next() == ToolApprovalStatus.APPROVED
+                    || transition.next() == ToolApprovalStatus.DENIED
+                    || transition.next() == ToolApprovalStatus.CONSUMED) && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            approvals.put(transition.approvalId(), current.apply(transition, revision));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
     public CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
         return complete(() -> {
             Objects.requireNonNull(key, "key");
@@ -1942,6 +2029,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, TimerSchedule> timers;
         /** Registration order, which is the order {@code handlers(key)} promises to return. */
         private final Map<UUID, DurableHandler> handlers;
+        /** Registration order, retained for deterministic operator inspection. */
+        private final Map<UUID, DurableToolApproval> approvals;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -1953,6 +2042,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private Entry(ProcessInstance state, long revision, GraphVersionPin graphVersionPin, String tenantId,
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
                       Map<UUID, DurableHandler> handlers,
+                      Map<UUID, DurableToolApproval> approvals,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -1964,6 +2054,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.lease = lease;
             this.timers = timers;
             this.handlers = handlers;
+            this.approvals = approvals;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;

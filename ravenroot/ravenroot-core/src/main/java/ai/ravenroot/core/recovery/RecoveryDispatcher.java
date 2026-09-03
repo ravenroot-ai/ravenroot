@@ -13,12 +13,10 @@ import ai.ravenroot.api.persistence.PendingWork;
  * attempt that was never sent is indistinguishable from one whose outcome is unknown, so the next
  * sweep would park work that had provably never started.</p>
  *
- * <h2>{@link #NONE} is the production wiring today, and that is a scope fact, not an oversight</h2>
- * <p>Re-dispatching a recovered attempt means executing a node of a graph, and the graph bytes are
- * stored nowhere — {@code GraphVersionPin} holds a hash, and no definition store exists. PERS-04's
- * scope is therefore "make pending work dispatchable with correct lease, fencing
- * and idempotency semantics", not "resume execution". {@link #NONE} declines everything, so recovered
- * work stays claimable and unacknowledged, which loses nothing and parks nothing spuriously.</p>
+ * <p>Generic recovered attempts still require a host-specific dispatcher. A reserved handler may
+ * instead be paired with a trusted bounded-continuation dispatcher. {@link #NONE} is the additive,
+ * fail-closed default: unsupported work stays claimable and unacknowledged rather than being lost or
+ * spuriously completed.</p>
  */
 public interface RecoveryDispatcher {
 
@@ -38,7 +36,7 @@ public interface RecoveryDispatcher {
      */
     void dispatch(PendingWork item, String idempotencyKey);
 
-    /** Declines everything. See the class comment for why this is the current production wiring. */
+    /** Declines everything for hosts that install no recovery dispatcher. */
     RecoveryDispatcher NONE = new RecoveryDispatcher() {
         @Override
         public boolean canDispatch(PendingWork item) {

@@ -311,6 +311,8 @@ public final class RavenrootServer implements AutoCloseable {
     private final AtomicBoolean started = new AtomicBoolean();
     /** Installed only by the composition root before {@link #start()}; packages never see {@code HttpServer}. */
     private ai.ravenroot.server.ingress.ManagedIngressRegistry managedIngress;
+    /** Installed only by the packaged composition before start; absent hosts expose no approval authority. */
+    private ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
     /**
      * Injectable: the narrower constructors below default to the stdout
      * {@link StructuredGraphMlRejectionLogger}/{@code StructuredPayloadRejectionLogger}, but
@@ -944,6 +946,13 @@ public final class RavenrootServer implements AutoCloseable {
         }
         managedIngress = java.util.Objects.requireNonNull(registry, "registry");
         registry.bind(server, handler -> publicContext(exchange -> protectedRequest(handler).handle(exchange)));
+    }
+
+    /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
+    synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals) {
+        if (started.get()) throw new IllegalStateException("tool approvals must be installed before start");
+        if (toolApprovals != null) throw new IllegalStateException("tool approvals are already installed");
+        toolApprovals = java.util.Objects.requireNonNull(approvals, "approvals");
     }
 
     public int port() {
@@ -2292,6 +2301,14 @@ public final class RavenrootServer implements AutoCloseable {
                 readProcessInstanceTraversals(exchange, segments[1]);
                 return;
             }
+            if (segments.length == 5 && !segments[1].isBlank()
+                    && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
+                    && ("approve".equals(segments[4]) || "deny".equals(segments[4])
+                        || "cancel".equals(segments[4]))) {
+                if (!method(exchange, "POST")) return;
+                decideToolApproval(exchange, segments[1], segments[3], segments[4]);
+                return;
+            }
             fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
             return;
         }
@@ -2325,6 +2342,50 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             submitExecution(exchange, policy);
+        }
+    }
+
+    /** Authenticated, tenant-derived decision path; no stored content is serialized. */
+    private void decideToolApproval(HttpExchange exchange, String processText, String approvalText,
+                                    String decision) throws IOException {
+        ai.ravenroot.core.approval.ToolApprovalService service = toolApprovals;
+        if (service == null) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        java.util.UUID processId;
+        java.util.UUID approvalId;
+        try {
+            processId = java.util.UUID.fromString(processText);
+            approvalId = java.util.UUID.fromString(approvalText);
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        ai.ravenroot.core.approval.ToolApprovalResult result;
+        try {
+            result = switch (decision) {
+                case "approve" -> service.approve(context, processId, approvalId);
+                case "deny" -> service.deny(context, processId, approvalId);
+                case "cancel" -> service.cancel(context, processId, approvalId);
+                default -> throw new IllegalStateException("unreachable tool approval decision");
+            };
+        } catch (RuntimeException failure) {
+            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        switch (result.code()) {
+            case NOT_FOUND -> fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            case UNAUTHORIZED -> fail(exchange, ErrorCode.ACCESS_DENIED);
+            case SCOPE_MISMATCH, UNAVAILABLE -> fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            default -> {
+                String resume = result.resumeTraversalId() == null ? ""
+                        : ",\"resumeTraversalId\":\"" + result.resumeTraversalId() + "\"";
+                json(exchange, 200, "{\"outcome\":\""
+                        + result.code().name().toLowerCase(java.util.Locale.ROOT)
+                        + "\",\"approvalId\":\"" + approvalId + "\"" + resume + "}");
+            }
         }
     }
 

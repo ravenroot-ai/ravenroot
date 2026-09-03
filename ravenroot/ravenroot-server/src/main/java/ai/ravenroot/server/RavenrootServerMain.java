@@ -207,10 +207,11 @@ public final class RavenrootServerMain {
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
+        var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(System.getenv());
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), executionStore,
-                deploymentCap.maxActiveDeployments(), unknownBehavior.policy());
+                deploymentCap.maxActiveDeployments(), unknownBehavior.policy(), graphExecutionLimits);
         application.configureArtifactDualControl(artifactLifecycle.dualControl());
         serverStartup.installInto(application::installManagedIngress);
         // Stated at startup rather than left to be discovered from a run's outcome: an operator who

@@ -139,6 +139,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     private final RequestReplyIngress requestReply = new DeploymentRequestReplyView();
     private final RequestReplyLimits requestReplyLimits;
     private final Clock clock;
+    private final GraphExecutionLimits graphExecutionLimits;
     /** Node ids currently reporting degraded, via {@link InboundSourceContext#reportDegraded}. */
     private final Set<String> degradedSources = ConcurrentHashMap.newKeySet();
 
@@ -166,6 +167,15 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                                   byte[] graphMl, int ingressBufferCapacity) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
                 DEFAULT_INBOX_RETENTION);
+    }
+
+    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           GraphExecutionLimits graphExecutionLimits) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
+                DEFAULT_INBOX_RETENTION, "ravenroot-" + UUID.randomUUID(), Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), graphExecutionLimits);
     }
 
     /**
@@ -238,10 +248,23 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            ai.ravenroot.api.persistence.ExecutionStore executionStore,
                            Duration inboxRetention, String workerId, Duration executionLeaseTtl,
                            RequestReplyLimits requestReplyLimits, Clock clock) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, executionStore,
+                inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
+                GraphExecutionLimits.DEFAULTS);
+    }
+
+    private DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits, Clock clock,
+                           GraphExecutionLimits graphExecutionLimits) {
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.executionLeaseTtl = Objects.requireNonNull(executionLeaseTtl, "executionLeaseTtl");
         this.requestReplyLimits = Objects.requireNonNull(requestReplyLimits, "requestReplyLimits");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.graphExecutionLimits = Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
         this.id = Objects.requireNonNull(id, "id");
         this.engine = Objects.requireNonNull(engine, "engine");
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors");
@@ -414,9 +437,9 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         long generation;
         try {
             openedDomain = engine.openDomain(id.value());
-            openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl));
+            openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl), graphExecutionLimits.graphMl());
             builtRunner = new GraphRunner(openedManager, engine, openedDomain, behaviors, monitor,
-                    identitySource, GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                    identitySource, GraphRunner.DEFAULT_SHUTDOWN_BOUND, graphExecutionLimits);
             // Sources are discovered and started here -- while this graph's nodes are being spawned,
             // never earlier -- and only after the runner itself is built, so a source's start failure
             // rolls back a fully-formed runner rather than a half-built one.

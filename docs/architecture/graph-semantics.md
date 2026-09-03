@@ -13,6 +13,8 @@ The executable graph is both a document with preservation requirements and a val
 - START establishes entry; END establishes successful termination; ERROR offers graph-level failure handling.
 - A behavior result names an outcome; outgoing edges express the eligible route.
 - Catalog resolution occurs before execution so an unresolved behavior follows the configured pass-through or refusal contract.
+- Linear complexity admission precedes actor allocation; cyclic graphs require the operator's finite
+  cumulative traversal-step policy, which survives branch fan-out and re-entry for the live traversal.
 
 ## Architectural consequence
 

@@ -81,6 +81,15 @@ public record PayloadLimits(
         }
     }
 
+    /**
+     * Validates a node-produced Java value and returns its canonical encoded size.
+     * Conversion is bounded while it copies, so an iterable cannot allocate an unbounded mirror first.
+     */
+    public int enforceAndMeasure(Object value) {
+        PayloadValue bounded = PayloadValue.fromJava(value, this);
+        return PayloadJson.write(bounded).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+    }
+
     private void walk(PayloadValue value, int depth, int[] counted) {
         if (depth > maxDepth) {
             throw PayloadRejection.depthExceeded(maxDepth);

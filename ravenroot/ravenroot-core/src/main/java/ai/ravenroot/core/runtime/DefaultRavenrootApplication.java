@@ -190,6 +190,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * fail-closed rather than this class inventing a number the process-boundary design already owns.
      */
     private final int maxActiveDeployments;
+    private final GraphExecutionLimits graphExecutionLimits;
 
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor) {
         this(engine, monitor, BehaviorEnvironment.safeDefaults());
@@ -273,7 +274,18 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ArtifactRegistry artifacts, ProgramRuntime programRuntime,
                                        ExecutionIdentitySource identitySource, ExecutionStore executionStore,
                                        int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, GraphExecutionLimits.DEFAULTS);
+    }
+
+    /** Terminal composition seam for operator-owned graph execution limits. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       GraphExecutionLimits graphExecutionLimits) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
+        this.graphExecutionLimits = java.util.Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
         this.engine = engine;
         this.monitor = monitor;
         this.behaviors = behaviors;
@@ -955,7 +967,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     @Override
     public GraphSummary inspectGraphMl(InputStream graphMl) {
-        try (var manager = GraphManager.readGraphMl(graphMl)) {
+        try (var manager = GraphManager.readGraphMl(graphMl, graphExecutionLimits.graphMl())) {
             long starts = manager.query(g -> g.V().has(GraphManager.KIND, NodeKind.START.name()).count().next());
             long ends = manager.query(g -> g.V().has(GraphManager.KIND, NodeKind.END.name()).count().next());
             return new GraphSummary(Math.toIntExact(manager.nodeCount()), Math.toIntExact(manager.edgeCount()),
@@ -982,14 +994,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(executionId, "executionId");
         java.util.Objects.requireNonNull(policy, "policy");
-        var document = GraphManager.readGraphMlDocument(graphMl);
+        var document = GraphManager.readGraphMlDocument(graphMl, graphExecutionLimits.graphMl());
         byte[] graphBytes = document.bytes();
         String graphVersion = sha256(graphBytes);
         var manager = document.manager();
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
-                    unknownBehaviors, policy);
+                    unknownBehaviors, policy, graphExecutionLimits);
         } catch (RuntimeException error) {
             manager.close();
             throw error;
@@ -1453,7 +1465,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes) {
         return deployments.computeIfAbsent(id, key -> {
             var created = new DefaultGraphDeployment(key, engine, behaviors, monitor, identitySource, graphMlBytes,
-                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, graphExecutionLimits);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });
@@ -1761,7 +1773,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * caller: it is fatal for a source session and legitimate for a deployment.</p>
      */
     private int inspectEffectiveSources(byte[] graphBytes) {
-        try (GraphManager manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graphBytes))) {
+        try (GraphManager manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graphBytes),
+                graphExecutionLimits.graphMl())) {
             var definition = manager.definition();
             new BehaviorPropertySchema(behaviors).validate(definition);
             new NodeRuntimeNatureValidator(behaviors).validate(definition);

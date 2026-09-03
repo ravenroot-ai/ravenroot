@@ -132,6 +132,22 @@ class ExecutionMonitorPublicReasonTest {
     }
 
     @Test
+    void anExecutionLimitKeepsItsClosedPublicCodeWhenJoinFailureWrapsIt() {
+        var monitor = new ExecutionMonitor();
+        var identity = identity();
+        UUID invocationId = UUID.randomUUID();
+        var wrapper = new IllegalStateException("join failed");
+        wrapper.addSuppressed(new GraphExecutionLimitException(
+                GraphExecutionLimitException.Reason.TRAVERSAL_STEPS, 11, 10));
+
+        monitor.nodeStarted(identity, "n", invocationId, invocationId);
+        monitor.nodeFailed(identity, "n", invocationId, invocationId, wrapper);
+
+        assertEquals("GRAPH_LIMIT_TRAVERSAL_STEPS_EXCEEDED",
+                event(monitor, ExecutionEventType.NODE_FAILED).publicReason());
+    }
+
+    @Test
     void failureAuthorMessageIsProjectedFromTheRawCauseBeforeLegacyDetailIsBounded() {
         var monitor = new ExecutionMonitor();
         var identity = identity();

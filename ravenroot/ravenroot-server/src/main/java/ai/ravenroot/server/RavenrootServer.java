@@ -2193,6 +2193,8 @@ public final class RavenrootServer implements AutoCloseable {
                     + ",\"startNodes\":" + summary.startNodes() + ",\"endNodes\":" + summary.endNodes()
                     + ",\"valid\":" + summary.valid() + ",\"violations\":" + stringArrayJson(summary.violations())
                     + "}");
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, rejection);
         } catch (GraphMlParseException error) {
             graphMlError(exchange, error);
         } catch (GraphMlCompatibilityException error) {
@@ -2372,6 +2374,8 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, error);
         } catch (GraphMlCompatibilityException error) {
             graphMlError(exchange, error);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, rejection);
         } catch (ai.ravenroot.api.application.SourceSessionException refusal) {
             fail(exchange, refusal.reason() == ai.ravenroot.api.application.SourceSessionException.Reason.GRAPH_CONFLICT
                     ? ErrorCode.CONFLICT : ErrorCode.INVALID_REQUEST);
@@ -2382,7 +2386,9 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (java.util.concurrent.TimeoutException timeout) {
             fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
         } catch (java.util.concurrent.ExecutionException failed) {
-            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            ai.ravenroot.core.runtime.GraphExecutionLimitException limited = graphExecutionLimitIn(failed);
+            if (limited != null) failGraphExecutionLimit(exchange, limited);
+            else fail(exchange, ErrorCode.INTERNAL_ERROR);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
@@ -2514,6 +2520,8 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, error);
         } catch (GraphMlCompatibilityException error) {
             graphMlError(exchange, error);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, rejection);
         } catch (ai.ravenroot.api.application.LocalDeploymentException refusal) {
             fail(exchange, refusal.reason()
                     == ai.ravenroot.api.application.LocalDeploymentException.Reason.GRAPH_CONFLICT
@@ -2525,7 +2533,9 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (java.util.concurrent.TimeoutException timeout) {
             fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
         } catch (java.util.concurrent.ExecutionException failed) {
-            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            ai.ravenroot.core.runtime.GraphExecutionLimitException limited = graphExecutionLimitIn(failed);
+            if (limited != null) failGraphExecutionLimit(exchange, limited);
+            else fail(exchange, ErrorCode.INTERNAL_ERROR);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             fail(exchange, ErrorCode.REQUEST_INTERRUPTED);
@@ -2653,6 +2663,8 @@ public final class RavenrootServer implements AutoCloseable {
             graphMlError(exchange, error);
         } catch (PayloadException rejection) {
             failPayload(exchange, rejection);
+        } catch (ai.ravenroot.core.runtime.GraphExecutionLimitException rejection) {
+            failGraphExecutionLimit(exchange, rejection);
         } catch (UnsupportedOperationException unsupportedPolicy) {
             fail(exchange, ErrorCode.EXECUTION_POLICY_UNSUPPORTED);
         } catch (IllegalArgumentException error) {
@@ -2660,6 +2672,24 @@ public final class RavenrootServer implements AutoCloseable {
         } catch (IllegalStateException error) {
             fail(exchange, ErrorCode.CONFLICT);
         }
+    }
+
+    private void failGraphExecutionLimit(HttpExchange exchange,
+                                         ai.ravenroot.core.runtime.GraphExecutionLimitException rejection)
+            throws IOException {
+        fail(exchange, ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT.status(),
+                ErrorEnvelope.ofServerCode(rejection.reason().publicCode(),
+                        ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT,
+                        AuthenticatedPrincipalAttribute.requestId(exchange)));
+    }
+
+    private static ai.ravenroot.core.runtime.GraphExecutionLimitException graphExecutionLimitIn(Throwable error) {
+        Throwable current = error;
+        while (current != null) {
+            if (current instanceof ai.ravenroot.core.runtime.GraphExecutionLimitException limited) return limited;
+            current = current.getCause();
+        }
+        return null;
     }
 
     /**

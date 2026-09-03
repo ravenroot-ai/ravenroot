@@ -4,6 +4,7 @@ import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.GraphExecutionLimitException;
 import ai.ravenroot.core.ai.AgentRuntimeRegistry;
 import ai.ravenroot.core.ai.ModelProviderRegistry;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -21,6 +22,7 @@ import ai.ravenroot.server.security.BrowserOriginPolicy;
 import ai.ravenroot.server.security.HttpSecurityConfiguration;
 import ai.ravenroot.server.security.SecurityHeadersPolicy;
 import ai.ravenroot.server.security.RequestAuthenticator;
+import ai.ravenroot.server.support.ForwardingRavenrootApplication;
 import ai.ravenroot.api.security.Role;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -321,6 +323,36 @@ class RavenrootServerTest {
             assertTrue(missingApi.headers().firstValue("Content-Security-Policy").orElseThrow()
                     .contains("frame-ancestors 'none'"));
             assertTrue(RavenrootHealthcheck.isHealthy(server.port()));
+        }
+    }
+
+    @Test
+    void graphExecutionLimitRefusalUsesAClosedPayloadFreeHttpCode() throws Exception {
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-graph-limit-test")) {
+            var delegate = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            var application = new ForwardingRavenrootApplication(delegate) {
+                @Override
+                public ai.ravenroot.api.application.ExecutionSubmission startGraphMl(
+                        ai.ravenroot.api.security.SecurityContext security, UUID executionId,
+                        java.io.InputStream graphMl, Object payload,
+                        ai.ravenroot.api.application.ExecutionPolicy policy) {
+                    throw new GraphExecutionLimitException(
+                            GraphExecutionLimitException.Reason.FAN_OUT, 99, 64);
+                }
+            };
+            try (var server = testServer(application, null)) {
+                server.start();
+                HttpResponse<String> response = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder(URI.create("http://localhost:" + server.port() + "/v1/executions"))
+                                .POST(HttpRequest.BodyPublishers.ofString(EXECUTABLE_GRAPH)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+
+                assertEquals(413, response.statusCode());
+                assertTrue(response.body().contains("\"code\":\"GRAPH_LIMIT_FAN_OUT_EXCEEDED\""),
+                        response.body());
+                assertFalse(response.body().contains("99"), response.body());
+                assertFalse(response.body().contains("64"), response.body());
+            }
         }
     }
 

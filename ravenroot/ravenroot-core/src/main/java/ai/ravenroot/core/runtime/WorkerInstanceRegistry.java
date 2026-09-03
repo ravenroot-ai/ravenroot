@@ -41,18 +41,14 @@ import java.util.function.Function;
  * under the same {@code invocationId}, so it is the same entry with a new attempt, and only a
  * documented transition that mints a new {@code invocationId} creates a second entry.
  *
- * <h2>There is no platform-imposed admission here</h2>
+ * <h2>Admission is owned by the runner, not this registry</h2>
  * <p>This registry previously had its own {@code Semaphore} of 1024, which bounded a deployment while
  * appearing to bound a pod, because a registry is per {@code GraphRunner}, which is per deployment.
  * {@code InvocationAdmission} then replaced it with a hierarchical pod/tenant/deployment ceiling
- * shared by every runner in the JVM. That admission layer was removed outright rather than
- * raise its ceilings, on a decision the platform does not get to make on the operator's behalf: how
- * much concurrent work one pod can carry is a property of that pod's threads, not a number this class
- * or any of its predecessors could know in advance. {@link #acquire} therefore always creates and
- * registers an instance; nothing here refuses one for being "too many". Scarcity is resolved by the
- * actor model itself — a busy dispatcher with few threads runs fewer worker instances at once and
- * queues the rest, exactly as it would for any other actor, which is why this registry does not need
- * to do that job a second time.
+ * shared by every runner in the JVM. The current model keeps the mutable counters in the live
+ * traversal's {@link ExecutionBudget} and the per-node gates in {@link TraversalAdmissionRegistry};
+ * both are checked before this registry is called. {@link #acquire} therefore still has one job:
+ * create and register an already-admitted instance, or unwind a failed spawn without partial state.
  *
  * <p><b>This does not touch the per-node ceilings the extensions declare on their own</b> — {@code
  * mail.send}'s {@code maxConcurrency}, Kafka's and AMQP's producer gates, the IMAP query behavior's

@@ -901,6 +901,19 @@ public final class AuthorizedRavenrootApplication {
         return delegate.processInventoryAvailable();
     }
 
+/**
+ * The largest page {@link #processInventory} will return in one call. Not tenant data and not
+ * gated by authorization for the same reason {@link #processInventoryAvailable()} and
+ * {@link #durableEventJournalAvailable()} are not: it is a fact about this deployment's composed
+ * store, published so an external caller building its own pagination loop can read the bound
+ * instead of discovering it by bisection.
+ * @see RavenrootApplication#processInventoryMaxPageSize()
+ * @return the maximum page size the composed store accepts, or zero when unavailable.
+ */
+    public int processInventoryMaxPageSize() {
+        return delegate.processInventoryMaxPageSize();
+    }
+
     /**
  * This caller's own tenant's page of the durable process inventory.
  *

@@ -97,6 +97,14 @@ class ProcessInventoryHttpTest {
                         () -> "processInstanceId != executionId on this fixture, and the traversal "
                                 + "listing must still name the traversal by its own id: " + traversals);
                 assertTrue(traversals.contains("\"status\":\"COMPLETED\""), traversals);
+                assertTrue(traversals.contains("\"retainedFrom\""),
+                        () -> "the traversal listing must carry the same retention floor the inventory "
+                                + "listing does, so a caller diagnosing an absence has it on whichever "
+                                + "of the two it is holding: " + traversals);
+                assertTrue(inventory.contains("\"maxPageSize\""),
+                        () -> "the inventory page must publish this deployment's declared page-size "
+                                + "bound rather than leaving a caller to discover it by bisection: "
+                                + inventory);
             }
         }
     }
@@ -152,6 +160,123 @@ class ProcessInventoryHttpTest {
                 var ownRead = getAs(server, "/v1/executions/" + processInstanceId + "/traversals", "tenant-a");
                 assertEquals(200, ownRead.statusCode(), ownRead.body());
             }
+        }
+    }
+
+    /**
+     * Review finding: query parameters were named {@code owner}/{@code deployment} while the
+     * response emits {@code ownerWorkerId}/{@code deploymentId}, and an unrecognised parameter was
+     * silently dropped -- so an operator who wrote {@code ?ownerWorkerId=w}, the name the response
+     * itself shows, got the entire unfiltered tenant page back and read it as "all this work belongs
+     * to w". This proves both halves of the fix: the aligned name is a real filter, and the old,
+     * now-wrong name is refused rather than quietly answering unfiltered.
+     */
+    @Test
+    void queryParameterNamesMatchTheResponseAndAnUnrecognisedNameIsRefused() throws Exception {
+        try (var engine = new PekkoExecutionEngine("process-inventory-http-param-test");
+             var store = new InMemoryExecutionStore()) {
+            var application = applicationWith(engine, store);
+            try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.start();
+
+                var submitResponse = postAs(server, "/v1/executions?mode=run", GRAPH, "tenant-a");
+                assertEquals(202, submitResponse.statusCode(), submitResponse.body());
+                pollUntilNonEmpty(server, "tenant-a");
+
+                // The aligned name is a real filter: a completed instance holds no lease, so
+                // filtering by any worker id -- even a nonexistent one -- must exclude it, never
+                // silently answer the unfiltered page.
+                String filtered = body(getAs(server,
+                        "/v1/executions/inventory?includeTerminal=true&ownerWorkerId=nonexistent-worker",
+                        "tenant-a"));
+                assertTrue(filtered.startsWith("{\"items\":[]"),
+                        () -> "ownerWorkerId must actually filter, not be ignored: " + filtered);
+
+                // The old, pre-fix name must now be refused outright, not silently dropped -- silently
+                // dropping it is exactly the defect: it would answer with the unfiltered page, which
+                // an operator who copied the response's own field name would misread as "this is all
+                // owner-worker's".
+                var rejected = getAs(server, "/v1/executions/inventory?owner=nonexistent-worker", "tenant-a");
+                assertEquals(400, rejected.statusCode(), rejected.body());
+                assertEquals("INVALID_REQUEST", errorCode(rejected), rejected.body());
+
+                var alsoRejected = getAs(server, "/v1/executions/inventory?deployment=x", "tenant-a");
+                assertEquals(400, alsoRejected.statusCode(), alsoRejected.body());
+            }
+        }
+    }
+
+    /**
+     * Review finding (F6): the CLI's {@code EmbeddedBackend}/{@code RemoteBackend} loop over
+     * {@code nextCursor} to avoid silently truncating a tenant with more instances than one page
+     * holds. This is the same property proved directly at the wire: a caller that follows
+     * {@code nextCursor} reaches every row, never stops one page short of the whole answer, and every
+     * page along the way publishes {@code maxPageSize} rather than leaving the bound to be
+     * discovered by bisection.
+     */
+    @Test
+    void nextCursorReachesEveryRowAcrossMultiplePagesRatherThanTruncating() throws Exception {
+        try (var engine = new PekkoExecutionEngine("process-inventory-http-pagination-test");
+             var store = new InMemoryExecutionStore()) {
+            var application = applicationWith(engine, store);
+            try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.start();
+
+                int submitted = 3;
+                for (int i = 0; i < submitted; i++) {
+                    var submitResponse = postAs(server, "/v1/executions?mode=run", GRAPH, "tenant-a");
+                    assertEquals(202, submitResponse.statusCode(), submitResponse.body());
+                }
+                // Wait for all three to reach COMPLETED before paginating, so the page count below is
+                // a property of pagination and not of submissions still catching up.
+                long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+                java.util.Set<String> seen = new java.util.HashSet<>();
+                while (seen.size() < submitted && System.nanoTime() < deadline) {
+                    seen = collectProcessInstanceIds(server, "tenant-a");
+                    if (seen.size() < submitted) {
+                        Thread.sleep(100);
+                    }
+                }
+                var finalSeen = seen;
+                assertEquals(submitted, seen.size(),
+                        () -> "fixture did not reach " + submitted + " completed instances in time: " + finalSeen);
+
+                java.util.Set<String> paginated = collectProcessInstanceIds(server, "tenant-a");
+                assertEquals(seen, paginated,
+                        "following nextCursor to completion must reach the exact same set a single "
+                                + "unbounded read sees -- neither more nor fewer rows");
+            }
+        }
+    }
+
+    /** Pages {@code GET /v1/executions/inventory?includeTerminal=true} one row at a time
+     * ({@code limit=1}), following {@code nextCursor} until it is exhausted, asserting every page
+     * along the way carries a positive {@code maxPageSize}. */
+    private static java.util.Set<String> collectProcessInstanceIds(RavenrootServer server, String tenant)
+            throws Exception {
+        java.util.Set<String> ids = new java.util.HashSet<>();
+        String cursor = null;
+        int pages = 0;
+        while (true) {
+            String path = "/v1/executions/inventory?includeTerminal=true&limit=1"
+                    + (cursor == null ? "" : "&cursor=" + java.net.URLEncoder.encode(cursor, "UTF-8"));
+            String page = body(getAs(server, path, tenant));
+            pages++;
+            assertTrue(pages < 100, "pagination did not terminate: " + page);
+            var itemMatcher = Pattern.compile("\"processInstanceId\":\"([^\"]+)\"").matcher(page);
+            while (itemMatcher.find()) {
+                ids.add(itemMatcher.group(1));
+            }
+            var maxPageSizeMatcher = Pattern.compile("\"maxPageSize\":(\\d+)").matcher(page);
+            assertTrue(maxPageSizeMatcher.find(), () -> "no maxPageSize in page: " + page);
+            assertTrue(Integer.parseInt(maxPageSizeMatcher.group(1)) > 0, page);
+            var cursorMatcher = Pattern.compile("\"nextCursor\":(null|\"([^\"]+)\")").matcher(page);
+            assertTrue(cursorMatcher.find(), () -> "no nextCursor in page: " + page);
+            String next = cursorMatcher.group(2);
+            if (next == null) {
+                return ids;
+            }
+            cursor = next;
         }
     }
 

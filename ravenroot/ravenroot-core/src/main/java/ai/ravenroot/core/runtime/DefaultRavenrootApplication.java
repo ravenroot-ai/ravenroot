@@ -1354,6 +1354,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return executionStore != null && executionStore.supports(StoreCapability.PROCESS_INVENTORY);
     }
 
+    @Override
+    public int processInventoryMaxPageSize() {
+        return processInventoryAvailable() ? executionStore.maxInventoryPageSize() : 0;
+    }
+
     private void requireProcessInventory() {
         if (!processInventoryAvailable()) {
             throw new IllegalStateException(

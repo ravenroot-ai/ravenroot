@@ -403,19 +403,26 @@ public final class RouteTable {
             // for the full distinction. "inventory" is reserved the same way "live" is: never a valid
             // traversal id (ids are UUIDs), so no legitimate GET /v1/executions/{id} read is shadowed.
             // 501 when this deployment composed no inventory-capable store at all -- a fact about the
-            // deployment rather than the request.
+            // deployment rather than the request. Query parameter names match the response's own
+            // field names (ownerWorkerId, deploymentId) exactly, and an unrecognised parameter is
+            // refused rather than silently dropped -- see RavenrootServer#listProcessInventory's own
+            // Javadoc for the failure that closes.
             new RouteDescriptor(Set.of("GET"), "/v1/executions/inventory",
                     "Lists one page of this tenant's durable process inventory (#154): what this "
                             + "deployment's own persisted record says exists, surviving a restart, as "
                             + "opposed to GET /v1/executions/live's process-local runtime view. "
-                            + "Optional query parameters: status (comma-separated "
-                            + "ProcessInstanceStatus names), owner (lease-holder worker id), deployment "
-                            + "(hosting deployment id), includeTerminal (true to include "
-                            + "COMPLETED/FAILED rows, excluded by default), limit and cursor (opaque, "
-                            + "from a previous page's nextCursor). The response always carries "
-                            + "retainedFrom, this tenant's inventory retention floor, so a caller can "
-                            + "tell an instance that never existed from one purged by policy without a "
-                            + "second request. Tenant-scoped structurally, the same way GET "
+                            + "Optional query parameters, each named exactly like the field the "
+                            + "response itself carries: status (comma-separated ProcessInstanceStatus "
+                            + "names), ownerWorkerId (lease-holder worker id), deploymentId (hosting "
+                            + "deployment id), includeTerminal (true to include COMPLETED/FAILED rows, "
+                            + "excluded by default), limit and cursor (opaque, from a previous page's "
+                            + "nextCursor). Any other parameter name is refused as 400, not silently "
+                            + "ignored. The response always carries retainedFrom, this tenant's "
+                            + "inventory retention floor, so a caller can tell an instance that never "
+                            + "existed from one purged by policy without a second request, and "
+                            + "maxPageSize, this deployment's declared page-size bound, so a caller "
+                            + "paginating its own loop can read it instead of discovering it by "
+                            + "bisection. Tenant-scoped structurally, the same way GET "
                             + "/v1/executions/live is. 501 when this deployment has no "
                             + "inventory-capable execution store composed.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
@@ -426,9 +433,12 @@ public final class RouteTable {
             // RavenrootServer#readProcessInstanceTraversals's own Javadoc for why that id space is
             // deliberately different from every other /v1/executions sub-route's.
             new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/traversals",
-                    "Lists one durable process instance's traversals from the inventory (#154). "
-                            + "Unlike every other /v1/executions sub-route, {id} here is a "
-                            + "processInstanceId, not the executionId/traversalId GET "
+                    "Lists one durable process instance's traversals from the inventory (#154), "
+                            + "alongside this tenant's inventory retention floor as retainedFrom -- the "
+                            + "same field GET /v1/executions/inventory carries, present here too so an "
+                            + "operator diagnosing an absence has it on whichever of the two listings "
+                            + "they are holding. Unlike every other /v1/executions sub-route, {id} here "
+                            + "is a processInstanceId, not the executionId/traversalId GET "
                             + "/v1/executions/{id} and the cancel/pause/resume trio use -- a process "
                             + "instance can contain more than one traversal, so a traversal id could "
                             + "not address this route's question. 404 when the instance is absent, "

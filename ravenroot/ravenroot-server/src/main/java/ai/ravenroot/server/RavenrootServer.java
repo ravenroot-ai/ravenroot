@@ -2764,6 +2764,14 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"startedAt\":\"" + execution.startedAt() + "\"}";
     }
 
+    /** Query parameters {@link #listProcessInventory} recognises; anything else is refused rather
+     * than silently ignored -- see that method's own Javadoc for why. Names match the response's own
+     * field names ({@code ownerWorkerId}, {@code deploymentId}) exactly, on purpose: an operator who
+     * writes the parameter name the response just showed them must filter by it, never fall through
+     * to an unfiltered page that reads as "all this work belongs to that value". */
+    private static final Set<String> INVENTORY_QUERY_PARAMETERS =
+            Set.of("status", "ownerWorkerId", "deploymentId", "includeTerminal", "limit", "cursor");
+
     /**
      * {@code GET /v1/executions/inventory} (issue 154): one page of this tenant's durable, authoritative
      * process inventory -- what API, CLI, UI, audit and recovery callers are meant to share instead of
@@ -2772,21 +2780,27 @@ public final class RavenrootServer implements AutoCloseable {
      * and it survives a restart -- see {@link ai.ravenroot.api.application.RavenrootApplication#processInventoryAvailable()}
      * for the full distinction between the two.
      *
-     * <p>Query parameters, every one optional: {@code status} (comma-separated
-     * {@link ai.ravenroot.api.application.ProcessInstanceStatus} names), {@code owner} (lease
-     * holder worker id), {@code deployment} (hosting deployment id), {@code includeTerminal}
-     * ({@code true} to include {@code COMPLETED}/{@code FAILED} rows, which are excluded by
-     * default), {@code limit} and {@code cursor} (opaque, from a previous page's
-     * {@code nextCursor}). The response body always carries {@code retainedFrom}, the tenant's
-     * inventory retention floor, so a caller can tell an instance that never existed from one that
-     * expired by policy without a second request.</p>
+     * <p>Query parameters, every one optional, and named exactly like the fields the response itself
+     * carries: {@code status} (comma-separated {@link ai.ravenroot.api.application.ProcessInstanceStatus}
+     * names), {@code ownerWorkerId} (lease holder worker id), {@code deploymentId} (hosting deployment
+     * id), {@code includeTerminal} ({@code true} to include {@code COMPLETED}/{@code FAILED} rows,
+     * which are excluded by default), {@code limit} and {@code cursor} (opaque, from a previous page's
+     * {@code nextCursor}). A parameter outside this set is refused as 400 rather than dropped: a typo
+     * or a stale name silently answering with an unfiltered page would read as "everything belongs to
+     * what I asked for", the wrong direction for a filter to fail in. The response body always carries
+     * {@code retainedFrom}, the tenant's inventory retention floor, so a caller can tell an instance
+     * that never existed from one that expired by policy without a second request, and
+     * {@code maxPageSize}, this deployment's declared page-size bound
+     * ({@link ai.ravenroot.api.application.RavenrootApplication#processInventoryMaxPageSize()}), so a
+     * caller paginating its own loop can read the bound instead of discovering it by bisection.</p>
      *
      * <p>501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when this deployment has no
      * inventory-capable store composed at all -- a fact about the deployment, not the request, so it
-     * is checked before the request is otherwise parsed. Malformed query input (an unrecognised
-     * status name, a non-numeric limit, a limit or cursor the store itself rejects) answers 400
-     * {@link ErrorCode#INVALID_REQUEST} -- the store's own {@code InvalidRequest} classification is
-     * translated here rather than surfaced as 500, since it is a fact about the caller's request.</p>
+     * is checked before the request is otherwise parsed. Malformed query input (an unknown parameter
+     * name, an unrecognised status name, a non-numeric limit, a limit or cursor the store itself
+     * rejects) answers 400 {@link ErrorCode#INVALID_REQUEST} -- the store's own {@code InvalidRequest}
+     * classification is translated here rather than surfaced as 500, since it is a fact about the
+     * caller's request.</p>
      */
     private void listProcessInventory(HttpExchange exchange) throws IOException {
         var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
@@ -2795,6 +2809,10 @@ public final class RavenrootServer implements AutoCloseable {
             return;
         }
         var parameters = query(exchange);
+        if (!INVENTORY_QUERY_PARAMETERS.containsAll(parameters.keySet())) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        }
         var builder = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder();
         String rawStatus = parameters.get("status");
         if (rawStatus != null && !rawStatus.isBlank()) {
@@ -2810,11 +2828,11 @@ public final class RavenrootServer implements AutoCloseable {
                 }
             }
         }
-        String owner = parameters.get("owner");
+        String owner = parameters.get("ownerWorkerId");
         if (owner != null && !owner.isBlank()) {
             builder.ownedBy(owner);
         }
-        String deployment = parameters.get("deployment");
+        String deployment = parameters.get("deploymentId");
         if (deployment != null && !deployment.isBlank()) {
             builder.hostedBy(deployment);
         }
@@ -2841,7 +2859,7 @@ public final class RavenrootServer implements AutoCloseable {
         }
         try {
             var page = authorizedApplication.processInventory(requestContext, builder.build());
-            json(exchange, 200, processInventoryPageJson(page));
+            json(exchange, 200, processInventoryPageJson(page, authorizedApplication.processInventoryMaxPageSize()));
         } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
             if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.InvalidRequest) {
                 fail(exchange, ErrorCode.INVALID_REQUEST);
@@ -2851,7 +2869,8 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
-    private static String processInventoryPageJson(ai.ravenroot.api.persistence.ProcessInventoryPage page) {
+    private static String processInventoryPageJson(ai.ravenroot.api.persistence.ProcessInventoryPage page,
+                                                    int maxPageSize) {
         var body = new StringBuilder(256);
         body.append("{\"items\":[");
         var items = page.items();
@@ -2863,7 +2882,8 @@ public final class RavenrootServer implements AutoCloseable {
         }
         body.append("],\"nextCursor\":")
                 .append(page.nextCursor().map(cursor -> "\"" + escape(cursor) + "\"").orElse("null"))
-                .append(",\"retainedFrom\":\"").append(page.retainedFrom()).append("\"}");
+                .append(",\"retainedFrom\":\"").append(page.retainedFrom()).append('"')
+                .append(",\"maxPageSize\":").append(maxPageSize).append('}');
         return body.toString();
     }
 
@@ -2913,6 +2933,10 @@ public final class RavenrootServer implements AutoCloseable {
      * indistinguishable by design, exactly as {@code GET /v1/executions/{id}} already is for its own
      * id space. 501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when no inventory-capable store
      * is composed at all.</p>
+     *
+     * <p>The response also carries {@code retainedFrom}, this tenant's inventory retention floor,
+     * exactly like {@code GET /v1/executions/inventory} does -- an operator diagnosing an absence
+     * needs it on whichever of the two listings they happen to be holding, not only on one of them.</p>
      */
     private void readProcessInstanceTraversals(HttpExchange exchange, String rawId) throws IOException {
         var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
@@ -2929,8 +2953,10 @@ public final class RavenrootServer implements AutoCloseable {
         }
         try {
             var traversals = authorizedApplication.processInstanceTraversals(requestContext, processInstanceId);
+            var retainedFrom = authorizedApplication.processInventoryRetainedFrom(requestContext);
             var body = traversals.stream().map(RavenrootServer::traversalInventoryEntryJson)
-                    .collect(java.util.stream.Collectors.joining(",", "{\"traversals\":[", "]}"));
+                    .collect(java.util.stream.Collectors.joining(",", "{\"traversals\":[", "],\"retainedFrom\":\""
+                            + retainedFrom + "\"}"));
             json(exchange, 200, body);
         } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
             if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {

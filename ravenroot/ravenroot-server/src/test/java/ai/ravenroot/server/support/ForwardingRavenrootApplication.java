@@ -65,6 +65,7 @@ public class ForwardingRavenrootApplication implements RavenrootApplication {
     @Override public boolean cancelTraversal(UUID traversalId) { return delegate.cancelTraversal(traversalId); }
     @Override public boolean drain(Duration bound) { return delegate.drain(bound); }
     @Override public boolean processInventoryAvailable() { return delegate.processInventoryAvailable(); }
+    @Override public int processInventoryMaxPageSize() { return delegate.processInventoryMaxPageSize(); }
     @Override public ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
             String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
         return delegate.processInventory(tenantId, query);

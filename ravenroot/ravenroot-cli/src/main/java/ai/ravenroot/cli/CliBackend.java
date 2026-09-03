@@ -56,16 +56,26 @@ public interface CliBackend {
      * full distinction between the two. Tenant scoping is structural, the same mechanism {@link #live}
      * already documents.
      *
-     * <p>Unfiltered, first page only, terminal rows <strong>included</strong> --
-     * {@code ProcessInventoryQuery.everything()} on both transports. Deliberately the opposite
-     * default from the HTTP route's own ({@code includeTerminal=false}): an operator running this
-     * verb right after {@code ravenroot run} needs to keep seeing the instance once it finishes, or
-     * the verb would go silent on the exact work it was just used to start. Filtering and pagination
-     * are the query surface's own job and are not exposed as CLI flags yet; this is deliberately the
-     * smallest useful verb rather than a second console.</p>
+     * <p>Unfiltered, terminal rows <strong>included</strong> -- {@code ProcessInventoryQuery.everything()}
+     * on both transports. Deliberately the opposite default from the HTTP route's own
+     * ({@code includeTerminal=false}): an operator running this verb right after
+     * {@code ravenroot run} needs to keep seeing the instance once it finishes, or the verb would go
+     * silent on the exact work it was just used to start. Filtering is the query surface's own job
+     * and is not exposed as a CLI flag yet; this is deliberately the smallest useful verb rather than
+     * a second console.</p>
+     *
+     * <p><strong>Paged to completion, never one page.</strong> This verb has no continuation flag a
+     * caller could use to ask for the rest, so a single-page read would silently truncate a tenant
+     * with more rows than one page holds -- exactly the failure
+     * {@code ai.ravenroot.api.persistence.ExecutionStore#maxInventoryPageSize()}'s own Javadoc argues
+     * against for the store, reproduced one layer up: an operator using this to find work that needs
+     * recovery would conclude the work is not there. Both {@link EmbeddedBackend} and
+     * {@link ai.ravenroot.cli.remote.RemoteBackend} therefore follow the store's own
+     * {@code nextCursor} internally until it is exhausted, so {@link InventoryListing#items()} is
+     * always the tenant's whole answer.</p>
      * @throws IOException if this deployment has no durable inventory-capable execution store composed
      */
-    List<InventoryView> inventory() throws IOException;
+    InventoryListing inventory() throws IOException;
 
     /**
      * One durable process instance's traversals from the inventory (issue 154). {@code processInstanceId}
@@ -76,7 +86,7 @@ public interface CliBackend {
      * terminal retention window (all three indistinguishable by design), or this deployment has no
      * durable inventory-capable execution store composed
      */
-    List<TraversalInventoryView> traversals(String processInstanceId) throws IOException;
+    TraversalListing traversals(String processInstanceId) throws IOException;
 
     /** API-02. Cancel and server drain; pause/resume and handler triggers remain out of scope. */
     CancelView cancel(String traversalId) throws IOException;
@@ -312,9 +322,37 @@ public interface CliBackend {
                          String createdAt, String updatedAt) {
     }
 
+    /**
+     * The complete answer {@link #inventory()} returns: every matching row, paged to completion by
+     * the backend rather than left for the caller to continue, plus the retention floor that makes
+     * an absence on {@code items} readable -- see {@link #inventory()}'s own Javadoc for why both are
+     * carried together rather than the cursor being surfaced instead.
+     * @param items every matching row, in the store's own order, never a partial page
+     * @param retainedFrom this tenant's inventory retention floor, the transport's own string form
+     *                     of {@code ai.ravenroot.api.persistence.ProcessInventoryPage#retainedFrom()}
+     */
+    record InventoryListing(List<InventoryView> items, String retainedFrom) {
+        public InventoryListing {
+            items = List.copyOf(items);
+        }
+    }
+
     /** Mirrors {@code ai.ravenroot.api.persistence.TraversalInventoryEntry} (issue 154). */
     record TraversalInventoryView(String traversalId, int position, String ingressNodeId, String status,
                                   String disposition, int invocationCount, int parkedAttemptCount) {
+    }
+
+    /**
+     * The complete answer {@link #traversals(String)} returns: one instance's traversals, plus the
+     * same tenant's retention floor that {@link InventoryListing} carries -- present here too so an
+     * operator diagnosing an absence has it on whichever of the two verbs they are holding.
+     * @param traversals the instance's traversals, in insertion order
+     * @param retainedFrom this tenant's inventory retention floor
+     */
+    record TraversalListing(List<TraversalInventoryView> traversals, String retainedFrom) {
+        public TraversalListing {
+            traversals = List.copyOf(traversals);
+        }
     }
 
     /** Mirrors {@code ai.ravenroot.api.application.CancelResult}: {@code note} is the operator-facing

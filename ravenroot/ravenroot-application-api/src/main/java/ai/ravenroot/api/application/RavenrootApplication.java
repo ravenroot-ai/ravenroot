@@ -582,6 +582,22 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * The largest page {@link #processInventory} will return in one call, delegating to
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#maxInventoryPageSize()} — published rather
+     * than left for a caller to discover by bisection, which is exactly the failure
+     * {@link ai.ravenroot.api.persistence.ExecutionStore#maxInventoryPageSize()}'s own Javadoc argues
+     * against for the store itself. This bound is adapter- and deployment-configurable (both shipped
+     * adapters default it to the same value, but an operator may change it), so it is stated here as
+     * a fact this implementation reads back from its composed store rather than a literal anyone could
+     * cite as universal.
+     * @return the maximum page size the composed store accepts, or zero when
+     * {@link #processInventoryAvailable()} is {@code false}
+     */
+    default int processInventoryMaxPageSize() {
+        return 0;
+    }
+
+    /**
      * Lists one page of {@code tenantId}'s durable process instances (issue 154), delegating
      * directly to {@link ai.ravenroot.api.persistence.ExecutionStore#listProcessInstances}.
      *

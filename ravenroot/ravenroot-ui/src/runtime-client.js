@@ -390,15 +390,19 @@ export class RavenrootRuntimeClient {
    * server's stored outcome rather than reconstructing one from events.
    *
    * `filters` mirrors `GET /v1/executions/inventory`'s own optional query parameters verbatim
-   * (`status`, `owner`, `deployment`, `includeTerminal`, `limit`, `cursor`) rather than inventing a
-   * client-side vocabulary for them; an absent or blank value is simply omitted from the request.
-   * The response body -- `items`, `nextCursor`, `retainedFrom` -- is returned unmodified, so a
+   * (`status`, `ownerWorkerId`, `deploymentId`, `includeTerminal`, `limit`, `cursor` -- named exactly
+   * like the fields the response itself carries, not a shorter alias, so a caller filtering by a
+   * value it just read off a previous response uses the identical name) rather than inventing a
+   * client-side vocabulary for them; an absent or blank value is simply omitted from the request,
+   * and the server refuses any other parameter name outright rather than ignoring it. The response
+   * body -- `items`, `nextCursor`, `retainedFrom`, `maxPageSize` -- is returned unmodified, so a
    * caller can tell "never existed" from "expired by retention" from `retainedFrom` without a
-   * second request.
+   * second request, and can read this deployment's declared page-size bound from `maxPageSize`
+   * instead of discovering it by trial and error.
    */
   async processInventory(filters = {}, { signal } = {}) {
     const params = new URLSearchParams();
-    for (const key of ['status', 'owner', 'deployment', 'includeTerminal', 'limit', 'cursor']) {
+    for (const key of ['status', 'ownerWorkerId', 'deploymentId', 'includeTerminal', 'limit', 'cursor']) {
       const value = filters?.[key];
       if (value === undefined || value === null || value === '') continue;
       params.set(key, String(value));
@@ -415,7 +419,10 @@ export class RavenrootRuntimeClient {
    * One durable process instance's traversals from the inventory (issue 154). `processInstanceId`
    * is a process instance id, not the `executionId`/traversal id `execution()` above takes -- see
    * `RavenrootServer#readProcessInstanceTraversals`'s own Javadoc for why the two id spaces are
-   * deliberately distinct rather than an inconsistency.
+   * deliberately distinct rather than an inconsistency. The response body -- `traversals`,
+   * `retainedFrom` -- is returned unmodified; `retainedFrom` is this tenant's same retention floor
+   * `processInventory()` carries, present here too so a caller diagnosing an absence has it on
+   * whichever of the two responses it is holding.
    */
   async processInstanceTraversals(processInstanceId, { signal } = {}) {
     const id = String(processInstanceId || '');

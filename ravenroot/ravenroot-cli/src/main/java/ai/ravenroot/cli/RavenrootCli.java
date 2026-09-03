@@ -285,11 +285,16 @@ public final class RavenrootCli {
      * Lists this tenant's durable process inventory (issue 154): what this deployment's own
      * persisted record says exists, surviving a restart -- distinct from {@code live}, which is
      * unchanged and remains the process-local runtime view. See {@link CliBackend#inventory}'s own
-     * Javadoc for the full distinction. One line per instance; an idle tenant gets no lines, the
-     * same "absence of output IS the answer" convention {@code live} uses.
+     * Javadoc for the full distinction, including why the backend pages this to completion rather
+     * than answering with one page. One line per instance, followed by one trailing
+     * {@code retained-from=} line -- printed even for an idle tenant, deliberately the one exception
+     * to the "absence of output IS the answer" convention {@code live} uses: the retention floor is
+     * exactly what an operator needs to read when the listing above it is empty, to tell "nothing
+     * ever ran" from "it ran and aged out".
      */
     private int inventory() throws IOException {
-        for (var entry : backend.inventory()) {
+        var listing = backend.inventory();
+        for (var entry : listing.items()) {
             output.println("process-instance-id=" + entry.processInstanceId()
                     + "\tstatus=" + entry.status()
                     + "\tdisposition=" + entry.disposition()
@@ -301,6 +306,7 @@ public final class RavenrootCli {
                     + "\tcreated-at=" + entry.createdAt()
                     + "\tupdated-at=" + entry.updatedAt());
         }
+        output.println("retained-from=" + listing.retainedFrom());
         return 0;
     }
 
@@ -309,12 +315,15 @@ public final class RavenrootCli {
      * {@code ravenroot traversals <process-instance-id>}. The argument is a process instance id, not
      * the traversal/execution id {@code cancel} and {@code result} take -- see
      * {@link CliBackend#traversals}'s own Javadoc for why the two id spaces are deliberately distinct.
+     * One line per traversal, followed by the same trailing {@code retained-from=} line
+     * {@link #inventory()} prints, for the same reason.
      */
     private int traversals(String[] args) throws IOException {
         if (args.length != 2) {
             return invalid("Usage: traversals <process-instance-id>");
         }
-        for (var entry : backend.traversals(args[1])) {
+        var listing = backend.traversals(args[1]);
+        for (var entry : listing.traversals()) {
             output.println("traversal-id=" + entry.traversalId()
                     + "\tposition=" + entry.position()
                     + "\tingress-node-id=" + sanitizeForConsole(entry.ingressNodeId())
@@ -323,6 +332,7 @@ public final class RavenrootCli {
                     + "\tinvocation-count=" + entry.invocationCount()
                     + "\tparked-attempt-count=" + entry.parkedAttemptCount());
         }
+        output.println("retained-from=" + listing.retainedFrom());
         return 0;
     }
 

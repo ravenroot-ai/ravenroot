@@ -2941,6 +2941,48 @@ public abstract class ExecutionStoreContract {
                 "acquiring a new lease over an already-settled instance is still not a lifecycle transition");
     }
 
+    /**
+     * {@code lifecycleGeneration}'s javadoc states the rule precisely: it starts at {@code 1} for the
+     * batch that creates the instance, and every later accepted batch adds the number of
+     * {@link ExecutionTransition.ProcessTransitioned} transitions <em>that batch contains</em> — per
+     * transition, not per batch, and explicitly not derived by comparing status before and after. This
+     * pins the exact rule rather than only monotonicity, using the javadoc's own illustrative case: one
+     * batch containing {@code RUNNING -> WAITING -> RUNNING} (two {@code ProcessTransitioned} entries)
+     * leaves the net status unchanged, so an implementation that derived the count from a before/after
+     * status comparison would see zero change and add nothing. The correct answer is +2 regardless.
+     */
+    @Test
+    final void lifecycleGenerationCountsProcessTransitionedEntriesPerBatchNotPerNetStatusChange() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        assertEquals(1L, await(store().findProcessInstance(key)).orElseThrow().lifecycleGeneration(),
+                "creation is itself the first transition, into the initial status");
+
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+        assertEquals(2L, await(store().findProcessInstance(key)).orElseThrow().lifecycleGeneration(),
+                "one batch containing one ProcessTransitioned entry adds exactly one");
+
+        // The net status is RUNNING both before and after this batch: a before/after comparison would
+        // see no change. The contract counts transitions within the batch instead.
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+
+        ProcessInventoryEntry after = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(ProcessInstanceStatus.RUNNING, after.status(), "the net status change of this batch is zero");
+        assertEquals(4L, after.lifecycleGeneration(),
+                "1 (creation) + 1 (RUNNING) + 2 (WAITING, RUNNING in one batch) = 4, despite this "
+                        + "batch's net status change being zero -- an implementation deriving the count "
+                        + "from before/after status would wrongly answer 2");
+    }
+
     // ---- 8. convergence under concurrency (acceptance criterion 3) ----
 
     @Test
@@ -3012,6 +3054,44 @@ public abstract class ExecutionStoreContract {
         // outlive the instance that names it.
         assertFalse(store().terminalRetention().compareTo(store().journalRetention()) < 0,
                 "terminalRetention must never be shorter than journalRetention");
+    }
+
+    /**
+     * Pins the read path to the purge path, through the port, on <em>any</em> adapter: for every
+     * terminal row, {@link ExecutionStore#findProcessInstance} must publish a {@code retainedUntil},
+     * and a purge landing exactly on that instant must remove the row. This does not depend on how or
+     * whether an adapter stores the deadline (a computed column, a resolved fallback, or anything
+     * else) -- it only requires the two answers to agree with each other, which is what actually
+     * matters to a caller and is checkable without knowing anything about an adapter's schema.
+     *
+     * <p>The boundary itself is asserted in both directions, because an off-by-one in the comparison
+     * is the obvious next bug of this shape: one tick before the published deadline, the row must
+     * survive a purge; landed exactly on it, the row must be removed.
+     */
+    @Test
+    final void findProcessInstanceRetainedUntilIsPresentForEveryTerminalRowAndPurgeRemovesItExactlyAtThatInstant() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        ExecutionKey key = newKey();
+        failInstance(key, UUID.randomUUID());
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(ProcessInstanceStatus.FAILED, entry.status());
+        Instant deadline = entry.retainedUntil().orElseThrow(() -> new AssertionError(
+                "every terminal row must publish a retainedUntil, whatever the adapter's storage shape"));
+
+        // One tick before the boundary: not yet due.
+        clock().set(deadline.minusMillis(1));
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(DEFAULT_TENANT)),
+                "a row must not be purged before the instant its own retainedUntil publishes");
+        assertTrue(await(store().findProcessInstance(key)).isPresent(), "must still be readable one tick early");
+
+        // Landed exactly on the boundary: due.
+        clock().set(deadline);
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(DEFAULT_TENANT)),
+                "a purge landing exactly on the published retainedUntil must remove the row -- the read "
+                        + "path and the purge path must agree on this instant, not merely both exist");
+        assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
     }
 
     @Test

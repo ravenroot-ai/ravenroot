@@ -163,6 +163,21 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
                         canonical.size(), maxDefinitionBytes));
             }
             var key = new GraphDefinitionKey(tenantId, canonical.contentId());
+            // The overwhelmingly common case for an accepted execution is that this exact document is
+            // already stored and already bound: a deployment accepts its thousandth traversal, or a
+            // caller resubmits a graph it has run before. Deciding that in a read transaction keeps it
+            // off the file's single write lock -- which the execution store beside this one needs for
+            // the acceptance that follows -- and keeps a document of up to the size limit from being
+            // read back and re-hashed once per acceptance.
+            //
+            // It is only a fast path, never an authority: every branch that must change something
+            // returns null and the write transaction below re-reads under the lock, so a row inserted
+            // between the two is seen there rather than raced.
+            StoredGraphDefinition alreadyStored =
+                    inReadTransaction(key, () -> storedAndBound(key, identity, canonical));
+            if (alreadyStored != null) {
+                return alreadyStored;
+            }
             return inWriteTransaction(key, () -> {
                 GraphContentId bound = readBinding(tenantId, identity);
                 if (bound != null && !bound.equals(canonical.contentId())) {
@@ -329,6 +344,75 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
     }
 
     // ---------------------------------------------------------------- rows
+
+    /**
+     * The definition as stored, when it is already stored under this exact content and already bound
+     * to this exact version, and {@code null} whenever anything must change.
+     *
+     * <p>Reads no document bytes and computes no digest over them. It does compare the digest
+     * recorded beside the definition against the address the row is filed under, which is 32 bytes
+     * and catches an internally inconsistent row; it does not re-derive the digest from the content,
+     * which is the check every read performs at the moment the content is actually handed out.</p>
+     */
+    private StoredGraphDefinition storedAndBound(GraphDefinitionKey key, GraphDefinitionIdentity identity,
+                                                 CanonicalGraphMl canonical) throws SQLException {
+        StoredMeta meta = readMeta(key);
+        if (meta == null) {
+            return null;
+        }
+        if (meta.formatVersion() != canonical.formatVersion()) {
+            // Stored under a different canonical-form version than the caller presents. Not a fast
+            // path: the write transaction reads the real row and answers from what is stored.
+            return null;
+        }
+        if (!HexFormat.of().formatHex(meta.digest()).equals(key.contentId().value())) {
+            throw failure(new GraphDefinitionStoreFailure.Corrupted(key,
+                    "the digest recorded beside the definition does not match the address it is "
+                            + "filed under"));
+        }
+        GraphContentId bound = readBinding(key.tenantId(), identity);
+        if (!canonical.contentId().equals(bound)) {
+            // Either unbound, which needs a write, or bound elsewhere, which is a conflict the write
+            // transaction decides under the lock rather than from a snapshot.
+            return null;
+        }
+        // The caller's own value carries the bytes; they hash to this address by construction, so
+        // returning it copies nothing and hashes nothing.
+        return new StoredGraphDefinition(key, meta.identity(), canonical, meta.storedAt());
+    }
+
+    /** The small columns of one definition row: never the document, never a hash of it. */
+    private StoredMeta readMeta(GraphDefinitionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT format_version, digest, first_graph_id, first_version_id, "
+                        + "stored_at_epoch_second, stored_at_nano "
+                        + "FROM graph_definition WHERE tenant_id = ? AND content_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.contentId().value());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    return null;
+                }
+                byte[] digest = rows.getBytes("digest");
+                int formatVersion = rows.getInt("format_version");
+                if (digest == null || formatVersion < 1) {
+                    throw failure(new GraphDefinitionStoreFailure.Corrupted(key,
+                            "the stored definition row is missing its digest or carries an illegal "
+                                    + "format version"));
+                }
+                GraphDefinitionIdentity identity;
+                try {
+                    identity = new GraphDefinitionIdentity(rows.getString("first_graph_id"),
+                            rows.getString("first_version_id"));
+                } catch (IllegalArgumentException illegal) {
+                    throw failure(new GraphDefinitionStoreFailure.Corrupted(key,
+                            "the stored definition names an illegal graph version identity"));
+                }
+                return new StoredMeta(formatVersion, digest, identity,
+                        StoredInstant.read(rows, "stored_at"));
+            }
+        }
+    }
 
     private Row readRow(GraphDefinitionKey key) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
@@ -630,6 +714,11 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
     @FunctionalInterface
     private interface Work<T> {
         T run() throws Exception;
+    }
+
+    /** Everything about a stored definition except the document itself. */
+    private record StoredMeta(int formatVersion, byte[] digest, GraphDefinitionIdentity identity,
+                              Instant storedAt) {
     }
 
     private record Row(int formatVersion, byte[] bytes, byte[] digest,

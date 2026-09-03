@@ -18,10 +18,16 @@ import java.util.regex.Pattern;
  * length prefix. That is not an oversight and it is not a weaker construction here: the input is one
  * complete XML document rather than a concatenation of independently chosen fields, so the
  * concatenation ambiguity a domain-separated, length-prefixed encoding defends against cannot arise.
- * What the plain digest buys instead is decisive — it is byte-identical to the graph version
- * reference an accepted execution already records in {@link GraphVersionPin}, so every pin written
- * before a definition store existed addresses a stored definition directly, with no data migration
- * and no second identity to keep in step.</p>
+ * What the plain digest buys instead is decisive: it is byte-identical to the graph version
+ * reference an accepted execution already records in {@link GraphVersionPin}, so there is one address
+ * rather than two identities to keep in step, and no translation table between them.</p>
+ *
+ * <p><strong>That is a statement about addressing, not about recovery.</strong> Nothing backfills a
+ * document for an execution accepted before definitions were stored. Such a pin is a well-formed
+ * address that resolves to nothing, so reading it fails with
+ * {@link GraphDefinitionStoreFailure.NotFound} and that execution does not become recoverable by
+ * upgrading. What the shared identity avoids is a data migration of the pins themselves, and a second
+ * identity that could drift from the first.</p>
  *
  * <p>Byte identity is not semantic identity. Two documents that describe the same graph but differ
  * in whitespace, attribute order or encoding declaration have different addresses and are stored as

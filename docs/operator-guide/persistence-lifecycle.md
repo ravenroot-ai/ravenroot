@@ -11,11 +11,11 @@ Protect accepted executions and audit evidence across drain, backup, restart, an
 
 ## Graph definitions
 
-Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored, so an accepted execution is always one whose graph can be produced again.
+Accepting an execution durably stores the exact canonical GraphML document it will run, before the execution is recorded, and binds the execution to that document's content address. Acceptance is refused if the document cannot be stored. An accepted execution is therefore always one whose graph is retained, and the retained document — not a copy held by whichever process accepted it — is the authoritative record of what that execution was accepted to run.
 
-After a restart or a transfer of ownership the stored definition is authoritative. A running process may cache the document while it holds the execution, but a recovering process reads it from durable storage, verifies it against its digest, and refuses a definition that is missing, altered, or filed under another tenant. Nothing asks the caller to resubmit the document.
+Definitions are stored with execution state, so they are inside the same backup and come back with the same restore. They are scoped to one tenant, and two executions share one stored document only when the documents are byte-identical and belong to the same tenant. Definitions hold graph content and non-secret references only; credentials are supplied at execution time and are never stored with a definition.
 
-Definitions are scoped to one tenant and are shared between executions of that tenant only when the documents are byte-identical. Reclaiming unreferenced definitions is an operator action, not a background sweep, and it cannot remove a definition that a retained execution still names. Definitions hold graph content and non-secret references only; credentials are supplied at execution time and never stored with a definition.
+Storing the document is what this release adds. **Ravenroot does not yet read it back to resume work**: no runtime reconstructs a graph from a stored definition, and reclaiming stored definitions is not yet an exposed operator command. Both arrive in a following change. Until then, treat these definitions as retained evidence that an accepted execution's graph is recoverable, not as a recovery procedure you can run today.
 
 ## Authority
 
@@ -23,7 +23,7 @@ Only an operator may drain, copy or replace durable state, restore a deployment,
 
 ## Verification
 
-After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, confirm that a retained execution's graph definition is still readable from the restored store, and execute a bounded Test graph before reopening Run traffic.
+After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, and execute a bounded Test graph before reopening Run traffic.
 
 - [Contract](../architecture/durability-events.md)
 - [Decision record](../../adr/0031-durable-canonical-graph-definitions.md)

@@ -1,9 +1,13 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.application.ExecutionIdentityKind;
+import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionSubmission;
 import ai.ravenroot.api.persistence.CanonicalGraphMl;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.ExecutionStoreException;
+import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.GraphContentId;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphDefinitionKey;
@@ -27,6 +31,7 @@ import java.time.Clock;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -113,17 +118,29 @@ class DefaultRavenrootApplicationGraphDefinitionTest {
     @Test
     void acceptanceFailsAndRecordsNoExecutionWhenTheDefinitionCannotBeCommitted() {
         var executions = new InMemoryExecutionStore();
-        var application = applicationWith(executions, new RefusingDefinitionStore());
+        // Pinned, so the assertion below can name the process instance that would have been created
+        // and prove no row exists for it. Asserting only that no lease is held would pass against an
+        // implementation that wrote the instance and then failed to lease it, which is the exact
+        // half-committed state this ordering exists to make unreachable.
+        UUID processInstanceId = UUID.randomUUID();
+        var application = applicationWith(executions, new RefusingDefinitionStore(),
+                fixedIdentities(processInstanceId));
 
         var failure = assertThrows(GraphDefinitionStoreException.class,
                 () -> application.startGraphMl(TestIdentities.TENANT_A, UUID.randomUUID(),
                         new ByteArrayInputStream(graphBytes()), "payload"));
         assertInstanceOf(GraphDefinitionStoreFailure.Unavailable.class, failure.failure());
 
+        var executionKey = new ExecutionKey(TestIdentities.TENANT_A.tenantId(), processInstanceId);
+        var storeFailure = assertThrows(CompletionException.class,
+                () -> executions.load(executionKey).toCompletableFuture().join());
+        assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                ExecutionStoreException.unwrap(storeFailure).failure(),
+                "the definition write is refused before the acceptance write is attempted, so no "
+                        + "process instance was ever created");
         assertEquals(0, executions.leases(TestIdentities.TENANT_A.tenantId())
                         .toCompletableFuture().join().size(),
-                "the definition write is refused before the acceptance write is attempted, so the "
-                        + "execution was never created and holds no lease");
+                "and nothing holds a lease on an instance that does not exist");
         application.close();
     }
 
@@ -203,12 +220,25 @@ class DefaultRavenrootApplicationGraphDefinitionTest {
 
     private DefaultRavenrootApplication applicationWith(ExecutionStore executions,
                                                         GraphDefinitionStore definitions) {
+        return applicationWith(executions, definitions,
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids());
+    }
+
+    private DefaultRavenrootApplication applicationWith(ExecutionStore executions,
+                                                        GraphDefinitionStore definitions,
+                                                        ExecutionIdentitySource identities) {
         return new DefaultRavenrootApplication(new SameThreadExecutionEngine(), new ExecutionMonitor(),
                 BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
                 new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
                 new ai.ravenroot.core.programming.DisabledProgramRuntime(),
-                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), executions,
-                0, UnknownBehaviorPolicy.passThrough(), definitions);
+                identities, executions, 0, UnknownBehaviorPolicy.passThrough(), definitions);
+    }
+
+    /** Fixes the process-instance identity so a test can assert about the row that was not written. */
+    private static ExecutionIdentitySource fixedIdentities(UUID processInstanceId) {
+        return kind -> kind == ExecutionIdentityKind.PROCESS_INSTANCE
+                ? processInstanceId
+                : UUID.randomUUID();
     }
 
     private static byte[] graphBytes() {

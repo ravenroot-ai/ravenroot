@@ -571,6 +571,31 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     /**
+     * Reports which graph definitions this store's instances still pin, so a co-located definition
+     * store can decide retention without keeping a reference count of its own.
+     *
+     * <p>A pin reference and a definition's content address are the same value by construction, so
+     * this comparison needs no translation table. That shared identity does <em>not</em> mean an
+     * execution recorded before definitions were stored has become recoverable: nothing backfills the
+     * document for it, so its address resolves to nothing and it is correctly reported here as
+     * referencing a definition this store does not hold. The consequence for retention is the safe
+     * one -- such a pin keeps a definition alive if one is ever stored at that address, and protects
+     * nothing otherwise.</p>
+     *
+     * @return oracle answering whether any instance of a tenant pins a given definition.
+     */
+    public ai.ravenroot.api.persistence.GraphDefinitionReferences graphDefinitionReferences() {
+        return key -> {
+            synchronized (monitor) {
+                return instances.entrySet().stream().anyMatch(entry ->
+                        entry.getKey().tenantId().equals(key.tenantId())
+                                && entry.getValue().graphVersionPin.reference()
+                                        .equals(key.contentId().value()));
+            }
+        };
+    }
+
+    /**
      * Discards everything, which for a <strong>non-durable</strong> adapter is exactly right
      * (ADR 0010 section 13.1): retaining state across close would falsely simulate durability, which
      * section 11 forbids, and this adapter declares neither {@link StoreCapability#DURABLE} nor
@@ -587,26 +612,6 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * expiry would never do. Fencing tokens must not reset on reopen either; a session is not a
      * fencing domain.</p>
      */
-    /**
-     * Reports which graph definitions this store's instances still pin, so a co-located definition
-     * store can decide retention without keeping a reference count of its own.
-     *
-     * <p>The pin reference is the definition's content address; that identity is shared on purpose,
-     * so a pin written before any definition store existed still names a stored definition.</p>
-     *
-     * @return oracle answering whether any instance of a tenant pins a given definition.
-     */
-    public ai.ravenroot.api.persistence.GraphDefinitionReferences graphDefinitionReferences() {
-        return key -> {
-            synchronized (monitor) {
-                return instances.entrySet().stream().anyMatch(entry ->
-                        entry.getKey().tenantId().equals(key.tenantId())
-                                && entry.getValue().graphVersionPin.reference()
-                                        .equals(key.contentId().value()));
-            }
-        };
-    }
-
     @Override
     public void close() {
         synchronized (monitor) {

@@ -483,8 +483,56 @@ public abstract class GraphDefinitionStoreContract {
 
     // ============================================================ classification of every member
 
+    /**
+     * Drives the adapter into every failure it can be driven into through this port, and asserts none
+     * of the resulting diagnostics carries document content.
+     *
+     * <p>Distinct from the classification assertion below, which builds the failure records itself
+     * and therefore proves only that the taxonomy describes itself correctly. This one is the check
+     * that an <em>adapter</em> is not pasting a document into a message on its way to a log. It
+     * cannot reach {@code Corrupted}, {@code NotAuthorized}, {@code Unavailable} or
+     * {@code OutcomeUnknown}, which no conforming adapter can be driven into through the port's own
+     * operations; those stay adapter-conditional and are asserted by the adapter that can reach
+     * them.</p>
+     */
     @Test
-    final void everyFailureMemberCarriesARetryabilityAndAContentSafeDiagnosis() {
+    final void noFailureRaisedByTheAdapterCarriesDocumentContent() {
+        // A document whose bytes are a distinctive marker, so a diagnostic that pasted any part of it
+        // is caught rather than merely a diagnostic that pasted the whole thing.
+        String marker = "SHOULD-NEVER-REACH-A-DIAGNOSTIC";
+        byte[] document = ("<graphml><!-- " + marker + " --></graphml>").getBytes(StandardCharsets.UTF_8);
+        CanonicalGraphMl canonical = CanonicalGraphMl.of(document);
+
+        assertContentSafe(marker, failureOf(() -> await(store().load(
+                new GraphDefinitionKey(DEFAULT_TENANT, canonical.contentId())))));
+        assertContentSafe(marker, failureOf(() -> await(store().resolve(DEFAULT_TENANT,
+                identity("orders", "1")))));
+        assertContentSafe(marker, failureOf(() -> await(store().put(" ", identity("orders", "1"),
+                canonical))));
+
+        byte[] oversized = new byte[store().maxDefinitionBytes() + 1];
+        System.arraycopy(document, 0, oversized, 0, document.length);
+        assertContentSafe(marker, failureOf(() -> await(store().put(DEFAULT_TENANT,
+                identity("orders", "1"), CanonicalGraphMl.of(oversized)))));
+
+        GraphDefinitionKey key = await(store().put(DEFAULT_TENANT, identity("orders", "1"), canonical)).key();
+        assertContentSafe(marker, failureOf(() -> await(store().put(DEFAULT_TENANT,
+                identity("orders", "1"),
+                CanonicalGraphMl.of((marker + " other").getBytes(StandardCharsets.UTF_8))))));
+        markReferenced(key);
+        assertContentSafe(marker, failureOf(() -> await(store().remove(key))));
+    }
+
+    private static void assertContentSafe(String marker, GraphDefinitionStoreFailure failure) {
+        String description = failure.describe();
+        assertFalse(description.contains(marker), () -> failure.getClass().getSimpleName()
+                + " leaked document content into a diagnostic that reaches logs: " + description);
+        assertFalse(description.contains("graphml"), () -> failure.getClass().getSimpleName()
+                + " leaked document markup into a diagnostic that reaches logs: " + description);
+    }
+
+    @Test
+    final void everyFailureMemberInTheTaxonomyIsClassifiedAndDescribesItself() {
         GraphDefinitionKey key = new GraphDefinitionKey(DEFAULT_TENANT,
                 GraphContentId.of(GRAPHML_A.getBytes(StandardCharsets.UTF_8)));
         GraphDefinitionIdentity version = identity("orders", "1");
@@ -511,13 +559,16 @@ public abstract class GraphDefinitionStoreContract {
                 Retryability.INDETERMINATE);
     }
 
+    /**
+     * Asserts the taxonomy's own behaviour for one member, built here rather than raised by an
+     * adapter. It says nothing about whether an adapter leaks content -- these records carry no
+     * document to leak; {@link #noFailureRaisedByTheAdapterCarriesDocumentContent} is that check.
+     */
     private static void assertClassified(GraphDefinitionStoreFailure failure, Retryability expected) {
         assertEquals(expected, failure.retryability(), () -> failure + " is misclassified");
         String description = failure.describe();
         assertNotNull(description);
         assertFalse(description.isBlank(), () -> failure + " must describe itself");
-        assertFalse(description.contains("<graphml"), () -> failure
-                + " leaked document content into a diagnostic that reaches logs");
         assertEquals(description, new GraphDefinitionStoreException(failure).getMessage(),
                 "the carrier must not restate the diagnosis in its own words");
         assertEquals(expected, new GraphDefinitionStoreException(failure).retryability());

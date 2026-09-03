@@ -28,7 +28,7 @@ Backup and restore acquire the same persistent maintenance lock as the server an
 
 The destination must not already exist. Publication uses a sibling staging directory and atomic rename.
 
-The canonical graph definition every accepted execution is pinned to is held in the execution store and is therefore inside the snapshot. Restoring a bundle restores the definitions with the executions that name them, and a restored server returns the exact accepted document without asking a caller to submit it again. External artifact source is still not a bundle payload; preserve it in its owning repository.
+The canonical graph definition every accepted execution is pinned to is held in the execution store and is therefore inside the snapshot. Restoring a bundle restores the definitions together with the executions that name them, so the document an execution was accepted to run survives a restore. Reading a definition back to resume work is not yet part of any command or endpoint. External artifact source is still not a bundle payload; preserve it in its owning repository.
 
 The manifest records `authenticity: not-provided` and `encryption: none`. Protect the complete bundle with access control, encrypted storage, and an independently authenticated transfer channel.
 

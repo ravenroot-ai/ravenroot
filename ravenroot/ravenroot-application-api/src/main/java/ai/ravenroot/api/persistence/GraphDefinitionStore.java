@@ -104,10 +104,16 @@ public interface GraphDefinitionStore extends AutoCloseable {
      * logical identity is legal and adds a binding without a second copy.</p>
      *
      * <p>Fails with {@link GraphDefinitionStoreFailure.DefinitionTooLarge} when the document exceeds
-     * {@link #maxDefinitionBytes()}, {@link GraphDefinitionStoreFailure.IdentityConflict} when the
-     * logical version is already bound to different content, and
-     * {@link GraphDefinitionStoreFailure.DigestMismatch} when content already stored at this address
-     * no longer hashes to it — a repeated write must not overwrite corruption into looking healthy.</p>
+     * {@link #maxDefinitionBytes()} and {@link GraphDefinitionStoreFailure.IdentityConflict} when the
+     * logical version is already bound to different content. A repeated write never overwrites what
+     * is stored, so it cannot turn a corrupt definition into one that looks healthy.</p>
+     *
+     * <p>Storing is <strong>not</strong> a full integrity check of what is already there, and must
+     * not be relied on as one. An implementation may confirm that a definition is present at the
+     * address without re-deriving the digest from the stored document, so that accepting an execution
+     * does not pay a read and a hash of the whole document, and does not serialise behind a write
+     * lock, once per acceptance. Re-deriving the digest from the content is what every read does, at
+     * the moment the content is actually handed to something that will execute it.</p>
      *
      * @param tenantId tenant that will own the stored definition.
      * @param identity immutable logical graph version to bind this content to.

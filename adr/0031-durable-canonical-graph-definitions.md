@@ -33,8 +33,10 @@ thing.
 **Content identity is the digest of those bytes.** A definition's address is the lowercase
 hexadecimal SHA-256 digest of the canonical document. The server computes it and never accepts it
 from a caller. This is byte-identical to the graph version reference an accepted execution already
-records, so an execution pinned before durable definitions existed addresses a stored definition with
-no data migration and no second identity to keep in step.
+records, so there is one address rather than two identities to keep in step, and the pins already
+written need no data migration. It does not make an execution accepted before this change
+recoverable: no document is backfilled for it, so its address resolves to nothing and reading it
+fails closed. Recoverability begins with executions accepted after the definition is stored.
 
 **Content identity and revision identity answer different questions.** ADR 0008's rule that transport
 details stay out of identity governs *revision* identity: whether two documents are the same version
@@ -94,6 +96,12 @@ so one document has one durable home and one address.
   previously impossible for a stated reason rather than an accidental one.
 - Acceptance gains a durable write that can refuse it. A submission whose definition cannot be
   committed is rejected instead of becoming an unrecoverable execution.
+- Accepting an execution costs one durable write the first time a document is seen and two small
+  indexed reads every time after, because storing is idempotent by content and the repeat path
+  neither transfers the document nor re-hashes it. The cost of confirming what is already stored is
+  therefore independent of document size. The deliberate limit of that choice: a document whose
+  stored bytes were altered after they were written is still detected on every read, which is where
+  it matters, but not at the moment a new execution is accepted against it.
 - Storage grows with distinct documents. Because identity is byte-derived, a whitespace-only edit
   produces a second stored definition, and because reclamation is caller-invoked, an operator who
   never invokes it accumulates definitions indefinitely.

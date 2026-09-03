@@ -168,6 +168,18 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         if (journalRetention.isZero() || journalRetention.isNegative()) {
             throw new IllegalArgumentException("journalRetention must be positive");
         }
+        if (terminalRetention.compareTo(journalRetention) < 0) {
+            // The same guard SqliteStoreConfig's canonical constructor applies, and it belongs on both
+            // adapters because the reason for it is a property of the contract rather than of the
+            // medium: a terminal instance pruned while its own events are still readable leaves the
+            // journal naming an instance the inventory can no longer describe, and every event
+            // replayed from there resolves to "never existed". Enforcing it in only one adapter would
+            // let a deployment reach a state through the reference store that the durable store
+            // refuses, and discover the difference on the day it swapped them.
+            throw new IllegalArgumentException("terminalRetention " + terminalRetention
+                    + " cannot be shorter than journalRetention " + journalRetention
+                    + ": events would outlive the instance they name");
+        }
         this.clock = Objects.requireNonNull(clock, "clock");
         this.maxLeaseTtl = Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");
         if (maxLeaseTtl.isZero() || maxLeaseTtl.isNegative()) {
@@ -795,13 +807,17 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     // Only terminal rows are eligible, however old a non-terminal one is. Age is not
                     // evidence that work is finished, and pruning a stuck instance would destroy the
                     // row an operator needs in order to discover that it is stuck.
-                    if (!entry.state.status().terminal() || entry.retainedUntil == null
-                            || entry.retainedUntil.isAfter(now)) {
+                    //
+                    // The deadline comes from the same resolution a reader is given, not from the raw
+                    // field: a purge that decided eligibility differently from what findProcessInstance
+                    // reports would remove a row whose own deadline said it was safe.
+                    Optional<Instant> deadline = retainedUntilOf(entry);
+                    if (deadline.isEmpty() || deadline.get().isAfter(now)) {
                         continue;
                     }
                     doomed.add(instance.getKey());
-                    if (earliest == null || entry.retainedUntil.isBefore(earliest)) {
-                        earliest = entry.retainedUntil;
+                    if (earliest == null || deadline.get().isBefore(earliest)) {
+                        earliest = deadline.get();
                     }
                 }
                 if (doomed.isEmpty()) {
@@ -875,6 +891,27 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         return true;
     }
 
+    /**
+     * What a reader is told about retention, and what the purge decides eligibility from — one
+     * resolution, used by both, so the two cannot disagree about the same fact.
+     *
+     * <p>The terminal test is the gate: retention has not started for a non-terminal row, and absent
+     * is how that is said rather than a sentinel date a reader could take for a real deadline. The
+     * fallback to {@code updatedAt + terminalRetention} exists so this adapter states the identical
+     * rule to the SQLite one, where it is reachable through the schema-5 upgrade path. Here it is
+     * unreachable — every terminal entry records its deadline in the transaction that made it terminal
+     * — and it is written anyway, because a rule expressed in only one of two adapters is a rule the
+     * two will eventually differ on.</p>
+     */
+    private Optional<Instant> retainedUntilOf(Entry entry) {
+        if (!entry.state.status().terminal()) {
+            return Optional.empty();
+        }
+        return Optional.of(entry.retainedUntil != null
+                ? entry.retainedUntil
+                : plusClamped(entry.updatedAt, terminalRetention));
+    }
+
     private ProcessInventoryEntry entryOf(ExecutionKey key, Entry entry, Instant now) {
         boolean leaseLive = leaseLive(entry, now);
         return new ProcessInventoryEntry(key, entry.state.status(),
@@ -885,7 +922,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 entry.fencingToken,
                 leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
                 entry.state.traversals().size(), entry.createdAt, entry.updatedAt,
-                Optional.ofNullable(entry.retainedUntil));
+                retainedUntilOf(entry));
     }
 
     private void requireInventoryQuery(ProcessInventoryQuery query) {

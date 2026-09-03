@@ -21,7 +21,6 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 import ai.ravenroot.testkit.persistence.MutableClock;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -529,28 +528,12 @@ class SqliteProcessInventoryTest {
      * {@code updatedAt + terminalRetention()} -- rather than reporting the row as unbounded or leaving
      * {@link ProcessInventoryEntry#retainedUntil()} empty.
      *
-     * <p><strong>DEFECT (issue 154, wave 1):</strong> it does not. {@code SqliteExecutionStore
-     * .readInventoryRow} builds {@code ProcessInventoryEntry.retainedUntil} from the raw stored column
-     * — {@code Optional.ofNullable(nullableInstant(rows, "retained_until"))} — with no call to
-     * {@code retentionDueAt(...)}. The purge path ({@code earliestExpiredDeadline}, which DOES call
-     * {@code retentionDueAt}) correctly treats this exact row as due at
-     * {@code updatedAt + terminalRetention()}, so the row IS eligible for purge at the right instant —
-     * but a caller reading it first sees {@code retainedUntil()} empty, contradicting
-     * {@code ProcessInventoryEntry#retainedUntil}'s own javadoc ("absent while the instance is
-     * non-terminal") for a row that is, in fact, terminal. The adapter's own {@code InstanceMeta}
-     * javadoc even documents the inconsistency in passing ("null while non-terminal, and also null on
-     * a terminal row written before schema 5") without drawing the conclusion that the read path
-     * should apply the same resolution the purge path does. This is a genuine bug in
-     * {@code src/main}, out of this test's territory to fix; it is reported here with a demonstrating,
-     * disabled test rather than fixed or worked around. Route the fix to
-     * {@code SqliteExecutionStore.readInventoryRow}
-     * (and the sibling reader used by {@code findProcessInstance}), applying {@code retentionDueAt}
-     * the same way {@code earliestExpiredDeadline} does.</p>
+     * <p>The read and the purge resolve that deadline through one method, {@code retentionDueAt}, so
+     * they cannot answer differently about the same row. A read that returned the raw column would
+     * report no deadline for a row the purge is about to remove on schedule — and a caller comparing
+     * the two would have no way to tell which was right.</p>
      */
     @Test
-    @Disabled("DEFECT: readInventoryRow reports a terminal row's retainedUntil as raw-NULL instead of "
-            + "resolving updatedAt + terminalRetention(), unlike the purge path's retentionDueAt -- "
-            + "see this test's javadoc")
     void aTerminalRowWithNoStoredRetainedUntilResolvesAgainstUpdatedAtPlusTerminalRetention() throws Exception {
         Path file = databaseDirectory.resolve("legacy-terminal.db");
         var clock = new MutableClock(EPOCH);

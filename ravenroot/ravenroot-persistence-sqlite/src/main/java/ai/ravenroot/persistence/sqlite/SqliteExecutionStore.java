@@ -1077,7 +1077,32 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 rows.getLong("fencing_token"),
                 leaseLive ? Optional.of(leaseExpiresAt) : Optional.empty(),
                 rows.getInt("traversal_count"), StoredInstant.read(rows, "created_at"),
-                StoredInstant.read(rows, "updated_at"), Optional.ofNullable(nullableInstant(rows, "retained_until")));
+                StoredInstant.read(rows, "updated_at"),
+                retainedUntilOf(status, nullableInstant(rows, "retained_until"),
+                        StoredInstant.read(rows, "updated_at")));
+    }
+
+    /**
+     * What a reader is told about retention, resolved the same way the purge decides it.
+     *
+     * <p>The stored column is not the answer on its own. A terminal row written before schema 5 has no
+     * deadline stored, and the purge already resolves that case through {@link #retentionDueAt} — so a
+     * read that returned the raw column would report no deadline for a row the purge is about to remove
+     * on schedule. Two paths disagreeing about the same fact is how a caller comes to trust the wrong
+     * one; routing both through {@link #retentionDueAt} makes them incapable of it, which is the same
+     * treatment {@link #expiredInstanceIdQuery()} already gives the floor query and the delete.</p>
+     *
+     * <p>The terminal test is the gate, and it is what stops the fallback from inventing a deadline for
+     * a running instance: retention has not started for a non-terminal row, and absent is how that is
+     * said. That is also why the fallback is exact rather than approximate for the rows it does apply
+     * to — a terminal instance is never written again, so its {@code updated_at} is its terminal
+     * transition instant.</p>
+     */
+    private Optional<Instant> retainedUntilOf(ProcessInstanceStatus status, Instant storedDeadline,
+                                              Instant updatedAt) {
+        return status.terminal()
+                ? Optional.of(retentionDueAt(storedDeadline, updatedAt))
+                : Optional.empty();
     }
 
     /** Binds one accumulated filter argument; an instant occupies the three slots of a comparison. */
@@ -1512,8 +1537,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * @param createdAt          write-once, and half of the inventory's sort key
      * @param lifecycleGeneration count of authoritative status transitions, exact from schema 5 and a
      *                           floor of one for a row that predates it
-     * @param retainedUntil      null while non-terminal, and also null on a terminal row written before
-     *                           schema 5, which {@link #retentionDueAt} resolves against updated_at
+     * @param retainedUntil      the <em>raw</em> stored column and not the answer a caller is given:
+     *                           null while non-terminal, and also null on a terminal row written before
+     *                           schema 5. Every path that reports or acts on a deadline resolves it
+     *                           through {@link #retentionDueAt} instead, so no reader sees this value
+     *                           unmediated
      */
     private record InstanceMeta(long revision, long fencingToken, GraphVersionPin graphVersionPin,
                                 ProcessInstanceStatus status, Instant updatedAt, Instant createdAt,

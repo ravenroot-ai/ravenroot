@@ -2,7 +2,6 @@ package ai.ravenroot.core.persistence;
 
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.testkit.persistence.ExecutionStoreContract;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -29,22 +28,17 @@ class InMemoryExecutionStoreContractTest extends ExecutionStoreContract {
     }
 
     /**
-     * DEFECT (issue 154, wave 1): the commit message and {@code ExecutionStore#terminalRetention()}'s
-     * javadoc both state that terminal retention "may not be shorter than journal retention" -- and
-     * {@code SqliteStoreConfig}'s canonical constructor enforces exactly that, rejecting the
-     * combination with {@code IllegalArgumentException}. {@code InMemoryExecutionStore}'s six-argument
-     * constructor validates {@code journalRetention} and {@code terminalRetention} each independently
-     * (positive, non-null) but never compares them to each other, so the in-memory adapter silently
-     * accepts a configuration the SQLite adapter refuses. This is a genuine cross-adapter
-     * inconsistency in {@code src/main}, which is out of this test's territory to fix; it is reported
-     * here with a demonstrating, disabled test rather than fixed or worked around. Route the fix to
-     * {@code InMemoryExecutionStore}'s canonical constructor
-     * ({@code ravenroot-core/src/main/java/ai/ravenroot/core/persistence/InMemoryExecutionStore.java}),
-     * mirroring {@code SqliteStoreConfig}'s guard.
+     * The retention invariant is a property of the contract, so both adapters enforce it.
+     *
+     * <p>{@code ExecutionStore#terminalRetention()} states that a terminal instance must outlive its
+     * own events, and {@code SqliteStoreConfig}'s canonical constructor rejects the combination that
+     * would break it. The reason has nothing to do with the storage medium — a terminal instance
+     * pruned while its events are still readable leaves the journal naming an instance the inventory
+     * can no longer describe — so the reference adapter has to refuse it too. Enforcing it in only one
+     * adapter would let a deployment reach a configuration through this store that the durable store
+     * rejects, and find out on the day it swapped them.</p>
      */
     @Test
-    @Disabled("DEFECT: InMemoryExecutionStore does not reject terminalRetention shorter than "
-            + "journalRetention, unlike SqliteStoreConfig -- see this test's javadoc")
     final void terminalRetentionShorterThanJournalRetentionIsRejectedAtConstruction() {
         assertThrows(IllegalArgumentException.class, () -> new InMemoryExecutionStore(Clock.systemUTC(),
                 Duration.ofMinutes(5), 1024 * 1024, Duration.ofSeconds(5),

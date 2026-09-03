@@ -35,11 +35,26 @@ import java.util.Optional;
  *                            {@link InventoryDisposition} for the precedence
  * @param revision            the store revision this row was read at, strictly increasing per instance
  * @param lifecycleGeneration count of authoritative status transitions applied to this instance,
- *                            incremented in the same transaction as the transition. Deliberately
- *                            <strong>not</strong> the fencing token: a generation counts how far the
- *                            lifecycle has moved, a token names who may move it, and one worker can
- *                            apply many transitions under a single token while a contested instance
- *                            can change owner without its status moving at all
+ *                            incremented in the same transaction as the transitions themselves.
+ *                            Precisely: it starts at {@code 1} for the batch that creates the
+ *                            instance — creation is itself the first transition, into the initial
+ *                            status — and every later accepted batch adds the number of
+ *                            {@link ExecutionTransition.ProcessTransitioned} transitions that batch
+ *                            contains. So it counts <em>per transition</em> and not per batch: a
+ *                            single batch moving an instance {@code RUNNING -> WAITING -> RUNNING}
+ *                            adds two, which is also why it is not derived by comparing the status
+ *                            before and after a batch — that comparison would see no change at all
+ *                            and count none. A replayed batch is answered from its idempotency
+ *                            record before any increment happens, so an at-least-once redelivery
+ *                            cannot inflate it. It is therefore exact for every instance created
+ *                            under the schema that introduced it; a row that predates it reports a
+ *                            floor of {@code 1}, meaning "at least the transition that created it",
+ *                            because no record survives of how many followed.
+ *                            <p>Deliberately <strong>not</strong> the fencing token: a generation
+ *                            counts how far the lifecycle has moved, a token names who may move it,
+ *                            and one worker can apply many transitions under a single token while a
+ *                            contested instance can change owner without its status moving at
+ *                            all.</p>
  * @param graphVersionPin     the write-once definition this instance replays against
  * @param deploymentId        hosting deployment, absent for a transient submission
  * @param workloadId          owning workload, when the caller models one

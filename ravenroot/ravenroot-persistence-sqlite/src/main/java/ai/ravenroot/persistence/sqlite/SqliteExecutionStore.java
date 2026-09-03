@@ -56,7 +56,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * The durable single-host {@link ExecutionStore}, backed by one SQLite database in WAL mode (PERS-03).
+ * The durable single-host {@link ExecutionStore}, backed by one SQLite database in WAL mode.
  *
  * <h2>What it declares, and on what evidence</h2>
  * <ul>
@@ -72,8 +72,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *   else.</strong> SQLite's locking is built on POSIX advisory locks, which are unreliable over NFS,
  *   SMB and most network or overlay filesystems — there the exclusion silently does not hold and two
  *   processes can both believe they own a lease. Placing the database on such a volume does not
- *   degrade this capability, it falsifies it. Multi-host coordination is PERS-08's problem, not a
- *   configuration of this one.</li>
+ *   degrade this capability, it falsifies it. Coordinating execution state across several hosts is
+ *   a different adapter's problem, not a configuration of this one.</li>
  *   <li>{@link StoreCapability#IDEMPOTENCY_PURGE} — {@code purgeExpiredIdempotencyRecords} is
  *   implemented and advances the per-tenant watermark.</li>
  * </ul>
@@ -113,9 +113,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * <p>One connection, confined to one thread, with every operation submitted to it. That is what makes
  * the {@link CompletionStage} signatures honest: the port's own documentation says the adapter must
  * own its execution context because only the adapter knows its blocking profile, and this one blocks
- * on disk. Running the work on the caller's thread would put an fsync on an actor dispatcher once
- * PERS-04 lands. Thread confinement also removes any question of the connection's own thread safety
- * and makes intra-process write serialization structural rather than a lock to remember.</p>
+ * on disk. Running the work on the caller's thread would put an fsync on an actor dispatcher the
+ * moment one drives this store. Thread confinement also removes any question of the connection's own
+ * thread safety and makes intra-process write serialization structural rather than a lock to
+ * remember.</p>
  *
  * <h2>close() and the lease it does not release</h2>
  * <p>{@link ExecutionStore#close()} describes releasing this session's leases as a latency
@@ -322,9 +323,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
         AggregateStorage.write(connection, key, folded);
         writeTimers(key, batch);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
-        // Inside the same transaction as the transition above, which is the entirety of PERS-07's
-        // shared transactional boundary. There is no publish step to crash between, because there is
-        // no publish step: delivery reads the committed journal afterwards.
+        // Inside the same transaction as the transition above, which is the entirety of the shared
+        // transactional boundary the event journal promises. There is no publish step to crash
+        // between, because there is no publish step: delivery reads the committed journal afterwards.
         writeJournal(key, batch, revision, now);
         dropAcknowledgementsForRescheduledWork(key);
 
@@ -1909,10 +1910,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * {@code visible_again_at <= now}: an item with no claim row at all has never been delivered and
      * must be claimable, and a plain comparison against a missing row is never true.</p>
      *
-     * <h3>Why {@code RUNNING} is claimable, and why {@code PARKED} is not (PERS-04, ADR 0022)</h3>
+     * <h3>Why {@code RUNNING} is claimable, and why {@code PARKED} is not (ADR 0022)</h3>
      * <p>An attempt that is still {@code SCHEDULED} has provably not started, because the runtime
      * persists the {@code RUNNING} transition before the engine send. An attempt stuck in
-     * {@code RUNNING} is exactly the crash case PERS-04 exists for: dispatched, outcome never learned.
+     * {@code RUNNING} is exactly the crash case parking exists for: dispatched, outcome never learned.
      * Restricting this query to {@code SCHEDULED} would make that case <em>permanently invisible</em>
      * — the work would never be redelivered, so the decided ambiguity rule ({@code deliveryAttempt}
      * greater than one on a {@code RUNNING} attempt) could never fire and a crashed attempt would be
@@ -2429,9 +2430,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
      *
      * <p>Called from {@code applyLocked}, between the aggregate write and the return, so the event
      * rows and the transition rows are inside one {@code COMMIT}. That single fact is the whole of
-     * PERS-07's first contract requirement and the whole of its documented requirements: there is no
-     * window between committing the transition and recording the event, because there is no second
-     * write to perform.</p>
+     * the event journal's atomicity requirement: there is no window between committing the transition
+     * and recording the event, because there is no second write to perform.</p>
      */
     private void writeJournal(ExecutionKey key, ExecutionBatch batch, long revision, Instant now)
             throws SQLException {

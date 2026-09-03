@@ -75,7 +75,7 @@ final class SqliteSchema {
      * A token column on {@code lease} would vanish with the lease and restart from zero.</p>
      */
     static List<SchemaMigration> migrations() {
-        return List.of(new SchemaMigration(1, "PERS-03 initial execution store", List.of(
+        return List.of(new SchemaMigration(1, "initial execution store", List.of(
                 """
                 CREATE TABLE process_instance (
                     tenant_id           TEXT    NOT NULL,
@@ -220,7 +220,7 @@ final class SqliteSchema {
                     forgotten_before_nano           INTEGER NOT NULL
                 )
                 """)),
-                new SchemaMigration(2, "PERS-07 event journal, transactional outbox and inbox", List.of(
+                new SchemaMigration(2, "event journal, transactional outbox and inbox", List.of(
                 """
                 CREATE TABLE event_journal (
                     tenant_id             TEXT    NOT NULL,
@@ -287,22 +287,22 @@ final class SqliteSchema {
                     PRIMARY KEY (tenant_id, process_instance_id)
                 )
                 """)),
-                // PERS-04 (ADR 0022). The column is nullable and no existing row is rewritten:
-                // every pre-PERS-04 attempt row folds exactly as it did before, because a park cause
-                // exists iff the status is PARKED and no pre-existing row can carry that status.
+                // ADR 0022. The column is nullable and no existing row is rewritten: every attempt
+                // row written before this migration folds exactly as it did before, because a park
+                // cause exists iff the status is PARKED and no pre-existing row can carry that status.
                 //
                 // The *rollback* is the one-way part, and it is a property of the status name rather
-                // than of this column: the first row written with status 'PARKED' is unreadable by a
-                // pre-PERS-04 binary, whose NodeAttemptStatus.valueOf throws and surfaces as
+                // than of this column: the first row written with status 'PARKED' is unreadable by
+                // a binary that predates it, whose NodeAttemptStatus.valueOf throws and surfaces as
                 // ExecutionStoreFailure.Corrupted on replay. Downgrade is safe until that first row
                 // exists and unsafe after it. That mapping is asserted by the conformance suite
                 // (unknownAttemptStatusNamesReplayAsCorruptedRatherThanBeingMisread) rather than left
                 // to be discovered in production.
-                new SchemaMigration(3, "PERS-04 parked attempts carry an operator-facing cause", List.of(
+                new SchemaMigration(3, "parked attempts carry an operator-facing cause", List.of(
                         "ALTER TABLE attempt ADD COLUMN park_cause TEXT")),
                 // Existing invocations were operational by definition. The non-null default makes
                 // upgrade and replay preserve that meaning without rewriting old rows in Java.
-                new SchemaMigration(4, "CORE-317 structural incoming node command", List.of(
+                new SchemaMigration(4, "structural incoming node command", List.of(
                         "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")),
                 // Durable canonical graph definitions, in the same database as the executions that
                 // pin them. Co-location is not a convenience: it is what puts a definition and the
@@ -391,7 +391,7 @@ final class SqliteSchema {
                 // opens happily against this binary with the wrong shape -- exactly the silent
                 // corruption the guard exists to prevent, and invisible to it. Renumbering to 6 is
                 // what keeps the version a name for one structure rather than for two.
-                new SchemaMigration(6, "issue 154 durable tenant-scoped process and traversal inventory",
+                new SchemaMigration(6, "durable tenant-scoped process and traversal inventory",
                         List.of(
                         "ALTER TABLE process_instance ADD COLUMN created_at_epoch_second "
                                 + "INTEGER NOT NULL DEFAULT 0",

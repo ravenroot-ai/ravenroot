@@ -13,7 +13,10 @@ import java.util.Objects;
  * time during an incident.</p>
  *
  * @param version    strictly positive, applied in ascending order with no gaps
- * @param description recorded in {@code store_schema_history} so an operator can read what ran
+ * @param description recorded in {@code store_schema_history} so an operator can read what ran.
+ *                   It ships inside every database this produces and is read by people with no
+ *                   sight of how the change was tracked, so it names the change on its own terms
+ *                   and never carries an internal work-item or issue reference
  * @param statements DDL executed in order inside the migration's own transaction
  */
 record SchemaMigration(int version, String description, List<String> statements) {

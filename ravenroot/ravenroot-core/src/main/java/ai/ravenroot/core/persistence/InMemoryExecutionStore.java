@@ -887,7 +887,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             HandlerRegistration.requireBoundedKey(handlerName, "handlerName");
             HandlerRegistration.requireBoundedKey(correlationKey, "correlationKey");
             synchronized (monitor) {
-                return liveHandler(tenantId, handlerName, correlationKey, null);
+                // No batch in flight on the read path, so committed state is all there is to see.
+                return liveHandler(tenantId, null, Map.of(), handlerName, correlationKey, null);
             }
         });
     }
@@ -916,7 +917,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             registerHandler(key, folded, handlers, registration, revision);
         }
         for (HandlerTransition transition : batch.handlerTransitions()) {
-            transitionHandler(key, folded, handlers, transition, revision);
+            transitionHandler(batch, folded, handlers, transition, revision);
         }
     }
 
@@ -926,7 +927,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
                 "handler " + registration.handlerId());
 
-        DurableHandler byDeduplication = handlerByDeduplicationKey(key.tenantId(),
+        DurableHandler byDeduplication = handlerByDeduplicationKey(key.tenantId(), key, handlers,
                 registration.deduplicationKey());
         if (byDeduplication != null) {
             // Registration is exactly-once, and this is what makes a retried wait safe: a crash
@@ -942,8 +943,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             return;
         }
 
-        Optional<DurableHandler> contender = liveHandler(key.tenantId(), registration.name(),
-                registration.correlationKey(), registration.handlerId());
+        Optional<DurableHandler> contender = liveHandler(key.tenantId(), key, handlers,
+                registration.name(), registration.correlationKey(), registration.handlerId());
         if (contender.isPresent()) {
             throw failure(new ExecutionStoreFailure.HandlerCorrelationTaken(registration.name(),
                     registration.correlationKey()));
@@ -955,7 +956,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         handlers.put(registration.handlerId(), DurableHandler.waiting(key, registration, revision));
     }
 
-    private void transitionHandler(ExecutionKey key, ProcessInstance folded,
+    private void transitionHandler(ExecutionBatch batch, ProcessInstance folded,
                                    Map<UUID, DurableHandler> handlers, HandlerTransition transition,
                                    long revision) {
         DurableHandler current = handlers.get(transition.handlerId());
@@ -974,6 +975,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     current.status(), transition.next()));
         }
         if (transition.next().resumesProcess()) {
+            requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
             requireTraversalExists(folded, transition.resumeTraversalId(),
                     "handler " + current.handlerId() + " resume");
         }
@@ -993,44 +996,96 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     /**
      * The single live handler for one correlation key, ignoring {@code excludedHandlerId}.
      *
-     * <p>Scans the tenant's instances, which is what a physically isolated adapter would get for free
-     * from its own database. The exclusion exists so a re-registration of the same handler does not
-     * collide with itself.</p>
+     * <p>Reads through {@link #tenantHandlers}, so it sees the batch's own registrations as well as
+     * committed ones. The exclusion exists so a re-registration of the same handler does not collide
+     * with itself.</p>
      */
-    private Optional<DurableHandler> liveHandler(String tenantId, String handlerName, String correlationKey,
-                                                 UUID excludedHandlerId) {
-        for (var instance : instances.entrySet()) {
-            if (!instance.getKey().tenantId().equals(tenantId)) {
+    private Optional<DurableHandler> liveHandler(String tenantId, ExecutionKey writtenKey,
+                                                 Map<UUID, DurableHandler> pending, String handlerName,
+                                                 String correlationKey, UUID excludedHandlerId) {
+        for (DurableHandler handler : tenantHandlers(tenantId, writtenKey, pending)) {
+            if (handler.status().terminal()) {
                 continue;
             }
-            for (DurableHandler handler : instance.getValue().handlers.values()) {
-                if (handler.status().terminal()) {
-                    continue;
-                }
-                if (!handler.name().equals(handlerName) || !handler.correlationKey().equals(correlationKey)) {
-                    continue;
-                }
-                if (handler.handlerId().equals(excludedHandlerId)) {
-                    continue;
-                }
-                return Optional.of(handler);
+            if (!handler.name().equals(handlerName) || !handler.correlationKey().equals(correlationKey)) {
+                continue;
             }
+            if (handler.handlerId().equals(excludedHandlerId)) {
+                continue;
+            }
+            return Optional.of(handler);
         }
         return Optional.empty();
     }
 
-    private DurableHandler handlerByDeduplicationKey(String tenantId, String deduplicationKey) {
+    private DurableHandler handlerByDeduplicationKey(String tenantId, ExecutionKey writtenKey,
+                                                     Map<UUID, DurableHandler> pending,
+                                                     String deduplicationKey) {
+        for (DurableHandler handler : tenantHandlers(tenantId, writtenKey, pending)) {
+            if (handler.deduplicationKey().equals(deduplicationKey)) {
+                return handler;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Every handler of {@code tenantId} as this batch will leave them, not as they were committed.
+     *
+     * <p>{@code pending} is the in-flight copy of {@code writtenKey}'s handlers, already carrying the
+     * registrations this batch has folded so far, and it therefore <strong>replaces</strong> that
+     * instance's committed map rather than adding to it. Reading committed state here instead would
+     * make both uniqueness rules blind to the batch's own earlier registrations: two handlers sharing
+     * a correlation key, or a deduplication key, would be refused when they arrive in two batches and
+     * accepted when they arrive in one. A physically isolated adapter gets this for free — its
+     * lookups are queries inside the write transaction, so they already see rows the same transaction
+     * inserted — and an in-memory adapter that skipped it would diverge from every real one on a
+     * uniqueness rule that decides which of two concurrent triggers wins.</p>
+     *
+     * <p>Called with the monitor held, and {@code pending} is a batch-local copy, so nothing here can
+     * observe a partially folded batch belonging to another writer.</p>
+     * @param tenantId tenant whose handlers are being enumerated.
+     * @param writtenKey the instance this batch writes, whose committed handlers {@code pending}
+     *                   supersedes, or {@code null} on a read path where no batch is in flight.
+     * @param pending in-flight handler map for {@code writtenKey}; empty on a read path.
+     * @return handlers visible to this batch, in instance then registration order.
+     */
+    private List<DurableHandler> tenantHandlers(String tenantId, ExecutionKey writtenKey,
+                                                Map<UUID, DurableHandler> pending) {
+        var visible = new ArrayList<DurableHandler>(pending.values());
         for (var instance : instances.entrySet()) {
             if (!instance.getKey().tenantId().equals(tenantId)) {
                 continue;
             }
-            for (DurableHandler handler : instance.getValue().handlers.values()) {
-                if (handler.deduplicationKey().equals(deduplicationKey)) {
-                    return handler;
-                }
+            // Superseded, not merged: `pending` already contains this instance's committed handlers
+            // plus whatever the batch has folded, so adding the committed map again would return the
+            // pre-batch copy of a handler this batch has just transitioned.
+            if (instance.getKey().equals(writtenKey)) {
+                continue;
             }
+            visible.addAll(instance.getValue().handlers.values());
         }
-        return null;
+        return visible;
+    }
+
+    /**
+     * Requires that {@code traversalId} is a traversal <em>this batch created</em>.
+     *
+     * <p>Existence in the post-fold aggregate is not enough. A terminal handler transition naming a
+     * traversal that was already there — the very traversal that was waiting, for instance — would
+     * commit, and the trigger the store then offers would point a claimant at a traversal still in
+     * {@code WAITING} that nothing authorized it to resume. The re-entry point has to be created by
+     * the same batch that authorizes it, which is the whole of "the resolution and the traversal it
+     * authorizes commit together or neither does".</p>
+     */
+    private void requireBatchCreatedTraversal(ExecutionBatch batch, UUID traversalId, String what) {
+        boolean created = batch.transitions().stream()
+                .anyMatch(transition -> transition instanceof ExecutionTransition.TraversalAdded added
+                        && added.traversal().traversalId().equals(traversalId));
+        if (!created) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch did not create"));
+        }
     }
 
     private void requireTraversalExists(ProcessInstance folded, UUID traversalId, String what) {
@@ -1071,8 +1126,15 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         int delivery = registerClaim(entry, handler.handlerId(), now, leaseTtl);
         // The RE-ENTRY traversal, never the one that was waiting: the claimant runs the traversal the
         // resolution authorized, and the waiting traversal's own history stays closed.
+        //
+        // The invocation is ABSENT, not the waiting one. Pairing a new traversal with an invocation
+        // that lives under the old one produces a pair no lookup resolves -- a claimant asking the
+        // re-entry traversal for that invocation gets null -- and it is the invocation the wait is
+        // over for, so naming it would also read as work still to do. The claimant creates the
+        // re-entry invocation itself; the waiting one stays reachable through the handler, whose id
+        // is this item's own workItemId.
         return new PendingWork.HandlerTrigger(key, handler.handlerId(), handler.resumeTraversalId(),
-                handler.invocationId(), handler.name(), handler.outcomePayload(),
+                null, handler.name(), handler.outcomePayload(),
                 lease.fencingToken(), lease.expiresAt(), delivery);
     }
 

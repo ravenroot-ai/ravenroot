@@ -2262,6 +2262,165 @@ public abstract class ExecutionStoreContract {
                 "a retained terminal handler must keep its acknowledgement, or its trigger replays forever");
     }
 
+    /**
+     * Both uniqueness rules must see the batch's <em>own</em> registrations, not only committed ones.
+     *
+     * <p>This is the assertion whose absence let the two adapters disagree. A store whose lookups
+     * query inside its write transaction sees rows the same transaction inserted and refuses both
+     * cases for free; a store that consults committed state instead accepts them, and then holds two
+     * live handlers under one correlation key — the state
+     * {@link ExecutionStoreFailure.HandlerCorrelationTaken} exists to make impossible — or two
+     * handlers under one deduplication key, which is the exactly-once registration guarantee the
+     * crash-recovery story rests on. Neither adapter can be trusted to have got it right by
+     * construction, so it is asserted for both.</p>
+     */
+    @Test
+    final void bothUniquenessRulesSeeRegistrationsMadeEarlierInTheSameBatch() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+
+        ExecutionKey correlationKey = newKey();
+        var correlationFixture = twoWaitingInvocations(correlationKey);
+        ExecutionStoreFailure correlationTaken = failureOf(() -> await(store().apply(
+                correlationFixture.batch()
+                        .registerHandler(handlerRegistration(correlationFixture.firstHandlerId(),
+                                "approval", correlationFixture.traversalId(),
+                                correlationFixture.firstInvocationId(), "invoice-42", "dedup-a"))
+                        .registerHandler(handlerRegistration(correlationFixture.secondHandlerId(),
+                                "approval", correlationFixture.traversalId(),
+                                correlationFixture.secondInvocationId(), "invoice-42", "dedup-b"))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.HandlerCorrelationTaken.class, correlationTaken,
+                "two live handlers under one correlation key would make findHandler's answer "
+                        + "depend on iteration order and strand whichever one it did not return");
+        assertTrue(await(store().handlers(correlationKey)).isEmpty(),
+                "the refused batch registers neither handler");
+
+        ExecutionKey deduplicationKey = newKey();
+        var deduplicationFixture = twoWaitingInvocations(deduplicationKey);
+        ExecutionStoreFailure deduplicationRefused = failureOf(() -> await(store().apply(
+                deduplicationFixture.batch()
+                        .registerHandler(handlerRegistration(deduplicationFixture.firstHandlerId(),
+                                "approval-a", deduplicationFixture.traversalId(),
+                                deduplicationFixture.firstInvocationId(), "corr-a", "same-dedup"))
+                        .registerHandler(handlerRegistration(deduplicationFixture.secondHandlerId(),
+                                "approval-b", deduplicationFixture.traversalId(),
+                                deduplicationFixture.secondInvocationId(), "corr-b", "same-dedup"))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, deduplicationRefused);
+        assertTrue(await(store().handlers(deduplicationKey)).isEmpty(),
+                "a deduplication key that admitted two different handlers would break the "
+                        + "exactly-once registration a retried wait depends on");
+    }
+
+    /** The same registration twice in one batch is the retry case, and collapses rather than failing. */
+    @Test
+    final void thesameRegistrationRepeatedWithinOneBatchCollapsesToASingleHandler() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        ExecutionKey key = newKey();
+        var fixture = twoWaitingInvocations(key);
+        HandlerRegistration registration = handlerRegistration(fixture.firstHandlerId(), "approval",
+                fixture.traversalId(), fixture.firstInvocationId(), "invoice-42", "dedup-a");
+
+        await(store().apply(fixture.batch()
+                .registerHandler(registration)
+                .registerHandler(registration)
+                .build()));
+
+        assertEquals(1, await(store().handlers(key)).size(),
+                "a repeated identical registration is a retry, and a retry must not double-register");
+    }
+
+    /**
+     * The re-entry traversal must be one the resolving batch created, not merely one that exists.
+     *
+     * <p>Naming the traversal that was <em>waiting</em> passes an existence check and produces a
+     * trigger pointing a claimant at a traversal still in {@code WAITING} that nothing authorized it
+     * to resume. The store is where this has to be refused, for the reason it refuses everything else
+     * about a handler batch: a caller assembling its own batch is not bound by what the runtime
+     * happens to do.</p>
+     */
+    @Test
+    final void aTerminalTransitionMustNameATraversalTheSameBatchCreated() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(waiting.revision()))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(),
+                                "issuer|USER|approver", fixture.traversalId(),
+                                OpaquePayload.of("approved".getBytes(StandardCharsets.UTF_8),
+                                        "application/vnd.ravenroot.test-approval")))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(HandlerStatus.WAITING,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status(),
+                "the handler is untouched, so the wait it records is still the truth");
+        assertEquals(waiting.revision(), await(store().load(fixture.key())).revision());
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "nothing may become claimable from a re-entry point that was never authorized");
+    }
+
+    /** A trigger names the re-entry traversal and no invocation, because the new traversal has none. */
+    @Test
+    final void aTriggerNamesNoInvocationBecauseTheReEntryTraversalHasNotCreatedOneYet() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        UUID resumeTraversalId = resolve(fixture, "approved");
+
+        var trigger = assertInstanceOf(PendingWork.HandlerTrigger.class,
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).getFirst());
+
+        assertEquals(resumeTraversalId, trigger.traversalId());
+        assertNull(trigger.invocationId(),
+                "naming the waiting invocation would pair a new traversal with an invocation living "
+                        + "under the old one, which no lookup resolves");
+        assertTrue(await(store().load(fixture.key())).state().traversals().get(resumeTraversalId)
+                        .invocations().isEmpty(),
+                "and there is genuinely nothing to name: the claimant creates the first invocation");
+        assertEquals(fixture.invocationId(),
+                await(store().loadHandler(fixture.key(), trigger.workItemId())).orElseThrow()
+                        .invocationId(),
+                "the waiting invocation stays reachable through the handler the trigger is keyed by");
+    }
+
+    /** Identities for a batch that parks two invocations of one traversal, for the same-batch rules. */
+    private record TwoWaits(ExecutionKey key, UUID traversalId, UUID firstInvocationId,
+                            UUID secondInvocationId, UUID firstHandlerId, UUID secondHandlerId,
+                            long revision) {
+        /** The parking batch, open so a test can add the registrations it is actually asserting. */
+        private ExecutionBatch.Builder batch() {
+            return ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                            new NodeInvocation(firstInvocationId, "await-first", Set.of(),
+                                    NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                            new NodeInvocation(secondInvocationId, "await-second", Set.of(),
+                                    NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING));
+        }
+    }
+
+    private TwoWaits twoWaitingInvocations(ExecutionKey key) {
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return new TwoWaits(key, traversalId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), created.revision());
+    }
+
+    private static HandlerRegistration handlerRegistration(UUID handlerId, String name, UUID traversalId,
+                                                           UUID invocationId, String correlationKey,
+                                                           String deduplicationKey) {
+        return new HandlerRegistration(handlerId, name, traversalId, invocationId, correlationKey,
+                deduplicationKey,
+                new HandlerPayloadSchema("application/vnd.ravenroot.test-approval", "approval/v1", 1024),
+                HandlerAuthorization.ofRoles("APPROVER"));
+    }
+
     /** Identities the whole PERS-05 story is told in, kept together so a test reads as one wait. */
     private record HandlerFixture(ExecutionKey key, UUID traversalId, UUID invocationId, UUID handlerId,
                                   HandlerRegistration registration) {

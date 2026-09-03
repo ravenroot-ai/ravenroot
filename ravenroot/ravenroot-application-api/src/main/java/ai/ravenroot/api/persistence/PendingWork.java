@@ -131,10 +131,19 @@ public sealed interface PendingWork {
      * <p>{@code payload} is the outcome body the resolving principal supplied, already validated
      * against the handler's {@link HandlerPayloadSchema} at resolution time. An expiry carries an
      * empty payload, because nobody supplied one.</p>
+     *
+     * <p>{@code invocationId} is <strong>always absent</strong> on this kind, unlike on every other,
+     * and that is a statement rather than an omission. A re-entry traversal holds no invocation when
+     * it is committed: the claimant creates the first one. Naming the invocation that <em>waited</em>
+     * would pair a new traversal with an invocation living under the old one — a pair no lookup
+     * resolves, since asking the re-entry traversal for it yields nothing — and it is the invocation
+     * whose wait is over, so it would also read as work still outstanding. The waiting invocation
+     * stays reachable through {@link ExecutionStore#loadHandler(ExecutionKey, java.util.UUID)},
+     * keyed by this item's own {@link #workItemId()}, which is the handler id.</p>
  * @param key the stable key used to identify the requested resource.
  * @param workItemId the stable work item id used to identify the requested resource.
  * @param traversalId the re-entry traversal committed with the handler's terminal transition.
- * @param invocationId the stable invocation id used to identify the requested resource.
+ * @param invocationId always {@code null} for this kind; see above.
  * @param handlerName handler selected to process the pending work.
  * @param payload bounded payload carried by the pending work.
  * @param fencingToken the stable fencing token used to identify the requested resource.

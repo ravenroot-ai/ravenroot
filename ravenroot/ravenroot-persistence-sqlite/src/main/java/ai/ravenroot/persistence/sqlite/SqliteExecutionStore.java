@@ -144,6 +144,32 @@ public final class SqliteExecutionStore implements ExecutionStore {
      */
     private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
 
+    /**
+     * {@code ('WAITING', 'ESCALATED')} and {@code ('RESOLVED', 'DENIED', 'EXPIRED')}, derived from
+     * {@link HandlerStatus#terminal()} rather than written out as SQL text.
+     *
+     * <p>Restating the split as a literal in every query is how the two adapters come to disagree
+     * without anything failing: a sixth, non-terminal status would be enforced by the in-memory
+     * adapter's own {@code terminal()} check and quietly ignored by a hand-written {@code IN} list
+     * here, so correlation-key uniqueness would hold on one store and not the other. Deriving it
+     * means adding a status changes both at once.</p>
+     *
+     * <p>The frozen migration DDL cannot use these — a migration's text is history and must never be
+     * rewritten — so {@code SqliteHandlerStatusSqlTest} pins that literal against the same enum
+     * instead, and fails the build when a new status makes the shipped partial index wrong.</p>
+     */
+    static final String LIVE_HANDLER_STATUSES = statusList(false);
+
+    /** The terminal counterpart of {@link #LIVE_HANDLER_STATUSES}. */
+    static final String TERMINAL_HANDLER_STATUSES = statusList(true);
+
+    private static String statusList(boolean terminal) {
+        return java.util.Arrays.stream(HandlerStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(status -> "'" + status.name() + "'")
+                .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
+    }
+
     private static final int SQLITE_PERM = 3;
     private static final int SQLITE_BUSY = 5;
     private static final int SQLITE_LOCKED = 6;
@@ -1524,7 +1550,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 // arbitrary winner.
                 try (PreparedStatement statement = connection.prepareStatement(
                         HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
-                                + "AND h.status IN ('WAITING', 'ESCALATED')")) {
+                                + "AND h.status IN " + LIVE_HANDLER_STATUSES)) {
                     statement.setString(1, tenantId);
                     statement.setString(2, handlerName);
                     statement.setString(3, correlationKey);
@@ -1572,7 +1598,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             registerHandler(key, folded, registration, revision);
         }
         for (HandlerTransition transition : batch.handlerTransitions()) {
-            transitionHandler(key, folded, transition, revision);
+            transitionHandler(key, batch, folded, transition, revision);
         }
     }
 
@@ -1608,8 +1634,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
         insertHandler(DurableHandler.waiting(key, registration, revision), nextHandlerPosition(key));
     }
 
-    private void transitionHandler(ExecutionKey key, ProcessInstance folded, HandlerTransition transition,
-                                   long revision) throws SQLException {
+    private void transitionHandler(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                   HandlerTransition transition, long revision) throws SQLException {
         DurableHandler current = readHandler(key, transition.handlerId());
         if (current == null) {
             // InvalidRequest rather than NotFound: NotFound names a process instance, and the
@@ -1626,6 +1652,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     current.status(), transition.next()));
         }
         if (transition.next().resumesProcess()) {
+            requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
             requireTraversalExists(folded, transition.resumeTraversalId(),
                     "handler " + current.handlerId() + " resume");
         }
@@ -1719,7 +1747,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
-                        + "AND h.status IN ('WAITING', 'ESCALATED')")) {
+                        + "AND h.status IN " + LIVE_HANDLER_STATUSES)) {
             statement.setString(1, tenantId);
             statement.setString(2, handlerName);
             statement.setString(3, correlationKey);
@@ -1796,6 +1824,26 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
+    /**
+     * Requires that {@code traversalId} is a traversal <em>this batch created</em>.
+     *
+     * <p>Existence in the post-fold aggregate is not enough. A terminal handler transition naming a
+     * traversal that was already there — the very traversal that was waiting, for instance — would
+     * commit, and the trigger the store then offers would point a claimant at a traversal still in
+     * {@code WAITING} that nothing authorized it to resume. The re-entry point has to be created by
+     * the same batch that authorizes it, which is the whole of "the resolution and the traversal it
+     * authorizes commit together or neither does".</p>
+     */
+    private void requireBatchCreatedTraversal(ExecutionBatch batch, UUID traversalId, String what) {
+        boolean created = batch.transitions().stream()
+                .anyMatch(transition -> transition instanceof ExecutionTransition.TraversalAdded added
+                        && added.traversal().traversalId().equals(traversalId));
+        if (!created) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch did not create"));
+        }
+    }
+
     private void requireInvocationExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
                                          String what) {
         requireTraversalExists(folded, traversalId, what);
@@ -1807,7 +1855,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private List<DurableHandler> claimableTriggers(ExecutionKey key, Instant now) throws SQLException {
         String sql = HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
-                + "AND h.status IN ('RESOLVED', 'DENIED', 'EXPIRED') "
+                + "AND h.status IN " + TERMINAL_HANDLER_STATUSES + " "
                 + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = h.tenant_id "
                 + "AND k.process_instance_id = h.process_instance_id AND k.work_item_id = h.handler_id) "
                 + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = h.tenant_id "
@@ -1834,8 +1882,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
         int delivery = registerClaim(key, handler.handlerId(), now, leaseTtl);
         // The RE-ENTRY traversal, never the one that was waiting: the claimant runs the traversal the
         // resolution authorized, and the waiting traversal's own history stays closed.
+        //
+        // The invocation is ABSENT, not the waiting one. Pairing a new traversal with an invocation
+        // that lives under the old one produces a pair no lookup resolves -- a claimant asking the
+        // re-entry traversal for that invocation gets null -- and it is the invocation the wait is
+        // over for, so naming it would also read as work still to do. The claimant creates the
+        // re-entry invocation itself; the waiting one stays reachable through the handler, whose id
+        // is this item's own workItemId.
         return new PendingWork.HandlerTrigger(key, handler.handlerId(), handler.resumeTraversalId(),
-                handler.invocationId(), handler.name(), handler.outcomePayload(),
+                null, handler.name(), handler.outcomePayload(),
                 lease.fencingToken(), lease.expiresAt(), delivery);
     }
 

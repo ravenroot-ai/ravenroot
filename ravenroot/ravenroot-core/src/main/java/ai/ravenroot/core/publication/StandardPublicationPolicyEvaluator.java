@@ -122,6 +122,7 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
             if (next.equals(decoded)) break;
             decoded = next;
         }
+        if (containsPercentTriplet(decoded)) return CanonicalPath.invalid();
         if (containsSecurityEscape(decoded)) return CanonicalPath.invalid();
         String normalized = Normalizer.normalize(decoded, Normalizer.Form.NFKC);
         var separators = new StringBuilder(normalized.length());
@@ -195,6 +196,15 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
         return lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c")
                 || lower.contains("%e2%88%95") || lower.contains("%e2%81%84")
                 || lower.contains("%ef%bc%8f") || lower.contains("%ef%bc%bc");
+    }
+
+    private static boolean containsPercentTriplet(String value) {
+        for (int index = 0; index + 2 < value.length(); index++) {
+            if (value.charAt(index) == '%'
+                    && Character.digit(value.charAt(index + 1), 16) >= 0
+                    && Character.digit(value.charAt(index + 2), 16) >= 0) return true;
+        }
+        return false;
     }
 
     private static boolean separator(int point) {

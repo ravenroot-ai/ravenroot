@@ -106,6 +106,8 @@ class StandardPublicationPolicyEvaluatorTest {
         var policy = policy(16_384, List.of(destination(), paths(), artifacts(false), provenance()));
         List<String> denied = List.of(
                 "%2e%2e/private/file",
+                "%25252525252e%25252525252e%25252525252fprivate/file",
+                "%2525252525252e%2525252525252e%2525252525252fprivate/file",
                 "private%2Ffile",
                 "..\uFF0Fprivate/file",
                 "public/../private/file",
@@ -123,7 +125,8 @@ class StandardPublicationPolicyEvaluatorTest {
         }
 
         for (String path : List.of("..-safe/file", "%2e%2e-safe/file", "private-file", "private%2Dfile",
-                "privateish/file", "public/.well-known")) {
+                "privateish/file", "public/.well-known", "public/100%/file", "public/%zz/file",
+                "public/%2/file")) {
             assertEquals(PublicationDecision.Disposition.CONTINUE,
                     evaluator.evaluate(policy, candidate(List.of(text(path, "document", "en", "safe"))))
                             .disposition(), path);

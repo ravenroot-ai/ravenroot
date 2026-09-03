@@ -316,6 +316,28 @@ abstract class CliBackendContract {
                 "a traversal that has already completed must not still be reported live");
     }
 
+    /**
+     * Issue 154, shape parity: neither fixture in this contract composes a durable, inventory-capable
+     * {@code ExecutionStore} (both {@code @BeforeEach} methods pass {@code null}), which is the
+     * ordinary shape most of this contract's own assertions run against and is deliberately left
+     * that way -- exercising the durable inventory's actual content needs its own store-backed
+     * fixture, which is embedded-only for the same reason {@link #liveDoesNotReportATerminalExecution}'s
+     * neighbour {@code LiveExecutionsCliTest} is: no seam here for it. What this contract can and does
+     * prove is that both transports report the identical, closed-vocabulary unavailability rather than
+     * one throwing a different shape of failure than the other.
+     */
+    @Test
+    final void bothTransportsRefuseTheInventoryReadIdenticallyWhenNoDurableStoreIsComposed() {
+        IOException inventoryFailure = assertThrows(IOException.class, () -> backend.inventory());
+        assertTrue(inventoryFailure.getMessage().contains("PROCESS_INVENTORY_UNAVAILABLE"),
+                "expected PROCESS_INVENTORY_UNAVAILABLE in message, got: " + inventoryFailure.getMessage());
+
+        IOException traversalsFailure = assertThrows(IOException.class,
+                () -> backend.traversals(UUID.randomUUID().toString()));
+        assertTrue(traversalsFailure.getMessage().contains("PROCESS_INVENTORY_UNAVAILABLE"),
+                "expected PROCESS_INVENTORY_UNAVAILABLE in message, got: " + traversalsFailure.getMessage());
+    }
+
     /** Proves the two transports agree on failure, not just on success. */
     @Test
     final void readingAnUnknownExecutionIdFailsExplicitly() {

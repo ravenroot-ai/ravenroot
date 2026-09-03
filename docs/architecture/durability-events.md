@@ -13,6 +13,7 @@ Durability connects admission, state changes, event ordering, result retention, 
 - The durable journal is authoritative for replay; the ring buffer serves bounded recent delivery.
 - Terminal results have a retention boundary independent from event consumption.
 - Drain stops new admission, allows accepted work to reach its defined boundary, and makes shutdown observable through readiness.
+- The durable process inventory is a separate, tenant-scoped authority over which process instances and traversals exist, read from the same rows the lifecycle writes; it answers "what exists and in what recovery state" where the journal answers "what happened."
 
 ## Architectural consequence
 
@@ -22,3 +23,4 @@ Recovery reconstructs accepted work from durable authority; live delivery accele
 
 - [Exact contract](../reference/execution-events.md)
 - [Procedure or recovery](../troubleshooting/events-persistence.md)
+- [Durable process inventory](process-inventory.md)

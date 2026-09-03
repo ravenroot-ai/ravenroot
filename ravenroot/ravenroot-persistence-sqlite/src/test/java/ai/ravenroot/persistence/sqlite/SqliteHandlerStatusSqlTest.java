@@ -46,7 +46,7 @@ class SqliteHandlerStatusSqlTest {
 
     /** How the handler migration is identified, independently of the number it happens to carry. */
     private static final String HANDLER_MIGRATION_DESCRIPTION =
-            "PERS-05 durable handlers for wait, re-entry and human tasks";
+            "durable handlers for wait, re-entry and human tasks";
 
     @Test
     void theDerivedStatusListsAreExactlyTheNonTerminalAndTerminalMembers() {

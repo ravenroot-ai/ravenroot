@@ -107,6 +107,36 @@ class DefaultRavenrootApplicationExecutionStoreTest {
         store.close();
     }
 
+    /**
+     * Issue 154's write path, at the transient-submission admission point: {@code startGraphMl}
+     * never opens a deployment domain and models no workload, so the durable inventory row it
+     * writes must carry an absent {@code deploymentId} and {@code workloadId} while still recording
+     * the caller's own correlation identity -- the distinction acceptance criterion 2 requires
+     * between "transient" and "deployment-hosted" without conflating either with a deployment or a
+     * graph version.
+     */
+    @Test
+    void recordsTransientOriginWithAbsentDeploymentAndWorkloadButPresentCorrelationId() {
+        var store = new InMemoryExecutionStore();
+        var engine = new StubExecutionEngine();
+        var application = applicationWith(engine, store);
+
+        ExecutionSubmission submission = application.startGraphMl(TestIdentities.TENANT_A,
+                java.util.UUID.randomUUID(), new ByteArrayInputStream(graphBytes()), "payload");
+
+        var entry = store.findProcessInstance(
+                        new ExecutionKey(TestIdentities.TENANT_A.tenantId(), submission.processInstanceId()))
+                .toCompletableFuture().join().orElseThrow();
+
+        assertTrue(entry.deploymentId().isEmpty(), "a transient submission opens no deployment domain");
+        assertTrue(entry.workloadId().isEmpty(), "a transient submission models no workload");
+        assertEquals(TestIdentities.TENANT_A.requestId(), entry.correlationId().orElseThrow(),
+                "the caller's own ingress correlation identity must still be recorded");
+
+        application.close();
+        store.close();
+    }
+
     @Test
     void durableReplayPreservesTheSameStableEdgeIdentityAndCausalOrdering() {
         var store = new InMemoryExecutionStore();
@@ -271,6 +301,48 @@ class DefaultRavenrootApplicationExecutionStoreTest {
 
     /** Declares no capabilities, so composition must refuse it. */
     private static class NonTransactionalStore implements ExecutionStore {
+        // Durable inventory. This double declares no capabilities and exists only to be
+        // refused at composition time, so every operation stays unimplemented rather than acquiring a
+        // behaviour that no assertion covers.
+
+        @Override
+        public int maxInventoryPageSize() {
+            return 1;
+        }
+
+        @Override
+        public Duration terminalRetention() {
+            return Duration.ofHours(1);
+        }
+
+        @Override
+        public CompletionStage<ai.ravenroot.api.persistence.ProcessInventoryPage> listProcessInstances(
+                String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry>>
+                findProcessInstance(ExecutionKey key) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<List<ai.ravenroot.api.persistence.TraversalInventoryEntry>> listTraversals(
+                ExecutionKey key) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
+            throw new UnsupportedOperationException();
+        }
+
         @Override
         public Set<StoreCapability> capabilities() {
             return Set.of();

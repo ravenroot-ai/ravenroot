@@ -37,6 +37,7 @@ import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionTransition;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.RevisionExpectation;
@@ -1343,6 +1344,66 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return executionStore != null && executionStore.supports(StoreCapability.EVENT_JOURNAL);
     }
 
+    /**
+     * Issue 154: the durable inventory is available exactly when a store is composed and declares
+     * {@link StoreCapability#PROCESS_INVENTORY} — the same "declared capability, not implicit
+     * feature-sniffing" rule {@link #durableEventJournalAvailable()} already follows for the journal.
+     */
+    @Override
+    public boolean processInventoryAvailable() {
+        return executionStore != null && executionStore.supports(StoreCapability.PROCESS_INVENTORY);
+    }
+
+    @Override
+    public int processInventoryMaxPageSize() {
+        return processInventoryAvailable() ? executionStore.maxInventoryPageSize() : 0;
+    }
+
+    private void requireProcessInventory() {
+        if (!processInventoryAvailable()) {
+            throw new IllegalStateException(
+                    "no durable, inventory-capable execution store is configured, so the durable "
+                            + "process inventory is unavailable; the caller must choose its own "
+                            + "fallback rather than discover this by catching an exception");
+        }
+    }
+
+    @Override
+    public ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
+            String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(query, "query");
+        requireProcessInventory();
+        return await(executionStore.listProcessInstances(tenantId, query));
+    }
+
+    @Override
+    public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> processInstance(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        requireProcessInventory();
+        return await(executionStore.findProcessInstance(new ExecutionKey(tenantId, processInstanceId)));
+    }
+
+    @Override
+    public List<ai.ravenroot.api.persistence.TraversalInventoryEntry> processInstanceTraversals(
+            String tenantId, UUID processInstanceId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(processInstanceId, "processInstanceId");
+        requireProcessInventory();
+        return await(executionStore.listTraversals(new ExecutionKey(tenantId, processInstanceId)));
+    }
+
+    @Override
+    public java.time.Instant processInventoryRetainedFrom(String tenantId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        if (executionStore == null) {
+            return java.time.Instant.MIN;
+        }
+        return await(executionStore.inventoryRetainedFrom(tenantId));
+    }
+
     /** Always true: this implementation always retains results, bounded by count. */
     @Override
     public boolean executionResultsRetained() {
@@ -2082,9 +2143,16 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var accepted = new ProcessInstance(processInstanceId, ProcessInstanceStatus.ACCEPTED,
                 Map.of(traversalId, traversal));
 
+        // Issue 154: a transient submission opens no deployment domain and models no workload, so
+        // only the caller's own correlation identity is knowable here -- deploymentId and workloadId
+        // stay absent rather than being invented, which is exactly what keeps a transient execution's
+        // inventory row from being conflated with a deployment or a graph version (acceptance
+        // criterion 2). requestId is SecurityContext's own "ingress request correlation identifier",
+        // the same value every interior boundary already carries for this submission.
         StoredProcessInstance created = await(executionStore.apply(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(accepted, new GraphVersionPin(graphVersion)))
+                .recordOrigin(ExecutionOrigin.of(null, null, security.requestId()))
                 .build()));
 
         return await(executionStore.apply(ExecutionBatch.to(key)

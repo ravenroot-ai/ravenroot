@@ -598,6 +598,167 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<Long> compactJournal(String tenantId);
 
+    // ---------------------------------------------------------------- durable execution inventory
+
+    /**
+     * The largest page {@link #listProcessInstances(String, ProcessInventoryQuery)} will return. Static
+     * self-description, therefore synchronous.
+     *
+     * <p>Declared rather than enforced silently, because the alternative is clamping: a store that
+     * quietly reduced a caller's limit would return a short page that is indistinguishable from the
+     * last page, and a caller paginating on "fewer rows than I asked for means I am done" would stop
+     * early and never learn it. An over-limit request is rejected with
+     * {@link ExecutionStoreFailure.InvalidRequest} instead, and this is the number that says what the
+     * limit is before the rejection happens.</p>
+     * @return the maximum page size this adapter accepts.
+     */
+    int maxInventoryPageSize();
+
+    /**
+     * How long a terminal process instance is retained before
+     * {@link #purgeExpiredProcessInstances(String)} may remove it. Static self-description, therefore
+     * synchronous.
+     *
+     * <p>The counterpart of {@link #journalRetention()} for instances, and declared for the same
+     * reason: it is the window inside which a completed or failed execution is still discoverable, and
+     * an operator or an audit caller needs to read that bound rather than discover it as a missing row
+     * during an investigation. Adapters that never prune still answer, because an inventory that is
+     * never pruned retains everything and its bound is honestly unbounded.</p>
+     * @return the retention window applied to terminal instances.
+     */
+    Duration terminalRetention();
+
+    /**
+     * Lists one page of {@code tenantId}'s durable process instances, ordered by
+     * {@code (createdAt descending, processInstanceId descending)}.
+     *
+     * <h4>Determinism, and what a scan deliberately does not see</h4>
+     * <p>Both components of the sort key are immutable for the life of a row, so a row cannot move
+     * between pages while a scan is under way. Work created after the scan started sorts <em>before</em>
+     * page one and is therefore not returned by that scan; that is the cost of a stable cursor and it
+     * is chosen deliberately over an ordering on {@code updatedAt}, which would let an updated row jump
+     * the cursor and be returned twice, or fall behind it and be skipped — silently, in both
+     * directions. Terminal work expiring mid-scan removes rows the scan has not reached yet, which is
+     * a short page rather than a hole, and {@link ProcessInventoryPage#retainedFrom()} says so.</p>
+     *
+     * <h4>Rejections</h4>
+     * <p>Fails with {@link ExecutionStoreFailure.InvalidRequest} when the limit is not positive, when
+     * it exceeds {@link #maxInventoryPageSize()}, when the cursor does not decode or was minted for
+     * another tenant, and when the query is self-contradictory — a status filter naming only terminal
+     * statuses while excluding terminal rows. Each of those returns nothing under a lenient reading,
+     * and an empty page that means "your request was wrong" is indistinguishable from one that means
+     * "there is none". Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#PROCESS_INVENTORY} is declared.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @param query the page to return: filters, cursor and limit.
+     * @return one deterministic page of the tenant's process instances.
+     */
+    CompletionStage<ProcessInventoryPage> listProcessInstances(String tenantId, ProcessInventoryQuery query);
+
+    /**
+     * Reads one instance's inventory row directly, without a scan.
+     *
+     * <p><strong>Empty is the answer for an instance that does not exist and for one that belongs to
+     * another tenant, and the two are indistinguishable by design</strong> — the same rule
+     * {@link #load(ExecutionKey)} follows, for the same reason: a distinguishable denial would make the
+     * store a cross-tenant existence oracle, and a caller could enumerate another tenant's instance ids
+     * through the difference. It is also empty for an instance whose retention window elapsed; a caller
+     * that needs to tell that case apart compares against
+     * {@link #inventoryRetainedFrom(String)} rather than against a second failure channel.</p>
+     *
+     * <p>Absence is an empty value and not a failure, because it is the ordinary outcome of a lookup
+     * and modelling the ordinary outcome as a thrown exception would put a catch block on the common
+     * path. A stored row that no longer reconstructs into a legal aggregate is a different matter and
+     * still fails with {@link ExecutionStoreFailure.Corrupted}, so a malformed row is never silently
+     * dropped from a listing or misread as a well-formed one.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @return the instance's inventory row, or empty when it is absent or not visible to the key's tenant.
+     */
+    CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key);
+
+    /**
+     * Lists every traversal of one instance, in {@code position} order.
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.NotFound} when the instance is absent <em>or</em> not
+     * visible to the key's tenant — indistinguishable, exactly as {@link #load(ExecutionKey)} is. An
+     * instance with no traversals yet is a different answer and is an empty list, because it exists and
+     * the honest report of its contents is that there are none.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @return the instance's traversals, in insertion order.
+     */
+    CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key);
+
+    /**
+     * The per-tenant inventory retention floor: the <strong>latest retention deadline this tenant has
+     * actually crossed</strong>. Every terminal instance whose deadline is strictly after this instant
+     * is still present; one whose deadline is at or before it may have been purged. Monotonically
+     * non-decreasing, never retreating, and {@link java.time.Instant#MIN} until something is purged.
+     *
+     * <h4>The floor is measured in deadlines, not in end instants</h4>
+     * <p>It lives in the same space the purge decides in — the {@code retainedUntil} that
+     * {@link #findProcessInstance(ExecutionKey)} publishes for every terminal row — and that is the
+     * point: a floor expressed in a different space than the predicate needs a conversion, and the
+     * conversion is exactly where an off-by-one or an inverted bound hides. It also matches
+     * {@link #forgottenBefore(String)}, which is stated in its records' {@code expiresAt} rather than
+     * in when they were written. A caller holding an execution it once read compares that row's own
+     * {@code retainedUntil}; one that never read the row derives the deadline from the instant the
+     * execution ended plus {@link #terminalRetention()}, both of which are published.</p>
+     *
+     * <h4>Latest, not earliest, and the boundary is exclusive</h4>
+     * <p>The guarantee runs in the direction "everything past this is still here", so the floor must
+     * sit at or beyond every boundary a purge crossed. Publishing the <em>earliest</em> deadline
+     * removed breaks it as soon as one run removes two rows whose deadlines are further apart than the
+     * retention window: the later row is gone and sits after the published floor, so a caller following
+     * this rule concludes that a genuinely completed execution never existed — the ambiguity inverted
+     * into the unsafe direction, which is the opposite of what this method is for. A run that removes
+     * exactly one row is the degenerate case where earliest and latest coincide, so no single-row test
+     * can tell the two apart.</p>
+     *
+     * <p>The boundary is exclusive because collection is inclusive: a row is purged when its deadline
+     * is at or before the store's now, so the row sitting exactly on the floor is precisely one that
+     * was removed. This is one of the store's non-uniform boundary conventions and is stated here on
+     * its own merits rather than assumed to match a neighbour's.</p>
+     *
+     * <p>The counterpart of {@link #forgottenBefore(String)} and {@link #journalRetainedFrom(String)},
+     * and it exists for the identical reason: it is what turns an absent row from an ambiguity into an
+     * answer. Without it a caller cannot distinguish an instance that never existed from one that
+     * expired by policy, and those call for opposite actions — investigate a bad identifier, or accept
+     * a completed execution that aged out.</p>
+     *
+     * <p>Asynchronous because it reads stored state.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the earliest instant from which this tenant's terminal inventory is complete.
+     */
+    CompletionStage<java.time.Instant> inventoryRetainedFrom(String tenantId);
+
+    /**
+     * Removes {@code tenantId}'s terminal instances whose {@link #terminalRetention()} window has
+     * elapsed, returning how many were removed, and advances that tenant's
+     * {@link #inventoryRetainedFrom(String)} floor — and <strong>only</strong> that tenant's.
+     *
+     * <p><strong>Nothing is ever deleted implicitly on a read.</strong> Retention is an explicit
+     * operator or scheduler action, exactly like {@link #purgeExpiredIdempotencyRecords(String)} and
+     * {@link #compactJournal(String)}, so a listing has no side effect and two identical listings
+     * return identical pages. A read that pruned would make the inventory's own contents depend on who
+     * happened to look at it.</p>
+     *
+     * <p>Only <em>terminal</em> rows are eligible. A non-terminal instance is never removed however old
+     * it is, because age is not evidence that work is finished: pruning a long-running or interrupted
+     * instance would destroy the very row an operator needs in order to discover that it is stuck.</p>
+     *
+     * <p>A tenant that lost nothing must keep its floor exactly where it was, at
+     * {@link java.time.Instant#MIN} if it has never purged. Advancing a floor for a tenant that forgot
+     * nothing would report a retention gap that does not exist, and a periodic purge job would report
+     * one on every tick.</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#INVENTORY_RETENTION} is declared — its absence is declared, never
+     * silent.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the number of expired terminal instances removed.
+     */
+    CompletionStage<Long> purgeExpiredProcessInstances(String tenantId);
+
     /**
      * Releases what the <em>process</em> owns and <strong>no lease</strong>.
      *

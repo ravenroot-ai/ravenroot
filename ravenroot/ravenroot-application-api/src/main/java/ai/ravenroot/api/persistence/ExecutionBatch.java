@@ -53,7 +53,8 @@ public final class ExecutionBatch {
         // omitted from this condition would make its own batch look empty and be rejected.
         if (transitions.isEmpty() && timersToSchedule.isEmpty() && timersToCancel.isEmpty()
                 && idempotency == null && events.isEmpty() && origin.isEmpty()
-                && handlerTransitions.isEmpty() && toolApprovalsToRegister.isEmpty()
+                && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()
+                && toolApprovalsToRegister.isEmpty()
                 && toolApprovalTransitions.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }

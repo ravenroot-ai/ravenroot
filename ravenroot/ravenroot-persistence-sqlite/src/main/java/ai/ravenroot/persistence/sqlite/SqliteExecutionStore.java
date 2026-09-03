@@ -156,7 +156,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
      *
      * <p>The frozen migration DDL cannot use these — a migration's text is history and must never be
      * rewritten — so {@code SqliteHandlerStatusSqlTest} pins that literal against the same enum
-     * instead, and fails the build when a new status makes the shipped partial index wrong.</p>
+     * instead, and fails the build when a new status makes the shipped partial index wrong. That pin
+     * finds the migration by its <em>description</em>, not by its number: the handler migration
+     * shipped as 5 and became 6 when it merged behind another feature that had taken that number, so
+     * the number is a merge outcome rather than an identity.</p>
      */
     static final String LIVE_HANDLER_STATUSES = statusList(false);
 

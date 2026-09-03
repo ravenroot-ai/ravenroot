@@ -15,8 +15,10 @@ import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
+import ai.ravenroot.api.node.service.ToolCallAuthorization;
 import ai.ravenroot.api.payload.PayloadValue;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -50,8 +52,8 @@ import java.util.function.LongSupplier;
  *   the same tool forever, and only a finite bound ends it;</li>
  *   <li><b>the tool contract exists because the model chooses what to call</b> — a refusal must be an
  *   answer the model can read and correct, not a terminated traversal (see {@link AgentTool});</li>
- *   <li><b>the instructions live in the system turn</b>, which {@code llm-prompt} never uses — see
- *   {@link AgentTurn} rule 2.</li>
+ *   <li><b>only operator policy lives in the system turn</b>; graph instructions are a separate,
+ *   untrusted user turn — see {@link AgentTurn} rule 2.</li>
  * </ul>
  *
  * <h2>Three properties carried over from {@code llm-prompt} unchanged, and why each is not optional</h2>
@@ -71,9 +73,10 @@ import java.util.function.LongSupplier;
  *
  * <h2>The credential is never in this process's reach</h2>
  * <p>Like its sibling, this behavior requires {@link NodePackageCapability#OUTBOUND_HTTP} and
- * deliberately <b>not</b> {@code CREDENTIAL_RESOLUTION}. The profile names a binding; the runtime
- * resolves it and places it on the request. This bundle never holds a secret and has no code path
- * that could return one.</p>
+ * deliberately <b>not</b> {@code CREDENTIAL_RESOLUTION}; it additionally requires
+ * {@link NodePackageCapability#TOOL_AUTHORIZATION}. The profile names a binding; the runtime resolves
+ * it and places it on the request. This bundle never holds a secret and has no code path that could
+ * return one.</p>
  */
 public final class AgentNodeBehavior implements NodeBehavior {
 
@@ -156,7 +159,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
 
     @Override
     public Set<NodePackageCapability> requiredServices() {
-        return Set.of(NodePackageCapability.OUTBOUND_HTTP);
+        return Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                NodePackageCapability.TOOL_AUTHORIZATION);
     }
 
     @Override
@@ -173,8 +177,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         "Name of a model profile this deployment declared in its environment "
                                 + "(RAVENROOT_LLM_PROFILE_<hex(name)>)."),
                 NodePropertyDescriptor.required("instructions", "Instructions", NodePropertyType.TEXT,
-                        "Who the agent is and how it should work. Sent in the system turn, below the "
-                                + "operator's preamble. Supports {{payload}}, {{payload.a.b}} and "
+                        "Who the agent is and how it should work. Sent as untrusted graph content, "
+                                + "separate from operator policy. Supports {{payload}}, {{payload.a.b}} and "
                                 + "{{attributes.x}}."),
                 NodePropertyDescriptor.required("objective", "Objective", NodePropertyType.TEXT,
                         "The task for this invocation. Sent as the first user turn. Supports "
@@ -567,6 +571,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
         /** The one {@link LoadSkillTool} of this invocation, kept so discovery cannot replace it. */
         private final AgentTool loadSkill;
         private final List<PayloadValue> messages = new ArrayList<>();
+        private final ModelInputProvenance provenance = new ModelInputProvenance();
         /**
          * The model call currently in flight, so a cancelled run can actually stop.
          *
@@ -596,8 +601,30 @@ public final class AgentNodeBehavior implements NodeBehavior {
             // a property defect and must refuse before any byte leaves.
             String instructions = render(settings.instructions());
             String objective = render(settings.objective());
-            messages.add(AgentTurn.systemMessage(settings.profile().systemPreamble(), instructions,
-                    settings.skills()));
+            provenance.add(ModelInputProvenance.Kind.GRAPH_INSTRUCTIONS,
+                    "node:" + message.nodeId(), instructions);
+            provenance.add(ModelInputProvenance.Kind.GRAPH_OBJECTIVE,
+                    "node:" + message.nodeId(), objective);
+            provenance.add(ModelInputProvenance.Kind.INBOUND_PAYLOAD,
+                    "invocation:" + message.invocationId(), message.payload());
+            provenance.add(ModelInputProvenance.Kind.INBOUND_ATTRIBUTES,
+                    "invocation:" + message.invocationId(), message.attributes());
+            provenance.add(ModelInputProvenance.Kind.TOOL_DESCRIPTION, loadSkill.name(),
+                    Map.of("description", loadSkill.description(),
+                            "parameters", loadSkill.parameters().toJava()));
+            for (AgentSkill skill : settings.skills()) {
+                provenance.add(ModelInputProvenance.Kind.TOOL_DESCRIPTION,
+                        LoadSkillTool.NAME,
+                        Map.of("name", skill.name(), "description", skill.description()));
+            }
+            PayloadValue systemMessage = AgentTurn.systemMessage(settings.profile().systemPreamble());
+            PayloadValue authorMessage = AgentTurn.authorInstructionsMessage(instructions, settings.skills());
+            provenance.add(ModelInputProvenance.Kind.GENERATED_SYSTEM_MESSAGE,
+                    "agent-system", systemMessage.toJava());
+            provenance.add(ModelInputProvenance.Kind.GENERATED_AUTHOR_MESSAGE,
+                    "agent-author", authorMessage.toJava());
+            messages.add(systemMessage);
+            messages.add(authorMessage);
             messages.add(AgentTurn.userMessage(objective));
         }
 
@@ -654,6 +681,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
                             all.add(loadSkill);
                             all.addAll(discovered);
                             tools = List.copyOf(all);
+                            for (AgentTool tool : discovered) {
+                                provenance.add(ModelInputProvenance.Kind.TOOL_DESCRIPTION,
+                                        tool.name(), Map.of("description", tool.description(),
+                                                "parameters", tool.parameters().toJava()));
+                            }
                             step(result);
                         } catch (RuntimeException invalid) {
                             result.completeExceptionally(sanitize(invalid));
@@ -734,6 +766,19 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 throw new AgentException(AgentException.Code.ENDPOINT_REJECTED);
             }
             AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
+            var modelOutput = new LinkedHashMap<String, Object>();
+            modelOutput.put("answer", turn.answer());
+            var requestedTools = new ArrayList<Map<String, Object>>(turn.toolCalls().size());
+            for (AgentTurn.ToolCall call : turn.toolCalls()) {
+                requestedTools.add(Map.of("id", call.id(), "name", call.name(),
+                        "arguments", call.arguments()));
+            }
+            modelOutput.put("toolCalls", List.copyOf(requestedTools));
+            modelOutput.put("finishReason", turn.finishReason());
+            turn.promptTokens().ifPresent(value -> modelOutput.put("promptTokens", value));
+            turn.completionTokens().ifPresent(value -> modelOutput.put("completionTokens", value));
+            provenance.add(ModelInputProvenance.Kind.MODEL_OUTPUT, "turn:" + turns,
+                    Map.copyOf(modelOutput));
             finishReason = turn.finishReason();
             // Prompt AND completion tokens, summed per turn. That over-counts against a conversation
             // measured once, and it is the right number anyway: an endpoint re-reads the whole
@@ -798,6 +843,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     // was promised.
                     messages.add(AgentTurn.toolResultMessage(call.id(),
                             failure == null && text != null && !text.isEmpty() ? text : TOOL_FAILED));
+                    provenance.add(ModelInputProvenance.Kind.TOOL_RESULT, "tool-call:" + (index + 1),
+                            failure == null && text != null && !text.isEmpty() ? text : TOOL_FAILED);
                     runTools(requested, index + 1, result);
                 } catch (RuntimeException invalid) {
                     result.completeExceptionally(sanitize(invalid));
@@ -815,15 +862,55 @@ public final class AgentNodeBehavior implements NodeBehavior {
          * message, because a tool's internals are not content the model was promised.</p>
          */
         private CompletionStage<String> run(AgentTurn.ToolCall requested) {
+            AgentTool selected = null;
             for (AgentTool tool : tools) {
                 if (tool.name().equals(requested.name())) {
-                    try {
-                        return tool.invoke(requested.arguments());
-                    } catch (RuntimeException broken) {
-                        return CompletableFuture.completedFuture(TOOL_FAILED);
-                    }
+                    selected = tool;
+                    break;
                 }
             }
+            // An invented name is still authorized and audited, but its attacker-controlled spelling
+            // is neither a policy input nor durable evidence. The fixed token states the only trusted
+            // fact about it: it was absent from this invocation's immutable inventory.
+            String canonicalTool = selected == null ? "unavailable-tool" : selected.name();
+            AgentTool authorizedTool = selected;
+            ToolCallAuthorization authorization;
+            try {
+                authorization = services.toolAuthorization().authorize(message, canonicalTool,
+                        requested.arguments().getBytes(StandardCharsets.UTF_8));
+            } catch (RuntimeException unavailable) {
+                return CompletableFuture.failedFuture(new AgentException(
+                        AgentException.Code.TRANSPORT_UNAVAILABLE));
+            }
+            if (authorization.disposition() == ToolCallAuthorization.Disposition.DENY) {
+                return CompletableFuture.completedFuture(
+                        "The server denied this tool call. It performed no effect.");
+            }
+            if (authorization.disposition() == ToolCallAuthorization.Disposition.REQUIRE_APPROVAL) {
+                return CompletableFuture.completedFuture(
+                        "This tool call requires approval. It performed no effect.");
+            }
+            String canonicalArguments = new String(authorization.canonicalArguments(),
+                    StandardCharsets.UTF_8);
+            if (authorizedTool != null) {
+                try {
+                    CompletionStage<AgentTool.Result> effect = authorizedTool.invoke(canonicalArguments);
+                    return effect.handle((toolResult, failure) -> {
+                        boolean succeeded = failure == null && toolResult != null
+                                && toolResult.succeeded();
+                        authorization.complete(succeeded
+                                ? ToolCallAuthorization.Outcome.SUCCEEDED
+                                : ToolCallAuthorization.Outcome.FAILED);
+                        return failure == null && toolResult != null
+                                ? toolResult.text()
+                                : TOOL_FAILED;
+                    });
+                } catch (RuntimeException broken) {
+                    authorization.complete(ToolCallAuthorization.Outcome.FAILED);
+                    return CompletableFuture.completedFuture(TOOL_FAILED);
+                }
+            }
+            authorization.complete(ToolCallAuthorization.Outcome.FAILED);
             // Reached by every name the model invented, including one that names a real tool on a
             // real server the operator did not permit: such a tool was never placed in the list, so
             // there is nothing here to match, and the model is told what it may call instead.
@@ -843,6 +930,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             attributes.put("agent.toolCalls", toolCalls);
             attributes.put("agent.finishReason", finishReason);
             attributes.put("agent.truncated", turn.truncated());
+            attributes.put(ModelInputProvenance.AGENT_ATTRIBUTE, provenance.snapshot());
             if (tokens > 0) {
                 attributes.put("agent.totalTokens", tokens);
             }

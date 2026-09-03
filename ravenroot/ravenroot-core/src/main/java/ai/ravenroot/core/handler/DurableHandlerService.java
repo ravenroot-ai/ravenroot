@@ -325,6 +325,17 @@ public final class DurableHandlerService {
      * input was fine, and a caller switching on that arm would answer a person with "your submission
      * was rejected" for a defect they cannot act on. It propagates instead, which is what an
      * unexpected server-side fault is supposed to do.</p>
+     *
+     * <p><strong>That propagation leaves no audit record</strong>, because {@link #audited} wraps the
+     * commit rather than following it, so a rethrow passes straight through. Stated rather than left
+     * to be discovered: it does not weaken the criterion that duplicate, late, cross-tenant and
+     * unauthorized resolutions are audited, since every one of those four is decided and recorded
+     * <em>before</em> a batch is built — the first three by the lookup in {@link #settle}, the fourth
+     * by the authorization check beside it, and a duplicate that got as far as the store surfaces as
+     * {@link ExecutionStoreFailure.HandlerNotResolvable}, which is mapped and audited here rather than
+     * thrown. What is unaudited is only the platform fault, which is not an actor's action and has no
+     * principal to attribute; it reaches an operator as a failed call and a stack trace, which is the
+     * channel a fault belongs on.</p>
      */
     private HandlerTriggerOutcome classify(ExecutionStoreException refused, DurableHandler handler,
                                            int attempt) {

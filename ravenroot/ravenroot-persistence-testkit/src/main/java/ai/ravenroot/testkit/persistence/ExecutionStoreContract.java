@@ -2314,7 +2314,7 @@ public abstract class ExecutionStoreContract {
 
     /** The same registration twice in one batch is the retry case, and collapses rather than failing. */
     @Test
-    final void thesameRegistrationRepeatedWithinOneBatchCollapsesToASingleHandler() {
+    final void theSameRegistrationRepeatedWithinOneBatchCollapsesToASingleHandler() {
         assumeCapability(StoreCapability.DURABLE_HANDLERS);
         ExecutionKey key = newKey();
         var fixture = twoWaitingInvocations(key);

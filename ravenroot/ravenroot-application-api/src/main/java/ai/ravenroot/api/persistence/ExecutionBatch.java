@@ -170,6 +170,16 @@ public final class ExecutionBatch {
      * deduplication key was already used is a no-op success, which is what makes a retried wait
      * safe.</p>
      *
+     * <p><strong>Every registration in a batch is folded before every transition in it</strong>, and
+     * that ordering is observable rather than incidental. It means one batch cannot both close a wait
+     * and re-open the same correlation key: the new registration is checked against a handler that is
+     * still live, so it is refused with
+     * {@link ExecutionStoreFailure.HandlerCorrelationTaken}. Both adapters agree on this and the
+     * conformance suite holds them to it, so it is a contract rather than an accident — but it is a
+     * contract that forbids a re-arming loop, and a caller that needs one must use two batches. If a
+     * future graph shape needs re-arming to be atomic, that is a deliberate change to this ordering
+     * with its own conformance assertion, not a fix to be discovered while writing the graph.</p>
+     *
      * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
      * {@link StoreCapability#DURABLE_HANDLERS} is declared. The rejection is a property of the store
      * rather than of the builder, for the reason {@link #fencingToken()} already gives: the

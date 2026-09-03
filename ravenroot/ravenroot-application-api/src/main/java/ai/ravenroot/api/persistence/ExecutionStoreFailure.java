@@ -388,6 +388,68 @@ public sealed interface ExecutionStoreFailure {
         }
     }
 
+    /**
+     * A handler transition was applied to a handler whose stored state does not permit it (PERS-05).
+     *
+     * <p>This is the single refusal behind "duplicate, late, cross-tenant and unauthorized
+     * resolutions are refused deterministically". A second resolution, a resolution after an expiry
+     * and a denial after a resolution all reach it, because all three are the same fact: the handler
+     * is no longer in a state that accepts the transition. It is decided from stored state alone, so
+     * it is answered identically on every retry and across a restart — which is what
+     * {@link Retryability#DETERMINISTIC_REJECT} claims and what a deduplication window with a
+     * retention period could not have promised.</p>
+     *
+     * <p>Deliberately <em>not</em> {@link ConcurrencyConflict}: that value invites the caller to
+     * re-read and retry, and here the answer after re-reading is the same refusal forever. A caller
+     * that retried this one would loop.</p>
+ * @param handlerId the stable handler id used to identify the requested resource.
+ * @param current stored handler state at the moment of the refusal.
+ * @param requested state the refused transition asked for.
+     */
+    record HandlerNotResolvable(UUID handlerId, HandlerStatus current, HandlerStatus requested)
+            implements ExecutionStoreFailure {
+        @Override
+        public Retryability retryability() {
+            return Retryability.DETERMINISTIC_REJECT;
+        }
+
+        @Override
+        public String describe() {
+            return "handler " + handlerId + " is " + current + " and cannot transition to " + requested;
+        }
+    }
+
+    /**
+     * A handler registration reused a correlation key that another live handler already holds
+     * (PERS-05).
+     *
+     * <p>Correlation keys are unique per {@code (tenantId, name, correlationKey)} across handlers
+     * that are not yet terminal, because a trigger presenting one must resolve to exactly one
+     * handler. Two live handlers sharing a key would make an inbound trigger's target depend on
+     * iteration order — a nondeterministic answer to an authorization-bearing question.</p>
+     *
+     * <p>Terminal handlers do not participate, so a correlation key becomes reusable once the wait it
+     * named is over. The key is not echoed into {@link #describe()} beyond its own text, which is
+     * caller-supplied business identity rather than payload: it is bounded and control-free by
+     * {@link HandlerRegistration}, and an operator cannot act on this without seeing which key
+     * collided.</p>
+ * @param handlerName opaque handler name whose correlation namespace was contended.
+ * @param correlationKey correlation key already held by a live handler.
+     */
+    record HandlerCorrelationTaken(String handlerName, String correlationKey)
+            implements ExecutionStoreFailure {
+        @Override
+        public Retryability retryability() {
+            return Retryability.DETERMINISTIC_REJECT;
+        }
+
+        @Override
+        public String describe() {
+            return "handler " + handlerName + " already has a live registration for correlation key "
+                    + correlationKey;
+        }
+    }
+
 /**
  * Convenience for adapters that reject a batch before any key context exists.
  * @param reason machine-readable reason for the store failure.

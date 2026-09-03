@@ -44,6 +44,25 @@ public enum StoreCapability {
     EVENT_JOURNAL,
 
     /**
+     * Named handlers can be registered, correlated and transitioned inside the same batch as the
+     * aggregate transitions beside them, and a terminal handler produces a claimable
+     * {@link PendingWork.HandlerTrigger} (PERS-05).
+     *
+     * <p>Separate from {@link #DURABLE} because the two are independent claims and both are needed
+     * for a human task that survives a full shutdown: this capability says the handler mechanism
+     * exists and is transactional with the transition beside it, and {@code DURABLE} says the rows
+     * survive process death. An in-memory adapter can honour this one honestly — the conformance
+     * suite runs every handler assertion against it — and must still not claim {@code DURABLE}.</p>
+     *
+     * <p>Declaring it asserts the property the whole mechanism exists for: a registration and the
+     * {@code WAITING} transition beside it commit together or neither does, and a resolution and the
+     * re-entry traversal it authorizes commit together or neither does. An adapter that wrote the
+     * handler outside the transaction would leave a process waiting on a handler that does not
+     * exist, or resumed by a traversal nothing authorized.</p>
+     */
+    DURABLE_HANDLERS,
+
+    /**
      * The journal can be compacted on demand, discarding the payloads of records that are both
      * delivered to every destination and past their retention window.
      *

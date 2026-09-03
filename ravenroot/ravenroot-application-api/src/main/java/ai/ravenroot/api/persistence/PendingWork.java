@@ -114,12 +114,26 @@ public sealed interface PendingWork {
     /**
      * An authorized external trigger correlated to a waiting invocation.
      *
-     * <p>PERS-02 defines this kind but produces none: there is no handler registration surface until
-     * It is declared now so PERS-05 is additive rather than a breaking change to a sealed
-     * type that adapters have already switched over exhaustively.</p>
+     * <p>PERS-02 declared this kind and produced none, because there was no handler registration
+     * surface yet; declaring it early kept PERS-05 additive rather than a breaking change to a sealed
+     * type that adapters had already switched over exhaustively. PERS-05 is that surface, and this is
+     * now produced: a {@link DurableHandler} that reaches a state reporting
+     * {@link HandlerStatus#resumesProcess()} becomes claimable exactly once, and its
+     * {@link #workItemId()} is the handler's own identity.</p>
+     *
+     * <p>{@code traversalId} is the <strong>re-entry</strong> traversal the terminal handler
+     * transition committed, never the traversal that was waiting. That is the whole of "an authorized
+     * trigger starts a new traversal of the existing process without reviving stale actor state": the
+     * claimant is handed durable identities and a payload, and there is nothing here for it to resume
+     * <em>into</em> — no continuation, no actor reference, nothing that could have survived only in a
+     * process that is no longer running.</p>
+     *
+     * <p>{@code payload} is the outcome body the resolving principal supplied, already validated
+     * against the handler's {@link HandlerPayloadSchema} at resolution time. An expiry carries an
+     * empty payload, because nobody supplied one.</p>
  * @param key the stable key used to identify the requested resource.
  * @param workItemId the stable work item id used to identify the requested resource.
- * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param traversalId the re-entry traversal committed with the handler's terminal transition.
  * @param invocationId the stable invocation id used to identify the requested resource.
  * @param handlerName handler selected to process the pending work.
  * @param payload bounded payload carried by the pending work.

@@ -176,9 +176,15 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     }
 
     /**
-     * Composes a deployment that retains the document its hosted traversals are accepted against.
-     * Additive next to the constructor above, which every existing caller keeps using unchanged by
-     * not passing a definition store at all.
+     * Composes a deployment that carries a definition store but records nothing durably.
+     *
+     * <p>Additive next to the constructor above, which every existing caller keeps using unchanged by
+     * not passing a definition store at all. <strong>The definition store passed here is retained and
+     * never consulted</strong>, because binding a definition happens inside the durable-recording path
+     * and this constructor composes no execution store, so that path is skipped. It exists so a
+     * composer that will later supply durable execution state does not have to re-thread the
+     * definition store at the same time; the constructor that takes both is the one that makes the
+     * binding happen.</p>
      *
      * @param id deployment identity.
      * @param engine execution engine hosted traversals dispatch through.
@@ -259,6 +265,48 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
                 executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
                 Clock.systemUTC());
+    }
+
+    /**
+     * Composes a deployment that both records its hosted traversals durably and retains the document
+     * those traversals are accepted against.
+     *
+     * <p>This is the only composition in which a deployment-hosted acceptance is bound to a durable
+     * definition, because the binding sits inside the durable-recording path and that path is skipped
+     * entirely when no execution store is present. A deployment built through any other constructor
+     * keeps exactly its previous behaviour: with no execution store it records nothing, and a
+     * definition store passed alongside no execution store is retained but never consulted.</p>
+     *
+     * <p><strong>The shipped server does not compose deployments this way today.</strong> Deployments
+     * are registered without an execution store, so their traversals are not durably recorded and
+     * therefore not durably bound. Supplying deployments with durable execution state is a separate
+     * change; this constructor is what makes the binding reachable for a composer that already has
+     * both, and what lets the behaviour be asserted rather than assumed.</p>
+     *
+     * @param id deployment identity.
+     * @param engine execution engine hosted traversals dispatch through.
+     * @param behaviors behavior registry node kinds are resolved against.
+     * @param monitor monitor execution events are published to.
+     * @param identitySource source of process-instance identifiers.
+     * @param graphMl the GraphML document this deployment hosts; copied defensively.
+     * @param ingressBufferCapacity fixed inbound buffer capacity for the deployment's life.
+     * @param executionStore durable execution state; must declare durability and event journalling.
+     * @param inboxRetention how long a recorded inbox entry must outlive its own write.
+     * @param workerId lease ownership identity for this runtime.
+     * @param executionLeaseTtl how long each traversal's lease lives before a sweep may claim it.
+     * @param requestReplyLimits operator ceilings for request/reply ingress.
+     * @param graphDefinitionStore durable graph definitions, or {@code null} to retain no document.
+     */
+    public DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                                  ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                                  byte[] graphMl, int ingressBufferCapacity,
+                                  ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                                  Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                                  RequestReplyLimits requestReplyLimits,
+                                  ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                Clock.systemUTC(), graphDefinitionStore);
     }
 
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
@@ -1036,6 +1084,10 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     /**
      * Commits the document this deployment hosts, so the pin written next addresses bytes the store
      * actually holds. A failure propagates and the traversal is not accepted.
+     *
+     * <p>Reached only from {@link #openTraversalRecorder}, which returns before this when no execution
+     * store is composed. A deployment with a definition store and no execution store therefore
+     * commits nothing, correctly: there is no pin to protect.</p>
      */
     private void recordGraphDefinition(SecurityContext security) {
         if (graphDefinitionStore == null) {

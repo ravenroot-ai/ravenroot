@@ -13,9 +13,11 @@ from scripts.release_contract import (
     expected_next,
     parse_tag,
     selected_pull_request,
+    validate_event,
     validate_tag,
     validate_tag_authorization,
 )
+from scripts.check_product_version import helm_errors
 from scripts.central_registry import (
     EXCLUDED_ARTIFACTS,
     PUBLISHABLE_ARTIFACTS,
@@ -56,6 +58,32 @@ class ReleaseVersionTest(unittest.TestCase):
             "1.0.0-alpha.10",
             "1.0.0",
         ])
+
+    def test_release_event_is_bound_to_an_existing_semver_tag_ref(self):
+        for event in ("push", "workflow_dispatch"):
+            self.assertEqual(
+                validate_event(event, "tag", "v0.1.0-alpha.1", "v0.1.0-alpha.1"),
+                {"tag": "v0.1.0-alpha.1"},
+            )
+
+    def test_rejects_non_tag_and_untrusted_release_events(self):
+        cases = (
+            ("pull_request", "tag", "v0.1.0-alpha.1", "v0.1.0-alpha.1"),
+            ("schedule", "tag", "v0.1.0-alpha.1", "v0.1.0-alpha.1"),
+            ("push", "branch", "dev", "dev"),
+            ("workflow_dispatch", "branch", "main", "v0.1.0-alpha.1"),
+            ("workflow_dispatch", "tag", "v0.1.0-alpha.1", "v0.2.0-alpha.1"),
+        )
+        for values in cases:
+            with self.subTest(values=values), self.assertRaises(ReleaseContractError):
+                validate_event(*values)
+
+    def test_helm_version_and_app_version_must_match(self):
+        self.assertEqual(
+            helm_errors(INITIAL_VERSION, 'version: 0.1.0-alpha.1\nappVersion: "0.1.0-alpha.1"\n'),
+            [],
+        )
+        self.assertEqual(len(helm_errors(INITIAL_VERSION, "version: 1.0.0\nappVersion: 2.0.0\n")), 2)
 
 
 class TagGateTest(unittest.TestCase):

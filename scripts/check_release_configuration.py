@@ -129,6 +129,8 @@ def check_workflows() -> None:
     ci = workflows["ci.yml"]
     if "secrets." in ci or "packages: write" in ci or "environment:\n      name: release" in ci:
         raise ValueError("ordinary CI must not possess release credentials or package authority")
+    if ci.count("python3 -m unittest scripts.tests.test_release_registries") != 2:
+        raise ValueError("OCI, Central, and GitHub Release reconciliation tests must run in both CI tiers")
 
     authorize = workflows["authorize-release.yml"]
     if "secrets." in authorize or "environment:" in authorize or "pull_request_target" in authorize:
@@ -151,19 +153,41 @@ def check_workflows() -> None:
         "tags:\n      - \"v*\"",
         "workflow_dispatch:",
         "test \"$GITHUB_REF_TYPE\" = tag",
+        "release_contract.py validate-event",
         "validate-tag-authorization",
         "packages: write",
         "id-token: write",
-        "central_registry.py compare-local",
-        "skopeo copy --all",
+        "central_registry.py validate-bundle",
+        "central_registry.py build-bundle",
+        "central_registry.py publish-bundle",
+        "oci_registry.py validate-local",
+        "oci_registry.py reconcile",
+        "python3 -m unittest scripts.tests.test_release_registries -v",
         "SOURCE_DATE_EPOCH",
-        "local_image_digest",
-        "https://spdx.dev/Document",
-        "https://slsa.dev/provenance/v1",
+        "image_digest",
         "push-to-registry: true",
     ):
         if required not in publication:
             raise ValueError(f"release workflow contract is missing: {required}")
+    if re.search(r"ravenroot:\$?\{?[^\s\"']+@sha256", publication):
+        raise ValueError("OCI references must never combine a tag and digest")
+    if ":latest" in publication:
+        raise ValueError("release workflow must not create or move latest")
+
+    github_release = (ROOT / "scripts/github_release.py").read_text(encoding="utf-8")
+    for required in ('"--draft"', '"--draft=false"', '"--latest=false"'):
+        if required not in github_release:
+            raise ValueError(f"GitHub Release transaction is missing: {required}")
+    oci_registry = (ROOT / "scripts/oci_registry.py").read_text(encoding="utf-8")
+    for required in (
+        '"copy",',
+        '"--all",',
+        'f"{REPOSITORY}@{digest}"',
+        '"https://spdx.dev/Document"',
+        '"https://slsa.dev/provenance/v1"',
+    ):
+        if required not in oci_registry:
+            raise ValueError(f"OCI reconciliation contract is missing: {required}")
 
 
 def check_documentation() -> None:

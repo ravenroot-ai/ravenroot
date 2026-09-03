@@ -17,6 +17,7 @@ import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 class StandardPublicationPolicyEvaluatorTest {
@@ -106,6 +107,8 @@ class StandardPublicationPolicyEvaluatorTest {
         var policy = policy(16_384, List.of(destination(), paths(), artifacts(false), provenance()));
         List<String> denied = List.of(
                 "%2e%2e/private/file",
+                "\uFF05\uFF12\uFF45\uFF05\uFF12\uFF45\uFF0Fprivate/file",
+                "%EF%BC%85%EF%BC%92%EF%BD%85%EF%BC%85%EF%BC%92%EF%BD%85%EF%BC%8Fprivate/file",
                 "%25252525252e%25252525252e%25252525252fprivate/file",
                 "%2525252525252e%2525252525252e%2525252525252fprivate/file",
                 "private%2Ffile",
@@ -120,13 +123,18 @@ class StandardPublicationPolicyEvaluatorTest {
                 "public//file",
                 "public/" + Character.toString(0) + "file");
         for (String path : denied) {
-            assertReason(policy, candidate(List.of(text(path, "document", "en", "safe"))),
-                    PublicationDecision.Reason.PATH_DENIED);
+            PublicationDecision decision = evaluator.evaluate(
+                    policy, candidate(List.of(text(path, "document", "en", "safe"))));
+            assertEquals(PublicationDecision.Disposition.VIOLATION, decision.disposition(), path);
+            assertEquals(PublicationDecision.Reason.PATH_DENIED, decision.reason(), path);
+            assertFalse(decision.toString().contains(path));
         }
 
         for (String path : List.of("..-safe/file", "%2e%2e-safe/file", "private-file", "private%2Dfile",
                 "privateish/file", "public/.well-known", "public/100%/file", "public/%zz/file",
-                "public/%2/file")) {
+                "public/%2/file", "public/\uFF11\uFF10\uFF10\uFF05/file",
+                "public/\uFF05\uFF5A\uFF5A/file", "public/\uFF05\uFF12/file",
+                "public/\uFF05\uFF12\uFF47/file", "public/\uFF0E\uFF0E-safe/file")) {
             assertEquals(PublicationDecision.Disposition.CONTINUE,
                     evaluator.evaluate(policy, candidate(List.of(text(path, "document", "en", "safe"))))
                             .disposition(), path);

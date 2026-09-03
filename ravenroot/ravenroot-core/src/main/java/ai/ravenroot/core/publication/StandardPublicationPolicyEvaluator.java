@@ -26,6 +26,8 @@ import java.util.regex.Pattern;
 
 /** Deterministic, side-effect-free evaluator for the public declarative rule model. */
 public final class StandardPublicationPolicyEvaluator implements PublicationPolicyEvaluator {
+    private static final int MAX_LOGICAL_PATH_CHARACTERS = 2_048;
+    private static final int MAX_PATH_CANONICALIZATION_ROUNDS = 4;
     private static final PublicationRuleId CONTINUE = new PublicationRuleId("boundary.continue");
     private static final PublicationRuleId CANDIDATE_SIZE = new PublicationRuleId("boundary.candidate.size");
     private static final PublicationRuleId CANDIDATE_MALFORMED = new PublicationRuleId("boundary.candidate.malformed");
@@ -115,16 +117,8 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
     }
 
     private static CanonicalPath canonicalPath(String source, boolean prefix) {
-        String decoded = source;
-        for (int round = 0; round < 4; round++) {
-            String next = decodePercentTriplets(decoded);
-            if (next == null) return CanonicalPath.invalid();
-            if (next.equals(decoded)) break;
-            decoded = next;
-        }
-        if (containsPercentTriplet(decoded)) return CanonicalPath.invalid();
-        if (containsSecurityEscape(decoded)) return CanonicalPath.invalid();
-        String normalized = Normalizer.normalize(decoded, Normalizer.Form.NFKC);
+        String normalized = canonicalizePathEncoding(source);
+        if (normalized == null) return CanonicalPath.invalid();
         var separators = new StringBuilder(normalized.length());
         for (int index = 0; index < normalized.length();) {
             int point = normalized.codePointAt(index);
@@ -161,6 +155,25 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
         return new CanonicalPath(true, absolute, home, parent, String.join("/", canonical));
     }
 
+    private static String canonicalizePathEncoding(String source) {
+        String current = source;
+        for (int round = 0; round < MAX_PATH_CANONICALIZATION_ROUNDS; round++) {
+            String normalized = Normalizer.normalize(current, Normalizer.Form.NFKC);
+            if (normalized.length() > MAX_LOGICAL_PATH_CHARACTERS) return null;
+            String decoded = decodePercentTriplets(normalized);
+            if (decoded == null || decoded.length() > MAX_LOGICAL_PATH_CHARACTERS) return null;
+            if (decoded.equals(current)) {
+                current = decoded;
+                break;
+            }
+            current = decoded;
+        }
+        String stable = Normalizer.normalize(current, Normalizer.Form.NFKC);
+        if (stable.length() > MAX_LOGICAL_PATH_CHARACTERS
+                || !stable.equals(current) || containsPercentTriplet(current)) return null;
+        return current;
+    }
+
     private static String decodePercentTriplets(String value) {
         var decoded = new StringBuilder(value.length());
         boolean changed = false;
@@ -189,13 +202,6 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
             }
         }
         return changed ? decoded.toString() : value;
-    }
-
-    private static boolean containsSecurityEscape(String value) {
-        String lower = value.toLowerCase(Locale.ROOT);
-        return lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c")
-                || lower.contains("%e2%88%95") || lower.contains("%e2%81%84")
-                || lower.contains("%ef%bc%8f") || lower.contains("%ef%bc%bc");
     }
 
     private static boolean containsPercentTriplet(String value) {

@@ -70,7 +70,7 @@ The standard evaluator composes these generic rule families in profile order and
 
 Sensitive signatures support substring, token, and token-prefix matching. A profile can enable bounded one-layer percent/base64 inspection, joining across declared fragments, and a conservative Unicode confusable skeleton. These operations are deterministic and bounded by both the policy candidate limit and the rule normalization limit. Binary content is rejected when a text-inspection rule applies, rather than being interpreted heuristically.
 
-Logical paths are checked only after bounded percent decoding, Unicode compatibility normalization, separator folding, and dot-segment resolution. Encoded separators or traversal, absolute and drive forms, UNC and home-relative forms, control characters, and ambiguous empty components therefore cannot bypass a private-prefix rule. Policy rule identifiers must be unique and cannot use the guard-owned `boundary.*` namespace.
+Logical paths are checked only after Unicode compatibility normalization and strict percent decoding reach a bounded fixed point, followed by separator folding and dot-segment resolution. A path is denied if normalization or decoding exceeds the fixed round or character budget, or if a valid percent triplet remains ambiguous. Encoded separators or traversal, absolute and drive forms, UNC and home-relative forms, control characters, and ambiguous empty components therefore cannot bypass a private-prefix rule. Policy rule identifiers must be unique and cannot use the guard-owned `boundary.*` namespace.
 
 ## Violation handling and limitations
 

@@ -19,13 +19,17 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | Method and path | Result |
 |---|---|
 | `POST /v1/executions?mode=test\|run` | HTTP 202 plus execution ID |
-| `GET /v1/executions/live` | Current non-terminal executions |
+| `GET /v1/executions/live` | Current non-terminal executions, from process-local runtime state |
 | `GET /v1/executions/{id}` | State or terminal result |
+| `GET /v1/executions/inventory` | One page of the tenant's durable process inventory, read from storage and surviving a restart. Optional query parameters: `status`, `owner`, `deployment`, `includeTerminal` (excluded by default), `limit`, `cursor`. The response always carries `retainedFrom`. `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
+| `GET /v1/executions/{id}/traversals` | The durable inventory's traversals for one process instance. **`{id}` here is a `processInstanceId`, not the execution/traversal ID every other `/v1/executions` route below takes** — see the callout after this table. `404 UNKNOWN_PROCESS_INSTANCE` when the instance is absent, belongs to another tenant, or aged past its terminal-retention window; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
 | `POST /v1/executions/{id}/cancel` | Cancellation request |
 | `POST /v1/executions/{id}/pause` | Pause after in-flight work |
 | `POST /v1/executions/{id}/resume` | Resume dispatch |
 | `GET /v1/events` | Live SSE |
 | `GET /v1/events/recent` | Cursor-based retained events |
+
+> **`{id}` names two different things on adjacent routes.** `GET /v1/executions/{id}` and the cancel/pause/resume trio all take an execution ID, which is a traversal ID. `GET /v1/executions/{id}/traversals` is the one exception: its `{id}` is a **process instance ID**, because a process instance can contain more than one traversal and a traversal ID could not address "this instance's traversals" at all. The two ID spaces are both UUIDs and are not interchangeable — passing a traversal ID to the `/traversals` route returns `404 UNKNOWN_PROCESS_INSTANCE`, indistinguishable from an ID that never existed.
 
 ## Governed resources
 
@@ -61,8 +65,12 @@ Credential reads never return secret material. Governed resources remain scoped 
 | `ravenroot inspect FILE` | Inspect without effects |
 | `ravenroot validate FILE` | Validate the GraphML profile |
 | `ravenroot run FILE` | Execute with Run semantics |
+| `ravenroot inventory` | List the tenant's durable process inventory (`GET /v1/executions/inventory`); unfiltered, terminal rows **included** by default |
+| `ravenroot traversals PROCESS-INSTANCE-ID` | List one process instance's traversals from the durable inventory (`GET /v1/executions/{id}/traversals`); the argument is a process instance ID, not the execution/traversal ID `cancel` and `result` take |
 | `ravenroot-server` | Start the standalone service |
 
 CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Authentication and ownership checks are identical to HTTP because the CLI is a client, not a privileged bypass.
+
+`ravenroot inventory` defaults to including terminal rows, the opposite of the bare HTTP route's own default. An operator running `inventory` right after `ravenroot run` would otherwise stop seeing the instance the moment it finished — the exact run the verb was just used to start.
 
 See [Application and HTTP integration](../integrator-guide/application-http.md) and [Authentication troubleshooting](../troubleshooting/identity-browser.md).

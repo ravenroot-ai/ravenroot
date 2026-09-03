@@ -66,6 +66,8 @@
       url: /architecture/execution-actor-model.html
     - title: Durability, events, and recovery
       url: /architecture/durability-events.html
+    - title: Durable process inventory
+      url: /architecture/process-inventory.html
     - title: AI, programs, and extensions
       url: /architecture/ai-extension-boundaries.html
     - title: Embedded projection security model

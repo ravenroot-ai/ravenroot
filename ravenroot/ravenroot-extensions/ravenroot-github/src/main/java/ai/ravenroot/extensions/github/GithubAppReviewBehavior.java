@@ -38,11 +38,14 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         long deadline = System.currentTimeMillis() + profile.timeoutMs();
         String key = input.pullNumber + ":" + input.commit + ":" + input.correlationId;
         try { return runtime.submit(message, services, profile, BEHAVIOR, key, input.canonical(), deadline,
-                (api, operation, control) -> review(api, profile, input)); }
+                GithubOperationStore.BeginPolicy.forAmbiguousReconciliation(),
+                (api, operation, control) -> review(api, profile, input, operation)); }
         catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
     }
 
-    private static NodeResult review(GithubApi api, GithubProfile profile, Input input) {
+    private static NodeResult review(GithubApi api, GithubProfile profile, Input input,
+                                     GithubOperationStore.Lease operation) {
+        attestRepository(api, profile);
         String marker = "<!-- ravenroot-review:" + GithubValues.sha256(input.correlationId + ":" + input.commit
                 + ":" + input.verdict + ":" + GithubValues.sha256(input.body)).substring(0, 32) + " -->";
         Existing existing = findExisting(api, profile, input, marker);
@@ -59,14 +62,22 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                     existing.id, "");
             return submitPending(api, profile, input, existing.id, marker);
         }
+        if ("AMBIGUOUS".equals(operation.record().state())) return result("ambiguous", "ambiguous", input,
+                parseRemoteId(operation.record().remoteId()), "REMOTE_STATE_UNKNOWN");
         if (!input.commit.equals(head(api, profile, input.pullNumber))) return result("stale", "stale", input, 0, "STALE_HEAD");
         GithubApi.Response drafted;
         try { drafted = api.post(path(profile, input.pullNumber, "/reviews"), Map.of(
                 "commit_id", input.commit, "body", input.body + "\n\n" + marker)); }
         catch (GithubException failure) {
             if (failure.code() == GithubException.Code.TRANSPORT) {
-                Existing reconciled = findExisting(api, profile, input, marker);
-                if (reconciled != null) return result("ambiguous", "ambiguous", input, reconciled.id, "REMOTE_STATE_UNKNOWN");
+                try {
+                    Existing reconciled = findExisting(api, profile, input, marker);
+                    if (reconciled != null)
+                        return result("ambiguous", "ambiguous", input, reconciled.id, "REMOTE_STATE_UNKNOWN");
+                } catch (RuntimeException ignored) {
+                    // The draft may have landed and reconciliation may also be unavailable. Persist ambiguity.
+                }
+                return result("ambiguous", "ambiguous", input, 0, "REMOTE_STATE_UNKNOWN");
             }
             throw failure;
         }
@@ -142,6 +153,18 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
 
     private static String login(Map<String, Object> review) {
         return GithubValues.string(GithubValues.object(review.get("user")).get("login"), 100);
+    }
+    private static void attestRepository(GithubApi api, GithubProfile profile) {
+        Map<String, Object> repository = GithubProtocol.object(api.get("/repositories/" + profile.repositoryId()));
+        if (GithubValues.number(repository.get("id"), 1, Long.MAX_VALUE) != profile.repositoryId()
+                || !(profile.owner() + "/" + profile.repository()).equalsIgnoreCase(
+                        GithubValues.string(repository.get("full_name"), 201)))
+            throw new GithubException(GithubException.Code.FORBIDDEN);
+    }
+    private static long parseRemoteId(String value) {
+        if (value == null || value.isEmpty()) return 0;
+        try { long parsed = Long.parseLong(value); return parsed > 0 ? parsed : 0; }
+        catch (NumberFormatException invalid) { return 0; }
     }
     private static String expectedState(String verdict) {
         return switch (verdict) {

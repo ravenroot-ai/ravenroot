@@ -28,9 +28,12 @@ final class GithubApi {
     private final NodeMessage message;
     private final GithubProfile profile;
     private final CallControl control;
+    private final Runnable fence;
 
-    GithubApi(NodePackageServices services, NodeMessage message, GithubProfile profile, CallControl control) {
+    GithubApi(NodePackageServices services, NodeMessage message, GithubProfile profile, CallControl control,
+              Runnable fence) {
         this.services = services; this.message = message; this.profile = profile; this.control = control;
+        this.fence = fence;
     }
 
     Response get(String path) { return request("GET", path, new byte[0]); }
@@ -41,7 +44,7 @@ final class GithubApi {
     }
 
     private Response request(String method, String path, byte[] body) {
-        control.check();
+        control.check(); fence.run(); control.check();
         Map<String, List<String>> headers = body.length == 0
                 ? Map.of("accept", List.of("application/vnd.github+json"),
                          "x-github-api-version", List.of(API_VERSION), "user-agent", List.of("ravenroot-github/1"))
@@ -57,7 +60,7 @@ final class GithubApi {
         try {
             OutboundHttpResponse response = call.completion().toCompletableFuture()
                     .get(profile.timeoutMs(), TimeUnit.MILLISECONDS);
-            control.detach(call); control.check();
+            control.detach(call); control.check(); fence.run(); control.check();
             if (response.body().length > profile.maxResponseBytes()) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
             return new Response(response.statusCode(), response.headers(), response.body());
         } catch (InterruptedException cancelled) {
@@ -98,20 +101,26 @@ final class GithubApi {
 
         long retryAfterEpochMs() {
             long now = System.currentTimeMillis();
+            long earliest = now + 250;
+            long latest = now + 300_000;
             String seconds = header("retry-after");
             if (!seconds.isEmpty()) {
-                try { return Math.addExact(now, Math.multiplyExact(Long.parseLong(seconds), 1_000)); }
+                try { return Math.max(earliest, Math.min(latest,
+                        Math.addExact(now, Math.multiplyExact(Long.parseLong(seconds), 1_000)))); }
                 catch (ArithmeticException | NumberFormatException ignored) { }
             }
             String reset = header("x-ratelimit-reset");
             if (!reset.isEmpty()) {
-                try { return Math.multiplyExact(Long.parseLong(reset), 1_000); }
+                try { return Math.max(earliest, Math.min(latest, Math.multiplyExact(Long.parseLong(reset), 1_000))); }
                 catch (ArithmeticException | NumberFormatException ignored) { }
             }
-            return now + 1_000;
+            return earliest;
         }
 
-        boolean rateLimited() { return status == 429 || status == 403 && "0".equals(header("x-ratelimit-remaining")); }
+        boolean rateLimited() {
+            return status == 429 || status == 403
+                    && ("0".equals(header("x-ratelimit-remaining")) || !header("retry-after").isEmpty());
+        }
 
         String header(String name) {
             return headers.entrySet().stream().filter(entry -> entry.getKey().equalsIgnoreCase(name))
@@ -122,9 +131,18 @@ final class GithubApi {
     static final class CallControl {
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private final AtomicReference<OutboundCall<?>> active = new AtomicReference<>();
+        private final AtomicReference<GithubException> failure = new AtomicReference<>();
         void attach(OutboundCall<?> call) { check(); active.set(call); if (cancelled.get()) call.cancel(); }
         void detach(OutboundCall<?> call) { active.compareAndSet(call, null); }
-        void check() { if (cancelled.get()) throw new GithubException(GithubException.Code.CANCELLED); }
+        void check() {
+            GithubException failed = failure.get(); if (failed != null) throw failed;
+            if (cancelled.get()) throw new GithubException(GithubException.Code.CANCELLED);
+        }
+        void fail(GithubException cause) {
+            if (failure.compareAndSet(null, cause)) {
+                OutboundCall<?> call = active.get(); if (call != null) try { call.cancel(); } catch (RuntimeException ignored) { }
+            }
+        }
         boolean cancel() {
             if (!cancelled.compareAndSet(false, true)) return false;
             OutboundCall<?> call = active.get(); if (call != null) try { call.cancel(); } catch (RuntimeException ignored) { }

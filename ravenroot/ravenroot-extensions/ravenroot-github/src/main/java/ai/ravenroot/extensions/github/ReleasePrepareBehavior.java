@@ -20,13 +20,13 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import javax.xml.stream.XMLInputFactory;
+import javax.xml.stream.XMLStreamConstants;
+import javax.xml.stream.XMLStreamReader;
 
 /** Structurally read-only release metadata proposal; it has no merge, ref, release or dispatch operation. */
 public final class ReleasePrepareBehavior implements NodeBehavior {
     public static final String BEHAVIOR = "release-prepare";
-    private static final Pattern VERSION = Pattern.compile("(?<![0-9])([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?(?![0-9])");
     private final GithubRuntime runtime;
     ReleasePrepareBehavior(GithubRuntime runtime) { this.runtime = runtime; }
     @Override public Set<NodePackageCapability> requiredServices() { return Set.of(NodePackageCapability.OUTBOUND_HTTP); }
@@ -53,19 +53,12 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
     }
 
     private static NodeResult prepare(GithubApi api, GithubProfile profile, Input input) {
-        Map<String, Object> branch = GithubProtocol.object(api.get(profile.repositoryPath() + "/git/ref/heads/"
-                + encodePath(profile.release().branch())));
-        if (!input.commit.equals(GithubValues.object(branch.get("object")).get("sha")))
-            throw new GithubException(GithubException.Code.FORBIDDEN);
+        requireHead(api, profile, input.commit);
         Map<String, Object> commit = GithubProtocol.object(api.get(profile.repositoryPath() + "/commits/" + input.commit));
         if (!input.commit.equals(commit.get("sha"))) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
         byte[] versionBytes = content(api, profile, profile.release().versionPath(), input.commit,
                 profile.maxResponseBytes());
-        String versionText = new String(versionBytes, StandardCharsets.UTF_8);
-        Matcher match = VERSION.matcher(versionText);
-        if (!match.find()) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
-        Semver current = new Semver(Long.parseLong(match.group(1)), Long.parseLong(match.group(2)),
-                Long.parseLong(match.group(3)), match.group(4) == null ? "" : match.group(4));
+        Semver current = projectVersion(versionBytes);
         Semver next = current.bump(input.kind);
         List<Map<String, Object>> listing = GithubValues.objectList(GithubProtocol.list(api.get(profile.repositoryPath()
                 + "/contents/" + encodePath(profile.release().fragmentsPath()) + "?ref=" + input.commit)),
@@ -75,7 +68,9 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
             if (!"file".equals(entry.get("type"))) continue;
             String name = GithubValues.string(entry.get("name"), 256);
             String kind = fragmentKind(name); if (kind.isEmpty()) continue;
-            byte[] body = content(api, profile, GithubValues.string(entry.get("path"), 512), input.commit,
+            String path = listedPath(profile.release().fragmentsPath(), name,
+                    GithubValues.string(entry.get("path"), 512));
+            byte[] body = content(api, profile, path, input.commit,
                     Math.min(profile.maxResponseBytes(), 64 * 1024));
             bytes = Math.addExact(bytes, body.length); if (bytes > profile.maxResponseBytes()) throw GithubValues.invalid();
             String text = new String(body, StandardCharsets.UTF_8).strip();
@@ -93,7 +88,37 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
         output.put("highestFragmentKind", highest); output.put("fragments", proposed);
         output.put("sourceVersionSha256", GithubValues.sha256(versionBytes));
         output.put("generation", 0L); output.put("attempts", 0L); output.put("remoteId", input.commit);
+        requireHead(api, profile, input.commit);
         return NodeResult.continueWith(Map.copyOf(output));
+    }
+
+    private static void requireHead(GithubApi api, GithubProfile profile, String commit) {
+        Map<String, Object> branch = GithubProtocol.object(api.get(profile.repositoryPath() + "/git/ref/heads/"
+                + encodePath(profile.release().branch())));
+        if (!commit.equals(GithubValues.object(branch.get("object")).get("sha")))
+            throw new GithubException(GithubException.Code.FORBIDDEN);
+    }
+
+    private static Semver projectVersion(byte[] pom) {
+        try {
+            XMLInputFactory factory = XMLInputFactory.newFactory();
+            factory.setProperty(XMLInputFactory.SUPPORT_DTD, false);
+            factory.setProperty("javax.xml.stream.isSupportingExternalEntities", false);
+            XMLStreamReader reader = factory.createXMLStreamReader(new java.io.ByteArrayInputStream(pom), "UTF-8");
+            int depth = 0; boolean project = false;
+            while (reader.hasNext()) {
+                int event = reader.next();
+                if (event == XMLStreamConstants.START_ELEMENT) {
+                    depth++;
+                    if (depth == 1) project = "project".equals(reader.getLocalName());
+                    else if (project && depth == 2 && "version".equals(reader.getLocalName())) {
+                        String value = reader.getElementText(); reader.close(); return Semver.parse(value);
+                    }
+                } else if (event == XMLStreamConstants.END_ELEMENT) depth--;
+            }
+            reader.close(); throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        } catch (GithubException failure) { throw failure; }
+        catch (Exception invalid) { throw new GithubException(GithubException.Code.RESPONSE_INVALID); }
     }
 
     private static byte[] content(GithubApi api, GithubProfile profile, String path, String ref, int maximum) {
@@ -115,6 +140,18 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
             if (name.endsWith("." + kind + ".md")) return kind;
         return "";
     }
+    private static String listedPath(String directory, String name, String value) {
+        if (name.contains("/") || name.contains("\\") || value.contains("\\") || value.contains("//")
+                || value.startsWith("/") || value.endsWith("/") || !value.equals(directory + "/" + name))
+            throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        try {
+            if (!java.nio.file.Path.of(value).normalize().toString().replace('\\', '/').equals(value))
+                throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        } catch (java.nio.file.InvalidPathException invalid) {
+            throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        }
+        return value;
+    }
     private static String highest(List<Fragment> fragments) {
         return fragments.stream().map(Fragment::kind).max(Comparator.comparingInt(ReleasePrepareBehavior::rank)).orElse("none");
     }
@@ -128,6 +165,13 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
     }
     private record Fragment(String name, String kind, String text, String sha256) { }
     private record Semver(long major, long minor, long patch, String suffix) {
+        static Semver parse(String value) {
+            java.util.regex.Matcher match = java.util.regex.Pattern.compile(
+                    "([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?").matcher(value.strip());
+            if (!match.matches()) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+            return new Semver(Long.parseLong(match.group(1)), Long.parseLong(match.group(2)),
+                    Long.parseLong(match.group(3)), match.group(4) == null ? "" : match.group(4));
+        }
         Semver bump(String kind) { return switch (kind) {
             case "major" -> new Semver(major + 1, 0, 0, suffix);
             case "minor" -> new Semver(major, minor + 1, 0, suffix);

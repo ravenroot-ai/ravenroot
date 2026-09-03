@@ -20,7 +20,9 @@ import java.util.concurrent.CompletionStage;
 public final class ProjectTransitionBehavior implements NodeBehavior {
     public static final String BEHAVIOR = "project-transition";
     private static final String SNAPSHOT = """
-            query($item:ID!){node(id:$item){... on ProjectV2Item{id project{id} fieldValues(first:100){nodes{
+            query($item:ID!){node(id:$item){... on ProjectV2Item{id project{id}
+              content{... on PullRequest{repository{databaseId}} ... on Issue{repository{databaseId}} ... on DraftIssue{id}}
+              fieldValues(first:100){pageInfo{hasNextPage} nodes{
               ... on ProjectV2ItemFieldSingleSelectValue{field{... on ProjectV2SingleSelectField{id}} optionId}
               ... on ProjectV2ItemFieldNumberValue{field{... on ProjectV2FieldCommon{id}} number}
             }}}}}
@@ -54,14 +56,16 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
         long deadline = System.currentTimeMillis() + profile.timeoutMs();
         Map<String, Object> canonical = input.canonical();
-        String key = input.itemId + ":" + input.expectedGeneration + ":" + input.toStatus;
+        String key = profile.repositoryId() + ":" + input.itemId;
         try {
             return runtime.submit(message, services, profile, BEHAVIOR, key, canonical, deadline,
-                    (api, operation, control) -> transition(api, profile, input));
+                    GithubOperationStore.BeginPolicy.project(input.expectedGeneration),
+                    (api, operation, control) -> transition(api, profile, input, operation));
         } catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
     }
 
-    private static NodeResult transition(GithubApi api, GithubProfile profile, Input input) {
+    private static NodeResult transition(GithubApi api, GithubProfile profile, Input input,
+                                         GithubOperationStore.Lease operation) {
         Snapshot before = snapshot(api, profile, input.itemId);
         long wantedAttempts = input.expectedAttempts + (input.transition().equals(profile.project().claimTransition()) ? 1 : 0);
         long wantedGeneration = input.expectedGeneration + 1;
@@ -69,6 +73,8 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
                 input, wantedGeneration, wantedAttempts, "");
         if (!before.matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)) return result(
                 "conflict", "cas-lost", input, before.generation, before.attempts, "CAS_LOST");
+        if ("AMBIGUOUS".equals(operation.record().state())) return result("ambiguous", "ambiguous", input,
+                before.generation, before.attempts, "REMOTE_STATE_UNKNOWN");
         String client = GithubValues.sha256(input.itemId + ":" + wantedGeneration + ":" + input.toStatus).substring(0, 32);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("project", profile.project().projectId()); variables.put("item", input.itemId);
@@ -81,7 +87,8 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         catch (GithubProtocol.RateLimited limited) { return result("failed", "rate-limited", input,
                 input.expectedGeneration, input.expectedAttempts, "RATE_LIMITED", limited.retryAt()); }
         catch (GithubException ambiguous) {
-            if (ambiguous.code() != GithubException.Code.TRANSPORT) throw ambiguous;
+            if (ambiguous.code() != GithubException.Code.TRANSPORT
+                    && ambiguous.code() != GithubException.Code.RESPONSE_INVALID) throw ambiguous;
         }
         Snapshot after = snapshot(api, profile, input.itemId);
         if (after.matches(input.toStatus, wantedAttempts, wantedGeneration)) return result("continue", "applied",
@@ -97,8 +104,17 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         Map<String, Object> node = GithubValues.object(data.get("node"));
         if (!itemId.equals(node.get("id")) || !profile.project().projectId().equals(
                 GithubValues.object(node.get("project")).get("id"))) throw new GithubException(GithubException.Code.FORBIDDEN);
+        Map<String, Object> content = GithubValues.object(node.get("content"));
+        if (!(content.get("repository") instanceof Map<?, ?>)) throw new GithubException(GithubException.Code.FORBIDDEN);
+        if (GithubValues.number(GithubValues.object(content.get("repository")).get("databaseId"),
+                1, Long.MAX_VALUE) != profile.repositoryId()) throw new GithubException(GithubException.Code.FORBIDDEN);
         String status = ""; long attempts = -1; long generation = -1;
-        List<Object> values = GithubValues.list(GithubValues.object(node.get("fieldValues")).get("nodes"));
+        Map<String, Object> fieldValues = GithubValues.object(node.get("fieldValues"));
+        Object hasNextPage = GithubValues.object(fieldValues.get("pageInfo")).get("hasNextPage");
+        if (!(hasNextPage instanceof Boolean)) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        if ((Boolean) hasNextPage)
+            throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        List<Object> values = GithubValues.list(fieldValues.get("nodes"));
         for (Object raw : values) {
             Map<String, Object> value = GithubValues.object(raw);
             Object rawField = value.get("field"); if (rawField == null) continue;

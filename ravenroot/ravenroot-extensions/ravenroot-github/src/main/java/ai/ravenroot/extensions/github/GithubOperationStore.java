@@ -3,13 +3,15 @@ package ai.ravenroot.extensions.github;
 import java.util.Optional;
 
 interface GithubOperationStore extends AutoCloseable {
-    Lease begin(String tenant, String profile, String kind, String key, String requestDigest, long deadlineEpochMs);
+    Lease begin(String tenant, String profile, String kind, String key, String requestDigest, long deadlineEpochMs,
+                BeginPolicy policy);
     Optional<Record> find(String tenant, String profile, String kind, String key);
     void save(Lease lease, String state, long generation, long attempts, long deadlineEpochMs,
               String remoteId, String detailDigest, String resultJson, boolean terminal);
     void renew(Lease lease);
     void release(Lease lease);
     void audit(Lease lease, String disposition, String reason, String evidenceDigest);
+    DeliveryDecision bindDelivery(String tenant, String profile, String deliveryId, String bindingDigest);
     @Override default void close() { }
 
     record Record(String state, long generation, long attempts, long deadlineEpochMs,
@@ -19,6 +21,16 @@ interface GithubOperationStore extends AutoCloseable {
 
     record Lease(GithubOperationStore store, String tenant, String profile, String kind, String key,
                  String owner, Record record) { }
+
+    record BeginPolicy(boolean reconcileAmbiguous, boolean rollTerminal, long expectedGeneration) {
+        static BeginPolicy ordinary() { return new BeginPolicy(false, false, -1); }
+        static BeginPolicy forAmbiguousReconciliation() { return new BeginPolicy(true, false, -1); }
+        static BeginPolicy project(long expectedGeneration) {
+            return new BeginPolicy(true, true, expectedGeneration);
+        }
+    }
+
+    enum DeliveryDecision { FIRST_SEEN, REPLAY }
 
     final class SetNames {
         static final java.util.Set<String> TERMINAL = java.util.Set.of(

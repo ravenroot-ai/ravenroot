@@ -10,11 +10,18 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Shared tenant/profile admission, durable operation ownership, cancellation and sanitized evidence. */
 final class GithubRuntime {
+    private static final ScheduledExecutorService LEASE_KEEPER = Executors.newSingleThreadScheduledExecutor(task -> {
+        Thread thread = new Thread(task, "ravenroot-github-lease-keeper"); thread.setDaemon(true); return thread;
+    });
     private final java.util.function.Supplier<GithubConfiguration> resolver;
     private volatile GithubConfiguration resolvedConfiguration;
     private volatile GithubOperationStore resolvedStore;
@@ -57,14 +64,30 @@ final class GithubRuntime {
     CompletionStage<NodeResult> submit(NodeMessage message, NodePackageServices services, GithubProfile profile,
                                        String kind, String key, Map<String, Object> canonicalInput,
                                        long deadlineEpochMs, Work work) {
+        return submit(message, services, profile, kind, key, canonicalInput, deadlineEpochMs,
+                GithubOperationStore.BeginPolicy.ordinary(), work);
+    }
+
+    CompletionStage<NodeResult> submit(NodeMessage message, NodePackageServices services, GithubProfile profile,
+                                       String kind, String key, Map<String, Object> canonicalInput,
+                                       long deadlineEpochMs, GithubOperationStore.BeginPolicy beginPolicy, Work work) {
         String requestDigest = GithubValues.sha256(GithubValues.jsonBytes(canonicalInput));
         GithubOperationStore store = store();
         GithubOperationStore.Lease operation = store.begin(message.tenantId(), profile.name(), kind, key,
-                requestDigest, deadlineEpochMs);
-        if (operation.record().terminal() && !operation.record().resultJson().isEmpty()) {
+                requestDigest, deadlineEpochMs, beginPolicy);
+        if (operation.owner().isEmpty()) {
+            if (!operation.record().terminal() || operation.record().resultJson().isEmpty())
+                return CompletableFuture.failedFuture(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
             Object replay = PayloadJson.read(operation.record().resultJson().getBytes(StandardCharsets.UTF_8),
                     GithubValues.LIMITS).toJava();
-            return CompletableFuture.completedFuture(new NodeResult(outcome(operation.record().state()), replay, Map.of()));
+            Map<String, Object> value = GithubValues.object(replay);
+            if (value.get("failureCode") instanceof String code) {
+                try { return CompletableFuture.failedFuture(new GithubException(GithubException.Code.valueOf(code))); }
+                catch (IllegalArgumentException invalid) {
+                    return CompletableFuture.failedFuture(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                }
+            }
+            return CompletableFuture.completedFuture(new NodeResult(outcome(operation.record().state()), value, Map.of()));
         }
         Gate gate = gates.compute(profile.tenantId() + "\u0000" + profile.name(), (ignored, current) ->
                 current == null ? new Gate(profile.maxConcurrency()) : current.retain(profile.maxConcurrency()));
@@ -74,39 +97,75 @@ final class GithubRuntime {
         GithubApi.CallControl control = new GithubApi.CallControl();
         Task result = new Task(control);
         Thread worker = Thread.ofVirtual().name("ravenroot-github-" + kind).unstarted(() -> {
+            LeaseKeeper keeper = new LeaseKeeper(store, operation, control, configuration().store().leaseMs());
             try {
-                NodeResult completed = work.run(new GithubApi(services, message, profile, control), operation, control);
-                Map<String, Object> output = GithubValues.object(completed.payload());
-                String state = state(completed.outcome(), output);
-                String json = new String(GithubValues.jsonBytes(output), StandardCharsets.UTF_8);
-                String evidence = GithubValues.sha256(json);
-                store.save(operation, state, number(output.get("generation")), number(output.get("attempts")),
-                        deadlineEpochMs, optional(output.get("remoteId")), evidence, json, true);
-                store.audit(operation, state, reason(output), evidence);
-                result.complete(completed);
-            } catch (GithubException failure) {
-                String state = failure.code() == GithubException.Code.CANCELLED ? "CANCELLED" : "FAILED";
-                String evidence = GithubValues.sha256(kind + ":" + failure.code());
+                NodeResult completed;
                 try {
-                    store.save(operation, state, operation.record().generation(), operation.record().attempts(),
-                            deadlineEpochMs, operation.record().remoteId(), evidence, "", true);
-                    store.audit(operation, state, failure.code().name(), evidence);
-                } catch (RuntimeException ignored) { }
-                result.completeExceptionally(failure);
-            } catch (RuntimeException failure) {
-                GithubException safe = new GithubException(GithubException.Code.RESPONSE_INVALID);
-                String evidence = GithubValues.sha256(kind + ":" + safe.code());
+                    completed = work.run(new GithubApi(services, message, profile, control,
+                            () -> { control.check(); store.renew(operation); control.check(); }), operation, control);
+                } catch (GithubException failure) {
+                    if (failure.code() == GithubException.Code.CAS_LOST) {
+                        result.completeExceptionally(failure);
+                        return;
+                    }
+                    try { persistFailure(store, operation, deadlineEpochMs, kind, failure); result.completeExceptionally(failure); }
+                    catch (RuntimeException persistence) {
+                        result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                    }
+                    return;
+                } catch (RuntimeException failure) {
+                    GithubException safe = new GithubException(GithubException.Code.RESPONSE_INVALID);
+                    try { persistFailure(store, operation, deadlineEpochMs, kind, safe); result.completeExceptionally(safe); }
+                    catch (RuntimeException persistence) {
+                        result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                    }
+                    return;
+                }
                 try {
-                    store.save(operation, "FAILED", operation.record().generation(), operation.record().attempts(),
-                            deadlineEpochMs, operation.record().remoteId(), evidence, "", true);
-                    store.audit(operation, "FAILED", safe.code().name(), evidence);
-                } catch (RuntimeException ignored) { }
-                result.completeExceptionally(safe);
+                    Map<String, Object> output = GithubValues.object(completed.payload());
+                    String state = state(completed.outcome(), output);
+                    byte[] serialized = GithubValues.jsonBytes(output);
+                    if (serialized.length > profile.maxResponseBytes()) throw GithubValues.invalid();
+                    String json = new String(serialized, StandardCharsets.UTF_8);
+                    String evidence = GithubValues.sha256(json);
+                    boolean terminal = !"WAITING".equals(state);
+                    store.save(operation, state, number(output.get("generation")), number(output.get("attempts")),
+                            deadlineEpochMs, optional(output.get("remoteId")), evidence, json, terminal);
+                    store.audit(operation, state, reason(output), evidence);
+                    if (!terminal) store.release(operation);
+                    result.complete(completed);
+                } catch (RuntimeException persistence) {
+                    result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                }
             } finally {
+                keeper.close();
                 gate.permits.release(); release(profile, gate);
             }
         });
         result.worker(worker); worker.start(); return result;
+    }
+
+    GithubOperationStore.DeliveryDecision bindDelivery(String tenant, String profile, String delivery,
+                                                        String bindingDigest) {
+        return store().bindDelivery(tenant, profile, delivery, bindingDigest);
+    }
+
+    private static void persistFailure(GithubOperationStore store, GithubOperationStore.Lease operation,
+                                       long deadlineEpochMs, String kind, GithubException failure) {
+        String state = failure.code() == GithubException.Code.CANCELLED ? "CANCELLED" : "FAILED";
+        Map<String, Object> output = Map.of("version", "github.operation.failure.v1", "status",
+                state.toLowerCase(java.util.Locale.ROOT), "failureCode", failure.code().name(),
+                "generation", operation.record().generation(), "attempts", operation.record().attempts(),
+                "remoteId", operation.record().remoteId());
+        String json = new String(GithubValues.jsonBytes(output), StandardCharsets.UTF_8);
+        String evidence = GithubValues.sha256(kind + ":" + failure.code());
+        try {
+            store.save(operation, state, operation.record().generation(), operation.record().attempts(),
+                    deadlineEpochMs, operation.record().remoteId(), evidence, json, true);
+            store.audit(operation, state, failure.code().name(), evidence);
+        } catch (RuntimeException persistence) {
+            throw new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE);
+        }
     }
 
     private void release(GithubProfile profile, Gate gate) {
@@ -156,5 +215,18 @@ final class GithubRuntime {
             control.cancel(); Thread running = worker; if (running != null) running.interrupt();
             return completeExceptionally(new GithubException(GithubException.Code.CANCELLED));
         }
+    }
+
+    private static final class LeaseKeeper implements AutoCloseable {
+        private final ScheduledFuture<?> task;
+        LeaseKeeper(GithubOperationStore store, GithubOperationStore.Lease lease,
+                    GithubApi.CallControl control, int leaseMs) {
+            long interval = Math.max(100, leaseMs / 3L);
+            task = LEASE_KEEPER.scheduleAtFixedRate(() -> {
+                try { store.renew(lease); }
+                catch (RuntimeException lost) { control.fail(new GithubException(GithubException.Code.CAS_LOST)); }
+            }, interval, interval, TimeUnit.MILLISECONDS);
+        }
+        @Override public void close() { task.cancel(false); }
     }
 }

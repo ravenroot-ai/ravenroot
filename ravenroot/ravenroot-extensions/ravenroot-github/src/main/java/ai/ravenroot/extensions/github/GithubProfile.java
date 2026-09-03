@@ -20,8 +20,10 @@ public record GithubProfile(
         name = token(name, 64); tenantId = token(tenantId, 160);
         apiOrigin = java.util.Objects.requireNonNull(apiOrigin);
         if (!"https".equalsIgnoreCase(apiOrigin.getScheme()) || apiOrigin.getHost() == null
+                || apiOrigin.getUserInfo() != null || apiOrigin.getQuery() != null || apiOrigin.getFragment() != null
+                || apiOrigin.getPort() != -1 && apiOrigin.getPort() != 443
                 || apiOrigin.getPath() != null && !apiOrigin.getPath().isEmpty()) throw invalid();
-        owner = token(owner, 100); repository = token(repository, 100);
+        owner = repositoryToken(owner); repository = repositoryToken(repository);
         if (repositoryId < 1 || installationId < 1) throw invalid();
         reviewerLogin = reviewer(reviewerLogin); credentialBindingId = token(credentialBindingId, 256);
         credentialReference = token(credentialReference, 256);
@@ -95,10 +97,26 @@ public record GithubProfile(
     public record ReleasePolicy(String branch, String versionPath, String fragmentsPath,
                                 Set<String> allowedKinds, int maxFiles) {
         public ReleasePolicy {
-            branch = token(branch, 160); versionPath = token(versionPath, 256);
-            fragmentsPath = token(fragmentsPath, 256); allowedKinds = Set.copyOf(allowedKinds);
+            branch = token(branch, 160); versionPath = relativePath(versionPath);
+            fragmentsPath = relativePath(fragmentsPath); allowedKinds = Set.copyOf(allowedKinds);
             if (allowedKinds.isEmpty() || !Set.of("patch", "minor", "major", "none").containsAll(allowedKinds)) throw invalid();
             if (maxFiles < 1 || maxFiles > 1_000) throw invalid();
         }
+    }
+
+    private static String repositoryToken(String value) {
+        if (value == null || !value.matches("[A-Za-z0-9](?:[A-Za-z0-9._-]{0,98}[A-Za-z0-9])?")) throw invalid();
+        return value;
+    }
+
+    private static String relativePath(String value) {
+        if (value == null || value.isBlank() || value.length() > 256 || value.indexOf('\\') >= 0
+                || value.startsWith("/") || value.endsWith("/") || value.contains("//")) throw invalid();
+        java.nio.file.Path path;
+        try { path = java.nio.file.Path.of(value); }
+        catch (RuntimeException invalid) { throw invalid(); }
+        if (path.isAbsolute() || !path.normalize().toString().replace('\\', '/').equals(value)
+                || path.startsWith("..")) throw invalid();
+        return value;
     }
 }

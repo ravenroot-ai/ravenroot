@@ -56,13 +56,15 @@ public final class GithubEventsSourceBehavior implements NodeBehavior, InboundSo
     @Override public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context,
                                                 NodePackageServices services) {
         GithubProfile profile = runtime.requireProfile(context.identity().tenantId(), GithubBehaviorDescriptors.profile(configuration));
-        return new Source(profile, services);
+        return new Source(profile, services, runtime);
     }
 
     private static final class Source implements ManagedIngressSource {
-        private final GithubProfile profile; private final NodePackageServices services;
+        private final GithubProfile profile; private final NodePackageServices services; private final GithubRuntime runtime;
         private InboundSourceContext context; private IngressRouteLease lease; private long generation; private boolean started;
-        Source(GithubProfile profile, NodePackageServices services) { this.profile = profile; this.services = services; }
+        Source(GithubProfile profile, NodePackageServices services, GithubRuntime runtime) {
+            this.profile = profile; this.services = services; this.runtime = runtime;
+        }
 
         @Override public synchronized CompletionStage<Void> start(InboundSourceContext context) {
             if (started) return CompletableFuture.completedFuture(null);
@@ -130,7 +132,13 @@ public final class GithubEventsSourceBehavior implements NodeBehavior, InboundSo
             try { action = body.get("action") == null ? "" : GithubValues.string(body.get("action"), 64); }
             catch (RuntimeException invalid) { return empty(400); }
             Set<String> actions = source.profile.webhookEvents().get(event);
-            if (!actions.isEmpty() && !actions.contains(action)) return empty(403);
+            if (actions.isEmpty() ? !action.isEmpty() : !actions.contains(action)) return empty(403);
+            String binding = GithubValues.sha256(GithubValues.sha256(request.body()) + ":" + event + ":" + action
+                    + ":" + source.profile.repositoryId() + ":" + source.profile.installationId());
+            try { source.runtime.bindDelivery(context.identity().tenantId(), source.profile.name(), delivery, binding); }
+            catch (GithubException collision) {
+                return empty(collision.code() == GithubException.Code.CAPACITY ? 429 : 409);
+            }
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("version", "github.event.v1"); payload.put("event", event); payload.put("action", action);
             payload.put("deliveryId", delivery); payload.put("repositoryId", source.profile.repositoryId());
@@ -159,7 +167,9 @@ public final class GithubEventsSourceBehavior implements NodeBehavior, InboundSo
 
         private static byte[] utf8(char[] chars) {
             ByteBuffer encoded = StandardCharsets.UTF_8.encode(CharBuffer.wrap(chars));
-            byte[] result = new byte[encoded.remaining()]; encoded.get(result); return result;
+            byte[] result = new byte[encoded.remaining()]; encoded.get(result);
+            if (encoded.hasArray()) Arrays.fill(encoded.array(), (byte) 0);
+            return result;
         }
         private static byte[] hmac(byte[] key, byte[] body) {
             try { Mac mac = Mac.getInstance("HmacSHA256"); mac.init(new SecretKeySpec(key, "HmacSHA256")); return mac.doFinal(body); }

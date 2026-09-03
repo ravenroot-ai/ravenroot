@@ -77,7 +77,9 @@ final class GithubTestSupport {
     static final class HttpHarness implements NodePackageServices {
         final ArrayDeque<OutboundHttpResponse> replies = new ArrayDeque<>();
         final List<OutboundHttpRequest> requests = new ArrayList<>();
+        final java.util.concurrent.CountDownLatch requestArrived = new java.util.concurrent.CountDownLatch(1);
         volatile OutboundCall<OutboundHttpResponse> pending;
+        volatile Runnable onRequest;
 
         HttpHarness reply(int status, Object body) {
             replies.add(new OutboundHttpResponse(status, Map.of(), json(body))); return this;
@@ -94,6 +96,9 @@ final class GithubTestSupport {
         @Override public ai.ravenroot.api.node.service.OutboundHttpService outboundHttp() {
             return (message, request) -> {
                 requests.add(request);
+                requestArrived.countDown();
+                Runnable hook = onRequest;
+                if (hook != null) { onRequest = null; hook.run(); }
                 if (pending != null) return pending;
                 OutboundHttpResponse reply = replies.poll();
                 return reply == null ? OutboundCall.failed(new AssertionError("unexpected " + request.method() + " " + request.destination()))

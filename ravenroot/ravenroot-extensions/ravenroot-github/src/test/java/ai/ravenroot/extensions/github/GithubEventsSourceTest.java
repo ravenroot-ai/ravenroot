@@ -64,6 +64,35 @@ class GithubEventsSourceTest {
         assertTrue(new String(replay.body(), StandardCharsets.UTF_8).contains("duplicate"));
         assertEquals(2, ingress.offers.get());
         assertEquals(1, ingress.keys.size());
+
+        byte[] collision = GithubValues.jsonBytes(Map.of("action", "synchronize",
+                "repository", Map.of("id", 1234L), "installation", Map.of("id", 5678L)));
+        IngressResponse rejected = restarted.handler.handle(request(collision, signature("test-secret", collision),
+                "delivery-2", GithubTestSupport.TENANT)).toCompletableFuture().join();
+        assertEquals(409, rejected.status());
+        assertEquals(2, ingress.offers.get());
+    }
+
+    @Test void emptyActionAllowlistAcceptsOnlyEventsWithoutAction() throws Exception {
+        DurableIngress ingress = new DurableIngress();
+        GithubConfiguration base = GithubTestSupport.configuration(directory.resolve("empty-action.db"));
+        GithubProfile old = base.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        GithubProfile narrowed = new GithubProfile(old.name(), old.tenantId(), old.apiOrigin(), old.owner(),
+                old.repository(), old.repositoryId(), old.installationId(), old.reviewerLogin(),
+                old.credentialBindingId(), old.credentialReference(), old.webhookSecretReference(), old.route(),
+                Map.of("pull_request", Set.of()), old.project(), old.workflowIds(), old.release(), old.timeoutMs(),
+                old.maxRequestBytes(), old.maxResponseBytes(), old.maxConcurrency(), old.maxPolls(), old.pollIntervalMs());
+        GithubNodePackage nodePackage = new GithubNodePackage(new GithubConfiguration(base.authority(), base.projection(),
+                base.store(), Map.of(GithubTestSupport.TENANT + "\u0000" + GithubTestSupport.PROFILE, narrowed)));
+        CaptureRoute route = source(ingress, nodePackage);
+        byte[] absent = GithubValues.jsonBytes(Map.of("repository", Map.of("id", 1234L),
+                "installation", Map.of("id", 5678L)));
+        assertEquals(202, route.handler.handle(request(absent, signature("test-secret", absent), "no-action",
+                GithubTestSupport.TENANT)).toCompletableFuture().join().status());
+        byte[] present = GithubValues.jsonBytes(Map.of("action", "opened", "repository", Map.of("id", 1234L),
+                "installation", Map.of("id", 5678L)));
+        assertEquals(403, route.handler.handle(request(present, signature("test-secret", present), "has-action",
+                GithubTestSupport.TENANT)).toCompletableFuture().join().status());
     }
 
     @Test void trustedTenantCannotBeOverriddenByRelayPrincipalOrSignedBody() throws Exception {
@@ -78,7 +107,10 @@ class GithubEventsSourceTest {
     }
 
     private CaptureRoute source(DurableIngress ingress) {
-        GithubNodePackage nodePackage = GithubTestSupport.nodePackage(directory.resolve("operations.db"));
+        return source(ingress, GithubTestSupport.nodePackage(directory.resolve("operations.db")));
+    }
+
+    private CaptureRoute source(DurableIngress ingress, GithubNodePackage nodePackage) {
         InboundSourceCapable behavior = (InboundSourceCapable) GithubTestSupport.behavior(nodePackage, "github-events-source");
         Context context = new Context(ingress);
         InboundSource source = behavior.createSource(GithubTestSupport.node("github-events-source"), context, credentials());

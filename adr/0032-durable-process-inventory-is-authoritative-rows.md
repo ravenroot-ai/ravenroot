@@ -72,3 +72,8 @@ wrong" is indistinguishable from one that means "there is none."
   minimum of as long as the events that describe it.
 - A stable, deterministic scan trades immediacy for correctness: an operator watching a long scan
   will not see instances created after the scan began until they ask again from page one.
+- This decision defines the retention-removal operation but does not by itself expose it: no shipped
+  surface calls it in this release, a deliberate scoping choice because permanently deleting terminal
+  execution records needs its own confirmation posture. Until a later change exposes it, every
+  terminal row is retained regardless of age in practice, and the terminal-retention window above
+  binds configuration without yet removing anything.

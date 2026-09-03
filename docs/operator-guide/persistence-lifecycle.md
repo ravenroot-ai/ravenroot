@@ -9,7 +9,7 @@ Protect accepted executions and audit evidence across drain, backup, restart, an
 3. Take a storage-consistent backup only after the write boundary is established; record release and schema identity with it.
 4. Restore into an isolated target, start against the restored state, and reconcile executions and recent events before promotion.
 5. After restart or restore, the durable process inventory (`GET /v1/executions/inventory`, or `ravenroot inventory`) is queryable immediately, with no rebuild delay: it is read from the same rows the lifecycle committed, not from a projection that has to catch up. Use it, not the process-local live-execution view, to find work that outlived the restart.
-6. When an instance you expect to find is absent, compare its expected creation time against the inventory's `retainedFrom` floor in the same response before concluding the identifier is wrong: an absence at or after the floor means no such instance exists or it is not visible to your tenant; an absence before the floor means a terminal instance aged out of the configured terminal-retention window.
+6. When an instance you expect to find is absent from `GET /v1/executions/inventory`, do not compare against its creation time — the `retainedFrom` floor that response carries is measured in retention-deadline space, not creation space, and the boundary is exclusive: a row whose own deadline (`retainedUntil`, or its terminal-transition instant plus the configured terminal retention if you never read the row) sits strictly after the floor is guaranteed still present, while a deadline at or before the floor may have been purged. Compare the instance's deadline against the floor, not when it was created, before concluding the identifier is wrong. In this release that comparison will read as "still present" for every terminal instance regardless of age: see Authority below for why.
 
 ## Graph definitions
 
@@ -21,9 +21,11 @@ Storing the document is what this release adds. **Ravenroot does not yet read it
 
 ## Authority
 
-Only an operator may drain, copy or replace durable state, restore a deployment, or approve an upgrade. API consumers observe these transitions but do not perform storage mutation. Removing expired terminal rows from the durable inventory follows the same rule: nothing is deleted implicitly by a listing or a lookup, removal is an explicit operator or scheduled maintenance action, only terminal instances are ever eligible, and it advances the retention floor for the tenant it was run against and no other.
+Only an operator may drain, copy or replace durable state, restore a deployment, or approve an upgrade. API consumers observe these transitions but do not perform storage mutation.
 
-Terminal-retention configuration cannot be set shorter than event-journal retention, so a terminal instance is never pruned while its own events are still readable. The default terminal retention is seven days, chosen to span a weekend: a failure late on a Friday must still be discoverable when someone looks on Monday.
+**No shipped surface removes expired terminal rows from the durable inventory in this release.** The retention operation exists at the store level — nothing is ever deleted implicitly by a listing or a lookup, only terminal instances are ever eligible, and running it advances the retention floor for the tenant it was run against and no other — but there is no CLI verb, no HTTP route, and no scheduler that calls it. It is reachable today only by an embedder composing its own execution store directly. This is a deliberate scoping decision, not an oversight: a verb that permanently deletes terminal execution records is destructive and needs its own confirmation posture, and it was left out of this change rather than added late. Until a future change exposes it to an operator, the retention floor stays at its minimum in every real deployment and every terminal row is retained regardless of age.
+
+Terminal-retention configuration cannot be set shorter than event-journal retention, so once retention removal is exposed, a terminal instance will never be pruned while its own events are still readable. The default terminal retention is seven days, chosen to span a weekend so a failure late on a Friday is still discoverable when someone looks on Monday — a bound that constrains configuration today but removes nothing until the operation above is reachable.
 
 ## Verification
 

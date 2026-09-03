@@ -35,6 +35,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
             allowedTypes = tokens(allowedTypes, 128, "destination type");
             allowedAddresses = boundedStrings(allowedAddresses, 2_048, "destination address");
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("Destination", id); }
     }
 
     /**
@@ -58,6 +61,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
             }
             privatePrefixes = Set.copyOf(normalized);
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("LogicalPath", id); }
     }
 
     /** Content categories that can be scanned by one generic sensitive-signature rule. */
@@ -87,6 +93,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
             literal = bounded(literal, 512, "sensitive signature");
             mode = mode == null ? MatchMode.TOKEN : mode;
         }
+
+        /** @return a redacted summary without the protected literal */
+        @Override public String toString() { return "PublicationRule.Signature[literal=redacted]"; }
     }
 
     /**
@@ -115,6 +124,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
                 throw new IllegalArgumentException("normalized scan budget is outside the supported range");
             }
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("SensitiveContent", id); }
     }
 
     /**
@@ -139,6 +151,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
             }
             allowedLanguages = Set.copyOf(normalized);
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("Language", id); }
     }
 
     /**
@@ -155,6 +170,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
             id = requireId(id);
             allowedTypes = tokens(allowedTypes, 128, "artifact type");
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("ArtifactType", id); }
     }
 
     /**
@@ -175,6 +193,9 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
                 throw new IllegalArgumentException("required file-pair suffixes must differ");
             }
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("RequiredFilePair", id); }
     }
 
     /**
@@ -189,6 +210,13 @@ public sealed interface PublicationRule permits PublicationRule.Destination, Pub
             id = requireId(id);
             allowedSourceTypes = tokens(allowedSourceTypes, 128, "provenance source type");
         }
+
+        /** @return a redacted summary containing only the safe rule identity */
+        @Override public String toString() { return summary("Provenance", id); }
+    }
+
+    private static String summary(String type, PublicationRuleId id) {
+        return "PublicationRule." + type + "[id=" + id.value() + ", protectedValues=redacted]";
     }
 
     private static PublicationRuleId requireId(PublicationRuleId id) {

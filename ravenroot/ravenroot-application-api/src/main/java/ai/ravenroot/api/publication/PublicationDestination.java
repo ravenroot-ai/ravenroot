@@ -16,4 +16,14 @@ public record PublicationDestination(String type, String address) {
             throw new IllegalArgumentException("destination address must be non-blank and at most 2048 characters");
         }
     }
+
+    /**
+     * Returns a fixed summary without destination values.
+     *
+     * @return a redacted summary
+     */
+    @Override
+    public String toString() {
+        return "PublicationDestination[protectedValues=redacted]";
+    }
 }

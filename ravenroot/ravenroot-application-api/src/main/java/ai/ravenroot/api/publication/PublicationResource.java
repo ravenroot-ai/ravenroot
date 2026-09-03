@@ -25,6 +25,17 @@ public record PublicationResource(String logicalPath, String artifactType, Strin
         Objects.requireNonNull(content, "content");
     }
 
+    /**
+     * Returns a bounded summary without resource metadata or content.
+     *
+     * @return a redacted summary
+     */
+    @Override
+    public String toString() {
+        return "PublicationResource[contentType=" + content.getClass().getSimpleName()
+                + ", protectedValues=redacted]";
+    }
+
     private static String token(String value, String name) {
         if (value == null || !value.matches("[A-Za-z0-9][A-Za-z0-9._:+/-]{0,127}")) {
             throw new IllegalArgumentException(name + " must be a bounded canonical identifier");

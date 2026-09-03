@@ -30,6 +30,16 @@ public record PublicationProvenance(String sourceType, String sourceId, String s
                 && contentDigest.matches("sha256:[0-9a-f]{64}");
     }
 
+    /**
+     * Returns a fixed summary without provenance or digest values.
+     *
+     * @return a redacted summary
+     */
+    @Override
+    public String toString() {
+        return "PublicationProvenance[protectedValues=redacted]";
+    }
+
     private static String bounded(String value, int maximum) {
         if (value == null) return "";
         return value.length() <= maximum ? value : "";

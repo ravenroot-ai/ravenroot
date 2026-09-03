@@ -9,6 +9,7 @@ import ai.ravenroot.api.publication.PublicationResource;
 import ai.ravenroot.api.publication.PublicationRule;
 import ai.ravenroot.api.publication.PublicationRuleId;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URLDecoder;
 import java.nio.ByteBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -98,18 +99,108 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
     }
 
     private static boolean pathDenied(PublicationRule.LogicalPath rule, String path) {
-        String normalized = path.replace('\\', '/');
-        boolean absolute = normalized.startsWith("/") || normalized.matches("^[A-Za-z]:/.*");
-        boolean parent = List.of(normalized.split("/", -1)).contains("..");
-        boolean home = normalized.equals("~") || normalized.startsWith("~/");
-        if (rule.denyAbsolute() && absolute || rule.denyParentTraversal() && parent
-                || rule.denyHomeRelative() && home) return true;
+        CanonicalPath candidate = canonicalPath(path, false);
+        if (!candidate.valid()
+                || rule.denyAbsolute() && candidate.absolute()
+                || rule.denyParentTraversal() && candidate.parentTraversal()
+                || rule.denyHomeRelative() && candidate.homeRelative()) return true;
         for (String prefix : rule.privatePrefixes()) {
-            if (normalized.equals(prefix) || normalized.startsWith(prefix.endsWith("/") ? prefix : prefix + "/")) {
+            CanonicalPath privatePrefix = canonicalPath(prefix, true);
+            if (!privatePrefix.valid() || candidate.value().equals(privatePrefix.value())
+                    || candidate.value().startsWith(privatePrefix.value() + "/")) {
                 return true;
             }
         }
         return false;
+    }
+
+    private static CanonicalPath canonicalPath(String source, boolean prefix) {
+        String decoded = source;
+        for (int round = 0; round < 4; round++) {
+            String next = decodePercentTriplets(decoded);
+            if (next == null) return CanonicalPath.invalid();
+            if (next.equals(decoded)) break;
+            decoded = next;
+        }
+        if (containsSecurityEscape(decoded)) return CanonicalPath.invalid();
+        String normalized = Normalizer.normalize(decoded, Normalizer.Form.NFKC);
+        var separators = new StringBuilder(normalized.length());
+        for (int index = 0; index < normalized.length();) {
+            int point = normalized.codePointAt(index);
+            index += Character.charCount(point);
+            if (Character.isISOControl(point) || Character.getType(point) == Character.FORMAT) {
+                return CanonicalPath.invalid();
+            }
+            separators.appendCodePoint(separator(point) ? '/' : point);
+        }
+        String value = separators.toString();
+        boolean absolute = value.startsWith("/") || value.length() >= 2
+                && Character.isLetter(value.charAt(0)) && value.charAt(1) == ':';
+        boolean home = value.equals("~") || value.startsWith("~/");
+        String body = value.startsWith("/") ? value.replaceFirst("^/+", "") : value;
+        String[] components = body.split("/", -1);
+        var canonical = new ArrayList<String>(components.length);
+        boolean parent = false;
+        for (int index = 0; index < components.length; index++) {
+            String component = components[index];
+            if (component.isEmpty()) {
+                if (prefix && index == components.length - 1 && !canonical.isEmpty()) continue;
+                return CanonicalPath.invalid();
+            }
+            if (component.equals(".")) continue;
+            if (component.equals("..")) {
+                parent = true;
+                if (canonical.isEmpty()) return CanonicalPath.invalid();
+                canonical.removeLast();
+            } else {
+                canonical.add(component);
+            }
+        }
+        if (canonical.isEmpty()) return CanonicalPath.invalid();
+        return new CanonicalPath(true, absolute, home, parent, String.join("/", canonical));
+    }
+
+    private static String decodePercentTriplets(String value) {
+        var decoded = new StringBuilder(value.length());
+        boolean changed = false;
+        for (int index = 0; index < value.length();) {
+            if (value.charAt(index) != '%' || index + 2 >= value.length()
+                    || Character.digit(value.charAt(index + 1), 16) < 0
+                    || Character.digit(value.charAt(index + 2), 16) < 0) {
+                decoded.append(value.charAt(index++));
+                continue;
+            }
+            var bytes = new ByteArrayOutputStream();
+            while (index + 2 < value.length() && value.charAt(index) == '%') {
+                int high = Character.digit(value.charAt(index + 1), 16);
+                int low = Character.digit(value.charAt(index + 2), 16);
+                if (high < 0 || low < 0) break;
+                bytes.write((high << 4) | low);
+                index += 3;
+            }
+            try {
+                var decoder = StandardCharsets.UTF_8.newDecoder()
+                        .onMalformedInput(CodingErrorAction.REPORT).onUnmappableCharacter(CodingErrorAction.REPORT);
+                decoded.append(decoder.decode(ByteBuffer.wrap(bytes.toByteArray())));
+                changed = true;
+            } catch (CharacterCodingException malformed) {
+                return null;
+            }
+        }
+        return changed ? decoded.toString() : value;
+    }
+
+    private static boolean containsSecurityEscape(String value) {
+        String lower = value.toLowerCase(Locale.ROOT);
+        return lower.contains("%2e") || lower.contains("%2f") || lower.contains("%5c")
+                || lower.contains("%e2%88%95") || lower.contains("%e2%81%84")
+                || lower.contains("%ef%bc%8f") || lower.contains("%ef%bc%bc");
+    }
+
+    private static boolean separator(int point) {
+        return point == '/' || point == '\\' || point == 0x2044 || point == 0x2215
+                || point == 0x29F5 || point == 0x29F8 || point == 0xFE68
+                || point == 0xFF0F || point == 0xFF3C;
     }
 
     private static boolean allowedLanguage(PublicationRule.Language rule, String declared) {
@@ -121,7 +212,11 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
 
     private static boolean hasMissingPair(PublicationRule.RequiredFilePair rule, PublicationCandidate candidate) {
         Set<String> paths = new HashSet<>();
-        candidate.resources().forEach(resource -> paths.add(resource.logicalPath().replace('\\', '/')));
+        for (PublicationResource resource : candidate.resources()) {
+            CanonicalPath path = canonicalPath(resource.logicalPath(), false);
+            if (!path.valid()) return true;
+            paths.add(path.value());
+        }
         for (String path : paths) {
             if (path.endsWith(rule.firstSuffix())) {
                 String peer = path.substring(0, path.length() - rule.firstSuffix().length()) + rule.requiredSuffix();
@@ -300,4 +395,11 @@ public final class StandardPublicationPolicyEvaluator implements PublicationPoli
     }
 
     private record NormalizedSignature(String literal, PublicationRule.MatchMode mode) { }
+
+    private record CanonicalPath(boolean valid, boolean absolute, boolean homeRelative,
+                                 boolean parentTraversal, String value) {
+        private static CanonicalPath invalid() {
+            return new CanonicalPath(false, false, false, false, "");
+        }
+    }
 }

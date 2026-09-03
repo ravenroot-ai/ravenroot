@@ -30,6 +30,16 @@ public sealed interface PublicationContent permits PublicationContent.Text, Publ
         public Text(String text) {
             this(List.of(text == null ? "" : text));
         }
+
+        /**
+         * Returns a bounded summary without text fragments.
+         *
+         * @return a redacted summary
+         */
+        @Override
+        public String toString() {
+            return "PublicationContent.Text[fragments=" + fragments.size() + ", values=redacted]";
+        }
     }
 
     /**
@@ -53,6 +63,16 @@ public sealed interface PublicationContent permits PublicationContent.Text, Publ
          */
         public Base64Binary(String base64) {
             this(List.of(base64 == null ? "" : base64));
+        }
+
+        /**
+         * Returns a bounded summary without encoded content.
+         *
+         * @return a redacted summary
+         */
+        @Override
+        public String toString() {
+            return "PublicationContent.Base64Binary[fragments=" + fragments.size() + ", values=redacted]";
         }
     }
 }

@@ -38,6 +38,8 @@ The Java SPI is in `ai.ravenroot.api.publication`. A graph payload may use the e
 
 Binary content uses `encoding: base64`; each fragment is decoded independently. Fragment boundaries are retained because credentials and references can be split across structured values. The provenance digest binds the ordered resource metadata, fragment boundaries, and decoded content. Missing or mismatched provenance is a violation.
 
+The map form is closed: unrecognized members at the candidate, destination, resource, content, or provenance level make the candidate malformed. This prevents an unevaluated extension value from crossing the guard on `continue`. Public candidate and policy value objects also redact protected fields from their diagnostic string forms; callers must not substitute object formatting for a deliberate protected-data channel.
+
 The node configuration pins three values:
 
 - `policyId`
@@ -67,6 +69,8 @@ The standard evaluator composes these generic rule families in profile order and
 - complete provenance with an optional source-type allowlist.
 
 Sensitive signatures support substring, token, and token-prefix matching. A profile can enable bounded one-layer percent/base64 inspection, joining across declared fragments, and a conservative Unicode confusable skeleton. These operations are deterministic and bounded by both the policy candidate limit and the rule normalization limit. Binary content is rejected when a text-inspection rule applies, rather than being interpreted heuristically.
+
+Logical paths are checked only after bounded percent decoding, Unicode compatibility normalization, separator folding, and dot-segment resolution. Encoded separators or traversal, absolute and drive forms, UNC and home-relative forms, control characters, and ambiguous empty components therefore cannot bypass a private-prefix rule. Policy rule identifiers must be unique and cannot use the guard-owned `boundary.*` namespace.
 
 ## Violation handling and limitations
 

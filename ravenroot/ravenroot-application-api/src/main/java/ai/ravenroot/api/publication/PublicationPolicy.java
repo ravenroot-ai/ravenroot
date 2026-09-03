@@ -3,6 +3,7 @@ package ai.ravenroot.api.publication;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Set;
@@ -32,6 +33,15 @@ public final class PublicationPolicy {
         if (this.rules.isEmpty() || this.rules.size() > 4_096
                 || this.rules.stream().anyMatch(java.util.Objects::isNull)) {
             throw new IllegalArgumentException("publication policy requires between 1 and 4096 rules");
+        }
+        var identifiers = new HashSet<PublicationRuleId>();
+        for (PublicationRule rule : this.rules) {
+            if (rule.id().value().startsWith("boundary.")) {
+                throw new IllegalArgumentException("publication policy rule ids cannot use the reserved boundary namespace");
+            }
+            if (!identifiers.add(rule.id())) {
+                throw new IllegalArgumentException("publication policy rule ids must be unique");
+            }
         }
         var provisional = new PublicationPolicyReference(id, version, "sha256:" + "0".repeat(64));
         this.maxCandidateBytes = maxCandidateBytes;
@@ -64,6 +74,17 @@ public final class PublicationPolicy {
      */
     public List<PublicationRule> rules() {
         return rules;
+    }
+
+    /**
+     * Returns a bounded summary without rule parameters.
+     *
+     * @return a redacted policy summary
+     */
+    @Override
+    public String toString() {
+        return "PublicationPolicy[reference=" + reference + ", rules=" + rules.size()
+                + ", protectedValues=redacted]";
     }
 
     private static byte[] canonical(String id, String version, long maxBytes, List<PublicationRule> rules) {

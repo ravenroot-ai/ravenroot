@@ -18,6 +18,7 @@ import ai.ravenroot.core.publication.PublicationCandidateMetrics;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -124,6 +125,35 @@ class BoundaryGuardNodeBehaviorFactoryTest {
         assertSame(projection, result.payload());
     }
 
+    @Test
+    void unknownMapMembersFailClosedWithoutLeakingTheirValues() throws Exception {
+        String protectedValue = "unknown-field-protected-marker";
+        PublicationPolicy policy = policy(false);
+        var events = new ArrayList<PublicationAuditEvent>();
+        var registry = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults(),
+                (id, version) -> java.util.Optional.of(policy), events::add);
+        List<java.util.function.Consumer<Map<String, Object>>> mutations = List.of(
+                value -> value.put("unknown", protectedValue),
+                value -> map(value, "destination").put("unknown", protectedValue),
+                value -> firstResource(value).put("unknown", protectedValue),
+                value -> map(firstResource(value), "content").put("unknown", protectedValue),
+                value -> map(value, "provenance").put("unknown", protectedValue));
+
+        for (var mutation : mutations) {
+            Map<String, Object> projection = mutableProjection(candidate("public text"));
+            mutation.accept(projection);
+
+            NodeResult result = invoke(registry, node(policy), projection);
+
+            assertEquals("violation", result.outcome());
+            assertEquals("CANDIDATE_MALFORMED", ((Map<?, ?>) result.payload()).get("reason"));
+            assertFalse(result.payload().toString().contains(protectedValue));
+            assertFalse(result.attributes().toString().contains(protectedValue));
+            assertFalse(events.getLast().toString().contains(protectedValue));
+            assertEquals(null, result.actionDiagnostic());
+        }
+    }
+
     private static GraphNode node(PublicationPolicy policy) {
         return new GraphNode("guard", NodeKind.BEHAVIOR, "boundary-guard", Map.of(
                 "policyId", policy.reference().id(), "policyVersion", policy.reference().version(),
@@ -161,5 +191,41 @@ class BoundaryGuardNodeBehaviorFactoryTest {
                 PublicationPolicy.HARD_MAX_CANDIDATE_BYTES).resourceDigest();
         return new PublicationCandidate(incomplete.destination(), incomplete.resources(),
                 new PublicationProvenance("build", "one", "v1", digest));
+    }
+
+    private static Map<String, Object> mutableProjection(PublicationCandidate candidate) {
+        var content = new LinkedHashMap<String, Object>();
+        content.put("encoding", "utf-8");
+        content.put("fragments", new ArrayList<>(List.of("public text")));
+        var resource = new LinkedHashMap<String, Object>();
+        resource.put("path", "guide.txt");
+        resource.put("artifactType", "document");
+        resource.put("mediaType", "text/plain");
+        resource.put("language", "en");
+        resource.put("content", content);
+        var destination = new LinkedHashMap<String, Object>();
+        destination.put("type", "repository");
+        destination.put("address", "urn:public");
+        var provenance = new LinkedHashMap<String, Object>();
+        provenance.put("sourceType", "build");
+        provenance.put("sourceId", "one");
+        provenance.put("sourceVersion", "v1");
+        provenance.put("contentDigest", candidate.provenance().contentDigest());
+        var projection = new LinkedHashMap<String, Object>();
+        projection.put("contract", PublicationCandidate.CONTRACT);
+        projection.put("destination", destination);
+        projection.put("resources", new ArrayList<>(List.of(resource)));
+        projection.put("provenance", provenance);
+        return projection;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> map(Map<String, Object> parent, String key) {
+        return (Map<String, Object>) parent.get(key);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> firstResource(Map<String, Object> projection) {
+        return (Map<String, Object>) ((List<?>) projection.get("resources")).getFirst();
     }
 }

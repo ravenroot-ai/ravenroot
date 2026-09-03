@@ -9,6 +9,7 @@ import ai.ravenroot.api.publication.PublicationResource;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** Strict map-compatible decoder for the built-in boundary-guard node. */
 public final class PublicationCandidateDecoder {
@@ -18,14 +19,18 @@ public final class PublicationCandidateDecoder {
     public static PublicationCandidate decode(Object value) {
         if (value instanceof PublicationCandidate candidate) return candidate;
         if (!(value instanceof Map<?, ?> map)) throw malformed();
+        rejectUnknown(map, Set.of("contract", "destination", "resources", "provenance"));
         String contract = string(map, "contract", 64);
         Map<?, ?> destination = object(map, "destination");
+        rejectUnknown(destination, Set.of("type", "address"));
         List<?> resources = list(map, "resources", 1_024);
         var decodedResources = new ArrayList<PublicationResource>(resources.size());
         int fragments = 0;
         for (Object raw : resources) {
             if (!(raw instanceof Map<?, ?> resource)) throw malformed();
+            rejectUnknown(resource, Set.of("path", "artifactType", "mediaType", "language", "content"));
             Map<?, ?> content = object(resource, "content");
+            rejectUnknown(content, Set.of("encoding", "fragments"));
             String encoding = string(content, "encoding", 16);
             List<String> values = strings(content, "fragments", 4_096 - fragments);
             fragments += values.size();
@@ -44,6 +49,7 @@ public final class PublicationCandidateDecoder {
         Object rawProvenance = map.get("provenance");
         if (rawProvenance != null) {
             if (!(rawProvenance instanceof Map<?, ?> fields)) throw malformed();
+            rejectUnknown(fields, Set.of("sourceType", "sourceId", "sourceVersion", "contentDigest"));
             provenance = new PublicationProvenance(
                     optionalString(fields, "sourceType", 128), optionalString(fields, "sourceId", 256),
                     optionalString(fields, "sourceVersion", 128), optionalString(fields, "contentDigest", 71));
@@ -54,6 +60,12 @@ public final class PublicationCandidateDecoder {
                             string(destination, "address", 2_048)), decodedResources, provenance);
         } catch (RuntimeException invalid) {
             throw malformed();
+        }
+    }
+
+    private static void rejectUnknown(Map<?, ?> map, Set<String> allowed) {
+        for (Object key : map.keySet()) {
+            if (!(key instanceof String name) || !allowed.contains(name)) throw malformed();
         }
     }
 

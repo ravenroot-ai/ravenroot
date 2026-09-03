@@ -102,6 +102,35 @@ class StandardPublicationPolicyEvaluatorTest {
     }
 
     @Test
+    void canonicalizesPathAliasesBeforeEveryPathDecision() {
+        var policy = policy(16_384, List.of(destination(), paths(), artifacts(false), provenance()));
+        List<String> denied = List.of(
+                "%2e%2e/private/file",
+                "private%2Ffile",
+                "..\uFF0Fprivate/file",
+                "public/../private/file",
+                "private\\file",
+                "./private/file",
+                "/public/file",
+                "C:\\public\\file",
+                "\\\\server\\share\\file",
+                "~/public/file",
+                "public//file",
+                "public/" + Character.toString(0) + "file");
+        for (String path : denied) {
+            assertReason(policy, candidate(List.of(text(path, "document", "en", "safe"))),
+                    PublicationDecision.Reason.PATH_DENIED);
+        }
+
+        for (String path : List.of("..-safe/file", "%2e%2e-safe/file", "private-file", "private%2Dfile",
+                "privateish/file", "public/.well-known")) {
+            assertEquals(PublicationDecision.Disposition.CONTINUE,
+                    evaluator.evaluate(policy, candidate(List.of(text(path, "document", "en", "safe"))))
+                            .disposition(), path);
+        }
+    }
+
+    @Test
     void binaryRequiresExplicitPolicyAllowanceAndTextRulesFailClosedOnIt() {
         var binary = candidate(List.of(new PublicationResource("archive.bin", "binary", "application/octet-stream", "",
                 new PublicationContent.Base64Binary(Base64.getEncoder().encodeToString(new byte[]{0, 1, 2})))));

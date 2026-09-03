@@ -42,4 +42,14 @@ public record PublicationCandidate(String contract, PublicationDestination desti
                                 PublicationProvenance provenance) {
         this(CONTRACT, destination, resources, provenance);
     }
+
+    /**
+     * Returns a bounded summary that omits every candidate-provided value.
+     *
+     * @return a redacted summary
+     */
+    @Override
+    public String toString() {
+        return "PublicationCandidate[resources=" + resources.size() + ", protectedValues=redacted]";
+    }
 }

@@ -61,6 +61,7 @@ const TRAVERSAL_2 = '33333333-cccc-4ccc-8ccc-333333333333';
 const INVOCATION_1 = '44444444-dddd-4ddd-8ddd-444444444444';
 const INVOCATION_2 = '55555555-eeee-4eee-8eee-555555555555';
 const ATTEMPT_1 = '66666666-ffff-4fff-8fff-666666666666';
+const HANDLER_1 = '77777777-9999-4999-8999-777777777777';
 
 function eventWith(overrides) {
   return {
@@ -137,6 +138,44 @@ describe('activityIdentifiersHtml renders process/traversal/invocation/attempt a
     });
     it('the "attempt" span carries attemptId, not any other field', () => {
       expect(valueFor('attempt')).toBe(event.attemptId.slice(0, 8));
+    });
+  });
+
+  // ── The fifth row, and the only conditional one ─────────────────────────────────────────────────
+  //
+  // The four above are the execution hierarchy every event sits somewhere in, so an em dash for an
+  // absent one reads as "above that level". A handler is not part of that hierarchy: it is the
+  // durable wait a process is parked on, and only handler-lifecycle events carry one. Rendering an
+  // empty `handler —` on every node event would assert that every event has a handler slot, which is
+  // the opposite of the distinction the row exists to make — so absence here means the span is gone,
+  // not that it holds a placeholder, and both halves are asserted.
+  describe('a handler-lifecycle event names its handler as a fifth, conditional identifier', () => {
+    it('renders the handler span when the event carries a handlerId, without displacing the other four', () => {
+      const activityIdentifiersHtml = loadActivityIdentifiersHtml();
+      const html = activityIdentifiersHtml(eventWith({ handlerId: HANDLER_1 }));
+
+      expect(html).toContain(`data-id-kind="handler"`);
+      expect(html).toContain(HANDLER_1.slice(0, 8));
+      for (const kind of ['process', 'traversal', 'invocation', 'attempt']) {
+        expect(html).toContain(`data-id-kind="${kind}"`);
+      }
+    });
+
+    it('omits the handler span entirely on an event with no handler, rather than showing an empty slot', () => {
+      const activityIdentifiersHtml = loadActivityIdentifiersHtml();
+      const html = activityIdentifiersHtml(eventWith({}));
+
+      expect(html).not.toContain(`data-id-kind="handler"`);
+      expect(html).toContain(`data-id-kind="invocation"`);
+    });
+
+    it('the "handler" span carries handlerId and not the traversal it resumed', () => {
+      const activityIdentifiersHtml = loadActivityIdentifiersHtml();
+      const html = activityIdentifiersHtml(eventWith({ handlerId: HANDLER_1 }));
+      const valueFor = kind => html.match(new RegExp(`data-id-kind="${kind}">[^<]*<code>([^<]*)</code>`))[1];
+
+      expect(valueFor('handler')).toBe(HANDLER_1.slice(0, 8));
+      expect(valueFor('handler')).not.toBe(TRAVERSAL_1.slice(0, 8));
     });
   });
 

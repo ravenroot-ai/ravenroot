@@ -25,6 +25,8 @@ public final class ExecutionBatch {
     private final List<UUID> timersToCancel;
     private final IdempotencyWrite idempotency;
     private final List<EventEnvelope> events;
+    private final List<HandlerRegistration> handlersToRegister;
+    private final List<HandlerTransition> handlerTransitions;
 
     private ExecutionBatch(Builder builder) {
         this.key = builder.key;
@@ -35,8 +37,11 @@ public final class ExecutionBatch {
         this.timersToCancel = List.copyOf(builder.timersToCancel);
         this.idempotency = builder.idempotency;
         this.events = List.copyOf(builder.events);
+        this.handlersToRegister = List.copyOf(builder.handlersToRegister);
+        this.handlerTransitions = List.copyOf(builder.handlerTransitions);
         if (transitions.isEmpty() && timersToSchedule.isEmpty() && timersToCancel.isEmpty()
-                && idempotency == null && events.isEmpty()) {
+                && idempotency == null && events.isEmpty() && handlersToRegister.isEmpty()
+                && handlerTransitions.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -147,6 +152,68 @@ public final class ExecutionBatch {
         return events;
     }
 
+    /**
+     * Handlers created inside this batch's transaction, in the order the caller added them
+     * (PERS-05).
+     *
+     * <p>The second operation category ADR 0010 section 3 reserved the builder for, and the reason
+     * this type never had a canonical constructor. A registration here commits with the
+     * {@link ExecutionTransition.TraversalTransitioned} that moves its traversal to
+     * {@link ai.ravenroot.api.application.TraversalStatus#WAITING} or neither commits, so there is no
+     * instant at which a process is waiting and nothing durable records what for.</p>
+     *
+     * <p>Every registration's {@code traversalId} and {@code invocationId} must exist in the
+     * <em>post-fold</em> aggregate, so a handler may be registered in the same batch that creates the
+     * invocation it belongs to. A registration naming neither is
+     * {@link ExecutionStoreFailure.InvalidRequest}. A registration whose correlation key is already
+     * held by a live handler is {@link ExecutionStoreFailure.HandlerCorrelationTaken}; one whose
+     * deduplication key was already used is a no-op success, which is what makes a retried wait
+     * safe.</p>
+     *
+     * <p><strong>Every registration in a batch is folded before every transition in it</strong>, and
+     * that ordering is observable rather than incidental. It means one batch cannot both close a wait
+     * and re-open the same correlation key: the new registration is checked against a handler that is
+     * still live, so it is refused with
+     * {@link ExecutionStoreFailure.HandlerCorrelationTaken}. Both adapters agree on this and the
+     * conformance suite holds them to it, so it is a contract rather than an accident — but it is a
+     * contract that forbids a re-arming loop, and a caller that needs one must use two batches. If a
+     * future graph shape needs re-arming to be atomic, that is a deliberate change to this ordering
+     * with its own conformance assertion, not a fix to be discovered while writing the graph.</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#DURABLE_HANDLERS} is declared. The rejection is a property of the store
+     * rather than of the builder, for the reason {@link #fencingToken()} already gives: the
+     * conformance suite must be able to construct the offending batch in order to assert that every
+     * adapter rejects it.</p>
+ * @return immutable handler registrations in the order they were added.
+     */
+    public List<HandlerRegistration> handlersToRegister() {
+        return handlersToRegister;
+    }
+
+    /**
+     * Handler state changes applied inside this batch's transaction, in the order the caller added
+     * them (PERS-05).
+     *
+     * <p>An outcome-bearing transition — {@link HandlerTransition.Expired},
+     * {@link HandlerTransition.Denied}, {@link HandlerTransition.Resolved} — must name a
+     * {@code resumeTraversalId} that exists in the post-fold aggregate, which in practice means the
+     * batch also carries the {@link ExecutionTransition.TraversalAdded} that creates it. A
+     * transition naming a traversal the batch did not produce is
+     * {@link ExecutionStoreFailure.InvalidRequest}: a handler that closed a process and named a
+     * re-entry point nobody created would strand the process silently.</p>
+     *
+     * <p>A transition the handler's stored state does not permit is
+     * {@link ExecutionStoreFailure.HandlerNotResolvable}, which is where duplicate, late and
+     * out-of-order triggers land. Re-escalating an already escalated handler is the one exception and
+     * is answered as a no-op success, because an at-least-once timer delivery must not be able to
+     * turn an escalation into a failure.</p>
+ * @return immutable handler transitions in the order they were added.
+     */
+    public List<HandlerTransition> handlerTransitions() {
+        return handlerTransitions;
+    }
+
 /**
  * Defines the builder contract exposed to Ravenroot integrators.
  */
@@ -159,6 +226,8 @@ public final class ExecutionBatch {
         private final List<UUID> timersToCancel = new ArrayList<>();
         private IdempotencyWrite idempotency;
         private final List<EventEnvelope> events = new ArrayList<>();
+        private final List<HandlerRegistration> handlersToRegister = new ArrayList<>();
+        private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -254,6 +323,28 @@ public final class ExecutionBatch {
         public Builder publish(EventEnvelope envelope) {
             if (envelope == null) throw new IllegalArgumentException("envelope cannot be null");
             events.add(envelope);
+            return this;
+        }
+
+/**
+ * Registers a durable handler inside this batch's transaction.
+ * @param registration handler to create atomically with the transitions beside it.
+ * @return this builder.
+ */
+        public Builder registerHandler(HandlerRegistration registration) {
+            if (registration == null) throw new IllegalArgumentException("registration cannot be null");
+            handlersToRegister.add(registration);
+            return this;
+        }
+
+/**
+ * Applies one handler state change inside this batch's transaction.
+ * @param transition handler transition to apply atomically with the transitions beside it.
+ * @return this builder.
+ */
+        public Builder applyHandler(HandlerTransition transition) {
+            if (transition == null) throw new IllegalArgumentException("transition cannot be null");
+            handlerTransitions.add(transition);
             return this;
         }
 

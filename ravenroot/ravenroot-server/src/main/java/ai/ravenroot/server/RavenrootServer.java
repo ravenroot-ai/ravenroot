@@ -3285,18 +3285,36 @@ public final class RavenrootServer implements AutoCloseable {
             if (index > 0) {
                 body.append(',');
             }
-            var event = page.get(index);
-            String description = PublicExecutionDescription.forEventType(event.eventType());
-            body.append("{\"journalOffset\":").append(event.journalOffset())
-                    .append(",\"streamSequence\":").append(event.streamSequence())
-                    .append(",\"occurredAt\":\"").append(event.occurredAt()).append('"')
-                    .append(",\"type\":\"").append(escape(event.eventType())).append('"')
-                    .append(",\"description\":\"").append(escape(description)).append('"')
-                    .append(",\"processInstanceId\":\"").append(event.processInstanceId()).append('"')
-                    .append(",\"traversalId\":\"").append(event.traversalId()).append('"')
-                    .append("}");
+            body.append(durableRecentEventJson(page.get(index)));
         }
         return body.append("]}").toString();
+    }
+
+    /**
+     * One durable row of {@code /v1/events/recent}, exposed package-locally so its field set can be
+     * asserted directly.
+     *
+     * <p>Deliberately narrower than {@link #durableExecutionEventFrame}: this is the polling
+     * counterpart, and it has always carried the coarse position and identity rather than the full
+     * causal chain. {@code handlerId} is here for the same reason it is on the stream — a poller that
+     * saw {@code HANDLER_RESOLVED} and could not tell <em>which</em> handler resolved would have to go
+     * and ask, which is the question this projection exists to answer — and it is null on every other
+     * event type and on rows written before PERS-05.</p>
+     * @param event durable event to serialize.
+     * @return one JSON object, with no surrounding array or separator.
+     */
+    static String durableRecentEventJson(ai.ravenroot.api.application.DurableExecutionEvent event) {
+        String description = PublicExecutionDescription.forEventType(event.eventType());
+        return "{\"journalOffset\":" + event.journalOffset()
+                + ",\"streamSequence\":" + event.streamSequence()
+                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
+                + ",\"type\":\"" + escape(event.eventType()) + "\""
+                + ",\"description\":\"" + escape(description) + "\""
+                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
+                + ",\"traversalId\":\"" + event.traversalId() + "\""
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
+                + "}";
     }
 
     private void executionEvents(HttpExchange exchange) throws IOException {
@@ -3732,6 +3750,12 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
                 + ",\"edgeId\":" + (event.edgeId() == null ? "null"
                         : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
+                // The fourth identity, beside the process, the traversal and the invocation, so a
+                // client can tell a handler event apart from a node event that shares all three
+                // instead of parsing the sentence. A UUID, so it needs no escaping and costs a fixed
+                // 36 bytes inside the projection's own reserve.
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
                 + "}";
         String frame = "id: " + event.journalOffset() + "\nevent: execution\ndata: " + body + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);

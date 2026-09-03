@@ -2211,7 +2211,7 @@ public final class GraphRunner implements AutoCloseable {
                                 new NodeCommandAdmissionException(node.id(), message.command().name()));
                     }
                 }
-                return operational().handle(message);
+                return operational().handle(message, context.cancellation());
             }
 
             private NodeHandler operational() {

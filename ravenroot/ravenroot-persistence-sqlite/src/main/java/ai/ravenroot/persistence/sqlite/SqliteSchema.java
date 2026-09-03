@@ -303,7 +303,68 @@ final class SqliteSchema {
                 // Existing invocations were operational by definition. The non-null default makes
                 // upgrade and replay preserve that meaning without rewriting old rows in Java.
                 new SchemaMigration(4, "CORE-317 structural incoming node command", List.of(
-                        "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")));
+                        "ALTER TABLE invocation ADD COLUMN node_command TEXT NOT NULL DEFAULT 'process'")),
+                // PERS-05. A new table rather than columns on `invocation`, because a handler
+                // outlives the invocation's own lifecycle: it is retained after the wait ends, so a
+                // duplicate or late trigger can still be refused against it and an operator can still
+                // see who resolved a human task. Rows cascade with the process instance and with
+                // nothing narrower.
+                //
+                // The two uniqueness rules are enforced by the database rather than by a read-then-
+                // write in Java, because a check performed outside the write's own transaction is a
+                // race under concurrency and this one decides which of two concurrent triggers wins.
+                //
+                // `correlation_key` is unique only among handlers that are NOT terminal, expressed as
+                // a partial index: a trigger presenting a business key must resolve to exactly one
+                // live handler, while a key whose wait is over becomes reusable. `deduplication_key`
+                // is unique across every handler of the tenant, terminal included, which is what
+                // makes a retried registration a no-op instead of a second handler.
+                //
+                // The rollback boundary is the table's existence rather than a status name: a
+                // pre-PERS-05 binary opening this file is refused by the user_version downgrade
+                // guard, and a file that has never registered a handler downgrades cleanly.
+                new SchemaMigration(5, "PERS-05 durable handlers for wait, re-entry and human tasks",
+                        List.of(
+                """
+                CREATE TABLE execution_handler (
+                    tenant_id             TEXT    NOT NULL,
+                    process_instance_id   TEXT    NOT NULL,
+                    handler_id            TEXT    NOT NULL,
+                    position              INTEGER NOT NULL,
+                    name                  TEXT    NOT NULL,
+                    traversal_id          TEXT    NOT NULL,
+                    invocation_id         TEXT    NOT NULL,
+                    correlation_key       TEXT    NOT NULL,
+                    deduplication_key     TEXT    NOT NULL,
+                    schema_content_type   TEXT    NOT NULL,
+                    schema_ref            TEXT    NOT NULL,
+                    schema_max_bytes      INTEGER NOT NULL,
+                    required_roles        TEXT    NOT NULL,
+                    required_scopes       TEXT    NOT NULL,
+                    status                TEXT    NOT NULL,
+                    resume_traversal_id   TEXT,
+                    actor                 TEXT    NOT NULL,
+                    outcome_content_type  TEXT    NOT NULL,
+                    outcome_bytes         BLOB    NOT NULL,
+                    revision              INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, handler_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                """
+                CREATE UNIQUE INDEX execution_handler_live_correlation
+                    ON execution_handler (tenant_id, name, correlation_key)
+                    WHERE status IN ('WAITING', 'ESCALATED')
+                """,
+                """
+                CREATE UNIQUE INDEX execution_handler_deduplication
+                    ON execution_handler (tenant_id, deduplication_key)
+                """,
+                """
+                CREATE INDEX execution_handler_claimable
+                    ON execution_handler (tenant_id, status)
+                """)));
     }
 
     static int currentVersion() {

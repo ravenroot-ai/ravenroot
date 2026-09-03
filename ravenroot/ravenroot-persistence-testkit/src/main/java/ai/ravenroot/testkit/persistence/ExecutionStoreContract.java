@@ -9,6 +9,7 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -19,6 +20,11 @@ import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
+import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.LeaseHandle;
@@ -1946,6 +1952,371 @@ public abstract class ExecutionStoreContract {
                         NodeInvocationStatus.RUNNING))
                 .apply(new ExecutionTransition.AttemptAdded(traversalId, invocationId,
                         new NodeAttempt(attemptId, 1, NodeAttemptStatus.SCHEDULED)))
+                .build()));
+    }
+
+    // ============================================== PERS-05: durable handlers, wait and re-entry
+
+    /**
+     * The registration and the waiting transition share one commit, and a trigger resolves the
+     * handler by the business identity it presents rather than by an identity it could not know.
+     */
+    @Test
+    final void aRegistrationCommitsWithItsWaitingTransitionAndIsFoundByCorrelationKey() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        DurableHandler found = await(store()
+                .findHandler(fixture.key().tenantId(), "approval", "invoice-42")).orElseThrow();
+        assertEquals(fixture.handlerId(), found.handlerId());
+        assertEquals(HandlerStatus.WAITING, found.status());
+        assertNull(found.resumeTraversalId(), "a waiting handler has authorized no re-entry");
+        assertEquals(TraversalStatus.WAITING,
+                await(store().load(fixture.key())).state().traversals().get(fixture.traversalId()).status(),
+                "the wait and the handler that records what it is waiting for commit together");
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "a waiting handler is state, not work: nothing is claimable until it settles");
+    }
+
+    /**
+     * Registration is exactly-once, which is what makes a crash between the waiting transition and
+     * the registration recoverable by re-sending the identical batch.
+     */
+    @Test
+    final void aRepeatedRegistrationUnderTheSameDeduplicationKeyIsANoOpNotASecondHandler() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerHandler(fixture.registration())
+                .build()));
+
+        assertEquals(1, await(store().handlers(fixture.key())).size(),
+                "a retried wait must not leave a second handler that no trigger will ever resolve");
+    }
+
+    /** Two live handlers under one correlation key would make a trigger's target arbitrary. */
+    @Test
+    final void aLiveCorrelationKeyCannotBeTakenTwiceButBecomesReusableOnceTheWaitIsOver() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var first = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        ExecutionKey secondKey = newKey();
+
+        ExecutionStoreFailure taken = failureOf(() ->
+                waitingHandler(secondKey, "approval", "invoice-42", "dedup-2"));
+        var conflict = assertInstanceOf(ExecutionStoreFailure.HandlerCorrelationTaken.class, taken);
+        assertEquals("invoice-42", conflict.correlationKey());
+        assertEquals(Retryability.DETERMINISTIC_REJECT, conflict.retryability(),
+                "re-reading cannot make a taken correlation key free");
+
+        resolve(first, "approved");
+        assertDoesNotThrow(() -> waitingHandler(newKey(), "approval", "invoice-42", "dedup-3"),
+                "a key whose wait is over is reusable; terminal handlers are retained, not live");
+    }
+
+    /**
+     * The resolution, the re-entry traversal and the journal event are one commit, and the trigger
+     * the store then offers names the <em>new</em> traversal.
+     */
+    @Test
+    final void anAuthorizedResolutionCommitsAReEntryTraversalAndOffersExactlyOneTrigger() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        UUID resumeTraversalId = resolve(fixture, "approved");
+
+        DurableHandler resolved = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(HandlerStatus.RESOLVED, resolved.status());
+        assertEquals(resumeTraversalId, resolved.resumeTraversalId());
+        assertEquals("issuer|USER|approver", resolved.actor());
+        assertTrue(await(store().load(fixture.key())).state().traversals().containsKey(resumeTraversalId),
+                "the traversal that resumes the process is durable state, not a live continuation");
+        assertTrue(await(store().findHandler(fixture.key().tenantId(), "approval", "invoice-42")).isEmpty(),
+                "a settled handler is no longer live and no longer answers a trigger");
+
+        List<PendingWork> claimed =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size());
+        var trigger = assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst());
+        assertEquals(fixture.handlerId(), trigger.workItemId());
+        assertEquals(resumeTraversalId, trigger.traversalId(),
+                "the claimant runs the traversal the resolution authorized, not the one that waited");
+        assertEquals("approval", trigger.handlerName());
+        assertEquals("approved", new String(trigger.payload().bytes(), StandardCharsets.UTF_8));
+
+        await(store().ack(trigger));
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "one handler produces one trigger, and an acknowledged trigger stays acknowledged");
+    }
+
+    /**
+     * Duplicate and late are the same fact, and both are decided from stored state alone — no clock,
+     * no retention window, therefore the same answer on every retry.
+     */
+    @Test
+    final void aSecondResolutionIsRefusedDeterministicallyAndCommitsNothing() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        UUID firstResume = resolve(fixture, "approved");
+
+        StoredProcessInstance settled = await(store().load(fixture.key()));
+        UUID secondResume = UUID.randomUUID();
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(settled.revision()))
+                        .apply(new ExecutionTransition.TraversalAdded(new Traversal(secondResume, "work",
+                                TraversalStatus.ACCEPTED, Map.of())))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(), "issuer|USER|other",
+                                secondResume, OpaquePayload.of("approved".getBytes(StandardCharsets.UTF_8),
+                                        "text/plain")))
+                        .build())));
+        var notResolvable = assertInstanceOf(ExecutionStoreFailure.HandlerNotResolvable.class, refused);
+        assertEquals(HandlerStatus.RESOLVED, notResolvable.current());
+        assertEquals(Retryability.DETERMINISTIC_REJECT, notResolvable.retryability(),
+                "a caller that re-read and retried this would loop forever");
+
+        StoredProcessInstance after = await(store().load(fixture.key()));
+        assertEquals(settled.revision(), after.revision(), "a refused batch writes nothing at all");
+        assertFalse(after.state().traversals().containsKey(secondResume),
+                "the re-entry traversal must not survive the handler transition that was refused");
+        DurableHandler unchanged = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(firstResume, unchanged.resumeTraversalId());
+        assertEquals("issuer|USER|approver", unchanged.actor(),
+                "the second principal must not overwrite the one that actually resolved it");
+    }
+
+    /**
+     * The store cannot be used as a cross-tenant existence oracle: another tenant's handler is
+     * indistinguishable from one that was never registered.
+     */
+    @Test
+    final void anotherTenantsHandlerIsIndistinguishableFromOneThatNeverExisted() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        assertEquals(Optional.empty(), await(store().findHandler("intruder", "approval", "invoice-42")),
+                "an empty answer, never a denial, or the refusal itself would confirm the key exists");
+        assertEquals(Optional.empty(), await(store().loadHandler(
+                new ExecutionKey("intruder", fixture.key().processInstanceId()), fixture.handlerId())));
+        assertTrue(await(store().handlers(
+                new ExecutionKey("intruder", fixture.key().processInstanceId()))).isEmpty());
+    }
+
+    /** Escalation raises visibility, leaves the handler resolvable, and tolerates redelivery. */
+    @Test
+    final void escalationIsRepeatableAndLeavesTheHandlerResolvable() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        escalate(fixture, "no decision within the declared window");
+        DurableHandler escalated = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(HandlerStatus.ESCALATED, escalated.status());
+        assertNull(escalated.resumeTraversalId(), "an escalation resumes nothing and produces no trigger");
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty());
+
+        // At-least-once timer delivery must not be able to turn a retry into an incident.
+        assertDoesNotThrow(() -> escalate(fixture, "no decision within the declared window"));
+        assertEquals(1, await(store().handlers(fixture.key())).size());
+        assertTrue(await(store().findHandler(fixture.key().tenantId(), "approval", "invoice-42")).isPresent(),
+                "an escalated handler is still live: escalation unsticks work, it does not close it");
+
+        assertDoesNotThrow(() -> resolve(fixture, "approved"));
+    }
+
+    /** Expiry is terminal, resumes the process on its timeout route, and refuses a late trigger. */
+    @Test
+    final void anExpiredHandlerResumesTheProcessAndRefusesALaterResolution() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+        UUID timeoutTraversal = UUID.randomUUID();
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(waiting.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(timeoutTraversal, "work",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .applyHandler(new HandlerTransition.Expired(fixture.handlerId(), timeoutTraversal))
+                .build()));
+
+        DurableHandler expired = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(HandlerStatus.EXPIRED, expired.status());
+        assertEquals("", expired.actor(), "a deadline is not an actor and must not be recorded as one");
+        assertEquals(timeoutTraversal, expired.resumeTraversalId());
+
+        List<PendingWork> claimed =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size());
+        assertEquals(timeoutTraversal,
+                assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst()).traversalId());
+
+        assertInstanceOf(ExecutionStoreFailure.HandlerNotResolvable.class,
+                failureOf(() -> resolve(fixture, "approved")));
+    }
+
+    /** The payload schema is enforced by the store, so it holds for any caller building its own batch. */
+    @Test
+    final void aResolutionPayloadThatDoesNotMatchTheDeclaredSchemaIsRefusedAndCommitsNothing() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+        UUID resume = UUID.randomUUID();
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(waiting.revision()))
+                        .apply(new ExecutionTransition.TraversalAdded(new Traversal(resume, "work",
+                                TraversalStatus.ACCEPTED, Map.of())))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(),
+                                "issuer|USER|approver", resume,
+                                OpaquePayload.of(new byte[] {1, 2, 3}, "application/octet-stream")))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(HandlerStatus.WAITING,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status());
+        assertEquals(waiting.revision(), await(store().load(fixture.key())).revision());
+    }
+
+    /** A handler that closed a process while naming a re-entry point nobody created would strand it. */
+    @Test
+    final void aTerminalTransitionNamingATraversalTheBatchDidNotCreateIsRefused() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(waiting.revision()))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(),
+                                "issuer|USER|approver", UUID.randomUUID(),
+                                OpaquePayload.of("approved".getBytes(StandardCharsets.UTF_8), "text/plain")))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(HandlerStatus.WAITING,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status());
+    }
+
+    /**
+     * The human-task case the whole mechanism exists for: created before a complete shutdown,
+     * authorized and resolved after the restart, by a process that did not exist when the wait began.
+     */
+    @Test
+    final void aHumanTaskRegisteredBeforeAShutdownIsResolvableAfterTheRestart() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        assumeCapability(StoreCapability.DURABLE);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        reopen();
+
+        DurableHandler survived = await(store()
+                .findHandler(fixture.key().tenantId(), "approval", "invoice-42")).orElseThrow();
+        assertEquals(fixture.handlerId(), survived.handlerId());
+        assertEquals(HandlerStatus.WAITING, survived.status());
+        assertEquals(Set.of("APPROVER"), survived.authorization().requiredRoles(),
+                "the authorization requirement is what makes the task resolvable by the right person, "
+                        + "so it has to survive with it");
+        assertEquals("application/vnd.ravenroot.test-approval", survived.payloadSchema().contentType());
+
+        UUID resumeTraversalId = resolve(fixture, "approved");
+
+        reopen();
+
+        assertEquals(HandlerStatus.RESOLVED,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status());
+        List<PendingWork> claimed =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-after-restart", 10, TTL));
+        assertEquals(1, claimed.size());
+        assertEquals(resumeTraversalId,
+                assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst()).traversalId());
+
+        // And the refusal is just as durable as the resolution: a trigger redelivered by a client
+        // that never saw the first answer is refused identically after the restart.
+        assertInstanceOf(ExecutionStoreFailure.HandlerNotResolvable.class,
+                failureOf(() -> resolve(fixture, "approved")));
+    }
+
+    /** One handler, one trigger, and the acknowledgement is not lost to a later unrelated write. */
+    @Test
+    final void anAcknowledgedTriggerIsNotRedeliveredByALaterWriteToTheSameInstance() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        resolve(fixture, "approved");
+
+        PendingWork trigger =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).getFirst();
+        await(store().ack(trigger));
+
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(UUID.randomUUID(), "work",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .build()));
+
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "a retained terminal handler must keep its acknowledgement, or its trigger replays forever");
+    }
+
+    /** Identities the whole PERS-05 story is told in, kept together so a test reads as one wait. */
+    private record HandlerFixture(ExecutionKey key, UUID traversalId, UUID invocationId, UUID handlerId,
+                                  HandlerRegistration registration) {
+    }
+
+    /**
+     * Creates an instance whose only traversal is {@code WAITING} on one freshly registered handler.
+     *
+     * <p>The invocation carries no attempt, deliberately: an attempt would be claimable work of its
+     * own and every trigger assertion would then have to filter it out, which is exactly how a test
+     * comes to pass for the wrong reason.</p>
+     */
+    private HandlerFixture waitingHandler(ExecutionKey key, String name, String correlationKey,
+                                          String deduplicationKey) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID handlerId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        var registration = new HandlerRegistration(handlerId, name, traversalId, invocationId,
+                correlationKey, deduplicationKey,
+                new HandlerPayloadSchema("application/vnd.ravenroot.test-approval", "approval/v1", 1024),
+                HandlerAuthorization.ofRoles("APPROVER"));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                        new NodeInvocation(invocationId, "await-approval", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING))
+                .registerHandler(registration)
+                .build()));
+        return new HandlerFixture(key, traversalId, invocationId, handlerId, registration);
+    }
+
+    /** Resolves a fixture's handler and returns the re-entry traversal the resolution committed. */
+    private UUID resolve(HandlerFixture fixture, String outcome) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        UUID resumeTraversalId = UUID.randomUUID();
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(resumeTraversalId, "work",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(), "issuer|USER|approver",
+                        resumeTraversalId, OpaquePayload.of(outcome.getBytes(StandardCharsets.UTF_8),
+                                "application/vnd.ravenroot.test-approval")))
+                .build()));
+        return resumeTraversalId;
+    }
+
+    private void escalate(HandlerFixture fixture, String reason) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .applyHandler(new HandlerTransition.Escalated(fixture.handlerId(), reason))
                 .build()));
     }
 

@@ -2,6 +2,7 @@ package ai.ravenroot.persistence.sqlite;
 
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -13,6 +14,11 @@ import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
+import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.LeaseHandle;
@@ -129,7 +135,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoreCapability.CROSS_PROCESS_LEASE,
             StoreCapability.IDEMPOTENCY_PURGE,
             StoreCapability.EVENT_JOURNAL,
-            StoreCapability.JOURNAL_COMPACTION);
+            StoreCapability.JOURNAL_COMPACTION,
+            StoreCapability.DURABLE_HANDLERS);
+
+    /**
+     * The one projection every handler read uses, aliased so a correlated subquery cannot silently
+     * bind an unqualified column to its own table instead of to this one.
+     */
+    private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
 
     private static final int SQLITE_PERM = 3;
     private static final int SQLITE_BUSY = 5;
@@ -224,6 +237,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
             });
+            batch.handlerTransitions().forEach(transition ->
+                    requireWithinPayloadLimit(transition.outcomePayload()));
             requireEnvelopesMatchBatch(batch);
             return inWriteTransaction(batch.key(), () -> applyLocked(batch));
         });
@@ -269,6 +284,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
         writeInstanceRow(key, folded.status(), pin, revision, fencingToken, now);
         AggregateStorage.write(connection, key, folded);
         writeTimers(key, batch);
+        // After the aggregate, because a registration may name an invocation this batch created and a
+        // terminal transition must name a traversal this batch added; both are validated against the
+        // post-fold aggregate. A rejection rolls the enclosing transaction back, which is what makes
+        // a wait -- and a re-entry -- atomic with the transitions beside it.
+        writeHandlers(key, batch, folded, revision);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of PERS-07's
         // shared transactional boundary. There is no publish step to crash between, because there is
@@ -433,7 +453,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     }
                     List<ScheduledAttempt> attempts = claimableAttempts(key, now);
                     List<TimerSchedule> timers = claimableTimers(key, now);
-                    if (attempts.isEmpty() && timers.isEmpty()) {
+                    List<DurableHandler> triggers = claimableTriggers(key, now);
+                    if (attempts.isEmpty() && timers.isEmpty() && triggers.isEmpty()) {
                         continue;
                     }
                     LeaseHandle lease = issueLease(key, meta.fencingToken(),
@@ -449,6 +470,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             break;
                         }
                         claimed.add(claimTimer(key, timer, lease, now, leaseTtl));
+                    }
+                    for (DurableHandler handler : triggers) {
+                        if (claimed.size() >= limit) {
+                            break;
+                        }
+                        claimed.add(claimTrigger(key, handler, lease, now, leaseTtl));
                     }
                 }
                 return List.copyOf(claimed);
@@ -1432,15 +1459,21 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * would also let the table grow without bound across a long-lived instance.</p>
      */
     private void dropAcknowledgementsForRescheduledWork(ExecutionKey key) throws SQLException {
+        // Handler identities are work-item identities too, and a terminal handler is retained rather
+        // than deleted, so its acknowledgement must be retained with it. Omitting the third arm here
+        // would drop the acknowledgement on the next write and redeliver a resolved handler's trigger
+        // forever.
         String liveWork = "SELECT attempt_id FROM attempt WHERE tenant_id = ? AND process_instance_id = ? "
-                + "UNION ALL SELECT timer_id FROM timer WHERE tenant_id = ? AND process_instance_id = ?";
+                + "UNION ALL SELECT timer_id FROM timer WHERE tenant_id = ? AND process_instance_id = ? "
+                + "UNION ALL SELECT handler_id FROM execution_handler "
+                + "WHERE tenant_id = ? AND process_instance_id = ?";
         for (String table : List.of("work_acknowledgement", "work_claim")) {
             try (PreparedStatement statement = connection.prepareStatement(
                     "DELETE FROM " + table + " WHERE tenant_id = ? AND process_instance_id = ? "
                             + "AND work_item_id NOT IN (" + liveWork + ")")) {
                 String tenantId = key.tenantId();
                 String instanceId = key.processInstanceId().toString();
-                for (int pair = 0; pair < 3; pair++) {
+                for (int pair = 0; pair < 4; pair++) {
                     statement.setString(pair * 2 + 1, tenantId);
                     statement.setString(pair * 2 + 2, instanceId);
                 }
@@ -1454,6 +1487,356 @@ public final class SqliteExecutionStore implements ExecutionStore {
         statement.setString(1, key.tenantId());
         statement.setString(2, key.processInstanceId().toString());
         statement.setString(3, workItemId.toString());
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(handlerId, "handlerId");
+            return inReadTransaction(key, () -> {
+                // Absent instance and absent handler answer the same way. Distinguishing them would
+                // let a probe learn that a process instance exists in a tenant it cannot read.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                                + "AND h.handler_id = ?")) {
+                    bindItem(statement, key, handlerId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readHandler(rows)) : Optional.<DurableHandler>empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> findHandler(String tenantId, String handlerName,
+                                                                 String correlationKey) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            HandlerRegistration.requireBoundedKey(handlerName, "handlerName");
+            HandlerRegistration.requireBoundedKey(correlationKey, "correlationKey");
+            return inReadTransaction(null, () -> {
+                // The partial unique index makes this at most one row, so the answer does not depend
+                // on ordering. A LIMIT here would have hidden a violated invariant behind an
+                // arbitrary winner.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
+                                + "AND h.status IN ('WAITING', 'ESCALATED')")) {
+                    statement.setString(1, tenantId);
+                    statement.setString(2, handlerName);
+                    statement.setString(3, correlationKey);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readHandler(rows)) : Optional.<DurableHandler>empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableHandler>> handlers(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                var found = new ArrayList<DurableHandler>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                                + "ORDER BY h.position")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            found.add(readHandler(rows));
+                        }
+                    }
+                }
+                return List.copyOf(found);
+            });
+        });
+    }
+
+    /**
+     * Folds this batch's registrations and handler transitions, inside the enclosing transaction.
+     *
+     * <p>Runs after the aggregate is written, because a registration may name an invocation the same
+     * batch created and a terminal transition must name a traversal the same batch added; both are
+     * validated against the post-fold aggregate that is already in {@code folded}. A rejection here
+     * rolls the whole transaction back, which is what makes a wait, or a re-entry, atomic.</p>
+     */
+    private void writeHandlers(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                               long revision) throws SQLException {
+        for (HandlerRegistration registration : batch.handlersToRegister()) {
+            registerHandler(key, folded, registration, revision);
+        }
+        for (HandlerTransition transition : batch.handlerTransitions()) {
+            transitionHandler(key, folded, transition, revision);
+        }
+    }
+
+    private void registerHandler(ExecutionKey key, ProcessInstance folded, HandlerRegistration registration,
+                                 long revision) throws SQLException {
+        requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                "handler " + registration.handlerId());
+
+        DurableHandler byDeduplication = handlerByDeduplicationKey(key.tenantId(),
+                registration.deduplicationKey());
+        if (byDeduplication != null) {
+            // A retried wait re-sends the identical batch and must be a no-op. A DIFFERENT
+            // registration under the same key is a caller bug, and answering it as a success would
+            // silently discard a handler somebody asked for.
+            if (!byDeduplication.matches(registration)) {
+                throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                        + registration.deduplicationKey() + " already registers handler "
+                        + byDeduplication.handlerId() + ", which is not the handler being registered"));
+            }
+            return;
+        }
+        DurableHandler contender = liveHandler(key.tenantId(), registration.name(),
+                registration.correlationKey());
+        if (contender != null && !contender.handlerId().equals(registration.handlerId())) {
+            throw failure(new ExecutionStoreFailure.HandlerCorrelationTaken(registration.name(),
+                    registration.correlationKey()));
+        }
+        DurableHandler existing = readHandler(key, registration.handlerId());
+        if (existing != null) {
+            throw failure(ExecutionStoreFailure.invalid("handler " + registration.handlerId()
+                    + " is already registered under a different deduplication key"));
+        }
+        insertHandler(DurableHandler.waiting(key, registration, revision), nextHandlerPosition(key));
+    }
+
+    private void transitionHandler(ExecutionKey key, ProcessInstance folded, HandlerTransition transition,
+                                   long revision) throws SQLException {
+        DurableHandler current = readHandler(key, transition.handlerId());
+        if (current == null) {
+            // InvalidRequest rather than NotFound: NotFound names a process instance, and the
+            // instance is present -- it is the handler inside it that this batch invented.
+            throw failure(ExecutionStoreFailure.invalid("unknown handler " + transition.handlerId()));
+        }
+        // A redelivered escalation timer must not be able to turn an escalation into a failure.
+        // Every other repeat is a duplicate and is refused.
+        if (transition.next() == HandlerStatus.ESCALATED && current.status() == HandlerStatus.ESCALATED) {
+            return;
+        }
+        if (!current.status().canTransitionTo(transition.next())) {
+            throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
+                    current.status(), transition.next()));
+        }
+        if (transition.next().resumesProcess()) {
+            requireTraversalExists(folded, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+        }
+        if (transition.next() == HandlerStatus.RESOLVED) {
+            // Only a resolution supplies the body the handler was declared to be waiting for. A
+            // denial carries a refusal reason, which is a different shape by nature.
+            Optional<String> refusal = current.payloadSchema().rejectionOf(transition.outcomePayload());
+            if (refusal.isPresent()) {
+                throw failure(ExecutionStoreFailure.invalid("handler " + current.handlerId()
+                        + " payload was refused: " + refusal.get()));
+            }
+        }
+        updateHandler(current.apply(transition, revision));
+    }
+
+    private void insertHandler(DurableHandler handler, int position) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_handler (tenant_id, process_instance_id, handler_id, position, "
+                        + "name, traversal_id, invocation_id, correlation_key, deduplication_key, "
+                        + "schema_content_type, schema_ref, schema_max_bytes, required_roles, "
+                        + "required_scopes, status, resume_traversal_id, actor, outcome_content_type, "
+                        + "outcome_bytes, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, handler.key().tenantId());
+            statement.setString(2, handler.key().processInstanceId().toString());
+            statement.setString(3, handler.handlerId().toString());
+            statement.setInt(4, position);
+            statement.setString(5, handler.name());
+            statement.setString(6, handler.traversalId().toString());
+            statement.setString(7, handler.invocationId().toString());
+            statement.setString(8, handler.correlationKey());
+            statement.setString(9, handler.deduplicationKey());
+            statement.setString(10, handler.payloadSchema().contentType());
+            statement.setString(11, handler.payloadSchema().schemaRef());
+            statement.setInt(12, handler.payloadSchema().maxBytes());
+            statement.setString(13, joinTokens(handler.authorization().requiredRoles()));
+            statement.setString(14, joinTokens(handler.authorization().requiredScopes()));
+            statement.setString(15, handler.status().name());
+            statement.setString(16, handler.resumeTraversalId() == null ? null
+                    : handler.resumeTraversalId().toString());
+            statement.setString(17, handler.actor());
+            statement.setString(18, handler.outcomePayload().contentType());
+            statement.setBytes(19, handler.outcomePayload().bytes());
+            statement.setLong(20, handler.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateHandler(DurableHandler handler) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE execution_handler SET status = ?, resume_traversal_id = ?, actor = ?, "
+                        + "outcome_content_type = ?, outcome_bytes = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND handler_id = ?")) {
+            statement.setString(1, handler.status().name());
+            statement.setString(2, handler.resumeTraversalId() == null ? null
+                    : handler.resumeTraversalId().toString());
+            statement.setString(3, handler.actor());
+            statement.setString(4, handler.outcomePayload().contentType());
+            statement.setBytes(5, handler.outcomePayload().bytes());
+            statement.setLong(6, handler.revision());
+            statement.setString(7, handler.key().tenantId());
+            statement.setString(8, handler.key().processInstanceId().toString());
+            statement.setString(9, handler.handlerId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private int nextHandlerPosition(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM execution_handler "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableHandler readHandler(ExecutionKey key, UUID handlerId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? AND h.handler_id = ?")) {
+            bindItem(statement, key, handlerId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows) : null;
+            }
+        }
+    }
+
+    private DurableHandler liveHandler(String tenantId, String handlerName, String correlationKey)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
+                        + "AND h.status IN ('WAITING', 'ESCALATED')")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, handlerName);
+            statement.setString(3, correlationKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows) : null;
+            }
+        }
+    }
+
+    private DurableHandler handlerByDeduplicationKey(String tenantId, String deduplicationKey)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.deduplication_key = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, deduplicationKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows) : null;
+            }
+        }
+    }
+
+    /**
+     * Reconstructs a stored handler through its canonical constructor.
+     *
+     * <p>A row that no longer satisfies the record's invariants — a resuming status with no resume
+     * traversal, an unknown status name written by a newer binary — surfaces as
+     * {@link ExecutionStoreFailure.Corrupted} rather than escaping into the runtime, matching how the
+     * aggregate itself is revalidated on the way out.</p>
+     */
+    private DurableHandler readHandler(ResultSet rows) throws SQLException {
+        var key = new ExecutionKey(rows.getString("tenant_id"),
+                UUID.fromString(rows.getString("process_instance_id")));
+        String resumeTraversalId = rows.getString("resume_traversal_id");
+        try {
+            return new DurableHandler(UUID.fromString(rows.getString("handler_id")), key,
+                    rows.getString("name"), UUID.fromString(rows.getString("traversal_id")),
+                    UUID.fromString(rows.getString("invocation_id")), rows.getString("correlation_key"),
+                    rows.getString("deduplication_key"),
+                    new HandlerPayloadSchema(rows.getString("schema_content_type"),
+                            rows.getString("schema_ref"), rows.getInt("schema_max_bytes")),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    HandlerStatus.valueOf(rows.getString("status")),
+                    resumeTraversalId == null ? null : UUID.fromString(resumeTraversalId),
+                    rows.getString("actor"),
+                    OpaquePayload.of(rows.getBytes("outcome_bytes"),
+                            rows.getString("outcome_content_type")),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    /**
+     * Newline-delimited, which is unambiguous because {@link HandlerAuthorization} rejects a token
+     * carrying a control character. An escaping scheme invented here would be one every other adapter
+     * would have to reproduce exactly.
+     */
+    private static String joinTokens(java.util.Set<String> tokens) {
+        return String.join("\n", tokens);
+    }
+
+    private static java.util.Set<String> splitTokens(String stored) {
+        if (stored == null || stored.isEmpty()) {
+            return java.util.Set.of();
+        }
+        return new java.util.LinkedHashSet<>(List.of(stored.split("\n", -1)));
+    }
+
+    private void requireTraversalExists(ProcessInstance folded, UUID traversalId, String what) {
+        if (folded == null || !folded.traversals().containsKey(traversalId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    private void requireInvocationExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                         String what) {
+        requireTraversalExists(folded, traversalId, what);
+        if (!folded.traversals().get(traversalId).invocations().containsKey(invocationId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names invocation " + invocationId
+                    + ", which traversal " + traversalId + " does not contain"));
+        }
+    }
+
+    private List<DurableHandler> claimableTriggers(ExecutionKey key, Instant now) throws SQLException {
+        String sql = HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                + "AND h.status IN ('RESOLVED', 'DENIED', 'EXPIRED') "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = h.tenant_id "
+                + "AND k.process_instance_id = h.process_instance_id AND k.work_item_id = h.handler_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = h.tenant_id "
+                + "AND c.process_instance_id = h.process_instance_id AND c.work_item_id = h.handler_id "
+                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + ") "
+                + "ORDER BY h.position";
+        var ready = new ArrayList<DurableHandler>();
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            StoredInstant.bindComparison(statement, 3, now);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    ready.add(readHandler(rows));
+                }
+            }
+        }
+        return ready;
+    }
+
+    private PendingWork.HandlerTrigger claimTrigger(ExecutionKey key, DurableHandler handler,
+                                                    LeaseHandle lease, Instant now, Duration leaseTtl)
+            throws SQLException {
+        int delivery = registerClaim(key, handler.handlerId(), now, leaseTtl);
+        // The RE-ENTRY traversal, never the one that was waiting: the claimant runs the traversal the
+        // resolution authorized, and the waiting traversal's own history stays closed.
+        return new PendingWork.HandlerTrigger(key, handler.handlerId(), handler.resumeTraversalId(),
+                handler.invocationId(), handler.name(), handler.outcomePayload(),
+                lease.fencingToken(), lease.expiresAt(), delivery);
     }
 
     // ---------------------------------------------------------------- validation

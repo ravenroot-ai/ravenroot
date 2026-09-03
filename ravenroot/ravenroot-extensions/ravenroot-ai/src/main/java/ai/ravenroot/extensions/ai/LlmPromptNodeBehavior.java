@@ -236,9 +236,16 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                     new LlmPromptException(LlmPromptException.Code.CAPACITY_UNAVAILABLE));
         }
         OutboundCall<OutboundHttpResponse> call;
+        ModelInputProvenance provenance = new ModelInputProvenance();
         try {
             String prompt = PromptTemplate.render(settings.prompt(), message.payload(),
                     message.attributes(), Map.of());
+            provenance.add(ModelInputProvenance.Kind.RENDERED_PROMPT,
+                    "node:" + message.nodeId(), prompt);
+            provenance.add(ModelInputProvenance.Kind.INBOUND_PAYLOAD,
+                    "invocation:" + message.invocationId(), message.payload());
+            provenance.add(ModelInputProvenance.Kind.INBOUND_ATTRIBUTES,
+                    "invocation:" + message.invocationId(), message.attributes());
             byte[] body = OpenAiCompatibleChat.writeRequest(settings.model(), prompt, settings.tuning());
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                     settings.profile().endpoint(), "POST",
@@ -255,7 +262,7 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                 if (failure != null) {
                     result.completeExceptionally(sanitize(failure));
                 } else {
-                    result.complete(answer(settings, response, message));
+                    result.complete(answer(settings, response, message, provenance));
                 }
             } catch (RuntimeException invalid) {
                 result.completeExceptionally(sanitize(invalid));
@@ -266,7 +273,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         return result;
     }
 
-    private static NodeResult answer(Settings settings, OutboundHttpResponse response, NodeMessage message) {
+    private static NodeResult answer(Settings settings, OutboundHttpResponse response, NodeMessage message,
+                                     ModelInputProvenance provenance) {
         int status = response.statusCode();
         if (status < 200 || status >= 300) {
             // The body is NOT read into the failure. An endpoint's error document is remote text and
@@ -283,6 +291,13 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         attributes.put("llm.model", settings.model());
         attributes.put("llm.finishReason", completion.finishReason());
         attributes.put("llm.truncated", completion.truncated());
+        var modelOutput = new LinkedHashMap<String, Object>();
+        modelOutput.put("text", completion.text());
+        modelOutput.put("finishReason", completion.finishReason());
+        completion.promptTokens().ifPresent(value -> modelOutput.put("promptTokens", value));
+        completion.completionTokens().ifPresent(value -> modelOutput.put("completionTokens", value));
+        provenance.add(ModelInputProvenance.Kind.MODEL_OUTPUT, "completion", Map.copyOf(modelOutput));
+        attributes.put(ModelInputProvenance.PROMPT_ATTRIBUTE, provenance.snapshot());
         completion.promptTokens().ifPresent(count -> attributes.put("llm.promptTokens", count));
         completion.completionTokens().ifPresent(count -> attributes.put("llm.completionTokens", count));
         return new NodeResult("continue", completion.text(), Map.copyOf(attributes));

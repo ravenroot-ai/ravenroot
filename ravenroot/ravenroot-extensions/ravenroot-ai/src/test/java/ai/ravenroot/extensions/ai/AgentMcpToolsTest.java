@@ -90,9 +90,9 @@ class AgentMcpToolsTest {
 
         // And the result came back into the conversation as a tool message the model could read.
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        assertEquals(4, messages.size());
-        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)));
-        assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(3)));
+        assertEquals(5, messages.size());
+        assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)));
+        assertEquals(PayloadValue.of("beta answered"), contentOf(messages.get(4)));
     }
 
     @Test
@@ -134,7 +134,7 @@ class AgentMcpToolsTest {
         // Nothing was sent to the server. The refusal happened here, before any byte left.
         assertEquals(List.of(), alpha.calledTools());
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        String refusal = ((PayloadValue.TextValue) contentOf(messages.get(3))).value();
+        String refusal = ((PayloadValue.TextValue) contentOf(messages.get(4))).value();
         assertFalse(refusal.isEmpty());
         assertTrue(refusal.contains("available to you"), refusal);
     }
@@ -213,7 +213,7 @@ class AgentMcpToolsTest {
 
         assertEquals("I answered without it", result.payload());
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        String told = ((PayloadValue.TextValue) contentOf(messages.get(3))).value();
+        String told = ((PayloadValue.TextValue) contentOf(messages.get(4))).value();
         assertFalse(told.isEmpty());
         assertTrue(told.contains("did not answer"));
     }
@@ -345,7 +345,8 @@ class AgentMcpToolsTest {
         // The binding is a name the runtime resolves; the bundle never holds a secret and therefore
         // has no path that could return one. Adding CREDENTIAL_RESOLUTION here would replace that
         // property with a promise.
-        assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP),
+        assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                        NodePackageCapability.TOOL_AUTHORIZATION),
                 new AgentNodeBehavior().requiredServices());
         assertTrue(new AgentNodeBehavior().descriptor().properties().stream()
                 .anyMatch(property -> "mcpServers".equals(property.name())));
@@ -388,7 +389,7 @@ class AgentMcpToolsTest {
         // And the server never had to answer 404, which is the observation that does not depend on
         // reading headers at all.
         List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-        assertEquals(PayloadValue.of("found it"), contentOf(messages.get(3)));
+        assertEquals(PayloadValue.of("found it"), contentOf(messages.get(4)));
     }
 
     @Test
@@ -522,20 +523,20 @@ class AgentMcpToolsTest {
         // Both worlds are offered, and the built-in still comes first.
         assertEquals(List.of(LoadSkillTool.NAME, "alpha__search"),
                 toolNamesOf(http.chatBodies().get(0)));
-        // The skill's name and description reached the system turn; its body did not.
-        String system = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(0))
-                .get(0))).value();
-        assertTrue(system.contains("runbook"), system);
-        assertFalse(system.contains("step one, step two"), system);
+        // The skill's name and description reached the untrusted author turn; its body did not.
+        String author = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(0))
+                .get(1))).value();
+        assertTrue(author.contains("runbook"), author);
+        assertFalse(author.contains("step one, step two"), author);
 
         // The first load hands the body over.
         String first = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(1))
-                .get(3))).value();
+                .get(4))).value();
         assertEquals("step one, step two", first);
         // The second says "already loaded" instead of repeating it -- the duplicate-load rule holds on a node
         // that also declares an MCP server, which is the interaction worth pinning here.
         String second = ((PayloadValue.TextValue) contentOf(messagesOf(http.chatBodies().get(2))
-                .get(5))).value();
+                .get(6))).value();
         assertTrue(second.contains("already loaded"), second);
         assertFalse(second.contains("step one, step two"), second);
     }
@@ -578,8 +579,8 @@ class AgentMcpToolsTest {
 
             assertEquals("answered anyway", result.payload(), mode.name());
             List<PayloadValue> messages = messagesOf(http.chatBodies().get(1));
-            assertEquals(PayloadValue.of("tool"), roleOf(messages.get(3)), mode.name());
-            assertFalse(((PayloadValue.TextValue) contentOf(messages.get(3))).value().isEmpty(),
+            assertEquals(PayloadValue.of("tool"), roleOf(messages.get(4)), mode.name());
+            assertFalse(((PayloadValue.TextValue) contentOf(messages.get(4))).value().isEmpty(),
                     mode.name());
         }
     }

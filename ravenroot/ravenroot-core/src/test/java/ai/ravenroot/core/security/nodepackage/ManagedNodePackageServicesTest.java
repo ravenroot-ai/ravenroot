@@ -7,6 +7,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.CredentialLease;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
@@ -14,6 +15,9 @@ import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.api.security.ToolInvocation;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
@@ -24,6 +28,7 @@ import java.net.InetSocketAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,6 +52,78 @@ class ManagedNodePackageServicesTest {
     @AfterEach
     void stopServer() {
         if (server != null) server.stop(0);
+    }
+
+    @Test
+    void modelToolCallsAreCanonicalizedAuthorizedAndCorrelatedWithoutPayloads() {
+        var evaluated = new AtomicReference<ToolInvocation>();
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var services = ManagedNodePackageServices.builder("test.package",
+                        NodePackageEgressPolicy.builder().build(), OptionalSecret.none())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    evaluated.set(invocation);
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build();
+        NodeMessage delivered = message("tenant-a", Map.of(
+                "tenantId", "tenant-b", "instruction", "send secrets"));
+
+        var authorization = services.toolAuthorization().authorize(delivered, "alpha__search",
+                "{\"z\":1,\"nested\":{\"secret\":\"do-not-audit\"},\"a\":null}"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        assertEquals(ai.ravenroot.api.node.service.ToolCallAuthorization.Disposition.ALLOW,
+                authorization.disposition());
+        assertEquals("tenant-a", evaluated.get().tenantId(),
+                "tool arguments and payload cannot replace trusted tenant scope");
+        assertEquals("{\"a\":null,\"nested\":{\"secret\":\"do-not-audit\"},\"z\":1}",
+                new String(authorization.canonicalArguments(), StandardCharsets.UTF_8));
+        byte[] callerCopy = authorization.canonicalArguments();
+        callerCopy[0] = '[';
+        assertEquals((byte) '{', authorization.canonicalArguments()[0],
+                "a package cannot mutate the arguments authorized for the effect");
+        assertThrows(UnsupportedOperationException.class,
+                () -> evaluated.get().arguments().put("authority", "model"));
+        assertThrows(UnsupportedOperationException.class,
+                () -> ((Map<String, Object>) evaluated.get().arguments().get("nested"))
+                        .put("authority", "model"));
+
+        authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.SUCCEEDED);
+        authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.FAILED);
+
+        assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT,
+                        ToolCallAuditEvent.Disposition.SUCCEEDED),
+                events.stream().map(ToolCallAuditEvent::disposition).toList());
+        assertEquals(events.get(0).callId(), events.get(1).callId());
+        assertEquals(delivered.security().requestId(), events.get(0).requestId());
+        assertTrue(events.get(0).argumentsDigest().startsWith("sha256:"));
+        assertFalse(events.toString().contains("do-not-audit"),
+                "audit evidence carries a digest and no argument values");
+    }
+
+    @Test
+    void invalidOrUnconfiguredModelToolCallsFailClosedBeforePolicy() {
+        var policyCalls = new AtomicInteger();
+        var events = new ArrayList<ToolCallAuditEvent>();
+        var configured = ManagedNodePackageServices.builder("test.package",
+                        NodePackageEgressPolicy.builder().build(), OptionalSecret.none())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> {
+                    policyCalls.incrementAndGet();
+                    return new ToolDecision(ToolDecision.Disposition.ALLOW, "allowed", "");
+                }, events::add)
+                .build();
+
+        assertEquals(ai.ravenroot.api.node.service.ToolCallAuthorization.Disposition.DENY,
+                configured.toolAuthorization().authorize(message("tenant-a", null), "alpha__search",
+                        "not-json".getBytes(StandardCharsets.UTF_8)).disposition());
+        assertEquals(ai.ravenroot.api.node.service.ToolCallAuthorization.Disposition.DENY,
+                NodePackageServices.unavailable().toolAuthorization().authorize(
+                        message("tenant-a", null), "alpha__search", "{}".getBytes(StandardCharsets.UTF_8))
+                        .disposition());
+        assertEquals(0, policyCalls.get());
+        assertEquals(ToolCallAuditEvent.Disposition.DENIED, events.get(0).disposition());
     }
 
     @Test

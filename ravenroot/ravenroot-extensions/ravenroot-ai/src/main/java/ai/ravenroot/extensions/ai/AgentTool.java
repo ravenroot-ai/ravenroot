@@ -47,8 +47,8 @@ interface AgentTool {
      * <p>So a tool answers <em>eventually</em>. A local tool completes its stage immediately and
      * loses nothing.</p>
      *
-     * @param argumentsJson the raw {@code arguments} string the model produced, which is
-     *     model-authored text and may be malformed, empty or not an object at all
+     * @param argumentsJson the bounded canonical argument object the server-side reference monitor
+     *     evaluated; never the unchecked string the model produced
      * @return a stage carrying a non-null result or refusal; never {@code null} and never an empty
      *     string, because an empty tool message reads to a model as a successful call that returned
      *     nothing. The stage itself should not fail — a tool that fails it is treated by

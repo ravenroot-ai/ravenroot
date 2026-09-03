@@ -18,7 +18,7 @@ import java.util.concurrent.CompletionStage;
  * {@code load_skill}: the built-in tool through which an agent asks for the body of a skill.
  *
  * <h2>Progressive disclosure, which is the whole point</h2>
- * <p>The system turn carries every declared skill's <b>name and description and nothing else</b>
+ * <p>The untrusted author turn carries every declared skill's <b>name and description and nothing else</b>
  * (see {@link AgentTurn#systemMessage}); the body arrives here, once, when the model asks for it.
  * Wiring that as a tool rather than as a prompt section is what makes an unused skill cost its one
  * line and no more. Keeping that disclosure boundary in the tool contract also keeps the loop

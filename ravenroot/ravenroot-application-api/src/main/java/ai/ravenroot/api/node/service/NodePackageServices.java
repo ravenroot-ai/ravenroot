@@ -29,10 +29,23 @@ public interface NodePackageServices {
      */
     OutboundWebSocketService outboundWebSocket();
 
-/**
- * Deny-only view used for legacy packages and deployments which composed no grants.
+    /**
+     * Returns the server-owned authorization and audit boundary for model-requested tool calls.
+     *
+     * <p>This is a default method so SDK /2 packages compiled before the service existed remain
+     * binary compatible. The default refuses every call: adding the method cannot turn an older
+     * service view into authority it was never granted.</p>
+     *
+     * @return a fail-closed service unless the operator explicitly granted tool authorization
+     */
+    default ToolCallAuthorizationService toolAuthorization() {
+        return ToolCallAuthorizationService.unavailable();
+    }
+
+    /**
+     * Deny-only view used for legacy packages and deployments which composed no grants.
      * @return a reusable deny-only view that advertises no capabilities and fails every operation
- */
+     */
     static NodePackageServices unavailable() {
         NodePackageServiceException unavailable = new NodePackageServiceException(
                 NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);

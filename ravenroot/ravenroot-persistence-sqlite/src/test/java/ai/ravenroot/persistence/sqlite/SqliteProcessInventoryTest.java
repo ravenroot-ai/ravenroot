@@ -21,6 +21,7 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 import ai.ravenroot.testkit.persistence.MutableClock;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -476,6 +477,112 @@ class SqliteProcessInventoryTest {
                     page.items().stream().map(item -> item.key().processInstanceId()).toList(),
                     "the two axes compose as a conjunction; naming FAILED does not smuggle terminal "
                             + "rows past includeTerminal");
+        }
+    }
+
+    /**
+     * ADR 0010 section 12.4: an unrecognised status name -- a row written by a future binary, or bit
+     * rot -- must surface as {@link ExecutionStoreFailure.Corrupted} and fail the whole page, rather
+     * than being silently dropped from a listing or misread as a well-formed row. {@code Corrupted} is
+     * adapter-conditional by construction (no conforming in-memory adapter's own operations can
+     * produce it, since its aggregate holds a real {@code ProcessInstanceStatus} enum constant and has
+     * no serialization step to corrupt), so this can only be exercised against a durable, serialized
+     * adapter, and it belongs here rather than in the shared conformance suite for exactly that reason
+     * -- see that suite's own section-12.4 discussion.
+     */
+    @Test
+    void anUnrecognisedStatusNameSurfacesAsCorruptedRatherThanBeingSilentlyDroppedFromTheListing()
+            throws Exception {
+        Path file = databaseDirectory.resolve("corrupt.db");
+        var clock = new MutableClock(EPOCH);
+        ExecutionKey key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        try (var store = open(file, clock)) {
+            createRunning(store, key, traversalId);
+        }
+
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file);
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("UPDATE process_instance SET status = 'NOT_A_REAL_STATUS' "
+                    + "WHERE process_instance_id = '" + key.processInstanceId() + "'");
+        }
+
+        try (var reopened = open(file, clock)) {
+            ExecutionStoreFailure listingFailure = failureOf(() -> await(
+                    reopened.listProcessInstances(TENANT, ProcessInventoryQuery.everything(10))));
+            assertInstanceOf(ExecutionStoreFailure.Corrupted.class, listingFailure,
+                    "an unrecognised status name must fail the whole page, not silently drop the row "
+                            + "and report a listing that looks cleaner than the database actually is");
+
+            ExecutionStoreFailure lookupFailure = failureOf(() -> await(reopened.findProcessInstance(key)));
+            assertInstanceOf(ExecutionStoreFailure.Corrupted.class, lookupFailure,
+                    "a direct lookup of the same row must fail the same way, not return empty as if "
+                            + "the instance had never existed");
+        }
+    }
+
+    /**
+     * The migration-upgrade path: migration 5 leaves {@code retained_until_*} {@code NULL} for a
+     * pre-existing row rather than guessing a deadline the migration cannot know (see
+     * {@code SqliteSchemaMigrationTest}). This asserts the read-time half of that design: when the row
+     * is also terminal, the store must still resolve a deadline for it -- against
+     * {@code updatedAt + terminalRetention()} -- rather than reporting the row as unbounded or leaving
+     * {@link ProcessInventoryEntry#retainedUntil()} empty.
+     *
+     * <p><strong>DEFECT (issue 154, wave 1):</strong> it does not. {@code SqliteExecutionStore
+     * .readInventoryRow} builds {@code ProcessInventoryEntry.retainedUntil} from the raw stored column
+     * — {@code Optional.ofNullable(nullableInstant(rows, "retained_until"))} — with no call to
+     * {@code retentionDueAt(...)}. The purge path ({@code earliestExpiredDeadline}, which DOES call
+     * {@code retentionDueAt}) correctly treats this exact row as due at
+     * {@code updatedAt + terminalRetention()}, so the row IS eligible for purge at the right instant —
+     * but a caller reading it first sees {@code retainedUntil()} empty, contradicting
+     * {@code ProcessInventoryEntry#retainedUntil}'s own javadoc ("absent while the instance is
+     * non-terminal") for a row that is, in fact, terminal. The adapter's own {@code InstanceMeta}
+     * javadoc even documents the inconsistency in passing ("null while non-terminal, and also null on
+     * a terminal row written before schema 5") without drawing the conclusion that the read path
+     * should apply the same resolution the purge path does. This is a genuine bug in
+     * {@code src/main}, out of this test's territory to fix; it is reported here with a demonstrating,
+     * disabled test rather than fixed or worked around. Route the fix to
+     * {@code SqliteExecutionStore.readInventoryRow}
+     * (and the sibling reader used by {@code findProcessInstance}), applying {@code retentionDueAt}
+     * the same way {@code earliestExpiredDeadline} does.</p>
+     */
+    @Test
+    @Disabled("DEFECT: readInventoryRow reports a terminal row's retainedUntil as raw-NULL instead of "
+            + "resolving updatedAt + terminalRetention(), unlike the purge path's retentionDueAt -- "
+            + "see this test's javadoc")
+    void aTerminalRowWithNoStoredRetainedUntilResolvesAgainstUpdatedAtPlusTerminalRetention() throws Exception {
+        Path file = databaseDirectory.resolve("legacy-terminal.db");
+        var clock = new MutableClock(EPOCH);
+        ExecutionKey key = new ExecutionKey(TENANT, UUID.randomUUID());
+
+        try (var store = open(file, clock)) {
+            // Opening once is enough to run every migration and establish the real schema on this file.
+            assertTrue(store.supports(StoreCapability.PROCESS_INVENTORY));
+        }
+
+        Instant updatedAt = EPOCH.plusSeconds(120);
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + file);
+             var statement = connection.prepareStatement("INSERT INTO process_instance (tenant_id, "
+                     + "process_instance_id, status, graph_version_pin, revision, fencing_token, "
+                     + "updated_at_epoch_second, updated_at_nano, created_at_epoch_second, "
+                     + "created_at_nano, lifecycle_generation) VALUES (?, ?, 'FAILED', 'graph-v1', 1, 0, "
+                     + "?, 0, ?, 0, 1)")) {
+            // retained_until_epoch_second / retained_until_nano are left unspecified -- NULL -- which
+            // is exactly the shape migration 5 leaves a pre-existing terminal row in.
+            statement.setString(1, TENANT);
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setLong(3, updatedAt.getEpochSecond());
+            statement.setLong(4, updatedAt.getEpochSecond());
+            statement.executeUpdate();
+        }
+
+        try (var reopened = open(file, clock)) {
+            ProcessInventoryEntry entry = only(reopened, key);
+            assertEquals(ProcessInstanceStatus.FAILED, entry.status());
+            assertEquals(updatedAt.plus(reopened.terminalRetention()), entry.retainedUntil().orElseThrow(),
+                    "a terminal row with no stored retained_until must resolve against "
+                            + "updatedAt + terminalRetention(), not report as unbounded or absent");
         }
     }
 

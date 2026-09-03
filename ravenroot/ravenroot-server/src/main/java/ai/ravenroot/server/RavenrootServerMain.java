@@ -211,7 +211,8 @@ public final class RavenrootServerMain {
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), executionStore,
-                deploymentCap.maxActiveDeployments(), unknownBehavior.policy());
+                deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
+                executionStoreOwner.graphDefinitionStore());
         application.configureArtifactDualControl(artifactLifecycle.dualControl());
         serverStartup.installInto(application::installManagedIngress);
         // Stated at startup rather than left to be discovered from a run's outcome: an operator who

@@ -65,6 +65,8 @@ import java.util.concurrent.TimeoutException;
 
 /** Framework-neutral graph execution semantics, including fan-out and fan-in. */
 public final class GraphRunner implements AutoCloseable {
+    private static final Runnable NO_TIMEOUT_RELINQUISHED_OBSERVER = () -> { };
+
     /**
      * How long {@link #close()} waits for a stop, and then for the cancellation it escalates to.
      *
@@ -226,6 +228,7 @@ public final class GraphRunner implements AutoCloseable {
     private final JoinStore joinStore;
     private final boolean ownsJoinStore;
     private final Clock clock;
+    private final Runnable timeoutRelinquishedObserver;
 
     /**
      * SEC-09's decision point. Defaults to {@link UnknownBehaviorPolicy#passThrough()}, while a
@@ -367,7 +370,8 @@ public final class GraphRunner implements AutoCloseable {
                        ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
                        ExecutionPolicy executionPolicy) {
         this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(),
-                DEFAULT_SHUTDOWN_BOUND, UnknownBehaviorPolicy.passThrough(), null, null, executionPolicy);
+                DEFAULT_SHUTDOWN_BOUND, UnknownBehaviorPolicy.passThrough(), null, null, executionPolicy,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER);
     }
 
     /**
@@ -402,7 +406,8 @@ public final class GraphRunner implements AutoCloseable {
                        ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
                        UnknownBehaviorPolicy unknownBehaviors, ExecutionPolicy executionPolicy) {
         this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(),
-                DEFAULT_SHUTDOWN_BOUND, unknownBehaviors, null, null, executionPolicy);
+                DEFAULT_SHUTDOWN_BOUND, unknownBehaviors, null, null, executionPolicy,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER);
     }
 
     /**
@@ -430,6 +435,20 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /**
+     * Test-only composition seam for observing the terminal timeout handoff without changing the
+     * public runner contract. The observer runs only after shutdown has relinquished a join timeout
+     * while holding that timeout's handoff lock.
+     */
+    GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                JoinStore joinStore, Clock clock, Duration shutdownBound,
+                Runnable timeoutRelinquishedObserver) {
+        this(graphManager, engine, behaviors, monitor, identitySource, joinStore, clock, shutdownBound,
+                UnknownBehaviorPolicy.passThrough(), null, null, ExecutionPolicy.STANDARD,
+                timeoutRelinquishedObserver);
+    }
+
+    /**
      * Composes a runner whose nodes are spawned into {@code domain} rather than directly on
      * {@code engine} (ADR 0021 D1/D2): the deployment-hosting path, additive next to every
      * constructor above, none of which is touched. {@code null} is accepted and behaves exactly like
@@ -444,7 +463,8 @@ public final class GraphRunner implements AutoCloseable {
                        BehaviorRegistry behaviors, ExecutionMonitor monitor,
                        ExecutionIdentitySource identitySource, Duration shutdownBound) {
         this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
-                UnknownBehaviorPolicy.passThrough(), domain, null, ExecutionPolicy.STANDARD);
+                UnknownBehaviorPolicy.passThrough(), domain, null, ExecutionPolicy.STANDARD,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER);
     }
 
     /**
@@ -475,7 +495,7 @@ public final class GraphRunner implements AutoCloseable {
                        JoinStore joinStore, Clock clock, Duration shutdownBound,
                        UnknownBehaviorPolicy unknownBehaviors) {
         this(graphManager, engine, behaviors, monitor, identitySource, joinStore, clock, shutdownBound,
-                unknownBehaviors, null, null, ExecutionPolicy.STANDARD);
+                unknownBehaviors, null, null, ExecutionPolicy.STANDARD, NO_TIMEOUT_RELINQUISHED_OBSERVER);
     }
 
     /**
@@ -494,14 +514,16 @@ public final class GraphRunner implements AutoCloseable {
                        ExecutionIdentitySource identitySource, Duration shutdownBound) {
         this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
                 UnknownBehaviorPolicy.passThrough(), null,
-                java.util.Objects.requireNonNull(snapshot, "snapshot"), ExecutionPolicy.STANDARD);
+                java.util.Objects.requireNonNull(snapshot, "snapshot"), ExecutionPolicy.STANDARD,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER);
     }
 
     private GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
                        ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
                        JoinStore joinStore, Clock clock, Duration shutdownBound,
                        UnknownBehaviorPolicy unknownBehaviors, ExecutionDomain domain,
-                       GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy) {
+                       GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy,
+                       Runnable timeoutRelinquishedObserver) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.executionPolicy = java.util.Objects.requireNonNull(executionPolicy, "executionPolicy");
         // Read the manager exactly once, here, and never again. Everything below routes through the
@@ -523,6 +545,8 @@ public final class GraphRunner implements AutoCloseable {
         this.ownsJoinStore = joinStore == null;
         this.joinStore = joinStore == null ? new InMemoryJoinStore() : joinStore;
         this.shutdownBound = java.util.Objects.requireNonNull(shutdownBound, "shutdownBound");
+        this.timeoutRelinquishedObserver = java.util.Objects.requireNonNull(timeoutRelinquishedObserver,
+                "timeoutRelinquishedObserver");
         if (shutdownBound.isNegative() || shutdownBound.isZero()) {
             throw new IllegalArgumentException("shutdownBound must be positive: " + shutdownBound);
         }
@@ -703,7 +727,8 @@ public final class GraphRunner implements AutoCloseable {
         GraphNode start = graph.start();
         var state = new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
                 recorder, identity, identitySource, clock);
-        var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock);
+        var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock,
+                timeoutRelinquishedObserver);
         if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
             throw new IllegalStateException("Traversal " + traversalId + " is already running on this runner");
         }

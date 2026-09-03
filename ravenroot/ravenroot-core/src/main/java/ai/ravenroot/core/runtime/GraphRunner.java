@@ -6,6 +6,7 @@ import ai.ravenroot.api.application.ExecutionPolicy;
 import ai.ravenroot.api.catalog.NodeRuntimeNature;
 import ai.ravenroot.api.catalog.NodeRuntimeNatureProperty;
 import ai.ravenroot.api.catalog.NodeRuntimeMaxConcurrencyProperty;
+import ai.ravenroot.api.catalog.NodeRetryProperty;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.EdgeTraversalEventData;
@@ -29,7 +30,10 @@ import ai.ravenroot.api.execution.NodeFailurePayload;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeRef;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.ConnectorRetryReport;
 import ai.ravenroot.api.execution.RavenNode;
+import ai.ravenroot.api.execution.RetryDecision;
+import ai.ravenroot.api.execution.RetryPolicy;
 import ai.ravenroot.api.persistence.JoinStore;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphCanonicalForm;
@@ -354,6 +358,43 @@ public final class GraphRunner implements AutoCloseable {
      */
     private final ConcurrentHashMap<UUID, CompletableFuture<Void>> pausedTraversals = new ConcurrentHashMap<>();
 
+    /**
+     * Retry backoffs currently being waited out, per traversal.
+     *
+     * <p>A set per traversal rather than one future, because a fan-out can have several branches in
+     * backoff at the same time and cancelling the traversal must end all of them, not the one that
+     * happened to register last. Entries are removed as each wait settles, so the map's size tracks
+     * work in flight rather than growing with the traversal's history; {@link #close()} drains
+     * whatever is left, exactly as it does for pause gates.</p>
+     */
+    private final ConcurrentHashMap<UUID, Set<BackoffWait>> backoffWaits = new ConcurrentHashMap<>();
+
+    /**
+     * One retry backoff in progress, paired with the node whose next attempt it precedes.
+     *
+     * <p>The node id rides along so that a cancellation can name it. {@link TraversalCancelledException}
+     * documents {@code refusedNodeId} as "the first hop that did not run", and for a cancelled backoff
+     * that is the retried node itself — a placeholder there would make the exception's own contract
+     * false for the one path that produces it most often once retries are in use.</p>
+     *
+     * <p>The component is named {@code pending} rather than {@code wait} because {@code wait} is an
+     * illegal record component name — it would clash with {@link Object#wait()}.</p>
+     *
+     * @param pending the future the sleeping thread completes, or a cancellation fails
+     * @param nodeId  the node whose retry this wait precedes
+     */
+    private record BackoffWait(CompletableFuture<Void> pending, String nodeId) {
+    }
+
+    /**
+     * The ordinal of an invocation's first attempt.
+     *
+     * <p>Named rather than written as a literal at the one call site, because the number is the base
+     * of the monotonic sequence the whole retry model rests on — and because the literal {@code 1} in
+     * that position is exactly what this issue replaced.</p>
+     */
+    private static final int FIRST_ATTEMPT_ORDINAL = 1;
+
     public GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
                        ExecutionMonitor monitor) {
         this(graphManager, engine, behaviors, monitor, ExecutionIdentitySource.randomUuids());
@@ -600,7 +641,16 @@ public final class GraphRunner implements AutoCloseable {
                     ? behaviors.descriptor(node.behavior()).orElse(null) : null;
             int maxConcurrency = NodeRuntimeMaxConcurrencyProperty.effectiveValue(descriptor, node.properties());
             RavenNode runtime = runtimeNode(node);
-            definitions.put(node.id(), new NodeRuntimeDefinition(node, nature, maxConcurrency, runtime));
+            // Read once, here, from the same pinned definition every other precomputation reads, and
+            // for the reason stated on `authoredBypassNodes` above: a run in flight must not be able
+            // to observe its own retry bound changing. Malformed values throw from
+            // NodeRetryProperty.read and therefore abort construction, joining the fail-first group —
+            // a graph whose retry bound does not parse is refused before a single actor is spawned,
+            // rather than at the first failure that would have consulted it, which is the one moment
+            // the author is least able to act on it.
+            RetryPolicy retryPolicy = NodeRetryProperty.read(node.properties());
+            definitions.put(node.id(),
+                    new NodeRuntimeDefinition(node, nature, maxConcurrency, runtime, retryPolicy));
             if (nature != NodeRuntimeNature.WORKER && nature != NodeRuntimeNature.TRAVERSAL) {
                 residents.put(node.id(), spawner.apply(node.id(), runtime));
             }
@@ -893,6 +943,13 @@ public final class GraphRunner implements AutoCloseable {
         // released hop performs, which terminates the coordinator and notifies the monitor
         // synchronously, is no longer charged to whoever called cancel.
         releasePauseGate(traversalId, release);
+        // A branch waiting out a retry backoff is parked in neither the gate nor the admission queue,
+        // so neither of the two lines above reaches it. Ending the waits here is what makes cancel
+        // prompt for a retrying traversal instead of returning success over a branch that will happily
+        // dispatch another attempt once its timer elapses. Ordered after the gate release for no
+        // reason other than symmetry with it: the two are independent, and a hop can be in at most
+        // one of them.
+        cancelBackoffs(traversalId);
         return true;
     }
 
@@ -1228,6 +1285,51 @@ public final class GraphRunner implements AutoCloseable {
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), parentInvocationIds, invocationId, attemptId, command,
                 causedBy);
+        return deliverAttempt(node, payload, attributes, parentInvocationIds, command, state, identity,
+                coordinator, iteration, definition, admissionLease, invocationId, attemptId,
+                FIRST_ATTEMPT_ORDINAL, startedEventId);
+    }
+
+    /**
+     * Delivers <em>one</em> attempt of an invocation, and — when the node's policy allows it and the
+     * failure's classification calls for it — schedules and delivers the next one.
+     *
+     * <h2>Why the retry loop lives here and not around {@link #run}</h2>
+     * <p>A retry is another attempt at the <em>same visit</em>, not another visit. Re-entering
+     * {@code run} would mint a second invocation, so the durable record would show one node visited
+     * twice rather than one visit attempted twice, and the attempt ordinal — the thing the whole
+     * feature exists to make visible — would be permanently one on every row. Everything above this
+     * method is therefore per-invocation and everything in it is per-attempt, and the split is exactly
+     * where {@code invocationId} stops changing and {@code attemptId} starts.</p>
+     *
+     * <h2>What is re-done per attempt, and what is not</h2>
+     * <p>Re-done: the {@link NodeMessage}, because it carries {@code attemptId} and that identity is
+     * what an idempotency key downstream is derived from; the runtime instance, because ADR 0024 §3's
+     * dispatch sequence creates one per delivery; and traversal admission, because a retry is a fresh
+     * arrival at the node and must respect its {@code maxConcurrency} like any other. Not re-done: the
+     * invocation, its parents, its command, and its position in the graph.</p>
+     *
+     * <p>Re-acquiring admission is also the second, independent way a shutdown stops a retry:
+     * {@code traversalAdmission.close()} refuses every queued and future acquisition, so a retry that
+     * survives the cancellation check below still cannot be dispatched into a runner being torn
+     * down.</p>
+     *
+     * @param attemptId      this attempt's identity, freshly minted for every retry so each attempt is
+     *                       a distinct effect identity rather than a repeat of one
+     * @param attemptOrdinal this attempt's one-based ordinal, which the policy compares against its
+     *                       budget and which every event about this attempt reports
+     * @param startedEventId the journalled start of <em>this</em> attempt, which its own settlement
+     *                       names as its cause
+     */
+    private CompletionStage<Void> deliverAttempt(GraphNode node, Object payload, Map<String, Object> attributes,
+                                                 Set<UUID> parentInvocationIds, NodeCommand command,
+                                                 ExecutionState state,
+                                                 ExecutionMonitor.ExecutionIdentity identity,
+                                                 JoinCoordinator coordinator, IterationContext iteration,
+                                                 NodeRuntimeDefinition definition,
+                                                 TraversalAdmissionRegistry.Lease admissionLease,
+                                                 UUID invocationId, UUID attemptId, int attemptOrdinal,
+                                                 UUID startedEventId) {
         // Held across the two stages below rather than recomputed: the completion event's identity is
         // minted where the completion is recorded, and read again where the successors are dispatched.
         // The write happens-before the read through the stage boundary, so no further synchronisation.
@@ -1280,7 +1382,7 @@ public final class GraphRunner implements AutoCloseable {
         // paths -- with the count that is actually true on each, which for a failed spawn is whatever
         // OTHER instances of this node are alive, not this one.
         monitor.nodeStarted(identity, node.id(), invocationId, attemptId,
-                liveInstances(node.id(), definition.nature()));
+                liveInstances(node.id(), definition.nature()), attemptOrdinal);
         try {
             if (creationFailed != null) {
                 throw creationFailed;
@@ -1313,6 +1415,43 @@ public final class GraphRunner implements AutoCloseable {
                         workers.release(instance);
                     }
                     if (error != null) {
+                        // What the connector said about its own internal loop, read once and reported
+                        // on whichever settlement this failure produces. Never inferred: a connector
+                        // that implements nothing reports NOT_REPORTED, which is silence rather than
+                        // a claim that it attempted exactly once.
+                        int connectorAttempts = connectorAttemptsIn(error);
+                        RetryDecision.Retry retry = retryDecision(definition, attemptOrdinal, error);
+                        if (retry != null) {
+                            // The retry's identity is minted here and committed below, so the durable
+                            // record gains a distinct attempt -- new ordinal, new attemptId, therefore
+                            // a new effect identity -- rather than a counter on the one that failed.
+                            var nextAttempt = new NodeAttempt(identitySource.nextNodeAttemptId(),
+                                    retry.nextOrdinal(), NodeAttemptStatus.SCHEDULED);
+                            // Durable BEFORE the wait. A crash inside the backoff therefore finds the
+                            // retry already SCHEDULED, which is the state recovery reads as provably
+                            // effect-free -- see ExecutionState.retryScheduled for the full argument.
+                            //
+                            // The refusal is read from the commit rather than from a separate check
+                            // beforehand, and that ordering is the point: a traversal that ends
+                            // between a check and this write would leave the runtime retrying a node
+                            // whose retry was never recorded. The commit's own terminal guard runs
+                            // under the same lock the terminal transition takes, so there is no gap.
+                            ExecutionState.RetryCommit committed = state.retryScheduled(invocationId,
+                                    attemptId, nextAttempt, startedEventId);
+                            if (committed != null) {
+                                // One settlement per attempt: this replaces NODE_FAILED rather than
+                                // preceding it, so a node whose transient blips are absorbed by
+                                // retries does not start reporting failures it does not report today.
+                                monitor.nodeRetryScheduled(identity, node.id(), invocationId, attemptId,
+                                        retry.nextOrdinal(), retry.delay(), classificationToken(retry),
+                                        connectorAttempts, liveInstances(node.id(), definition.nature()));
+                                return NodeOutcome.retrying(nextAttempt, retry.delay(), committed.eventId());
+                            }
+                            // The traversal ended while this branch was failing. Fall through to the
+                            // ordinary failure path, which is what a branch that outlived its
+                            // traversal already does -- rather than running the node again with
+                            // nothing durable to show that it did.
+                        }
                         // Recording stays unconditional: the attempt and invocation are FAILED
                         // whether or not the author wired anything to route from here. Only
                         // what happens *after* this point is new.
@@ -1320,7 +1459,7 @@ public final class GraphRunner implements AutoCloseable {
                         // Measured after the release above, so the count no longer includes the instance
                         // that just finished -- what is reported is what is still carrying work.
                         monitor.nodeFailed(identity, node.id(), invocationId, attemptId, error,
-                                liveInstances(node.id(), definition.nature()));
+                                liveInstances(node.id(), definition.nature()), connectorAttempts);
                         // Asked of the definition, never recomputed here. A failure route
                         // may be declared by the author or defaulted from the target being an ERROR
                         // node, and the same resolution has to decide BOTH which edges fire on a
@@ -1352,7 +1491,7 @@ public final class GraphRunner implements AutoCloseable {
                         // payload, for the same reason markSyntheticProvenance drops it below when a
                         // node substitutes its own payload.
                         routedAttributes.keySet().removeIf(SyntheticProvenance::isProvenanceKey);
-                        return NodeOutcome.failed(
+                        return NodeOutcome.failedRouted(
                                 new NodeResult(GraphEdge.DEFAULT_OUTCOME, failurePayload, routedAttributes),
                                 failureRoute);
                     }
@@ -1383,13 +1522,22 @@ public final class GraphRunner implements AutoCloseable {
                                 authoredBypass);
                     } else {
                         monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, fallback,
-                                result.outcome(), stillAlive, result.actionDiagnostic());
+                                result.outcome(), stillAlive, result.actionDiagnostic(),
+                                result.connectorAttempts());
                     }
                     // The single point where the runner holds both the node and the trusted
                     // catalog, so the only point where provenance can be decided from the descriptor.
                     return NodeOutcome.completed(markSyntheticProvenance(node, delivered, result));
                 })
                 .thenCompose(outcome -> {
+                    if (outcome.retrying()) {
+                        // Checked before result(), which is null on this branch by construction. The
+                        // successors are deliberately not dispatched: an invocation with a scheduled
+                        // retry has not settled, so nothing downstream of it is decidable yet, and a
+                        // failure route fired here would run twice if the retry then succeeded.
+                        return backoffThenRetry(node, payload, attributes, parentInvocationIds, command,
+                                state, identity, coordinator, iteration, definition, invocationId, outcome);
+                    }
                     NodeResult result = outcome.result();
                     if (outcome.failureRouted()) {
                         // Handled failure: the failed attempt and invocation stay FAILED,
@@ -1499,6 +1647,229 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /**
+     * Asks the node's policy whether this failure earns another attempt, and refuses on behalf of a
+     * traversal that has already ended.
+     *
+     * <p>Two gates. The policy must be able to retry at all, which is the cheap check that keeps every
+     * node declaring nothing on exactly its previous code path; and the policy's own decision must be
+     * a {@link RetryDecision.Retry}, which is where the attempt budget and the failure classification
+     * are applied.</p>
+     *
+     * <p>Whether the <em>traversal</em> is still live is deliberately not asked here. A branch that
+     * outlived its traversal writes no transitions, so a retry there would run the node's effect again
+     * with nothing durable recording that it did — but the answer is only sound if it is read under
+     * the same lock the terminal transition takes, which is where
+     * {@code ExecutionState.retryScheduled} reads it. Asking twice would put a gap between the two
+     * reads and make the second one the only one that mattered.</p>
+     *
+     * @return the retry to schedule, or {@code null} when this attempt settles as a failure
+     */
+    private RetryDecision.Retry retryDecision(NodeRuntimeDefinition definition, int attemptOrdinal,
+                                              Throwable error) {
+        RetryPolicy policy = definition.retryPolicy();
+        if (!policy.enabled()) {
+            return null;
+        }
+        return policy.decide(attemptOrdinal, error) instanceof RetryDecision.Retry retry ? retry : null;
+    }
+
+    /**
+     * The failure classification as a bounded classifier token.
+     *
+     * <p>Lower-cased with underscores turned into hyphens so the value satisfies
+     * {@link ai.ravenroot.api.application.ExecutionEvent}'s public-reason character class, which
+     * admits letters, digits and {@code . _ - :} — an enum name would pass unchanged, and the
+     * transformation is for the reader rather than the validator: every other classifier on that
+     * component is lower-case hyphenated, and one shouting token among them reads as a different kind
+     * of value.</p>
+     */
+    private static String classificationToken(RetryDecision.Retry retry) {
+        return retry.classification().name().toLowerCase(java.util.Locale.ROOT).replace('_', '-');
+    }
+
+    /**
+     * What the connector reported about its own internal attempts, or silence.
+     *
+     * <p>Read through {@link ai.ravenroot.api.execution.RetryClassifier#unwrap(Throwable)} so a report
+     * survives the {@link CompletionException} an asynchronous stage wraps it in — without that, the
+     * one path every node actually fails through would report nothing, and the component would be
+     * dead on arrival.</p>
+     *
+     * <p>A negative report is discarded rather than propagated: the interface's contract is a count,
+     * and a caller that hands back a negative one has not produced a smaller count, it has produced an
+     * unusable one, which must not reach a metric as a value no consumer has a rule for.</p>
+     */
+    private static int connectorAttemptsIn(Throwable error) {
+        Throwable cause = ai.ravenroot.api.execution.RetryClassifier.unwrap(error);
+        if (cause instanceof ConnectorRetryReport report) {
+            int reported = report.connectorAttempts();
+            return reported < 0 ? ConnectorRetryReport.NOT_REPORTED : reported;
+        }
+        return ConnectorRetryReport.NOT_REPORTED;
+    }
+
+    /**
+     * Waits out the backoff, then dispatches the already-committed retry.
+     *
+     * <p>Ordering, in one line: the decision is durable, then the wait happens, then the attempt moves
+     * to {@code RUNNING}, then the send. Every step after the first is loseable to a crash without
+     * losing the retry, because {@code SCHEDULED} is what a recovering worker can act on and
+     * {@code RUNNING} is what it must treat as ambiguous.</p>
+     *
+     * <p>The cancellation check after the wait is not redundant with the one inside
+     * {@link #awaitBackoff}: that one refuses to start a wait for a traversal already cancelled, and
+     * this one catches a cancellation that arrived while the wait was in progress and completed it
+     * normally — the ordinary race between a control call and a timer.</p>
+     */
+    private CompletionStage<Void> backoffThenRetry(GraphNode node, Object payload,
+                                                   Map<String, Object> attributes,
+                                                   Set<UUID> parentInvocationIds, NodeCommand command,
+                                                   ExecutionState state,
+                                                   ExecutionMonitor.ExecutionIdentity identity,
+                                                   JoinCoordinator coordinator, IterationContext iteration,
+                                                   NodeRuntimeDefinition definition, UUID invocationId,
+                                                   NodeOutcome outcome) {
+        NodeAttempt next = outcome.scheduledRetry();
+        return awaitBackoff(identity.traversalId(), node.id(), outcome.retryDelay())
+                .thenCompose(released -> awaitPauseGate(identity.traversalId()))
+                .thenCompose(released -> {
+                    if (cancelledTraversals.contains(identity.traversalId())) {
+                        return CompletableFuture.<Void>failedFuture(
+                                new TraversalCancelledException(identity.traversalId(), node.id()));
+                    }
+                    var admissionKey = new TraversalAdmissionRegistry.Key(identity.security().tenantId(),
+                            identity.deploymentId(), identity.graphVersion(), identity.traversalId(),
+                            node.id());
+                    return traversalAdmission.acquire(admissionKey, definition.maxConcurrency())
+                            .thenCompose(lease -> {
+                                // A traversal that ended while this retry waited can no longer record
+                                // the RUNNING transition, and sending without it would break the one
+                                // ordering recovery rests on: a SCHEDULED attempt means "provably
+                                // never started". Dispatching anyway would leave an effect that a
+                                // later sweep is entitled to repeat.
+                                if (state.terminated()) {
+                                    lease.close();
+                                    return CompletableFuture.<Void>failedFuture(
+                                            new TraversalCancelledException(identity.traversalId(),
+                                                    node.id()));
+                                }
+                                UUID retryStartedEventId = state.retryStarted(invocationId,
+                                        next.attemptId(), outcome.retryCausedBy());
+                                return deliverAttempt(node, payload, attributes, parentInvocationIds,
+                                        command, state, identity, coordinator, iteration, definition,
+                                        lease, invocationId, next.attemptId(), next.ordinal(),
+                                        retryStartedEventId);
+                            });
+                });
+    }
+
+    /**
+     * Holds a retry on this traversal's pause gate, if one is installed, and otherwise proceeds.
+     *
+     * <p>A retry is not a hop, so {@link #run}'s own gate check does not cover it — and an operator
+     * who paused an execution and then watched it dispatch another attempt would reasonably read the
+     * pause as broken. It is checked <em>after</em> the backoff rather than before, because a pause
+     * that lands during the wait must be honoured just as much as one that preceded it, and the wait
+     * has no way to notice it arriving.</p>
+     *
+     * <p>Deliberately not a loop. A pause installed while this stage is releasing is caught by the
+     * next attempt's gate check, or by the cancellation check immediately after this — which is
+     * exactly the granularity {@code run()} offers an ordinary hop, and offering the retry path a
+     * stronger guarantee than the ordinary path would be a second semantics to keep in step.</p>
+     */
+    private CompletionStage<Void> awaitPauseGate(UUID traversalId) {
+        CompletableFuture<Void> gate = pausedTraversals.get(traversalId);
+        return gate == null ? CompletableFuture.completedFuture(null) : gate;
+    }
+
+    /**
+     * A wait that cancellation and shutdown can end early.
+     *
+     * <h2>Why the wait is in memory while the decision is durable</h2>
+     * <p>The obvious alternative is a {@code TimerSchedule} written into the same batch, which would
+     * make the delay itself durable. It is refused on a mechanical ground rather than a stylistic
+     * one: a scheduled timer becomes a claimable {@code PendingWork.TimerDue}, and the only consumer
+     * of that queue — {@code ExecutionRecoveryService} — has no timer dispatcher and answers
+     * {@code Deferred} <em>without acknowledging</em>. The row would be redelivered forever and
+     * consumed never. What a crash loses here is therefore the remaining wait and not the retry, and
+     * that is the trade this takes deliberately.</p>
+     *
+     * <h2>How it ends early</h2>
+     * <p>The wait is a future registered against its traversal. {@link #cancelBackoffs} completes it
+     * exceptionally, and the sleeping thread's later {@code complete} is then a no-op — no
+     * interruption, no race, and the continuation is skipped entirely because a
+     * {@code thenCompose} on an exceptionally completed stage never runs its function. So a cancel, a
+     * pause-gate release into a cancelled traversal, and {@link #close()} all stop a backoff through
+     * the one path, and none of them has to know a backoff exists.</p>
+     *
+     * <p>A virtual thread rather than {@link CompletableFuture#completeOnTimeout} on purpose: that
+     * method completes on a single daemon delayer thread shared by the whole JVM, and the
+     * continuation registered here performs a store write. One retry's write would then delay every
+     * other timeout in the process. The reasoning is {@link #releasePauseGate}'s, applied to a
+     * different thread pool.</p>
+     */
+    private CompletionStage<Void> awaitBackoff(UUID traversalId, String nodeId, Duration delay) {
+        if (cancelledTraversals.contains(traversalId)) {
+            return CompletableFuture.failedFuture(new TraversalCancelledException(traversalId, nodeId));
+        }
+        if (delay == null || delay.isZero() || delay.isNegative()) {
+            return CompletableFuture.completedFuture(null);
+        }
+        var wait = new CompletableFuture<Void>();
+        var registration = new BackoffWait(wait, nodeId);
+        var waits = backoffWaits.computeIfAbsent(traversalId, id -> ConcurrentHashMap.newKeySet());
+        waits.add(registration);
+        // Registered first, then re-checked: a cancellation that landed between the check at the top
+        // of this method and the registration above would otherwise leave a wait nobody can end.
+        if (cancelledTraversals.contains(traversalId)) {
+            waits.remove(registration);
+            return CompletableFuture.failedFuture(new TraversalCancelledException(traversalId, nodeId));
+        }
+        Thread.ofVirtual().name("ravenroot-retry-backoff-" + traversalId).start(() -> {
+            try {
+                Thread.sleep(delay);
+                wait.complete(null);
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                wait.completeExceptionally(new TraversalCancelledException(traversalId, nodeId));
+            }
+        });
+        return wait.whenComplete((released, failure) -> {
+            waits.remove(registration);
+            // The traversal's entry is dropped only when this was the last wait and the map still
+            // holds this same set, so a registration racing this cleanup is never silently discarded:
+            // the two-argument remove fails, and the newcomer keeps a set that is still reachable.
+            if (waits.isEmpty()) {
+                backoffWaits.remove(traversalId, waits);
+            }
+        });
+    }
+
+    /**
+     * Ends every backoff this traversal is holding, promptly.
+     *
+     * <p>Called from {@link #cancelTraversal(UUID, GateRelease)}, which {@link #close()} drives for
+     * every registered traversal — so cancellation, drain and graph shutdown all reach a backoff
+     * without any of them naming one. The waits are failed rather than completed: completing them
+     * would let the retry proceed into a traversal that has been told to stop, which is the same
+     * false success the pause-gate release exists to avoid.</p>
+     *
+     * @return whether any wait was ended
+     */
+    private boolean cancelBackoffs(UUID traversalId) {
+        Set<BackoffWait> waits = backoffWaits.remove(traversalId);
+        if (waits == null || waits.isEmpty()) {
+            return false;
+        }
+        // One exception per wait rather than one shared instance: each names its own node, and a
+        // shared throwable would also give several branches one stack trace that belongs to whichever
+        // of them was constructed first.
+        waits.forEach(held -> held.pending().completeExceptionally(
+                new TraversalCancelledException(traversalId, held.nodeId())));
+        return true;
+    }
+
+    /**
      * Binds one worker instance to the eight identifiers ADR 0024 §1 requires.
      *
      * <p>Every value is read from the identity this traversal was stamped with, never minted here.
@@ -1531,7 +1902,7 @@ public final class GraphRunner implements AutoCloseable {
      *                dispatch path.
      */
     private record NodeRuntimeDefinition(GraphNode node, NodeRuntimeNature nature, int maxConcurrency,
-                                         RavenNode runtime) {
+                                         RavenNode runtime, RetryPolicy retryPolicy) {
     }
 
     /**
@@ -1578,13 +1949,41 @@ public final class GraphRunner implements AutoCloseable {
      * edges when the attempt failed and at least one such edge exists -- the one case where edge
      * selection is not driven by an outcome at all, because a crashed node produced none.</p>
      */
-    private record NodeOutcome(NodeResult result, List<GraphEdge> failureEdges) {
-        private static NodeOutcome completed(NodeResult result) {
-            return new NodeOutcome(result, null);
+    private record NodeOutcome(NodeResult result, List<GraphEdge> failureEdges,
+                               NodeAttempt scheduledRetry, Duration retryDelay, UUID retryCausedBy) {
+
+        /**
+         * The retry branch, and the one member with no {@link NodeResult} at all.
+         *
+         * <p>{@code result} is {@code null} here rather than an empty result, because an attempt that
+         * is being retried produced nothing to route: it has not settled, so there is no outcome to
+         * select successors by and no payload to carry. The compose stage checks {@link #retrying()}
+         * before it reads {@link #result()}, which is what makes the {@code null} unreachable rather
+         * than merely undocumented.</p>
+         *
+         * @param scheduledRetry the attempt already committed as {@code SCHEDULED} by the batch that
+         *                       failed its predecessor; carries both the identity to dispatch and the
+         *                       ordinal to report
+         * @param retryDelay     the wait the policy computed before that attempt
+         * @param retryCausedBy  the journalled retry event, which the next attempt's start names as
+         *                       its cause; {@code null} when nothing is journalling
+         */
+        private static NodeOutcome retrying(NodeAttempt scheduledRetry, Duration retryDelay,
+                                            UUID retryCausedBy) {
+            return new NodeOutcome(null, null, scheduledRetry, retryDelay, retryCausedBy);
         }
 
-        private static NodeOutcome failed(NodeResult result, List<GraphEdge> failureEdges) {
-            return new NodeOutcome(result, failureEdges);
+        /** Whether this attempt is being retried rather than settled. */
+        private boolean retrying() {
+            return scheduledRetry != null;
+        }
+
+        private static NodeOutcome completed(NodeResult result) {
+            return new NodeOutcome(result, null, null, null, null);
+        }
+
+        private static NodeOutcome failedRouted(NodeResult result, List<GraphEdge> failureEdges) {
+            return new NodeOutcome(result, failureEdges, null, null, null);
         }
 
         private boolean failureRouted() {
@@ -2393,6 +2792,12 @@ public final class GraphRunner implements AutoCloseable {
         // ran, and every traversal execute() registered was handled above -- but "in the ordinary
         // case" is the whole of that claim, and completing a gate nobody waits on costs nothing.
         pausedTraversals.keySet().forEach(traversalId -> releasePauseGate(traversalId, GateRelease.ON_CALLER));
+        // Same argument as the line above, for the other place a branch can be parked: the loop over
+        // coordinators reaches every traversal this runner registered, and a backoff belonging to one
+        // it did not is ended here so no wait outlives the runner that owns it. Ending them is also
+        // what keeps the shutdown bound meaningful -- a branch asleep in a backoff is not doing work
+        // the engine's stop can drain, so waiting for it would be waiting on a timer.
+        backoffWaits.keySet().forEach(this::cancelBackoffs);
         releaseTraversals();
         // Every worker instance still serving an invocation is released before the stop below, so the
         // stop it escalates from is a stop of things that are supposed to still be here. A worker
@@ -3272,6 +3677,105 @@ public final class GraphRunner implements AutoCloseable {
         }
 
         /**
+         * Commits the decision to retry, as one fenced batch, <strong>before</strong> the backoff
+         * begins.
+         *
+         * <h2>This is the whole of the crash-safety argument, so it is stated here in full</h2>
+         * <p>Two transitions, one all-or-nothing batch: the attempt that failed reaches
+         * {@code FAILED}, and the next ordinal is appended as {@code SCHEDULED}. Neither half is
+         * separable from the other, because {@link ai.ravenroot.api.persistence.ExecutionBatch} does
+         * not partially apply and {@link NodeInvocation#addAttempt} refuses to append while the
+         * previous attempt is not {@code FAILED}.</p>
+         * <ul>
+         *   <li><b>A crash during the backoff cannot lose the decision.</b> The retry is already
+         *       durable and {@code SCHEDULED}, which is exactly the state both store adapters&#39;
+         *       claim queries treat as claimable and which {@code ExecutionRecoveryService} reads as
+         *       "the write-ordering invariant proves no effect began". What a crash loses is the
+         *       remaining <em>wait</em>, not the decision — an accepted cost, because making the wait
+         *       durable would mean a timer row whose only consumer has no dispatcher for it.</li>
+         *   <li><b>A crash cannot duplicate a committed attempt.</b> The batch carries
+         *       {@code RevisionExpectation.exactly} and the recorder&#39;s fencing token, so a repeat
+         *       is refused at the store; and independently, {@code addAttempt} refuses a duplicate
+         *       {@code attemptId} and any ordinal that is not exactly one past the history.</li>
+         * </ul>
+         *
+         * <h2>The invocation deliberately stays {@code RUNNING}</h2>
+         * <p>{@link #nodeFailed} pairs the failed attempt with {@code InvocationTransitioned(FAILED)}
+         * because there, the visit is over. Here it is not: an invocation with a scheduled retry is a
+         * visit still in progress, and marking it {@code FAILED} would both contradict that and make
+         * the aggregate refuse the very attempt this batch just appended, since a terminal invocation
+         * accepts no further attempt transitions.</p>
+         *
+         * @param invocationId    the invocation whose attempt failed
+         * @param failedAttemptId the attempt being closed as failed
+         * @param nextAttempt     the scheduled successor, carrying the next ordinal and a new identity
+         * @param startedEventId  this attempt&#39;s own start, which is why this settlement is emitted
+         * @return the identity of the retry event, for the next attempt's start to name as its cause,
+         *         or {@code null} when nothing was journalled
+         */
+        private synchronized RetryCommit retryScheduled(UUID invocationId, UUID failedAttemptId,
+                                                        NodeAttempt nextAttempt, UUID startedEventId) {
+            if (terminal) {
+                return null;
+            }
+            var transitions = List.<ExecutionTransition>of(
+                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
+                            NodeAttemptStatus.FAILED),
+                    new ExecutionTransition.AttemptAdded(traversalId, invocationId, nextAttempt));
+            UUID retryEventId = eventId();
+            record(transitions, events(ExecutionEventType.NODE_RETRY_SCHEDULED, retryEventId, startedEventId,
+                    invocationId, failedAttemptId));
+            lifecycle = fold(lifecycle, transitions);
+            return new RetryCommit(retryEventId);
+        }
+
+        /**
+         * That the retry was committed, and the event that named it.
+         *
+         * <p>A wrapper rather than the bare event identity, because {@code null} already means two
+         * different things on this path: {@link #eventId()} answers {@code null} whenever nothing is
+         * journalling, which is the ordinary in-memory case, and the caller must not read that as "the
+         * traversal ended and the retry was refused". Absence of the wrapper is the refusal, and the
+         * identity inside it may still legitimately be {@code null}.</p>
+         *
+         * @param eventId the journalled retry event, or {@code null} when nothing is journalling
+         */
+        private record RetryCommit(UUID eventId) {
+        }
+
+        /**
+         * Moves an already-scheduled retry to {@code RUNNING} and publishes its start.
+         *
+         * <p>The narrow twin of {@link #nodeStarted}: the invocation already exists and is already
+         * {@code RUNNING}, so only the attempt transitions. Re-adding the invocation would be refused
+         * by the aggregate, and transitioning it again would claim a visit started twice.</p>
+         *
+         * <p>Committed before the engine send for the same reason {@link #nodeStarted} is, and the
+         * ordering carries more weight here rather than less: it is the line that turns "a retry was
+         * decided" into "a retry was dispatched, outcome unknown", which is the distinction recovery
+         * reads to decide between dispatching freely and parking.</p>
+         *
+         * @param invocationId the invocation the retry belongs to
+         * @param attemptId    the scheduled attempt being dispatched
+         * @param causedBy     the retry event that scheduled this attempt
+         * @return the identity of this start, for its own settlement to name as cause, or
+         *         {@code null} when nothing was journalled
+         */
+        private synchronized UUID retryStarted(UUID invocationId, UUID attemptId, UUID causedBy) {
+            if (terminal) {
+                return null;
+            }
+            var transitions = List.<ExecutionTransition>of(
+                    new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                            NodeAttemptStatus.RUNNING));
+            UUID startedEventId = eventId();
+            record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
+                    invocationId, attemptId));
+            lifecycle = fold(lifecycle, transitions);
+            return startedEventId;
+        }
+
+        /**
          * The nodes this traversal recorded as {@code FAILED} and survived.
          *
          * <p>Read out of {@link #lifecycle}, which {@link #nodeFailed} already folded the
@@ -3316,6 +3820,19 @@ public final class GraphRunner implements AutoCloseable {
             record(transitions, List.of());
             lifecycle = fold(lifecycle, transitions);
             terminal = true;
+        }
+
+        /**
+         * Whether this traversal has already recorded a terminal status.
+         *
+         * <p>Read by the retry decision, and it must be read rather than inferred: the three guards
+         * that consult {@link #terminal} return {@code null} both when the traversal is over and when
+         * nothing is journalling, so a {@code null} event identity cannot stand in for this answer.
+         * {@code synchronized} for the reason every writer of the field is — the branch asking may
+         * not be the thread that set it.</p>
+         */
+        private synchronized boolean terminated() {
+            return terminal;
         }
 
         private synchronized void executionFailed() {

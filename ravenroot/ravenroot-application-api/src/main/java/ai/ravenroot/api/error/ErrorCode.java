@@ -34,8 +34,8 @@ public enum ErrorCode {
      */
     UNKNOWN_EXECUTION(404, "unknown execution"),
     /**
-     * The durable-inventory counterpart of {@link #UNKNOWN_EXECUTION} (issue 154), and deliberately
-     * a distinct code rather than a reuse: a process instance is PERS-01's aggregate, addressed by
+     * The durable-inventory counterpart of {@link #UNKNOWN_EXECUTION}, and deliberately a distinct
+     * code rather than a reuse: a process instance is the durable aggregate, addressed by
      * {@code processInstanceId}, and is not the same identity {@link #UNKNOWN_EXECUTION} names
      * ({@code executionId}, which is the traversal id). Says nothing about why for the identical
      * reason {@link #UNKNOWN_EXECUTION} does not: an instance that never existed, one belonging to
@@ -76,7 +76,7 @@ public enum ErrorCode {
     /** The deployment does not implement the requested execution policy. */
     EXECUTION_POLICY_UNSUPPORTED(501, "the requested execution policy is not implemented"),
     /**
-     * This deployment has no durable, inventory-capable execution store configured (issue 154), so
+     * This deployment has no durable, inventory-capable execution store configured, so
      * the durable process inventory cannot answer at all. 501, the same status
      * {@link #EXECUTION_POLICY_UNSUPPORTED} uses, because this is a fact about this deployment's
      * composed capability rather than about the caller's request: an operator must compose a store

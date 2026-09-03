@@ -542,7 +542,7 @@ public interface RavenrootApplication extends AutoCloseable {
  * <p>The default returns an empty list, for implementations that track no active executions at
  * all — consistent with {@link #cancelTraversal}'s own default.
  *
- * <p><strong>Relationship to {@link #processInventory} (issue 154):</strong> this method remains the
+ * <p><strong>Relationship to {@link #processInventory}:</strong> this method remains the
  * process-local live view and is not superseded by the durable inventory. See
  * {@link #processInventoryAvailable()} for the full distinction; in short, this answers "what is
  * this process running right now" and forgets everything on restart, while the durable inventory
@@ -557,7 +557,7 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
-     * Whether the durable, tenant-scoped process and traversal inventory (issue 154) is available:
+     * Whether the durable, tenant-scoped process and traversal inventory is available:
      * an {@code ExecutionStore} is composed and declares
      * {@code StoreCapability.PROCESS_INVENTORY}.
      *
@@ -598,7 +598,7 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
-     * Lists one page of {@code tenantId}'s durable process instances (issue 154), delegating
+     * Lists one page of {@code tenantId}'s durable process instances, delegating
      * directly to {@link ai.ravenroot.api.persistence.ExecutionStore#listProcessInstances}.
      *
      * <p><strong>{@code tenantId} is mechanism, not policy</strong>, exactly as it is on

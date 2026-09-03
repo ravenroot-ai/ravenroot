@@ -48,7 +48,7 @@ public interface CliBackend {
     List<LiveView> live() throws IOException;
 
     /**
-     * This tenant's durable process inventory (issue 154): what this deployment's own persisted
+     * This tenant's durable process inventory: what this deployment's own persisted
      * record says exists, surviving a restart -- distinct from {@link #live}, which is unchanged and
      * remains the process-local live view. The API exposes it through {@code GET
      * /v1/executions/inventory}; see that route's own Javadoc, and
@@ -78,7 +78,7 @@ public interface CliBackend {
     InventoryListing inventory() throws IOException;
 
     /**
-     * One durable process instance's traversals from the inventory (issue 154). {@code processInstanceId}
+     * One durable process instance's traversals from the inventory. {@code processInstanceId}
      * is a process instance id, not the traversal/execution id {@link #cancel} and {@link #result}
      * take -- see {@code GET /v1/executions/{id}/traversals}'s own Javadoc for why the two id spaces
      * are deliberately distinct.
@@ -310,7 +310,7 @@ public interface CliBackend {
     }
 
     /**
-     * Mirrors {@code ai.ravenroot.api.persistence.ProcessInventoryEntry} (issue 154), bounded to
+     * Mirrors {@code ai.ravenroot.api.persistence.ProcessInventoryEntry}, bounded to
      * non-secret fields -- no payloads, no opaque blobs, exactly the wire route's own contract.
      * {@code deploymentId}, {@code workloadId} and {@code correlationId} are {@code null} when
      * absent, the same nullable-string convention {@link CredentialView} already uses for a field a
@@ -337,7 +337,7 @@ public interface CliBackend {
         }
     }
 
-    /** Mirrors {@code ai.ravenroot.api.persistence.TraversalInventoryEntry} (issue 154). */
+    /** Mirrors {@code ai.ravenroot.api.persistence.TraversalInventoryEntry}. */
     record TraversalInventoryView(String traversalId, int position, String ingressNodeId, String status,
                                   String disposition, int invocationCount, int parkedAttemptCount) {
     }

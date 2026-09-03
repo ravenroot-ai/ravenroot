@@ -282,7 +282,7 @@ public final class RavenrootCli {
     }
 
     /**
-     * Lists this tenant's durable process inventory (issue 154): what this deployment's own
+     * Lists this tenant's durable process inventory: what this deployment's own
      * persisted record says exists, surviving a restart -- distinct from {@code live}, which is
      * unchanged and remains the process-local runtime view. See {@link CliBackend#inventory}'s own
      * Javadoc for the full distinction, including why the backend pages this to completion rather
@@ -311,7 +311,7 @@ public final class RavenrootCli {
     }
 
     /**
-     * Lists one durable process instance's traversals from the inventory (issue 154):
+     * Lists one durable process instance's traversals from the inventory:
      * {@code ravenroot traversals <process-instance-id>}. The argument is a process instance id, not
      * the traversal/execution id {@code cancel} and {@code result} take -- see
      * {@link CliBackend#traversals}'s own Javadoc for why the two id spaces are deliberately distinct.

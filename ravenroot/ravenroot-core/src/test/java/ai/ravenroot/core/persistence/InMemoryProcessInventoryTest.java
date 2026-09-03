@@ -45,7 +45,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The durable inventory contract (issue 154) against the reference adapter.
+ * The durable inventory contract against the reference adapter.
  *
  * <p>The reference adapter is not durable and does not pretend to be, so the reopen half of the
  * issue's acceptance criteria is asserted against SQLite. Everything else — ordering, cursor

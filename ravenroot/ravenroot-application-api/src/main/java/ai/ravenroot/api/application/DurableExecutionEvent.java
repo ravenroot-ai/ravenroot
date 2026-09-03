@@ -61,11 +61,19 @@ import java.util.UUID;
  * state can have its own, independent retention from the journal's)
  * @param edgeId stable edge identity decoded from an {@code EDGE_TRAVERSED} event body;
  * absent on older rows and every other event type
+ * @param handlerId durable handler identity decoded from a handler-lifecycle event body
+ * ({@code HandlerEventData}), absent on every other event type and on rows written
+ * before PERS-05. Decoded from the body for exactly the reason {@code edgeId} is:
+ * {@code EventEnvelope} carries the process, traversal, invocation and attempt as
+ * typed fields, and widening it with a fifth identity would change the digest every
+ * consumer already verifies. Carrying it here is what lets a reader tell the four
+ * levels apart -- which process, which traversal, which handler, which node
+ * invocation -- without inferring any of them
  */
 public record DurableExecutionEvent(UUID eventId, long journalOffset, long streamSequence, String tenantId,
                                     String eventType, UUID processInstanceId, UUID traversalId, UUID invocationId,
                                     UUID attemptId, UUID causationId, String correlationId, String graphVersion,
-                                    Instant occurredAt, String nodeId, String edgeId) {
+                                    Instant occurredAt, String nodeId, String edgeId, UUID handlerId) {
 
 /**
  * Normalizes durable execution-event fields required for replay and ordered observation.
@@ -99,6 +107,33 @@ public record DurableExecutionEvent(UUID eventId, long journalOffset, long strea
     }
 
     /**
+ * Compatibility constructor preserving the durable projection shape before durable handlers.
+* @param eventId durable journal deduplication identity
+* @param journalOffset tenant-local durable cursor assigned by the store
+* @param streamSequence contiguous position within the process-instance event stream
+* @param tenantId authenticated tenant that owns the operation or event
+* @param eventType domain event type recorded in the durable journal
+* @param processInstanceId identity of the process instance that owns the event
+* @param traversalId identity of the traversal that owns the event
+* @param invocationId identity of the node invocation, or {@code null} above invocation scope
+* @param attemptId identity of the node attempt, or {@code null} above attempt scope
+* @param causationId identity of the journal event that caused this event, when journalled
+* @param correlationId end-to-end request correlation identifier
+* @param graphVersion pinned graph version for the execution
+* @param occurredAt time at which the event occurred
+* @param nodeId graph node identity associated with the operation or event
+* @param edgeId stable edge identity for a traversal event, or {@code null}
+ */
+    public DurableExecutionEvent(UUID eventId, long journalOffset, long streamSequence, String tenantId,
+                                 String eventType, UUID processInstanceId, UUID traversalId, UUID invocationId,
+                                 UUID attemptId, UUID causationId, String correlationId, String graphVersion,
+                                 Instant occurredAt, String nodeId, String edgeId) {
+        this(eventId, journalOffset, streamSequence, tenantId, eventType, processInstanceId, traversalId,
+                invocationId, attemptId, causationId, correlationId, graphVersion, occurredAt, nodeId,
+                edgeId, null);
+    }
+
+    /**
  * Compatibility constructor preserving the durable projection shape before edge traversal.
 * @param eventId durable journal deduplication identity
 * @param journalOffset tenant-local durable cursor assigned by the store
@@ -120,6 +155,7 @@ public record DurableExecutionEvent(UUID eventId, long journalOffset, long strea
                                  UUID attemptId, UUID causationId, String correlationId, String graphVersion,
                                  Instant occurredAt, String nodeId) {
         this(eventId, journalOffset, streamSequence, tenantId, eventType, processInstanceId, traversalId,
-                invocationId, attemptId, causationId, correlationId, graphVersion, occurredAt, nodeId, null);
+                invocationId, attemptId, causationId, correlationId, graphVersion, occurredAt, nodeId, null,
+                null);
     }
 }

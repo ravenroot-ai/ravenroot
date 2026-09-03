@@ -101,7 +101,7 @@ public final class ExecutionRecoveryService {
     }
 
     /**
-     * Discovery path (issue 154): identifies {@link InventoryDisposition#INTERRUPTED} process
+     * Discovery path: identifies {@link InventoryDisposition#INTERRUPTED} process
      * instances — non-terminal, with no lease or an expired one — directly from the durable
      * inventory, across every tenant this service was constructed with.
      *

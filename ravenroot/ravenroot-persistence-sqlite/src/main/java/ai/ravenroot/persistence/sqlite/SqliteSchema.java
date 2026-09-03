@@ -346,7 +346,68 @@ final class SqliteSchema {
                         // scan of process_instance per candidate.
                         "CREATE INDEX idx_process_instance_pin "
                                 + "ON process_instance (tenant_id, graph_version_pin)")),
-                // Issue 154. Additive in structure: every column is added to an existing table and no
+                // PERS-05. A new table rather than columns on `invocation`, because a handler
+                // outlives the invocation's own lifecycle: it is retained after the wait ends, so a
+                // duplicate or late trigger can still be refused against it and an operator can still
+                // see who resolved a human task. Rows cascade with the process instance and with
+                // nothing narrower.
+                //
+                // The two uniqueness rules are enforced by the database rather than by a read-then-
+                // write in Java, because a check performed outside the write's own transaction is a
+                // race under concurrency and this one decides which of two concurrent triggers wins.
+                //
+                // `correlation_key` is unique only among handlers that are NOT terminal, expressed as
+                // a partial index: a trigger presenting a business key must resolve to exactly one
+                // live handler, while a key whose wait is over becomes reusable. `deduplication_key`
+                // is unique across every handler of the tenant, terminal included, which is what
+                // makes a retried registration a no-op instead of a second handler.
+                //
+                // The rollback boundary is the table's existence rather than a status name: a
+                // pre-PERS-05 binary opening this file is refused by the user_version downgrade
+                // guard, and a file that has never registered a handler downgrades cleanly.
+                new SchemaMigration(6, "durable handlers for wait, re-entry and human tasks",
+                        List.of(
+                """
+                CREATE TABLE execution_handler (
+                    tenant_id             TEXT    NOT NULL,
+                    process_instance_id   TEXT    NOT NULL,
+                    handler_id            TEXT    NOT NULL,
+                    position              INTEGER NOT NULL,
+                    name                  TEXT    NOT NULL,
+                    traversal_id          TEXT    NOT NULL,
+                    invocation_id         TEXT    NOT NULL,
+                    correlation_key       TEXT    NOT NULL,
+                    deduplication_key     TEXT    NOT NULL,
+                    schema_content_type   TEXT    NOT NULL,
+                    schema_ref            TEXT    NOT NULL,
+                    schema_max_bytes      INTEGER NOT NULL,
+                    required_roles        TEXT    NOT NULL,
+                    required_scopes       TEXT    NOT NULL,
+                    status                TEXT    NOT NULL,
+                    resume_traversal_id   TEXT,
+                    actor                 TEXT    NOT NULL,
+                    outcome_content_type  TEXT    NOT NULL,
+                    outcome_bytes         BLOB    NOT NULL,
+                    revision              INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, handler_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                """
+                CREATE UNIQUE INDEX execution_handler_live_correlation
+                    ON execution_handler (tenant_id, name, correlation_key)
+                    WHERE status IN ('WAITING', 'ESCALATED')
+                """,
+                """
+                CREATE UNIQUE INDEX execution_handler_deduplication
+                    ON execution_handler (tenant_id, deduplication_key)
+                """,
+                """
+                CREATE INDEX execution_handler_claimable
+                    ON execution_handler (tenant_id, status)
+                """)),
+                // Additive in structure: every column is added to an existing table and no
                 // table is recreated, so an interrupted run leaves a real intermediate version and the
                 // fold of every pre-existing row is unchanged. There is no second copy of the
                 // lifecycle here and no projection offset -- the inventory is served by reading these
@@ -360,12 +421,12 @@ final class SqliteSchema {
                 // PERMANENT: for a row written before this migration, created_at is the instant of its
                 // LAST WRITE, not of its creation. It is a truthful upper bound rather than a
                 // fabrication -- the instance certainly existed by then -- and it is stable from this
-                // point on, because created_at is never written again. Rows created from version 6
+                // point on, because created_at is never written again. Rows created from version 7
                 // onwards carry the real instant.
                 //
                 // lifecycle_generation defaults to 1 for pre-existing rows and that is a FLOOR, not a
                 // count: an instance that exists has had at least the transition that created it, and
-                // no record survives of how many followed. From version 6 onwards the counter is
+                // no record survives of how many followed. From version 7 onwards the counter is
                 // incremented in the same transaction as each authoritative status transition, so it
                 // is exact for every instance created after the upgrade.
                 //
@@ -378,10 +439,10 @@ final class SqliteSchema {
                 //
                 // DOWNGRADE is safe until the first row carries a non-NULL deployment_id, workload_id,
                 // correlation_id or retained_until, or a lifecycle_generation above 1 -- that is, until
-                // the first write under version 6. A binary that predates the inventory does not
+                // the first write under version 7. A binary that predates the inventory does not
                 // select these columns, so it reads and writes every row correctly; what it loses is
                 // the values it cannot see, and its next upsert of that row leaves them untouched
-                // because the upsert names only the columns it knows. After the first version-6 write
+                // because the upsert names only the columns it knows. After the first version-7 write
                 // the file is at a version the older binary refuses to open, which is the guard doing
                 // its job.
                 //
@@ -391,7 +452,7 @@ final class SqliteSchema {
                 // opens happily against this binary with the wrong shape -- exactly the silent
                 // corruption the guard exists to prevent, and invisible to it. Renumbering to 6 is
                 // what keeps the version a name for one structure rather than for two.
-                new SchemaMigration(6, "durable tenant-scoped process and traversal inventory",
+                new SchemaMigration(7, "durable tenant-scoped process and traversal inventory",
                         List.of(
                         "ALTER TABLE process_instance ADD COLUMN created_at_epoch_second "
                                 + "INTEGER NOT NULL DEFAULT 0",

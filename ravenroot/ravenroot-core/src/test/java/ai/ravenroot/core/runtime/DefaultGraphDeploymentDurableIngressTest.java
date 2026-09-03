@@ -528,7 +528,7 @@ class DefaultGraphDeploymentDurableIngressTest {
      * retry after the failure is a fresh commit, not a duplicate of a write that never happened.
      */
     private static final class FailingInboxStore implements ExecutionStore {
-        // Durable inventory (issue 154): pure delegation, so this double differs from the store it
+        // Durable inventory: pure delegation, so this double differs from the store it
         // wraps only in the one operation it exists to perturb.
 
         @Override
@@ -733,7 +733,7 @@ class DefaultGraphDeploymentDurableIngressTest {
      * {@code ingressEventIdDerivationIsUnchangedByTheNulByteFix} exists to pin.
      */
     private static final class EventIdCapturingStore implements ExecutionStore {
-        // Durable inventory (issue 154): pure delegation, so this double differs from the store it
+        // Durable inventory: pure delegation, so this double differs from the store it
         // wraps only in the one operation it exists to perturb.
 
         @Override

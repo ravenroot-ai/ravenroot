@@ -301,7 +301,7 @@ class DefaultRavenrootApplicationExecutionStoreTest {
 
     /** Declares no capabilities, so composition must refuse it. */
     private static class NonTransactionalStore implements ExecutionStore {
-        // Durable inventory (issue 154). This double declares no capabilities and exists only to be
+        // Durable inventory. This double declares no capabilities and exists only to be
         // refused at composition time, so every operation stays unimplemented rather than acquiring a
         // behaviour that no assertion covers.
 

@@ -4,6 +4,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletionStage;
 
 /**
@@ -350,6 +351,91 @@ public interface ExecutionStore extends AutoCloseable {
  * @return number of expired idempotency records removed.
      */
     CompletionStage<Long> purgeExpiredIdempotencyRecords(String tenantId);
+
+    // ---------------------------------------------------------------- durable handlers
+
+    /**
+     * Reads one registered handler of this instance, or empty when the instance holds no handler
+     * with that identity (PERS-05).
+     *
+     * <p>Empty is an <em>answer</em>, not a failure, for the reason
+     * {@link #lookupIdempotency(String, String, java.time.Instant)} already gives: absence is the
+     * ordinary outcome of asking about a handler that has not been registered, and modelling the
+     * common path as a thrown exception would make every caller wrap a catch to learn it may
+     * proceed. A handler belonging to another tenant is indistinguishable from an absent one, so the
+     * store cannot be used as a cross-tenant existence oracle.</p>
+     *
+     * <p>A terminal handler is still returned. It is the evidence a duplicate or late trigger is
+     * refused against and the record an operator reads to see who resolved a human task.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @param handlerId the stable handler id used to identify the requested resource.
+     * @return stored handler, or empty when this instance has none with that identity.
+     */
+    default CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
+        return handlersUnsupported();
+    }
+
+    /**
+     * Resolves the single <em>live</em> handler of {@code tenantId} registered under
+     * {@code handlerName} for {@code correlationKey}, or empty when there is none (PERS-05).
+     *
+     * <p>This is the lookup an inbound trigger performs, and it is the reason a correlation key is
+     * unique per {@code (tenantId, name, correlationKey)} among handlers that are not terminal: a
+     * trigger carries a business identity and must resolve to exactly one handler, deterministically.
+     * Terminal handlers are excluded so that a correlation key becomes reusable once the wait it
+     * named is over.</p>
+     *
+     * <p>Tenant-scoped as its first parameter, like every other operation that does not already carry
+     * an {@link ExecutionKey}: the trigger arrives knowing a tenant and a business key and does not
+     * yet know which process instance it belongs to — finding that out is precisely what this call is
+     * for. A cross-tenant trigger therefore reads as empty rather than as a denial, which is
+     * {@link ExecutionKey}'s own rule and is what keeps a probe for another tenant's correlation keys
+     * from succeeding as a side channel.</p>
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @param handlerName opaque handler name presented by the trigger.
+     * @param correlationKey business identity presented by the trigger.
+     * @return the single live handler for that key, or empty when none is waiting.
+     */
+    default CompletionStage<Optional<DurableHandler>> findHandler(String tenantId, String handlerName,
+                                                                  String correlationKey) {
+        return handlersUnsupported();
+    }
+
+    /**
+     * Lists every handler registered against one instance, live and terminal, in registration order
+     * (PERS-05).
+     *
+     * <p>Exposed because without it the retention of terminal handlers is unverifiable by the
+     * conformance suite and undiagnosable by an operator, who would otherwise have to guess a handler
+     * identity in order to ask about it — the same reason {@link #leases(String)} and
+     * {@link #journalRetainedFrom(String)} exist.</p>
+     * @param key the stable key used to identify the requested resource.
+     * @return handlers of this instance in registration order, empty when it has none.
+     */
+    default CompletionStage<List<DurableHandler>> handlers(ExecutionKey key) {
+        return handlersUnsupported();
+    }
+
+    /**
+     * The failed stage every handler operation returns when this adapter does not declare
+     * {@link StoreCapability#DURABLE_HANDLERS}.
+     *
+     * <p>These four operations are {@code default} rather than abstract deliberately. PERS-05 is
+     * additive to a port that adapters — including out-of-tree ones — have already implemented, and
+     * abstract methods would turn a new capability into a breaking change to every existing adapter.
+     * The default is not silence: it is a declared, classified refusal, which is the same discipline
+     * {@link #purgeExpiredIdempotencyRecords(String)} applies to
+     * {@link StoreCapability#IDEMPOTENCY_PURGE}. An adapter that overrides these must declare the
+     * capability, and one that declares it must override all of them.</p>
+     * @param <T> result type of the operation being refused.
+     * @return stage already failed with {@link ExecutionStoreFailure.CapabilityNotSupported}.
+     */
+    private static <T> CompletionStage<T> handlersUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.DURABLE_HANDLERS)));
+        return refused;
+    }
 
     // ---------------------------------------------------------------- event journal and outbox
 

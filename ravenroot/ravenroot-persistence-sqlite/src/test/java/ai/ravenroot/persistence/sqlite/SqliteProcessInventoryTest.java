@@ -19,6 +19,9 @@ import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 import ai.ravenroot.testkit.persistence.MutableClock;
 import org.junit.jupiter.api.Test;
@@ -43,7 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * The durable tenant-scoped process and traversal inventory (issue 154), against the adapter that can
+ * The durable tenant-scoped process and traversal inventory, against the adapter that can
  * actually lose a process.
  *
  * <p>These assertions live here rather than in the shared conformance suite because the property the
@@ -714,6 +717,64 @@ class SqliteProcessInventoryTest {
             assertEquals(0, quietRow.parkedAttemptCount());
             assertEquals(InventoryDisposition.INTERRUPTED, quietRow.disposition(),
                     "a traversal with no parked attempt of its own is not parked because its sibling is");
+        }
+    }
+
+    /**
+     * Retention and durable handlers meet at a foreign key, and neither feature's own tests can see
+     * it: the inventory's retention assertions were written before handlers existed, and the handler
+     * assertions were written before anything deleted a process instance.
+     *
+     * <p>{@code purgeExpiredProcessInstances} deletes from {@code process_instance}. With foreign keys
+     * on -- which this store enables -- that now cascades into {@code execution_handler}, because a
+     * handler row references the instance and is declared to cascade with it and with nothing
+     * narrower. This asserts the combination is coherent rather than assuming it: the handlers of a
+     * purged terminal instance go with it, and a later lookup reports them absent rather than
+     * returning a row whose process no longer exists.</p>
+     */
+    @Test
+    void purgingATerminalInstanceTakesItsDurableHandlersWithIt() {
+        var clock = new MutableClock(EPOCH);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID handlerId = UUID.randomUUID();
+
+        try (var store = open("purge-with-handlers.db", clock)) {
+            StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, traversalId)));
+            StoredProcessInstance waiting = await(store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                            new NodeInvocation(invocationId, "await-approval", null,
+                                    NodeInvocationStatus.SCHEDULED)))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING))
+                    .registerHandler(new HandlerRegistration(handlerId, "approval", traversalId,
+                            invocationId, "invoice-42", "dedup-1",
+                            new HandlerPayloadSchema("application/vnd.ravenroot.test-approval",
+                                    "approval/v1", 1024),
+                            HandlerAuthorization.ofRoles("APPROVER")))
+                    .build()));
+            assertTrue(await(store.loadHandler(key, handlerId)).isPresent());
+            assertEquals(1, await(store.handlers(key)).size());
+
+            await(store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(waiting.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                    .build()));
+
+            clock.advance(Duration.ofDays(7).plusSeconds(1));
+            assertEquals(1L, await(store.purgeExpiredProcessInstances(TENANT)));
+
+            assertEquals(Optional.empty(), await(store.findProcessInstance(key)));
+            assertEquals(Optional.empty(), await(store.loadHandler(key, handlerId)),
+                    "a handler cascades with the instance it belongs to; a row surviving here would "
+                            + "reference a process that no longer exists");
+            assertEquals(Optional.empty(),
+                    await(store.findHandler(TENANT, "approval", "invoice-42")),
+                    "and the correlation key it held is free again, rather than permanently taken by "
+                            + "a handler nobody can reach");
         }
     }
 

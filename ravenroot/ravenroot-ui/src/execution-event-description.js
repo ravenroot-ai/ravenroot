@@ -94,6 +94,16 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   JOIN_FAILED: 'Join conditions could not be satisfied.',
   EXECUTION_COMPLETED: 'Execution completed successfully.',
   EXECUTION_FAILED: 'Execution failed. Protected diagnostics may contain more detail.',
+  // Durable-journal types. They reach this table only as the fallback for a peer that sent no
+  // `description`; the server composes the same sentences from its own source-authored copy. They
+  // live here rather than being left to UNKNOWN because a handler event that rendered as generic
+  // activity would be indistinguishable from a node event in the one view an operator uses to find
+  // out why a process has not moved.
+  HANDLER_REGISTERED: 'A handler was registered and the process is waiting for it.',
+  HANDLER_ESCALATED: 'A waiting handler was escalated and can still be resolved.',
+  HANDLER_EXPIRED: "A handler's wait ended without a trigger.",
+  HANDLER_DENIED: 'A handler was denied and the process continued.',
+  HANDLER_RESOLVED: 'A handler was resolved and the process re-entered.',
 });
 
 /**

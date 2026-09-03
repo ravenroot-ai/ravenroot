@@ -152,7 +152,7 @@ class SqliteSchemaMigrationTest {
     /**
      * The one migration in this schema that rewrites rows, and the caveat it leaves behind.
      *
-     * <p>Everything else in version 5 is additive, so the interesting question is not whether the
+     * <p>Everything else in the migration is additive, so the interesting question is not whether the
      * columns appear — it is whether a row written under version 4 comes out of the upgrade with a
      * usable creation instant, because {@code created_at} is half of the inventory's sort key and a
      * row left at the DEFAULT would collapse onto epoch zero. The backfill copies {@code updated_at},
@@ -161,21 +161,33 @@ class SqliteSchemaMigrationTest {
      * claim of accuracy it never had.</p>
      */
     @Test
-    void migrationSixBackfillsCreatedAtFromUpdatedAtAndLeavesTheGenerationAtItsFloor() throws Exception {
+    void theInventoryMigrationBackfillsCreatedAtFromUpdatedAtAndLeavesTheGenerationAtItsFloor()
+            throws Exception {
         List<SchemaMigration> throughFour = SqliteSchema.migrations().subList(0, 4);
         try (Connection connection = open("inventory-upgrade.db")) {
             assertEquals(4, SqliteSchema.migrate(connection, throughFour, CLOCK));
             insertLegacyInstance(connection, "acme", "11111111-1111-1111-1111-111111111111",
                     "RUNNING", 1700, 250);
 
-            // Straight from 4 to the head, so the row passes through the intervening definition-store
-            // migration on its way to this one. Asserting the head rather than a literal is what keeps
-            // this test honest when another migration lands in between again.
+            // Straight from 4 to the head, so the row passes through every migration that landed
+            // between version 4 and this one -- two of them at the time of writing -- on its way here.
             assertEquals(SqliteSchema.highestKnownVersion(), SqliteSchema.migrate(connection, CLOCK));
-            assertEquals(6, SqliteSchema.highestKnownVersion(),
-                    "the inventory is migration 6: two branches that both stamped user_version = 5 "
-                            + "would produce databases the downgrade guard cannot tell apart, because "
-                            + "it compares integers and nothing else");
+
+            // The inventory migration is identified by what it does, not by the number it happens to
+            // hold. That number has already moved twice, each time because another feature merged
+            // ahead of it and took it; a literal here would fail on the next such merge for a reason
+            // that has nothing to do with what this test is about. What must stay true is that it is
+            // the LAST migration -- our columns are added to tables earlier migrations create -- and
+            // that the sequence has no gaps, because the downgrade guard compares integers and
+            // nothing else, so two structures sharing one version are indistinguishable to it.
+            assertEquals(SqliteSchema.highestKnownVersion(), inventoryMigration().version(),
+                    "the inventory migration must be the head of the sequence");
+            assertEquals(java.util.stream.IntStream.rangeClosed(1, SqliteSchema.highestKnownVersion())
+                            .boxed().toList(),
+                    SqliteSchema.migrations().stream().map(SchemaMigration::version).sorted().toList(),
+                    "versions must be 1..n with no gaps and no duplicates");
+            assertEquals(SqliteSchema.highestKnownVersion(), historyVersions(connection).size(),
+                    "every migration between 4 and the head records its own history row");
 
             assertTrue(columnNames(connection, "process_instance").containsAll(List.of(
                     "created_at_epoch_second", "created_at_nano", "lifecycle_generation",
@@ -258,6 +270,51 @@ class SqliteSchemaMigrationTest {
             assertEquals(Optional.empty(), liveEntry.retainedUntil(),
                     "retention has not started for a non-terminal row, migrated or not");
         }
+    }
+
+    /**
+     * Every migration description is operator-facing text that ships inside the database, so none of
+     * them may carry an internal tracker identifier.
+     *
+     * <p>Nothing asserted these strings until now, which is how five of them came to be prefixed with
+     * work-item codes that mean nothing to the person reading {@code store_schema_history} to find out
+     * what a schema version did. The strings are not otherwise load-bearing -- only the history insert
+     * reads them -- so there was no failing test to notice, and a sixth would have arrived the same
+     * way. This is the guard that stops the class returning rather than a re-check of the five.</p>
+     *
+     * <p>The pattern is deliberately shape-based rather than a list of known prefixes: a list would
+     * have to be extended by whoever introduces the next tracker, which is exactly the person not
+     * thinking about it.</p>
+     */
+    @Test
+    void noMigrationDescriptionCarriesAnInternalTrackerIdentifier() {
+        // LETTERS-DIGITS (PERS-05, CORE-317, ABC-1), or the words "issue"/"ticket"/"story" followed by
+        // a number. Case-insensitive, anywhere in the string.
+        var tracker = java.util.regex.Pattern.compile(
+                "\\b([A-Z]{2,}-\\d+|(issue|ticket|story|bug)\\s*#?\\d+)\\b",
+                java.util.regex.Pattern.CASE_INSENSITIVE);
+        for (SchemaMigration migration : SqliteSchema.migrations()) {
+            var matcher = tracker.matcher(migration.description());
+            assertTrue(!matcher.find(), () -> "migration " + migration.version() + " describes itself as \""
+                    + migration.description() + "\", which carries the tracker identifier \""
+                    + matcher.group() + "\". This string is written into store_schema_history in every "
+                    + "database this ships and is read by operators with no sight of how the change was "
+                    + "tracked; describe the change on its own terms instead.");
+        }
+    }
+
+    /**
+     * The inventory migration, found by what it does. Its number is a merge outcome rather than an
+     * identity -- it has already moved from 5 to 6 to 7 as other features landed ahead of it -- so
+     * every assertion about it resolves it this way, following the handler migration's own test.
+     */
+    private static SchemaMigration inventoryMigration() {
+        return SqliteSchema.migrations().stream()
+                .filter(migration -> migration.description().contains("process and traversal inventory"))
+                .reduce((first, second) -> {
+                    throw new AssertionError("more than one migration claims to be the inventory");
+                })
+                .orElseThrow(() -> new AssertionError("no migration describes the inventory"));
     }
 
     /** A row in the shape a version-4 database holds: no created_at, no generation, no retention. */

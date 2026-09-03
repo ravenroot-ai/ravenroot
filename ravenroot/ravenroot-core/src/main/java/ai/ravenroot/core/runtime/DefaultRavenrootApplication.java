@@ -1362,9 +1362,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private void requireProcessInventory() {
         if (!processInventoryAvailable()) {
             throw new IllegalStateException(
-                    "no durable, inventory-capable execution store is configured (issue 154 durable "
+                    "no durable, inventory-capable execution store is configured, so the durable "
                             + "process inventory is unavailable; the caller must choose its own "
-                            + "fallback rather than discover this by catching an exception)");
+                            + "fallback rather than discover this by catching an exception");
         }
     }
 
@@ -1443,6 +1443,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     envelope.graphVersion(), envelope.occurredAt(), nodeId,
                     ExecutionEventType.EDGE_TRAVERSED.name().equals(envelope.eventType())
                             ? ai.ravenroot.api.persistence.EdgeTraversalEventData.edgeId(envelope.payload())
+                                    .orElse(null)
+                            : null,
+                    // Decoded from the body under its own media type, exactly as the edge identity
+                    // above is, so a foreign or malformed payload stays absent rather than becoming
+                    // a plausible-looking handler id attributed to a handler that may exist.
+                    ai.ravenroot.api.persistence.HandlerEventData.isHandlerEvent(envelope.eventType())
+                            ? ai.ravenroot.api.persistence.HandlerEventData.handlerId(envelope.payload())
                                     .orElse(null)
                             : null));
         }

@@ -26,16 +26,18 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * {@code GET /v1/executions/inventory} and {@code GET /v1/executions/{id}/traversals} (issue 154):
+ * {@code GET /v1/executions/inventory} and {@code GET /v1/executions/{id}/traversals}:
  * the durable, authoritative process inventory API, CLI, UI, audit and recovery callers are meant to
  * share (acceptance criterion 7), distinct from {@code GET /v1/executions/live}'s process-local
  * runtime view -- see {@code LiveExecutionsHttpTest}, which this class deliberately parallels rather
@@ -113,8 +115,10 @@ class ProcessInventoryHttpTest {
      * The tenant boundary, over the durable source rather than runtime bookkeeping. Mutation proof:
      * replace {@code delegate.processInventory(context.tenantId(), query)} in
      * {@code AuthorizedRavenrootApplication#processInventory} with an unscoped read and
-     * {@code otherInventory}'s assertion reds. Also proves authorization-before-existence-disclosure
-     * for the single-instance route: tenant-b's read of tenant-a's own {@code processInstanceId} and
+     * {@code otherInventory}'s assertion reds. Also proves that the single-instance route is
+     * tenant-scoped indistinguishably -- for a caller that is fully authorized, which is what this
+     * fixture builds, so it says nothing about an unauthorized one: tenant-b's read of tenant-a's own
+     * {@code processInstanceId} and
      * tenant-b's read of an id that never existed both answer the identical 404 body, so a caller
      * cannot enumerate another tenant's instances through the difference.
      */
@@ -202,6 +206,66 @@ class ProcessInventoryHttpTest {
 
                 var alsoRejected = getAs(server, "/v1/executions/inventory?deployment=x", "tenant-a");
                 assertEquals(400, alsoRejected.statusCode(), alsoRejected.body());
+            }
+        }
+    }
+
+    /**
+     * A recognised parameter name carrying a blank value is refused, not dropped.
+     *
+     * <p>This is the case the unrecognised-name test above cannot distinguish. Both a bad name and a
+     * blank value took the same path -- neither reached the builder -- and the assertions there pass
+     * either way, because a request that names an unknown parameter and a request that names a known
+     * one with nothing in it produce identical outcomes under the old code and different ones under
+     * the fix. {@code ?ownerWorkerId=} is not a hypothetical: it is what a shell emits from a variable
+     * that was never set, and dropping it answers with the whole tenant page, which a caller reads as
+     * "these all belong to the worker I asked about".</p>
+     *
+     * <p>Every recognised filter is checked, because the guard is one loop and a guard that covered
+     * five of six would fail in exactly the direction this test exists to catch.</p>
+     */
+    @Test
+    void aRecognisedParameterWithABlankValueIsRefusedRatherThanAnsweredWithTheUnfilteredPage()
+            throws Exception {
+        try (var engine = new PekkoExecutionEngine("process-inventory-http-blank-test");
+             var store = new InMemoryExecutionStore()) {
+            var application = applicationWith(engine, store);
+            try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.start();
+
+                var submitResponse = postAs(server, "/v1/executions?mode=run", GRAPH, "tenant-a");
+                assertEquals(202, submitResponse.statusCode(), submitResponse.body());
+                pollUntilNonEmpty(server, "tenant-a");
+
+                // The page this tenant would get with no filter at all, so the assertions below are
+                // against a listing that is demonstrably non-empty -- a blank filter answering with an
+                // empty page would be wrong too, but for a different reason, and would hide this one.
+                String unfiltered = body(getAs(server,
+                        "/v1/executions/inventory?includeTerminal=true", "tenant-a"));
+                assertFalse(unfiltered.startsWith("{\"items\":[]"),
+                        () -> "the fixture must produce at least one row or this test proves nothing: "
+                                + unfiltered);
+
+                for (String parameter : List.of("ownerWorkerId", "deploymentId", "status",
+                        "includeTerminal", "cursor", "limit")) {
+                    var response = getAs(server, "/v1/executions/inventory?" + parameter + "=",
+                            "tenant-a");
+                    assertEquals(400, response.statusCode(),
+                            () -> parameter + " with a blank value must be refused, not dropped: "
+                                    + response.body());
+                    assertEquals("INVALID_REQUEST", errorCode(response), response.body());
+                }
+
+                // A blank element inside an otherwise valid list is the same defect one level down.
+                var blankToken = getAs(server,
+                        "/v1/executions/inventory?status=RUNNING,,COMPLETED", "tenant-a");
+                assertEquals(400, blankToken.statusCode(), blankToken.body());
+                assertEquals("INVALID_REQUEST", errorCode(blankToken), blankToken.body());
+
+                // And the guard must not have swallowed the valid case with it.
+                var accepted = getAs(server,
+                        "/v1/executions/inventory?includeTerminal=true&limit=5", "tenant-a");
+                assertEquals(200, accepted.statusCode(), accepted.body());
             }
         }
     }

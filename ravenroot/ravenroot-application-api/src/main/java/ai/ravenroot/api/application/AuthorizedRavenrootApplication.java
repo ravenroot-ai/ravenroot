@@ -892,7 +892,7 @@ public final class AuthorizedRavenrootApplication {
     }
 
 /**
- * Reports whether the durable process inventory (issue 154) is available.
+ * Reports whether the durable process inventory is available.
  * @see RavenrootApplication#processInventoryAvailable()
  * @return {@code true} when the delegate can answer {@link #processInventory}, {@link #processInstance}
  * and {@link #processInstanceTraversals} from a real durable store.

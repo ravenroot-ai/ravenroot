@@ -180,11 +180,50 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
         if (eventType == null) {
             return UNKNOWN_EVENT;
         }
+        String handler = handlerSentence(eventType);
+        if (handler != null) {
+            return normalizeAuthoredText(handler);
+        }
         try {
             return forType(ExecutionEventType.valueOf(eventType));
         } catch (IllegalArgumentException unknown) {
             return UNKNOWN_EVENT;
         }
+    }
+
+    /**
+ * Returns the source-authored sentence for a durable handler-lifecycle event type, or {@code null}
+ * when the type is not one.
+ *
+ * <p>These types live only in the durable journal, so they are matched by name here rather than
+ * added to {@link ExecutionEventType}. That enum is the <em>live, in-process</em> runtime
+ * vocabulary and is switched over exhaustively by the monitor, the telemetry bridge, the audit sink
+ * and the rate-limit registry; a handler event is produced by whichever process is alive when a
+ * trigger arrives, which may be one that was not running when the wait began, so it is not an
+ * in-process runtime transition and would be a false member of that set. Matching by name here
+ * keeps the addition to a single method.</p>
+ *
+ * <p>The sentences say <em>which level</em> the event is about, because that is what a reader
+ * scanning an activity log has to be able to tell apart: a handler event and a node event share a
+ * process and a traversal, and only the wording and the identifiers beside it distinguish them.
+ * None of them interpolates caller text, for the reason this class exists.</p>
+* @param eventType domain event type recorded in the durable journal
+* @return authored sentence, or {@code null} when this is not a handler event type
+ */
+    private static String handlerSentence(String eventType) {
+        return switch (eventType) {
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_REGISTERED ->
+                    "A handler was registered and the process is waiting for it.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_ESCALATED ->
+                    "A waiting handler was escalated and can still be resolved.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_EXPIRED ->
+                    "A handler's wait ended without a trigger.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_DENIED ->
+                    "A handler was denied and the process continued.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_RESOLVED ->
+                    "A handler was resolved and the process re-entered.";
+            default -> null;
+        };
     }
 
     /** Package-visible so the contract's Unicode/control/bound behavior can be tested directly. */

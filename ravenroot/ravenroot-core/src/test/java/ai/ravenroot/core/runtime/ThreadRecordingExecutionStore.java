@@ -188,7 +188,7 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
         return delegate.journalRetention();
     }
 
-    // The durable inventory (issue 154) is pure delegation here. This double exists to perturb one
+    // The durable inventory is pure delegation here. This double exists to perturb one
     // named operation; forwarding everything else unchanged is what keeps the perturbation the only
     // difference between it and the store it wraps.
 

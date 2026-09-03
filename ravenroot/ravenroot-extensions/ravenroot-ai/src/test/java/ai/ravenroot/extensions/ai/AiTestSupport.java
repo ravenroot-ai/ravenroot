@@ -7,6 +7,8 @@ import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
+import ai.ravenroot.api.node.service.ToolCallAuthorization;
+import ai.ravenroot.api.node.service.ToolCallAuthorizationService;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 
@@ -54,6 +56,19 @@ final class AiTestSupport {
         return name -> profile.name().equals(name) ? Optional.of(profile) : Optional.empty();
     }
 
+    static ToolCallAuthorizationService allowingTools() {
+        return (message, tool, arguments) -> new ToolCallAuthorization() {
+            private final UUID id = UUID.randomUUID();
+            private final byte[] canonical = arguments == null ? new byte[0] : arguments.clone();
+
+            @Override public UUID callId() { return id; }
+            @Override public Disposition disposition() { return Disposition.ALLOW; }
+            @Override public String argumentsDigest() { return "test"; }
+            @Override public byte[] canonicalArguments() { return canonical.clone(); }
+            @Override public void complete(Outcome outcome) { java.util.Objects.requireNonNull(outcome); }
+        };
+    }
+
     /** The exact bytes an operator would put in {@code RAVENROOT_LLM_PROFILE_<hex(name)>}. */
     static String encodedProfile(String json) {
         return Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
@@ -69,8 +84,11 @@ final class AiTestSupport {
                         ChatCompletionsDouble.completion("hello").getBytes(StandardCharsets.UTF_8)));
 
         @Override public Set<NodePackageCapability> capabilities() {
-            return Set.of(NodePackageCapability.OUTBOUND_HTTP);
+            return Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                    NodePackageCapability.TOOL_AUTHORIZATION);
         }
+
+        @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -172,8 +190,11 @@ final class AiTestSupport {
         }
 
         @Override public Set<NodePackageCapability> capabilities() {
-            return Set.of(NodePackageCapability.OUTBOUND_HTTP);
+            return Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                    NodePackageCapability.TOOL_AUTHORIZATION);
         }
+
+        @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -244,6 +265,7 @@ final class AiTestSupport {
         private volatile boolean stallChat;
         private volatile boolean uncancellable;
         private volatile boolean cancellationThrows;
+        private volatile ToolCallAuthorizationService toolAuthorization = allowingTools();
         private final java.util.List<CompletableFuture<OutboundHttpResponse>> stalled =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final java.util.List<Boolean> cancelled =
@@ -312,6 +334,11 @@ final class AiTestSupport {
             return this;
         }
 
+        RoutedHttp authorizing(ToolCallAuthorizationService authorization) {
+            toolAuthorization = java.util.Objects.requireNonNull(authorization);
+            return this;
+        }
+
         int chatCalls() {
             return chatCalls.get();
         }
@@ -341,8 +368,11 @@ final class AiTestSupport {
         }
 
         @Override public Set<NodePackageCapability> capabilities() {
-            return Set.of(NodePackageCapability.OUTBOUND_HTTP);
+            return Set.of(NodePackageCapability.OUTBOUND_HTTP,
+                    NodePackageCapability.TOOL_AUTHORIZATION);
         }
+
+        @Override public ToolCallAuthorizationService toolAuthorization() { return toolAuthorization; }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();

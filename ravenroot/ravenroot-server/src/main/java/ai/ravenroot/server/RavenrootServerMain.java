@@ -159,7 +159,8 @@ public final class RavenrootServerMain {
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
-                environment, credentialResolver, pluginActivationAuditSink);
+                environment, credentialResolver, pluginActivationAuditSink,
+                new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail));
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -523,10 +524,12 @@ public final class RavenrootServerMain {
      */
     private static PluginActivationOrchestrator.Registration registerNodePackagesOrRefuse(
             BehaviorEnvironment environment, CredentialResolver credentials,
-            AuditTrailPluginActivationSink auditSink) {
+            AuditTrailPluginActivationSink auditSink,
+            ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
-                    new DeploymentGlobalTenantCredentials(credentials));
+                    new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
+                    toolAuditSink);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment), System.getenv(), services);
         } catch (RuntimeException activationFailed) {

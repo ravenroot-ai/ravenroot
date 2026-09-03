@@ -117,13 +117,13 @@ final class McpToolset {
         }
 
         @Override
-        public CompletionStage<String> invoke(String argumentsJson) {
+        public CompletionStage<Result> invoke(String argumentsJson) {
             if (!session.profile().permits(announced.name())) {
                 // Unreachable through this object, which was only created for a permitted tool, and
                 // checked anyway: the allow-list is the one invariant in this class that must not
                 // depend on another method having been correct.
                 return CompletableFuture.completedFuture(
-                        new McpRefusal(McpRefusal.Reason.TOOL_NOT_ALLOWED).forModel());
+                        Result.failed(new McpRefusal(McpRefusal.Reason.TOOL_NOT_ALLOWED).forModel()));
             }
             return session.call(announced.name(), argumentsJson)
                     // A refusal becomes an answer here and not a failure, which is AgentTool's whole
@@ -131,7 +131,7 @@ final class McpToolset {
                     // finish another way. The budget is what stops a model that cannot.
                     .handle((result, failure) -> failure == null
                             ? result
-                            : McpSession.describeForModel(failure));
+                            : Result.failed(McpSession.describeForModel(failure)));
         }
     }
 }

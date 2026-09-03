@@ -4,6 +4,8 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.ToolCallAuditSink;
+import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
 import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
@@ -161,8 +163,20 @@ public final class EnvironmentNodePackageServiceGrants {
      */
     public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
                                                              TenantCredentialResolver credentials) {
+        return fromEnvironment(environment, credentials, ToolPolicy.denyAll(), ToolCallAuditSink.discarding());
+    }
+
+    /**
+     * Reads grants and composes each view with the deployment's one tool-policy and audit path.
+     */
+    public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
+                                                             TenantCredentialResolver credentials,
+                                                             ToolPolicy toolPolicy,
+                                                             ToolCallAuditSink toolAuditSink) {
         Objects.requireNonNull(environment, "environment");
         Objects.requireNonNull(credentials, "credentials");
+        Objects.requireNonNull(toolPolicy, "toolPolicy");
+        Objects.requireNonNull(toolAuditSink, "toolAuditSink");
 
         // Sorted so that a deployment with two malformed grants fails on the same one every run.
         // An operator fixing startup failures one at a time needs the order to be a property of the
@@ -190,7 +204,8 @@ public final class EnvironmentNodePackageServiceGrants {
             String packageId = packageIdOf(variable);
             Map<String, Object> grant = decode(variable, encoded);
             try {
-                registry.grant(packageId, services(variable, packageId, grant, credentials));
+                registry.grant(packageId, services(variable, packageId, grant, credentials,
+                        toolPolicy, toolAuditSink));
             } catch (IllegalArgumentException refused) {
                 // Everything the operator wrote about origins, headers, methods, subprotocols,
                 // bindings and ceilings is validated by NodePackageEgressPolicy.Builder and by the
@@ -265,7 +280,9 @@ public final class EnvironmentNodePackageServiceGrants {
 
     private static ManagedNodePackageServices services(String variable, String packageId,
                                                        Map<String, Object> grant,
-                                                       TenantCredentialResolver credentials) {
+                                                       TenantCredentialResolver credentials,
+                                                       ToolPolicy toolPolicy,
+                                                       ToolCallAuditSink toolAuditSink) {
         exactlyKnownKeys(variable, grant, GRANT_KEYS, "grant");
         Set<NodePackageCapability> capabilities = capabilities(variable, grant.get("capabilities"));
 
@@ -321,7 +338,8 @@ public final class EnvironmentNodePackageServiceGrants {
 
         TenantCredentialResolver scoped = credentialScope(variable, grant.get("credentialReferences"),
                 boundReferences, capabilities, credentials);
-        var services = ManagedNodePackageServices.builder(packageId, policy.build(), scoped);
+        var services = ManagedNodePackageServices.builder(packageId, policy.build(), scoped)
+                .toolAuthorization(toolPolicy, toolAuditSink);
         capabilities.forEach(services::grant);
         return services.build();
     }

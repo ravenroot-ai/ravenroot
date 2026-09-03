@@ -5,7 +5,14 @@ AI and programmable nodes remain ordinary graph steps whose privileged work is d
 ## Invariants
 
 - A model node refers to an operator-owned provider profile; it does not carry a provider secret.
-- An agent receives only the tools allowed by both its profile and the deployment allowlist.
+- The system role contains immutable operator policy only; graph, retrieval, tool, and model content
+  cannot enter that authority channel.
+- An agent receives only the tools allowed by both its profile and the deployment allowlist, and each
+  requested call passes the server-side tool policy immediately before effect.
+- Trusted invocation identity, egress policy, tool grants, and snapshotted budgets are not writable by
+  prompts, payloads, retrieved content, tool arguments, or model output.
+- Model inputs carry bounded content-digest provenance; tool decisions and terminal effects carry
+  sanitized server-minted audit correlation.
 - A program node refers to an approved artifact; executable source is not smuggled through GraphML.
 
 ## Runtime relationships

@@ -23,10 +23,12 @@ Backup and restore acquire the same persistent maintenance lock as the server an
 | Entry | Contract |
 |---|---|
 | `MANIFEST.txt` | Canonical UTF-8 inventory with byte length and SHA-256 digest |
-| `execution-store.db` | SQLite-native `VACUUM INTO` snapshot |
+| `execution-store.db` | SQLite-native `VACUUM INTO` snapshot, including the canonical graph definitions accepted executions are pinned to |
 | `audit/` | Every selected `.audit.jsonl` and `.audit.head` pair |
 
-The destination must not already exist. Publication uses a sibling staging directory and atomic rename. Graph documents and external artifact source are not bundle payloads; preserve them in their owning repositories.
+The destination must not already exist. Publication uses a sibling staging directory and atomic rename.
+
+The canonical graph definition every accepted execution is pinned to is held in the execution store and is therefore inside the snapshot. Restoring a bundle restores the definitions with the executions that name them, and a restored server returns the exact accepted document without asking a caller to submit it again. External artifact source is still not a bundle payload; preserve it in its owning repository.
 
 The manifest records `authenticity: not-provided` and `encryption: none`. Protect the complete bundle with access control, encrypted storage, and an independently authenticated transfer channel.
 

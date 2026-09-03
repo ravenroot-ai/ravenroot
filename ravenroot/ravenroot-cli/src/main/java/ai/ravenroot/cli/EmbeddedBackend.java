@@ -138,6 +138,51 @@ final class EmbeddedBackend implements CliBackend {
                 .toList();
     }
 
+    /** Tenant scoping is the same {@code requestContext} pass-through every other verb here
+     * uses -- see {@link CliBackend#inventory}'s own Javadoc. */
+    @Override
+    public List<InventoryView> inventory() throws IOException {
+        try {
+            var page = application.processInventory(requestContext,
+                    ai.ravenroot.api.persistence.ProcessInventoryQuery.everything(50));
+            return page.items().stream().map(EmbeddedBackend::inventoryView).toList();
+        } catch (IllegalStateException unavailable) {
+            throw new IOException("501 PROCESS_INVENTORY_UNAVAILABLE: " + unavailable.getMessage());
+        }
+    }
+
+    @Override
+    public List<TraversalInventoryView> traversals(String processInstanceId) throws IOException {
+        UUID id;
+        try {
+            id = UUID.fromString(processInstanceId);
+        } catch (IllegalArgumentException malformed) {
+            throw new IOException("Not a process instance id: " + processInstanceId);
+        }
+        try {
+            return application.processInstanceTraversals(requestContext, id).stream()
+                    .map(entry -> new TraversalInventoryView(entry.traversalId().toString(), entry.position(),
+                            entry.ingressNodeId(), entry.status().name(), entry.disposition().name(),
+                            entry.invocationCount(), entry.parkedAttemptCount()))
+                    .toList();
+        } catch (IllegalStateException unavailable) {
+            throw new IOException("501 PROCESS_INVENTORY_UNAVAILABLE: " + unavailable.getMessage());
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                throw new IOException("404 UNKNOWN_PROCESS_INSTANCE: unknown process instance");
+            }
+            throw new IOException(storeFailure);
+        }
+    }
+
+    private static InventoryView inventoryView(ai.ravenroot.api.persistence.ProcessInventoryEntry entry) {
+        return new InventoryView(entry.key().processInstanceId().toString(), entry.status().name(),
+                entry.disposition().name(), entry.graphVersionPin().reference(),
+                entry.deploymentId().orElse(null), entry.workloadId().orElse(null),
+                entry.correlationId().orElse(null), entry.traversalCount(),
+                entry.createdAt().toString(), entry.updatedAt().toString());
+    }
+
     @Override
     public CancelView cancel(String traversalId) {
         var result = application.cancelExecution(requestContext, java.util.UUID.fromString(traversalId));

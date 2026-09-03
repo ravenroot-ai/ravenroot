@@ -963,11 +963,20 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED,
                 java.util.Map.of(traversalId, traversal));
 
+        // Issue 154: every traversal opened here is deployment-hosted, so both halves of ADR 0021 D5's
+        // pair are knowable at admission and are recorded exactly as GraphRunner.execute below is
+        // stamped with them -- this deployment's own identity as deploymentId, and this traversal's id
+        // (the ADR 0021 D3 unit-of-work / sharding key) as workloadId. requestId is SecurityContext's
+        // own ingress correlation identifier. Recording all three here, once, at the instance's
+        // creation is what keeps the inventory row from ever needing a later, less-informed write to
+        // invent them.
         var created = awaitStore(executionStore.apply(
                 ai.ravenroot.api.persistence.ExecutionBatch.to(key)
                         .expecting(ai.ravenroot.api.persistence.RevisionExpectation.notPresent())
                         .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessCreated(accepted,
                                 new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion)))
+                        .recordOrigin(ai.ravenroot.api.persistence.ExecutionOrigin.of(
+                                id.value(), traversalId.toString(), security.requestId()))
                         .build()));
         // RUNNING is committed here, before the engine send below, so a persisted RUNNING means
         // "sent, outcome unknown" rather than "about to be sent" -- the reading PERS-04's recovery

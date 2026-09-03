@@ -56,6 +56,12 @@ public final class RavenrootCli {
                 case "run" -> runGraph(args);
                 case "result" -> result(args);
                 case "live" -> liveExecutions();
+                // Issue 154: the durable inventory, distinct from 'live' -- see #inventory's own
+                // Javadoc. Tenant is never a flag here, the same rule 'live' and every other verb
+                // follow: the embedded backend reads its own constructor RequestContext and the
+                // remote backend relies on the bearer token.
+                case "inventory" -> inventory();
+                case "traversals" -> traversals(args);
                 case "cancel" -> cancelExecution(args);
                 case "drain" -> drainServer();
                 // One verb, seven subcommands, mirroring 'credentials' below: a listing, a
@@ -276,6 +282,51 @@ public final class RavenrootCli {
     }
 
     /**
+     * Lists this tenant's durable process inventory (issue 154): what this deployment's own
+     * persisted record says exists, surviving a restart -- distinct from {@code live}, which is
+     * unchanged and remains the process-local runtime view. See {@link CliBackend#inventory}'s own
+     * Javadoc for the full distinction. One line per instance; an idle tenant gets no lines, the
+     * same "absence of output IS the answer" convention {@code live} uses.
+     */
+    private int inventory() throws IOException {
+        for (var entry : backend.inventory()) {
+            output.println("process-instance-id=" + entry.processInstanceId()
+                    + "\tstatus=" + entry.status()
+                    + "\tdisposition=" + entry.disposition()
+                    + "\tgraph-version=" + sanitizeForConsole(entry.graphVersion())
+                    + "\tdeployment-id=" + sanitizeForConsole(entry.deploymentId())
+                    + "\tworkload-id=" + sanitizeForConsole(entry.workloadId())
+                    + "\tcorrelation-id=" + sanitizeForConsole(entry.correlationId())
+                    + "\ttraversal-count=" + entry.traversalCount()
+                    + "\tcreated-at=" + entry.createdAt()
+                    + "\tupdated-at=" + entry.updatedAt());
+        }
+        return 0;
+    }
+
+    /**
+     * Lists one durable process instance's traversals from the inventory (issue 154):
+     * {@code ravenroot traversals <process-instance-id>}. The argument is a process instance id, not
+     * the traversal/execution id {@code cancel} and {@code result} take -- see
+     * {@link CliBackend#traversals}'s own Javadoc for why the two id spaces are deliberately distinct.
+     */
+    private int traversals(String[] args) throws IOException {
+        if (args.length != 2) {
+            return invalid("Usage: traversals <process-instance-id>");
+        }
+        for (var entry : backend.traversals(args[1])) {
+            output.println("traversal-id=" + entry.traversalId()
+                    + "\tposition=" + entry.position()
+                    + "\tingress-node-id=" + sanitizeForConsole(entry.ingressNodeId())
+                    + "\tstatus=" + entry.status()
+                    + "\tdisposition=" + entry.disposition()
+                    + "\tinvocation-count=" + entry.invocationCount()
+                    + "\tparked-attempt-count=" + entry.parkedAttemptCount());
+        }
+        return 0;
+    }
+
+    /**
      * API-02. Pause and resume remain outside this command; cancel and drain are the two pieces
      * of {@code control} it exposes.
      *
@@ -443,7 +494,16 @@ public final class RavenrootCli {
     private void help() {
         output.println("Usage: ravenroot [--server <url> --token-file <path>] "
                 + "<status|runtime|node-types|inspect <graph.graphml>|run <graph.graphml> [payload]"
-                + "|result <execution-id>|live|cancel <traversal-id>|drain|credentials|deployments>");
+                + "|result <execution-id>|live|inventory|traversals <process-instance-id>"
+                + "|cancel <traversal-id>|drain|credentials|deployments>");
+        // Issue 154: 'inventory' is the durable, tenant-scoped process inventory -- what this
+        // deployment's own persisted record says exists, surviving a restart -- as opposed to
+        // 'live', which is unchanged and remains the process-local runtime view. 'traversals' takes
+        // a process-instance-id, not the traversal/execution id 'cancel' and 'result' take.
+        output.println("       'inventory' lists the durable process inventory (survives a restart); "
+                + "'live' remains the process-local runtime view. 'traversals <process-instance-id>' "
+                + "lists one instance's traversals from the inventory -- note the argument is a "
+                + "process-instance-id, not the traversal/execution id 'cancel' and 'result' take.");
         // Listed separately, like 'credentials' is: seven related actions under one verb rather
         // than seven top-level commands. 'run' above starts a transient traversal that ends when it
         // completes or is cancelled; a deployment is the opposite shape -- a long-lived, addressable,

@@ -273,6 +273,44 @@ public final class RemoteBackend implements CliBackend {
         }).toList();
     }
 
+    /** Reads {@code GET /v1/executions/inventory?includeTerminal=true}: the server resolves the
+     * tenant from the bearer token, exactly as {@link #live} does -- see
+     * {@link CliBackend#inventory}'s own Javadoc for why {@code includeTerminal=true} is this verb's
+     * own default, the opposite of the HTTP route's bare default. */
+    @Override
+    public List<InventoryView> inventory() throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(get("/v1/executions/inventory?includeTerminal=true")));
+        return MinimalJson.asArray(body.get("items")).stream().map(entry -> {
+            var item = MinimalJson.asObject(entry);
+            return new InventoryView(MinimalJson.asString(item.get("processInstanceId")),
+                    MinimalJson.asString(item.get("status")), MinimalJson.asString(item.get("disposition")),
+                    MinimalJson.asString(item.get("graphVersion")),
+                    MinimalJson.asStringOrNull(item.get("deploymentId")),
+                    MinimalJson.asStringOrNull(item.get("workloadId")),
+                    MinimalJson.asStringOrNull(item.get("correlationId")),
+                    (int) MinimalJson.asLong(item.get("traversalCount")),
+                    MinimalJson.asString(item.get("createdAt")), MinimalJson.asString(item.get("updatedAt")));
+        }).toList();
+    }
+
+    /** Reads {@code GET /v1/executions/{id}/traversals} -- see {@link CliBackend#traversals}'s own
+     * Javadoc for why {@code processInstanceId} is not the same id space {@link #cancel} takes. */
+    @Override
+    public List<TraversalInventoryView> traversals(String processInstanceId) throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(
+                get("/v1/executions/" + java.net.URLEncoder.encode(processInstanceId, StandardCharsets.UTF_8)
+                        + "/traversals")));
+        return MinimalJson.asArray(body.get("traversals")).stream().map(entry -> {
+            var item = MinimalJson.asObject(entry);
+            return new TraversalInventoryView(MinimalJson.asString(item.get("traversalId")),
+                    (int) MinimalJson.asLong(item.get("position")),
+                    MinimalJson.asString(item.get("ingressNodeId")), MinimalJson.asString(item.get("status")),
+                    MinimalJson.asString(item.get("disposition")),
+                    (int) MinimalJson.asLong(item.get("invocationCount")),
+                    (int) MinimalJson.asLong(item.get("parkedAttemptCount")));
+        }).toList();
+    }
+
     @Override
     public CancelView cancel(String traversalId) throws IOException {
         var body = MinimalJson.asObject(MinimalJson.parse(

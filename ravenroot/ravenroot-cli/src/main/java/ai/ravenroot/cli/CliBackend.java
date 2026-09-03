@@ -47,6 +47,37 @@ public interface CliBackend {
      */
     List<LiveView> live() throws IOException;
 
+    /**
+     * This tenant's durable process inventory (issue 154): what this deployment's own persisted
+     * record says exists, surviving a restart -- distinct from {@link #live}, which is unchanged and
+     * remains the process-local live view. The API exposes it through {@code GET
+     * /v1/executions/inventory}; see that route's own Javadoc, and
+     * {@code ai.ravenroot.api.application.RavenrootApplication#processInventoryAvailable()}, for the
+     * full distinction between the two. Tenant scoping is structural, the same mechanism {@link #live}
+     * already documents.
+     *
+     * <p>Unfiltered, first page only, terminal rows <strong>included</strong> --
+     * {@code ProcessInventoryQuery.everything()} on both transports. Deliberately the opposite
+     * default from the HTTP route's own ({@code includeTerminal=false}): an operator running this
+     * verb right after {@code ravenroot run} needs to keep seeing the instance once it finishes, or
+     * the verb would go silent on the exact work it was just used to start. Filtering and pagination
+     * are the query surface's own job and are not exposed as CLI flags yet; this is deliberately the
+     * smallest useful verb rather than a second console.</p>
+     * @throws IOException if this deployment has no durable inventory-capable execution store composed
+     */
+    List<InventoryView> inventory() throws IOException;
+
+    /**
+     * One durable process instance's traversals from the inventory (issue 154). {@code processInstanceId}
+     * is a process instance id, not the traversal/execution id {@link #cancel} and {@link #result}
+     * take -- see {@code GET /v1/executions/{id}/traversals}'s own Javadoc for why the two id spaces
+     * are deliberately distinct.
+     * @throws IOException if the instance is absent, belongs to another tenant, was purged past its
+     * terminal retention window (all three indistinguishable by design), or this deployment has no
+     * durable inventory-capable execution store composed
+     */
+    List<TraversalInventoryView> traversals(String processInstanceId) throws IOException;
+
     /** API-02. Cancel and server drain; pause/resume and handler triggers remain out of scope. */
     CancelView cancel(String traversalId) throws IOException;
 
@@ -266,6 +297,24 @@ public interface CliBackend {
      */
     record LiveView(String processInstanceId, String traversalId, String executionId, String graphVersion,
                      String startedAt) {
+    }
+
+    /**
+     * Mirrors {@code ai.ravenroot.api.persistence.ProcessInventoryEntry} (issue 154), bounded to
+     * non-secret fields -- no payloads, no opaque blobs, exactly the wire route's own contract.
+     * {@code deploymentId}, {@code workloadId} and {@code correlationId} are {@code null} when
+     * absent, the same nullable-string convention {@link CredentialView} already uses for a field a
+     * transport may not carry.
+     * @param deploymentId hosting deployment, or {@code null} for a transient submission
+     */
+    record InventoryView(String processInstanceId, String status, String disposition, String graphVersion,
+                         String deploymentId, String workloadId, String correlationId, int traversalCount,
+                         String createdAt, String updatedAt) {
+    }
+
+    /** Mirrors {@code ai.ravenroot.api.persistence.TraversalInventoryEntry} (issue 154). */
+    record TraversalInventoryView(String traversalId, int position, String ingressNodeId, String status,
+                                  String disposition, int invocationCount, int parkedAttemptCount) {
     }
 
     /** Mirrors {@code ai.ravenroot.api.application.CancelResult}: {@code note} is the operator-facing

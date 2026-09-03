@@ -64,6 +64,22 @@ public class ForwardingRavenrootApplication implements RavenrootApplication {
     }
     @Override public boolean cancelTraversal(UUID traversalId) { return delegate.cancelTraversal(traversalId); }
     @Override public boolean drain(Duration bound) { return delegate.drain(bound); }
+    @Override public boolean processInventoryAvailable() { return delegate.processInventoryAvailable(); }
+    @Override public ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
+            String tenantId, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+        return delegate.processInventory(tenantId, query);
+    }
+    @Override public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> processInstance(
+            String tenantId, UUID processInstanceId) {
+        return delegate.processInstance(tenantId, processInstanceId);
+    }
+    @Override public List<ai.ravenroot.api.persistence.TraversalInventoryEntry> processInstanceTraversals(
+            String tenantId, UUID processInstanceId) {
+        return delegate.processInstanceTraversals(tenantId, processInstanceId);
+    }
+    @Override public java.time.Instant processInventoryRetainedFrom(String tenantId) {
+        return delegate.processInventoryRetainedFrom(tenantId);
+    }
     @Override public List<ExecutionEvent> executionEventsAfter(long sequence) {
         return delegate.executionEventsAfter(sequence);
     }

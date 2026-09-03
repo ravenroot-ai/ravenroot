@@ -54,6 +54,18 @@ final class MinimalJson {
         throw new IllegalArgumentException("Expected a JSON string, got: " + value);
     }
 
+    /**
+     * {@code asString}'s null-tolerant counterpart, for a field the server may legitimately answer
+     * {@code null} -- e.g. the durable inventory's {@code deploymentId}/{@code workloadId}/
+     * {@code correlationId} (issue 154), each absent for a row whose origin component was never
+     * recorded. A missing key and an explicit JSON {@code null} both read the same way through
+     * {@link Map#get}, so this treats them identically rather than distinguishing "absent from the
+     * object" from "present and null", a distinction the server's own wire shape does not draw either.
+     */
+    static String asStringOrNull(Object value) {
+        return value == null ? null : asString(value);
+    }
+
     static long asLong(Object value) {
         if (value instanceof Number number) {
             return number.longValue();

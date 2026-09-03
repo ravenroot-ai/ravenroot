@@ -2259,6 +2259,15 @@ public final class RavenrootServer implements AutoCloseable {
                 listLiveExecutions(exchange);
                 return;
             }
+            if (segments.length == 2 && "inventory".equals(segments[1])) {
+                // Issue 154: "inventory" is reserved the same way "live" is -- never a valid
+                // traversal id, so no legitimate /v1/executions/{id} read is ever shadowed by it.
+                if (!method(exchange, "GET")) {
+                    return;
+                }
+                listProcessInventory(exchange);
+                return;
+            }
             if (segments.length == 2 && !segments[1].isBlank()) {
                 readExecution(exchange, segments[1]);
                 return;
@@ -2270,6 +2279,17 @@ public final class RavenrootServer implements AutoCloseable {
                     return;
                 }
                 controlExecution(exchange, segments[1], segments[2]);
+                return;
+            }
+            if (segments.length == 3 && !segments[1].isBlank() && "traversals".equals(segments[2])) {
+                // Issue 154: unlike every other sub-route under /v1/executions, {id} here names a
+                // durable process instance id, not a traversal/execution id -- see
+                // #readProcessInstanceTraversals's own Javadoc for why that is deliberate rather than
+                // an inconsistency.
+                if (!method(exchange, "GET")) {
+                    return;
+                }
+                readProcessInstanceTraversals(exchange, segments[1]);
                 return;
             }
             fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
@@ -2742,6 +2762,195 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"executionId\":\"" + execution.executionId()
                 + "\",\"graphVersion\":\"" + escape(execution.graphVersion())
                 + "\",\"startedAt\":\"" + execution.startedAt() + "\"}";
+    }
+
+    /**
+     * {@code GET /v1/executions/inventory} (issue 154): one page of this tenant's durable, authoritative
+     * process inventory -- what API, CLI, UI, audit and recovery callers are meant to share instead of
+     * each maintaining an incompatible idea of what exists (acceptance criterion 7). Distinct from
+     * {@link #listLiveExecutions}: this reads the store's own persisted record, not runtime bookkeeping,
+     * and it survives a restart -- see {@link ai.ravenroot.api.application.RavenrootApplication#processInventoryAvailable()}
+     * for the full distinction between the two.
+     *
+     * <p>Query parameters, every one optional: {@code status} (comma-separated
+     * {@link ai.ravenroot.api.application.ProcessInstanceStatus} names), {@code owner} (lease
+     * holder worker id), {@code deployment} (hosting deployment id), {@code includeTerminal}
+     * ({@code true} to include {@code COMPLETED}/{@code FAILED} rows, which are excluded by
+     * default), {@code limit} and {@code cursor} (opaque, from a previous page's
+     * {@code nextCursor}). The response body always carries {@code retainedFrom}, the tenant's
+     * inventory retention floor, so a caller can tell an instance that never existed from one that
+     * expired by policy without a second request.</p>
+     *
+     * <p>501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when this deployment has no
+     * inventory-capable store composed at all -- a fact about the deployment, not the request, so it
+     * is checked before the request is otherwise parsed. Malformed query input (an unrecognised
+     * status name, a non-numeric limit, a limit or cursor the store itself rejects) answers 400
+     * {@link ErrorCode#INVALID_REQUEST} -- the store's own {@code InvalidRequest} classification is
+     * translated here rather than surfaced as 500, since it is a fact about the caller's request.</p>
+     */
+    private void listProcessInventory(HttpExchange exchange) throws IOException {
+        var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        if (!authorizedApplication.processInventoryAvailable()) {
+            fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        var parameters = query(exchange);
+        var builder = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder();
+        String rawStatus = parameters.get("status");
+        if (rawStatus != null && !rawStatus.isBlank()) {
+            for (String token : rawStatus.split(",")) {
+                if (token.isBlank()) {
+                    continue;
+                }
+                try {
+                    builder.status(ai.ravenroot.api.application.ProcessInstanceStatus.valueOf(token.trim()));
+                } catch (IllegalArgumentException unknownStatus) {
+                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    return;
+                }
+            }
+        }
+        String owner = parameters.get("owner");
+        if (owner != null && !owner.isBlank()) {
+            builder.ownedBy(owner);
+        }
+        String deployment = parameters.get("deployment");
+        if (deployment != null && !deployment.isBlank()) {
+            builder.hostedBy(deployment);
+        }
+        String rawIncludeTerminal = parameters.get("includeTerminal");
+        if (rawIncludeTerminal != null && !rawIncludeTerminal.isBlank()) {
+            if (!"true".equalsIgnoreCase(rawIncludeTerminal) && !"false".equalsIgnoreCase(rawIncludeTerminal)) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            builder.includeTerminal(Boolean.parseBoolean(rawIncludeTerminal));
+        }
+        String rawCursor = parameters.get("cursor");
+        if (rawCursor != null && !rawCursor.isBlank()) {
+            builder.cursor(rawCursor);
+        }
+        String rawLimit = parameters.get("limit");
+        if (rawLimit != null && !rawLimit.isBlank()) {
+            try {
+                builder.limit(Integer.parseInt(rawLimit.trim()));
+            } catch (NumberFormatException notANumber) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+        }
+        try {
+            var page = authorizedApplication.processInventory(requestContext, builder.build());
+            json(exchange, 200, processInventoryPageJson(page));
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.InvalidRequest) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private static String processInventoryPageJson(ai.ravenroot.api.persistence.ProcessInventoryPage page) {
+        var body = new StringBuilder(256);
+        body.append("{\"items\":[");
+        var items = page.items();
+        for (int index = 0; index < items.size(); index++) {
+            if (index > 0) {
+                body.append(',');
+            }
+            body.append(processInventoryEntryJson(items.get(index)));
+        }
+        body.append("],\"nextCursor\":")
+                .append(page.nextCursor().map(cursor -> "\"" + escape(cursor) + "\"").orElse("null"))
+                .append(",\"retainedFrom\":\"").append(page.retainedFrom()).append("\"}");
+        return body.toString();
+    }
+
+    /** Bounded, non-secret fields only -- no payloads, no opaque blobs (issue 154). */
+    private static String processInventoryEntryJson(ai.ravenroot.api.persistence.ProcessInventoryEntry entry) {
+        return "{\"tenantId\":\"" + escape(entry.key().tenantId())
+                + "\",\"processInstanceId\":\"" + entry.key().processInstanceId()
+                + "\",\"status\":\"" + entry.status()
+                + "\",\"disposition\":\"" + entry.disposition()
+                + "\",\"revision\":" + entry.revision()
+                + ",\"lifecycleGeneration\":" + entry.lifecycleGeneration()
+                + ",\"graphVersion\":\"" + escape(entry.graphVersionPin().reference())
+                + "\",\"deploymentId\":" + optionalStringJson(entry.deploymentId())
+                + ",\"workloadId\":" + optionalStringJson(entry.workloadId())
+                + ",\"correlationId\":" + optionalStringJson(entry.correlationId())
+                + ",\"ownerWorkerId\":" + optionalStringJson(entry.ownerWorkerId())
+                + ",\"fencingToken\":" + entry.fencingToken()
+                + ",\"leaseExpiresAt\":" + entry.leaseExpiresAt().map(instant -> "\"" + instant + "\"").orElse("null")
+                + ",\"traversalCount\":" + entry.traversalCount()
+                + ",\"createdAt\":\"" + entry.createdAt()
+                + "\",\"updatedAt\":\"" + entry.updatedAt() + "\""
+                + ",\"retainedUntil\":" + entry.retainedUntil().map(instant -> "\"" + instant + "\"").orElse("null")
+                + "}";
+    }
+
+    private static String optionalStringJson(java.util.Optional<String> value) {
+        return value.map(present -> "\"" + escape(present) + "\"").orElse("null");
+    }
+
+    /**
+     * {@code GET /v1/executions/{id}/traversals} (issue 154): the durable inventory's traversal rows for
+     * one process instance.
+     *
+     * <p><strong>{@code id} names a process instance, not a traversal/execution id.</strong> Every
+     * other sub-route under {@code /v1/executions} addresses a traversal ({@code GET
+     * /v1/executions/{id}} and the cancel/pause/resume trio, where {@code id == executionId ==
+     * traversalId}). This route is keyed differently on purpose: the durable inventory's traversal
+     * listing is {@link ai.ravenroot.api.persistence.ExecutionStore#listTraversals} scoped by
+     * {@link ai.ravenroot.api.persistence.ExecutionKey}, whose second component is
+     * {@code processInstanceId} -- PERS-01's own aggregate identity -- and a process instance can
+     * contain more than one traversal, so a traversal id could not address "this instance's
+     * traversals" at all. The two id spaces are both UUIDs and are not interchangeable; a client that
+     * passes a traversal id here receives 404, indistinguishable from an id that never existed.</p>
+     *
+     * <p>404 {@link ErrorCode#UNKNOWN_PROCESS_INSTANCE} when the instance is absent, belongs to
+     * another tenant, or was purged past its terminal retention window -- all three
+     * indistinguishable by design, exactly as {@code GET /v1/executions/{id}} already is for its own
+     * id space. 501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when no inventory-capable store
+     * is composed at all.</p>
+     */
+    private void readProcessInstanceTraversals(HttpExchange exchange, String rawId) throws IOException {
+        var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        if (!authorizedApplication.processInventoryAvailable()) {
+            fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var traversals = authorizedApplication.processInstanceTraversals(requestContext, processInstanceId);
+            var body = traversals.stream().map(RavenrootServer::traversalInventoryEntryJson)
+                    .collect(java.util.stream.Collectors.joining(",", "{\"traversals\":[", "]}"));
+            json(exchange, 200, body);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    /** Bounded, non-secret fields only -- no payloads, no opaque blobs (issue 154). */
+    private static String traversalInventoryEntryJson(ai.ravenroot.api.persistence.TraversalInventoryEntry entry) {
+        return "{\"traversalId\":\"" + entry.traversalId()
+                + "\",\"position\":" + entry.position()
+                + ",\"ingressNodeId\":\"" + escape(entry.ingressNodeId())
+                + "\",\"status\":\"" + entry.status()
+                + "\",\"disposition\":\"" + entry.disposition()
+                + "\",\"invocationCount\":" + entry.invocationCount()
+                + ",\"parkedAttemptCount\":" + entry.parkedAttemptCount()
+                + "}";
     }
 
     /**

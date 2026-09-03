@@ -382,6 +382,51 @@ export class RavenrootRuntimeClient {
     });
   }
 
+  /**
+   * The durable, tenant-scoped process inventory (issue 154): what the runtime's own persisted
+   * record says exists, surviving a restart. This is the authoritative source the UI shares with
+   * the API, CLI, audit and recovery -- distinct from anything derived from the event stream or
+   * kept only in this client's own memory, exactly as `execution()` above already reads the
+   * server's stored outcome rather than reconstructing one from events.
+   *
+   * `filters` mirrors `GET /v1/executions/inventory`'s own optional query parameters verbatim
+   * (`status`, `owner`, `deployment`, `includeTerminal`, `limit`, `cursor`) rather than inventing a
+   * client-side vocabulary for them; an absent or blank value is simply omitted from the request.
+   * The response body -- `items`, `nextCursor`, `retainedFrom` -- is returned unmodified, so a
+   * caller can tell "never existed" from "expired by retention" from `retainedFrom` without a
+   * second request.
+   */
+  async processInventory(filters = {}, { signal } = {}) {
+    const params = new URLSearchParams();
+    for (const key of ['status', 'owner', 'deployment', 'includeTerminal', 'limit', 'cursor']) {
+      const value = filters?.[key];
+      if (value === undefined || value === null || value === '') continue;
+      params.set(key, String(value));
+    }
+    const query = params.toString();
+    return this.#json(`/v1/executions/inventory${query ? `?${query}` : ''}`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+  }
+
+  /**
+   * One durable process instance's traversals from the inventory (issue 154). `processInstanceId`
+   * is a process instance id, not the `executionId`/traversal id `execution()` above takes -- see
+   * `RavenrootServer#readProcessInstanceTraversals`'s own Javadoc for why the two id spaces are
+   * deliberately distinct rather than an inconsistency.
+   */
+  async processInstanceTraversals(processInstanceId, { signal } = {}) {
+    const id = String(processInstanceId || '');
+    if (!id) throw new Error('Process instance traversals require an id');
+    return this.#json(`/v1/executions/${encodeURIComponent(id)}/traversals`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal,
+    });
+  }
+
   async nodeTypes() {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
     if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');

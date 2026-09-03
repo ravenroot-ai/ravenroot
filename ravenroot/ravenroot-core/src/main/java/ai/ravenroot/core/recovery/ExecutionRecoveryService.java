@@ -10,9 +10,13 @@ import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionTransition;
+import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.catalog.AttemptRepeatability;
+import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 
 import java.time.Duration;
@@ -94,6 +98,69 @@ public final class ExecutionRecoveryService {
             }
         }
         return List.copyOf(outcomes);
+    }
+
+    /**
+     * Discovery path (issue 154): identifies {@link InventoryDisposition#INTERRUPTED} process
+     * instances — non-terminal, with no lease or an expired one — directly from the durable
+     * inventory, across every tenant this service was constructed with.
+     *
+     * <h2>Why this exists beside {@link #sweepOnce()}, and what it deliberately does not do</h2>
+     * <p>{@link #sweepOnce()} discovers work at <em>attempt</em> granularity, through
+     * {@code claimPendingWork}: it finds attempts a dispatcher can act on, claimed and fenced,
+     * ready to be dispatched or parked. This method discovers at <em>instance</em> granularity,
+     * through the inventory's own derived {@link InventoryDisposition}, which the store computes
+     * from the same lease that {@code claimPendingWork} consults — but reports it directly, as a
+     * cohort an operator or a caller can see, rather than only implicitly through which attempts
+     * happen to still be claimable. Before this method, the only way to learn "which instances are
+     * stuck after a restart" was to already know their ids, or to infer it from
+     * {@code claimPendingWork}'s side effects; this reads it straight off the inventory instead.</p>
+     *
+     * <p>This method does <strong>not</strong> dispatch, park, or otherwise mutate anything it
+     * finds, and does not replace {@link #sweepOnce()}: a {@link ProcessInventoryEntry} carries no
+     * attempt identity or fencing token, so it cannot drive {@link #dispatchNeverStarted} or
+     * {@link #resolveAmbiguity} directly. It is deliberately read-only discovery, left for a caller
+     * to act on (typically by triggering {@link #sweepOnce()} for the same tenant, or by surfacing
+     * the cohort to an operator) — narrowing scope rather than silently reimplementing attempt-level
+     * recovery from coarser data.</p>
+     *
+     * <p>Requires {@link StoreCapability#PROCESS_INVENTORY}; the store itself rejects the query with
+     * {@code ExecutionStoreFailure.CapabilityNotSupported} when the capability is not declared,
+     * exactly as every other inventory read does.</p>
+     * @return interrupted process instances across every configured tenant, most recently created first
+     */
+    public List<ProcessInventoryEntry> discoverInterrupted() {
+        var interrupted = new ArrayList<ProcessInventoryEntry>();
+        for (String tenantId : tenantIds) {
+            interrupted.addAll(discoverInterrupted(tenantId));
+        }
+        return List.copyOf(interrupted);
+    }
+
+    /**
+     * The single-tenant half of {@link #discoverInterrupted()}, exposed separately so a caller that
+     * already knows which tenant it cares about — an operator console, or a test simulating one
+     * tenant's restart — is not forced to sweep every configured tenant to ask about one.
+     * @param tenantId tenant whose interrupted cohort is requested.
+     * @return that tenant's interrupted process instances, most recently created first.
+     */
+    public List<ProcessInventoryEntry> discoverInterrupted(String tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        var interrupted = new ArrayList<ProcessInventoryEntry>();
+        var query = ProcessInventoryQuery.outstanding(batchLimit);
+        while (true) {
+            var page = await(store.listProcessInstances(tenantId, query));
+            for (ProcessInventoryEntry entry : page.items()) {
+                if (entry.disposition() == InventoryDisposition.INTERRUPTED) {
+                    interrupted.add(entry);
+                }
+            }
+            if (page.nextCursor().isEmpty()) {
+                break;
+            }
+            query = query.after(page.nextCursor().get());
+        }
+        return List.copyOf(interrupted);
     }
 
     private RecoveryOutcome recover(PendingWork item) {

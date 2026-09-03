@@ -892,6 +892,88 @@ public final class AuthorizedRavenrootApplication {
     }
 
 /**
+ * Reports whether the durable process inventory (issue 154) is available.
+ * @see RavenrootApplication#processInventoryAvailable()
+ * @return {@code true} when the delegate can answer {@link #processInventory}, {@link #processInstance}
+ * and {@link #processInstanceTraversals} from a real durable store.
+ */
+    public boolean processInventoryAvailable() {
+        return delegate.processInventoryAvailable();
+    }
+
+    /**
+ * This caller's own tenant's page of the durable process inventory.
+ *
+ * <h4>Why the tenant scoping is structural here, not a check</h4>
+ * <p>Same shape as {@link #liveExecutions}, {@link #executionResult} and
+ * {@link #durableEventsAfter}: the tenant is read from the authenticated {@link RequestContext} and
+ * passed straight through as the delegate's {@code tenantId}, never accepted as a bare string a
+ * caller could substitute. The store filters by tenant while building the page, so another
+ * tenant's instance is never fetched and then excluded — it is a row the query never asks for.</p>
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @param query the page to return: filters, cursor and limit.
+ * @return one deterministic page of the caller's own tenant's durable process instances.
+ */
+    public ai.ravenroot.api.persistence.ProcessInventoryPage processInventory(
+            RequestContext context, ai.ravenroot.api.persistence.ProcessInventoryQuery query) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(query, "query");
+        return delegate.processInventory(context.tenantId(), query);
+    }
+
+    /**
+ * Reads one of the caller's own tenant's durable inventory rows directly.
+ *
+ * <h4>Authorization before existence disclosure</h4>
+ * <p>Authorization is checked first and unconditionally, before {@code processInstanceId} is used
+ * for anything — the same ordering {@link #executionResult} uses and for the same reason: a
+ * principal that may not read the inventory must not be able to learn whether an id exists by
+ * comparing how a denial and an absence differ. Once authorized, the tenant is read from the
+ * authenticated {@code RequestContext} and passed straight through as the delegate's
+ * {@code tenantId} — this signature never accepts a tenant scope a caller could substitute — so a
+ * cross-tenant id and one that never existed both come back as an empty {@link java.util.Optional},
+ * indistinguishable by design, exactly as {@link RavenrootApplication#processInstance} documents.</p>
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @param processInstanceId the durable process instance to read.
+ * @return the instance's inventory row, or empty when absent or not visible to the caller's tenant.
+ */
+    public java.util.Optional<ai.ravenroot.api.persistence.ProcessInventoryEntry> processInstance(
+            RequestContext context, UUID processInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        return delegate.processInstance(context.tenantId(), processInstanceId);
+    }
+
+    /**
+ * Lists one of the caller's own tenant's instances' traversals from the durable inventory, under the
+ * same authorization-before-existence-disclosure ordering {@link #processInstance} uses.
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @param processInstanceId the durable process instance whose traversals are listed.
+ * @return the instance's traversals, in insertion order.
+ * @throws ai.ravenroot.api.persistence.ExecutionStoreException wrapping
+ * {@code ExecutionStoreFailure.NotFound} when the instance is absent or not visible to the caller's
+ * tenant — indistinguishable, exactly as {@link RavenrootApplication#processInstanceTraversals} documents.
+ */
+    public List<ai.ravenroot.api.persistence.TraversalInventoryEntry> processInstanceTraversals(
+            RequestContext context, UUID processInstanceId) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        Objects.requireNonNull(processInstanceId, "processInstanceId");
+        return delegate.processInstanceTraversals(context.tenantId(), processInstanceId);
+    }
+
+    /**
+ * The caller's own tenant's durable inventory retention floor, under the same read permission
+ * {@link #processInventory} requires — it is what lets a caller tell "never existed" from "expired
+ * by policy" for a row {@link #processInstance} or {@link #processInstanceTraversals} could not find.
+ * @param context authenticated request context used for authorization and audit attribution.
+ * @return the earliest instant from which the caller's own tenant's terminal inventory is complete.
+ */
+    public java.time.Instant processInventoryRetainedFrom(RequestContext context) {
+        require(context, AuthorizationAction.EXECUTION_READ, collection("executions", context));
+        return delegate.processInventoryRetainedFrom(context.tenantId());
+    }
+
+/**
  * Reads execution events after an exclusive sequence position.
  * @param context authenticated request context used for authorization and audit attribution.
  * @param sequence monotonically increasing position of the execution event.

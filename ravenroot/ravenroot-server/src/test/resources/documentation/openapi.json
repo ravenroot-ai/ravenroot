@@ -433,6 +433,24 @@
         }
       }
     },
+    "/v1/executions/inventory": {
+      "get": {
+        "summary": "Lists one page of this tenant's durable process inventory (#154): what this deployment's own persisted record says exists, surviving a restart, as opposed to GET /v1/executions/live's process-local runtime view. Optional query parameters: status (comma-separated ProcessInstanceStatus names), owner (lease-holder worker id), deployment (hosting deployment id), includeTerminal (true to include COMPLETED/FAILED rows, excluded by default), limit and cursor (opaque, from a previous page's nextCursor). The response always carries retainedFrom, this tenant's inventory retention floor, so a caller can tell an instance that never existed from one purged by policy without a second request. Tenant-scoped structurally, the same way GET /v1/executions/live is. 501 when this deployment has no inventory-capable execution store composed.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "501": {"description": "PROCESS_INVENTORY_UNAVAILABLE"}
+        }
+      }
+    },
     "/v1/executions/live": {
       "get": {
         "summary": "Lists this tenant's live executions (accepted and not yet terminal) with their identifiers. Read directly from runtime bookkeeping, never derived from the event stream, so a stalled traversal that has stopped emitting still appears -- that property is why this route exists. Tenant-scoped structurally, the same way GET /v1/executions/{id} is: never reveals whether another tenant has executions running.",
@@ -531,6 +549,28 @@
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
           "404": {"description": "UNKNOWN_RESOURCE"}
+        }
+      }
+    },
+    "/v1/executions/{id}/traversals": {
+      "get": {
+        "summary": "Lists one durable process instance's traversals from the inventory (#154). Unlike every other /v1/executions sub-route, {id} here is a processInstanceId, not the executionId/traversalId GET /v1/executions/{id} and the cancel/pause/resume trio use -- a process instance can contain more than one traversal, so a traversal id could not address this route's question. 404 when the instance is absent, belongs to another tenant, or was purged past its terminal retention window -- all three indistinguishable by design, exactly like GET /v1/executions/{id}'s own 404. 501 when this deployment has no inventory-capable execution store composed.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_PROCESS_INSTANCE"},
+          "501": {"description": "PROCESS_INVENTORY_UNAVAILABLE"}
         }
       }
     },

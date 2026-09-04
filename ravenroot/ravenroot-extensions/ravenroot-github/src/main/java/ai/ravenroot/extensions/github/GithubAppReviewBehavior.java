@@ -46,12 +46,34 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
 
     private static NodeResult review(GithubApi api, GithubProfile profile, Input input,
                                      GithubOperationStore.Lease operation) {
-        attestRepository(api, profile);
+        boolean reconciling = operation.takeover() || "AMBIGUOUS".equals(operation.record().state());
+        long priorReviewId = priorReviewId(operation.record());
         String marker = "<!-- ravenroot-review:" + GithubValues.sha256(input.correlationId + ":" + input.commit
                 + ":" + input.verdict + ":" + GithubValues.sha256(input.body)).substring(0, 32) + " -->";
-        Existing existing = findExisting(api, profile, input, marker);
+        final Existing existing;
+        try {
+            attestRepository(api, profile);
+            existing = findExisting(api, profile, input, marker);
+        } catch (GithubProtocol.RateLimited limited) {
+            if (reconciling) return result("ambiguous", "ambiguous", input, priorReviewId,
+                    "RATE_LIMITED", limited.retryAt());
+            throw limited;
+        } catch (GithubException failure) {
+            if (reconciling && uncertainRead(failure)) return result("ambiguous", "ambiguous", input,
+                    priorReviewId, "REMOTE_STATE_UNKNOWN");
+            throw failure;
+        }
         if (existing != null) {
-            String currentHead = head(api, profile, input.pullNumber);
+            final String currentHead;
+            try { currentHead = head(api, profile, input.pullNumber); }
+            catch (GithubProtocol.RateLimited limited) {
+                return result("ambiguous", "ambiguous", input, existing.id,
+                        "RATE_LIMITED", limited.retryAt());
+            } catch (GithubException failure) {
+                if (uncertainRead(failure)) return result("ambiguous", "ambiguous", input,
+                        existing.id, "REMOTE_STATE_UNKNOWN");
+                throw failure;
+            }
             if (!existing.commit.equals(currentHead)) {
                 if ("PENDING".equals(existing.state)) {
                     try { GithubProtocol.requireSuccess(api.delete(path(profile, input.pullNumber, "/reviews/" + existing.id))); }
@@ -218,7 +240,14 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
     }
     private static boolean uncertainRead(GithubException failure) {
         return failure.code() == GithubException.Code.TRANSPORT
-                || failure.code() == GithubException.Code.RESPONSE_INVALID;
+                || failure.code() == GithubException.Code.RESPONSE_INVALID
+                || failure.code() == GithubException.Code.INVALID_INPUT;
+    }
+    private static long priorReviewId(GithubOperationStore.Record record) {
+        try {
+            long parsed = Long.parseLong(record.remoteId());
+            return parsed > 0 ? parsed : 0;
+        } catch (NumberFormatException ignored) { return 0; }
     }
     private static void attestRepository(GithubApi api, GithubProfile profile) {
         Map<String, Object> repository = GithubProtocol.object(api.get("/repositories/" + profile.repositoryId()));

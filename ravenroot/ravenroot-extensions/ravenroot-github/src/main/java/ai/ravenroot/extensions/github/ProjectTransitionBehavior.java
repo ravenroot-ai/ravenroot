@@ -71,7 +71,19 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
 
     private static NodeResult transition(GithubApi api, GithubProfile profile, Input input,
                                          GithubOperationStore.Lease operation) {
-        Snapshot before = snapshot(api, profile, input.itemId);
+        boolean reconciling = operation.takeover() || "AMBIGUOUS".equals(operation.record().state());
+        final Snapshot before;
+        try { before = snapshot(api, profile, input.itemId); }
+        catch (GithubProtocol.RateLimited limited) {
+            if (reconciling) return result("ambiguous", "ambiguous", input,
+                    operation.record().generation(), operation.record().attempts(),
+                    "RATE_LIMITED", limited.retryAt());
+            throw limited;
+        } catch (GithubException failure) {
+            if (reconciling && uncertainRead(failure)) return result("ambiguous", "ambiguous", input,
+                    operation.record().generation(), operation.record().attempts(), "REMOTE_STATE_UNKNOWN");
+            throw failure;
+        }
         long wantedAttempts;
         long wantedGeneration;
         try {
@@ -80,7 +92,8 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
             wantedGeneration = Math.addExact(input.expectedGeneration, 1);
         } catch (ArithmeticException overflow) { throw new GithubException(GithubException.Code.INVALID_INPUT); }
         if (before.matches(input.toStatus, wantedAttempts, wantedGeneration))
-            return finish(api, profile, input, before, wantedGeneration, wantedAttempts, "already-applied");
+            return finish(api, profile, input, before, wantedGeneration, wantedAttempts,
+                    "already-applied", reconciling);
         String client = GithubValues.sha256(input.itemId + ":" + wantedGeneration + ":" + input.toStatus).substring(0, 32);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("project", profile.project().projectId()); variables.put("item", input.itemId);
@@ -89,7 +102,6 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         variables.put("attemptsField", profile.project().attemptsFieldId()); variables.put("attempts", wantedAttempts);
         variables.put("generationField", profile.project().generationFieldId()); variables.put("generation", wantedGeneration);
         variables.put("client", client);
-        boolean reconciling = operation.takeover() || "AMBIGUOUS".equals(operation.record().state());
         if (reconciling && before.repairable(input, wantedAttempts))
             return repairPrefix(api, profile, input, variables, before, wantedGeneration, wantedAttempts);
         if (!before.matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)) return result(
@@ -103,7 +115,7 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
                         input.expectedAttempts, "RATE_LIMITED", limited.retryAt());
             }
             if (observed != null && observed.matches(input.toStatus, wantedAttempts, wantedGeneration))
-                return finish(api, profile, input, observed, wantedGeneration, wantedAttempts, "applied");
+                return finish(api, profile, input, observed, wantedGeneration, wantedAttempts, "applied", true);
             return result("ambiguous", "ambiguous", input,
                     observed == null ? input.expectedGeneration : observed.generation,
                     observed == null ? input.expectedAttempts : observed.attempts,
@@ -118,7 +130,7 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         if (after == null) return result("ambiguous", "ambiguous", input, input.expectedGeneration,
                 input.expectedAttempts, "REMOTE_STATE_UNKNOWN", dispatch.retryAt);
         if (after.matches(input.toStatus, wantedAttempts, wantedGeneration))
-            return finish(api, profile, input, after, wantedGeneration, wantedAttempts, "applied");
+            return finish(api, profile, input, after, wantedGeneration, wantedAttempts, "applied", true);
         if ((dispatch.partial || reconciling) && after.repairable(input, wantedAttempts))
             return repairPrefix(api, profile, input, variables, after, wantedGeneration, wantedAttempts);
         if (after.generation != input.expectedGeneration || after.attempts != input.expectedAttempts
@@ -143,7 +155,7 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         if (repaired == null) return result("ambiguous", "ambiguous", input,
                 observed.generation, observed.attempts, "REMOTE_STATE_UNKNOWN");
         if (repaired.matches(input.toStatus, wantedAttempts, wantedGeneration))
-            return finish(api, profile, input, repaired, wantedGeneration, wantedAttempts, "applied");
+            return finish(api, profile, input, repaired, wantedGeneration, wantedAttempts, "applied", true);
         if (repaired.repairable(input, wantedAttempts)) return result("ambiguous", "ambiguous", input,
                 repaired.generation, repaired.attempts, "REMOTE_STATE_UNKNOWN");
         return result("conflict", "cas-lost", input, repaired.generation, repaired.attempts, "CAS_LOST");
@@ -170,10 +182,15 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
     private static Snapshot safeSnapshot(GithubApi api, GithubProfile profile, String itemId) {
         try { return snapshot(api, profile, itemId); }
         catch (GithubException failure) {
-            if (failure.code() == GithubException.Code.TRANSPORT
-                    || failure.code() == GithubException.Code.RESPONSE_INVALID) return null;
+            if (uncertainRead(failure)) return null;
             throw failure;
         }
+    }
+
+    private static boolean uncertainRead(GithubException failure) {
+        return failure.code() == GithubException.Code.TRANSPORT
+                || failure.code() == GithubException.Code.RESPONSE_INVALID
+                || failure.code() == GithubException.Code.INVALID_INPUT;
     }
 
     private static Snapshot snapshot(GithubApi api, GithubProfile profile, String itemId) {
@@ -212,13 +229,23 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
     }
 
     private static NodeResult finish(GithubApi api, GithubProfile profile, Input input, Snapshot snapshot,
-                                     long generation, long attempts, String status) {
+                                     long generation, long attempts, String status, boolean preserveAmbiguity) {
         if (input.comment == null) return result("continue", status, input, generation, attempts, "");
         String marker = "<!-- ravenroot-project-transition:" + GithubValues.sha256(profile.repositoryId() + ":"
                 + input.itemId + ":" + snapshot.subjectId + ":" + generation + ":" + input.comment.kind
                 + ":" + GithubValues.sha256(input.comment.body)).substring(0, 32) + " -->";
-        if (findComment(api, profile, snapshot.issueNumber, marker))
-            return result("continue", status, input, generation, attempts, "");
+        try {
+            if (findComment(api, profile, snapshot.issueNumber, marker))
+                return result("continue", status, input, generation, attempts, "");
+        } catch (GithubProtocol.RateLimited limited) {
+            if (!preserveAmbiguity) throw limited;
+            return result("ambiguous", "ambiguous", input, generation, attempts,
+                    "RATE_LIMITED", limited.retryAt());
+        } catch (GithubException failure) {
+            if (preserveAmbiguity && uncertainRead(failure)) return result("ambiguous", "ambiguous", input,
+                    generation, attempts, "REMOTE_STATE_UNKNOWN");
+            throw failure;
+        }
         try {
             Map<String, Object> posted = GithubProtocol.object(api.post(profile.repositoryPath() + "/issues/"
                     + snapshot.issueNumber + "/comments", Map.of("body", input.comment.body + "\n\n" + marker)));

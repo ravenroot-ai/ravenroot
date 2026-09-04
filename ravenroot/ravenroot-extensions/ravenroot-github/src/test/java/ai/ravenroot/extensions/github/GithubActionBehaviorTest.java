@@ -389,6 +389,94 @@ class GithubActionBehaviorTest {
         }
     }
 
+    @Test void projectPartialMutationSurvivesTransientReconciliationReadFailureAcrossReopens() {
+        Path path = directory.resolve("project-monotonic-reconciliation.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        Map<String, Object> input = project("project-monotonic-reconciliation");
+        var interrupted = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7))
+                .reply(200, Map.of("data", Map.of(), "errors", List.of(Map.of("message", "partial"))))
+                .reply(500, Map.of("message", "snapshot unavailable"));
+        NodeResult ambiguous = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", interrupted).handle(GithubTestSupport.message(input))
+                .toCompletableFuture().join();
+        assertEquals("ambiguous", ambiguous.outcome());
+        assertEquals(1, mutationRequests(interrupted));
+
+        clock.advance(30_000);
+        var transientFailure = new GithubTestSupport.HttpHarness()
+                .reply(500, Map.of("message", "reconciliation snapshot unavailable"));
+        NodeResult stillAmbiguous = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", transientFailure).handle(GithubTestSupport.message(input))
+                .toCompletableFuture().join();
+        assertEquals("ambiguous", stillAmbiguous.outcome());
+        assertEquals("REMOTE_STATE_UNKNOWN", GithubValues.object(stillAmbiguous.payload()).get("reason"));
+        assertEquals(0, mutationRequests(transientFailure), "failed reconciliation read must not mutate");
+
+        clock.advance(30_000);
+        var recovered = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 2, 7))
+                .reply(200, Map.of("data", Map.of("generation", Map.of("clientMutationId", "repair"))))
+                .reply(200, snapshot("InProgress", 3, 8));
+        NodeResult completed = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", recovered).handle(GithubTestSupport.message(input))
+                .toCompletableFuture().join();
+        assertEquals("continue", completed.outcome());
+        assertEquals(1, mutationRequests(recovered), "only the required absolute-prefix repair may mutate");
+    }
+
+    @Test void projectCommentAmbiguitySurvivesMalformedDiscoveryAcrossReopens() {
+        Path path = directory.resolve("project-comment-monotonic-reconciliation.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        Map<String, Object> input = new java.util.LinkedHashMap<>(project("comment-monotonic-reconciliation"));
+        input.put("comment", Map.of("kind", "claim", "body", "Claim after durable reconciliation."));
+        input = Map.copyOf(input);
+        var interrupted = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7))
+                .reply(200, Map.of("data", Map.of("generation", Map.of("clientMutationId", "transition"))))
+                .reply(200, snapshot("InProgress", 3, 8)).reply(200, List.of())
+                .reply(500, Map.of("message", "comment outcome unavailable"))
+                .reply(500, Map.of("message", "comment discovery unavailable"));
+        NodeResult ambiguous = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", interrupted).handle(GithubTestSupport.message(input))
+                .toCompletableFuture().join();
+        assertEquals("ambiguous", ambiguous.outcome());
+        assertEquals(1, mutationRequests(interrupted));
+        assertEquals(1, interrupted.requests.stream().filter(request -> request.method().equals("POST")
+                && request.destination().getPath().endsWith("/comments")).count());
+
+        clock.advance(30_000);
+        var transientFailure = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8))
+                .reply(200, Map.of("unexpected", "not-a-comment-list"));
+        NodeResult stillAmbiguous = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", transientFailure).handle(GithubTestSupport.message(input))
+                .toCompletableFuture().join();
+        assertEquals("ambiguous", stillAmbiguous.outcome());
+        assertEquals(0, mutationRequests(transientFailure));
+        assertEquals(0, transientFailure.requests.stream().filter(request -> request.method().equals("POST")
+                && request.destination().getPath().endsWith("/comments")).count());
+
+        clock.advance(30_000);
+        String marker = "<!-- ravenroot-project-transition:" + GithubValues.sha256("1234:ITEM_1:ISSUE_1:8:claim:"
+                + GithubValues.sha256("Claim after durable reconciliation.")).substring(0, 32) + " -->";
+        Map<String, Object> landed = Map.of("id", 79L,
+                "body", "Claim after durable reconciliation.\n\n" + marker,
+                "user", Map.of("login", "example-reviewer[bot]"));
+        var recovered = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8))
+                .reply(200, List.of(landed));
+        NodeResult completed = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", recovered).handle(GithubTestSupport.message(input))
+                .toCompletableFuture().join();
+        assertEquals("continue", completed.outcome());
+        assertTrue(recovered.requests.stream().allMatch(request -> request.method().equals("GET")
+                || request.destination().getPath().equals("/graphql")));
+    }
+
     @Test void projectOwnershipLossAfterSnapshotPreventsMutationDispatch() {
         Path path = directory.resolve("project-takeover.db");
         MutableClock clock = new MutableClock();
@@ -736,6 +824,88 @@ class GithubActionBehaviorTest {
             assertTrue(reopened.requests.stream().allMatch(request -> request.method().equals("GET")),
                     "landed formal review must reconcile without another submit");
         }
+    }
+
+    @Test void draftReviewAmbiguityRemainsMonotonicAcrossEveryReconciliationReadBoundary() {
+        Path path = directory.resolve("review-draft-monotonic-reconciliation.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        String correlation = "review-draft-monotonic-reconciliation";
+        String marker = reviewMarker(correlation);
+        Map<String, Object> input = review(correlation);
+        var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(95, "PENDING", marker))
+                .reply(500, Map.of("message", "post-draft head unavailable"));
+        NodeResult ambiguous = review(configuration, clock, interrupted, input);
+        assertEquals("ambiguous", ambiguous.outcome());
+        assertEquals("95", GithubValues.object(ambiguous.payload()).get("remoteId"));
+
+        clock.advance(30_000);
+        NodeResult afterAttestationFailure = review(configuration, clock,
+                new GithubTestSupport.HttpHarness().reply(500, Map.of("message", "repository unavailable")), input);
+        assertEquals("ambiguous", afterAttestationFailure.outcome());
+        assertEquals("95", GithubValues.object(afterAttestationFailure.payload()).get("remoteId"));
+
+        clock.advance(30_000);
+        var malformedDiscovery = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, Map.of("unexpected", "not-a-review-list"));
+        NodeResult afterDiscoveryFailure = review(configuration, clock, malformedDiscovery, input);
+        assertEquals("ambiguous", afterDiscoveryFailure.outcome());
+        assertEquals("95", GithubValues.object(afterDiscoveryFailure.payload()).get("remoteId"));
+        assertTrue(malformedDiscovery.requests.stream().allMatch(request -> request.method().equals("GET")));
+
+        clock.advance(30_000);
+        var headTransport = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of(reviewObject(95, "PENDING", marker)));
+        headTransport.pending = OutboundCall.failed(new IllegalStateException("head transport unavailable"));
+        headTransport.pendingAtRequest = 3;
+        NodeResult afterHeadFailure = review(configuration, clock, headTransport, input);
+        assertEquals("ambiguous", afterHeadFailure.outcome());
+        assertEquals("95", GithubValues.object(afterHeadFailure.payload()).get("remoteId"));
+        assertTrue(headTransport.requests.stream().allMatch(request -> request.method().equals("GET")));
+
+        clock.advance(30_000);
+        var recovered = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of(reviewObject(95, "PENDING", marker)))
+                .reply(200, pull(GithubTestSupport.SHA))
+                .reply(200, reviewObject(95, "APPROVED", marker))
+                .reply(200, pull(GithubTestSupport.SHA));
+        NodeResult completed = review(configuration, clock, recovered, input);
+        assertEquals("continue", completed.outcome());
+        assertEquals(1, recovered.requests.stream().filter(request -> request.method().equals("POST")).count());
+        assertTrue(recovered.requests.stream().filter(request -> request.method().equals("POST"))
+                .allMatch(request -> request.destination().getPath().endsWith("/reviews/95/events")));
+    }
+
+    @Test void submittedReviewAmbiguitySurvivesTransientHeadReadAndReconcilesWithoutPost() {
+        Path path = directory.resolve("review-submitted-monotonic-reconciliation.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        String correlation = "review-submitted-monotonic-reconciliation";
+        String marker = reviewMarker(correlation);
+        Map<String, Object> input = review(correlation);
+        var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(96, "PENDING", marker))
+                .reply(200, pull(GithubTestSupport.SHA)).reply(200, reviewObject(96, "APPROVED", marker))
+                .reply(500, Map.of("message", "final head unavailable"));
+        assertEquals("ambiguous", review(configuration, clock, interrupted, input).outcome());
+
+        clock.advance(30_000);
+        var transientFailure = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of(reviewObject(96, "APPROVED", marker))).reply(200, Map.of());
+        NodeResult stillAmbiguous = review(configuration, clock, transientFailure, input);
+        assertEquals("ambiguous", stillAmbiguous.outcome());
+        assertEquals("96", GithubValues.object(stillAmbiguous.payload()).get("remoteId"));
+        assertTrue(transientFailure.requests.stream().allMatch(request -> request.method().equals("GET")));
+
+        clock.advance(30_000);
+        var recovered = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of(reviewObject(96, "APPROVED", marker)))
+                .reply(200, pull(GithubTestSupport.SHA));
+        NodeResult completed = review(configuration, clock, recovered, input);
+        assertEquals("continue", completed.outcome());
+        assertEquals("already-recorded", GithubValues.object(completed.payload()).get("status"));
+        assertTrue(recovered.requests.stream().allMatch(request -> request.method().equals("GET")));
     }
 
     @Test void expiredReviewWriterCannotBeTakenOverDuringOutboundUncertaintyWindow() {
@@ -1274,6 +1444,13 @@ class GithubActionBehaviorTest {
 
     private static NodeAction action(GithubNodePackage nodePackage, String behavior, GithubTestSupport.HttpHarness services) {
         return GithubTestSupport.behavior(nodePackage, behavior).create(GithubTestSupport.node(behavior), services);
+    }
+    private static NodeResult review(GithubConfiguration configuration, MutableClock clock,
+                                     GithubTestSupport.HttpHarness http, Map<String, Object> input) {
+        return new GithubAppReviewBehavior(new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock), clock))
+                .create(GithubTestSupport.node("github-app-review"), http)
+                .handle(GithubTestSupport.message(input)).toCompletableFuture().join();
     }
     private static Map<String, Object> snapshot(String status, long attempts, long generation) {
         return snapshot(status, attempts, generation, 1234, false);

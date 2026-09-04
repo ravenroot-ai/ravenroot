@@ -5,6 +5,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
@@ -12,6 +15,7 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class GitWorkspaceContractTest {
     @TempDir Path temporary;
@@ -47,5 +51,35 @@ class GitWorkspaceContractTest {
                 "refs/heads/a//b", "refs/tags/not-a-branch", "refs/heads/line\nfeed", "-option")) {
             assertFalse(GitWorkspaceProfile.safeRef(ref), ref);
         }
+    }
+
+    @Test
+    void fixtureResolvesExecutableSymlinksBeforeBuildingAProfile() throws Exception {
+        Path root = Files.createDirectory(temporary.resolve("authority"));
+        Path remote = Files.createDirectory(temporary.resolve("remote"));
+        Path git = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
+        Path shellAlias = temporary.resolve("bin-sh-alias");
+        Files.createSymbolicLink(shellAlias, Path.of("/bin/sh"));
+        assertTrue(Files.isSymbolicLink(shellAlias));
+
+        assertThrows(IllegalArgumentException.class, () -> new GitWorkspaceProfile("tenant", "profile", root,
+                remote.toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git, shellAlias,
+                "sha1", null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10));
+
+        Path shell = GitWorkspaceTestSupport.realExecutable(shellAlias);
+        assertEquals(Path.of("/bin/sh").toRealPath(), shell);
+        assertTrue(shell.isAbsolute());
+        assertTrue(Files.isRegularFile(shell, LinkOption.NOFOLLOW_LINKS));
+        assertTrue(Files.isExecutable(shell));
+        assertFalse(Files.isSymbolicLink(shell));
+        assertFalse(Files.isSymbolicLink(git));
+        assertTrue(Files.isRegularFile(git, LinkOption.NOFOLLOW_LINKS));
+        assertTrue(Files.isExecutable(git));
+
+        GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
+                remote.toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git, shell,
+                "sha1", null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10);
+        assertEquals(shell, profile.processShellExecutable());
+        assertEquals(git, profile.gitExecutable());
     }
 }

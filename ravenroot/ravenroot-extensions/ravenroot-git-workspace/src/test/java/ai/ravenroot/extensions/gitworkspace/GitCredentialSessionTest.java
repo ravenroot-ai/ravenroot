@@ -36,10 +36,11 @@ class GitCredentialSessionTest {
     void secretUsesPrivateSocketAndNeverAppearsInDaemonArgumentsOrEnvironment() throws Exception {
         String secret = "opaque ' $ ; ☃ test secret 170";
         Path root = Files.createDirectory(temporary.resolve("authority"));
-        Path gitExecutable = Path.of(GitWorkspaceTestSupport.run(temporary, "sh", "-c", "command -v git").trim());
+        Path gitExecutable = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 "https://example.invalid/org/repository.git", "refs/heads/dev", "refs/heads/issues/",
-                gitExecutable, Path.of("/bin/sh"), "sha1", "credential-ref", "git-user", Duration.ofSeconds(8), 1,
+                gitExecutable, GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1",
+                "credential-ref", "git-user", Duration.ofSeconds(8), 1,
                 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(

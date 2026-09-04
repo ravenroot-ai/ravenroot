@@ -65,7 +65,9 @@ class GitWorkspaceSecurityTest {
         Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"));
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
-                executable, Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(executable),
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(5), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
                 System.nanoTime() + Duration.ofSeconds(5).toNanos(), System::nanoTime);
@@ -107,7 +109,9 @@ class GitWorkspaceSecurityTest {
         Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"));
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "flood", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
-                executable, Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(executable),
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
                 System.nanoTime() + Duration.ofSeconds(8).toNanos(), System::nanoTime);
@@ -145,7 +149,9 @@ class GitWorkspaceSecurityTest {
         Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"));
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "swap", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
-                executable, Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(executable),
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
                 System.nanoTime() + Duration.ofSeconds(8).toNanos(), System::nanoTime);
@@ -181,7 +187,9 @@ class GitWorkspaceSecurityTest {
         Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"));
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "utf8", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
-                executable, Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(executable),
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
                 System.nanoTime() + Duration.ofSeconds(8).toNanos(), System::nanoTime);

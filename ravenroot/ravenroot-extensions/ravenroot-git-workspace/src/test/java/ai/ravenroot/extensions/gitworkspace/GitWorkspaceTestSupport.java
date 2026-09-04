@@ -10,6 +10,7 @@ import ai.ravenroot.api.security.SecurityContext;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -26,13 +27,15 @@ final class GitWorkspaceTestSupport {
     final Path remote;
     final Path source;
     final Path git;
+    final Path shell;
     final String base;
 
     GitWorkspaceTestSupport(Path temporary) throws Exception {
         root = Files.createDirectory(temporary.resolve("authority"));
         remote = temporary.resolve("remote.git");
         source = Files.createDirectory(temporary.resolve("source"));
-        git = Path.of(run(temporary, "sh", "-c", "command -v git").trim()).toAbsolutePath().normalize();
+        git = discoveredExecutable(temporary, "git");
+        shell = realExecutable(Path.of("/bin/sh"));
         run(temporary, git.toString(), "init", "--bare", "--initial-branch=dev", remote.toString());
         run(source, git.toString(), "init", "--initial-branch=dev");
         run(source, git.toString(), "config", "user.name", "Test");
@@ -47,7 +50,7 @@ final class GitWorkspaceTestSupport {
 
     GitWorkspaceProfile profile(int historyLimit) {
         return new GitWorkspaceProfile(TENANT, PROFILE, root, remote.toUri().toASCIIString(),
-                "refs/heads/dev", "refs/heads/issues/", git, Path.of("/bin/sh"), "sha1", null, null,
+                "refs/heads/dev", "refs/heads/issues/", git, shell, "sha1", null, null,
                 Duration.ofSeconds(30), 4, 256 * 1024, historyLimit);
     }
 
@@ -99,5 +102,20 @@ final class GitWorkspaceTestSupport {
         String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
         if (process.waitFor() != 0) throw new IOException(String.join(" ", command) + " failed: " + output);
         return output;
+    }
+
+    static Path discoveredExecutable(Path directory, String name) throws Exception {
+        return realExecutable(Path.of(run(directory, "sh", "-c", "command -v \"$1\"", "discover", name)
+                .trim()));
+    }
+
+    static Path realExecutable(Path candidate) throws IOException {
+        Path executable = candidate.toRealPath();
+        if (!executable.isAbsolute() || Files.isSymbolicLink(executable)
+                || !Files.isRegularFile(executable, LinkOption.NOFOLLOW_LINKS)
+                || !Files.isExecutable(executable)) {
+            throw new IOException("test executable is not a real regular executable");
+        }
+        return executable;
     }
 }

@@ -37,7 +37,8 @@ class GitWorkspaceRuntimeTest {
                 """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
         TestCancellation cancellation = new TestCancellation();
         Process sibling = new ProcessBuilder("/bin/sleep", "60").start();
@@ -85,7 +86,8 @@ class GitWorkspaceRuntimeTest {
                 """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "deadline", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(3), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(3), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
         var future = runtime.submit(profile, new TestCancellation(), control -> {
             GitWorkspaceStore store = new GitWorkspaceStore(profile);
@@ -114,7 +116,8 @@ class GitWorkspaceRuntimeTest {
                 """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "orphan", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
 
         runtime.submit(profile, new TestCancellation(), control -> {
@@ -132,7 +135,7 @@ class GitWorkspaceRuntimeTest {
         Path executable = temporary.resolve(name);
         Files.writeString(executable, contents);
         Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"));
-        return executable;
+        return GitWorkspaceTestSupport.realExecutable(executable);
     }
 
     private static final class TestCancellation implements CancellationSignal {

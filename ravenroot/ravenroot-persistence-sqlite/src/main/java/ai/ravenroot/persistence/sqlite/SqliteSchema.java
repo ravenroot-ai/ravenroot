@@ -534,7 +534,54 @@ final class SqliteSchema {
                 )
                 """,
                 "CREATE INDEX tool_approval_pending_expiry ON tool_approval "
-                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")));
+                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")),
+                new SchemaMigration(9, "first-class durable human tasks", List.of(
+                """
+                CREATE TABLE human_task (
+                    tenant_id               TEXT    NOT NULL,
+                    process_instance_id     TEXT    NOT NULL,
+                    task_id                 TEXT    NOT NULL,
+                    traversal_id            TEXT    NOT NULL,
+                    invocation_id           TEXT    NOT NULL,
+                    attempt_id              TEXT    NOT NULL,
+                    node_id                 TEXT    NOT NULL,
+                    correlation_key         TEXT    NOT NULL,
+                    deduplication_key       TEXT    NOT NULL,
+                    title                   TEXT    NOT NULL,
+                    description             TEXT    NOT NULL,
+                    response_content_type   TEXT    NOT NULL,
+                    response_schema         TEXT    NOT NULL,
+                    response_schema_version TEXT    NOT NULL,
+                    response_kind           TEXT    NOT NULL,
+                    response_max_bytes      INTEGER NOT NULL,
+                    required_roles          TEXT    NOT NULL,
+                    required_scopes         TEXT    NOT NULL,
+                    requester_request_id    TEXT    NOT NULL,
+                    requester_subject       TEXT    NOT NULL,
+                    requester_principal_type TEXT   NOT NULL,
+                    requester_issuer        TEXT    NOT NULL,
+                    graph_version_pin       TEXT    NOT NULL,
+                    escalate_at_epoch_second INTEGER,
+                    escalate_at_nano         INTEGER,
+                    expires_at_epoch_second INTEGER NOT NULL,
+                    expires_at_nano         INTEGER NOT NULL,
+                    resolved_outcome        TEXT    NOT NULL,
+                    denied_outcome          TEXT    NOT NULL,
+                    expired_outcome         TEXT    NOT NULL,
+                    cancelled_outcome       TEXT    NOT NULL,
+                    status                  TEXT    NOT NULL,
+                    actor                   TEXT    NOT NULL,
+                    generation              INTEGER NOT NULL,
+                    revision                INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, task_id),
+                    UNIQUE (tenant_id, deduplication_key),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                "CREATE UNIQUE INDEX human_task_live_correlation ON human_task "
+                        + "(tenant_id, correlation_key) WHERE status IN ('WAITING', 'ESCALATED')",
+                "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")));
     }
 
     static int currentVersion() {

@@ -19,6 +19,7 @@ import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.security.ToolCallAuditSink;
@@ -43,7 +44,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ManagedToolApprovalSuspensionTest {
     @Test
@@ -106,6 +109,19 @@ class ManagedToolApprovalSuspensionTest {
                         approval.request().canonicalArguments());
                 assertEquals(key.processInstanceId(), policyExecutionId.get(),
                         "initial managed policy must receive the process instance, not traversal id");
+
+                assertTrue(recorder.confirmsToolApproval(suspended.approvalId(), message));
+                var approver = new RequestContext("approve", "approver", PrincipalType.USER,
+                        "issuer", key.tenantId(), Set.of(Role.APPROVER), Set.of());
+                assertEquals(ToolApprovalStatus.APPROVED,
+                        approvalService.approve(approver, key.processInstanceId(),
+                                suspended.approvalId()).approval().status());
+                assertTrue(recorder.confirmsToolApproval(suspended.approvalId(), message),
+                        "a later approval transition must not invalidate the committed suspension proof");
+                assertFalse(recorder.confirmsToolApproval(UUID.randomUUID(), message));
+                var mismatched = new NodeMessage(security, key.processInstanceId(), traversalId,
+                        invocationId, UUID.randomUUID(), Set.of(), "agent", Map.of(), Map.of());
+                assertFalse(recorder.confirmsToolApproval(suspended.approvalId(), mismatched));
             }
         }
     }

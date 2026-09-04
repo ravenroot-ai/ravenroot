@@ -30,6 +30,8 @@ public final class ExecutionBatch {
     private final List<HandlerTransition> handlerTransitions;
     private final List<ToolApprovalRegistration> toolApprovalsToRegister;
     private final List<ToolApprovalTransition> toolApprovalTransitions;
+    private final List<HumanTaskRegistration> humanTasksToRegister;
+    private final List<HumanTaskTransition> humanTaskTransitions;
 
     private ExecutionBatch(Builder builder) {
         this.key = builder.key;
@@ -45,6 +47,8 @@ public final class ExecutionBatch {
         this.handlerTransitions = List.copyOf(builder.handlerTransitions);
         this.toolApprovalsToRegister = List.copyOf(builder.toolApprovalsToRegister);
         this.toolApprovalTransitions = List.copyOf(builder.toolApprovalTransitions);
+        this.humanTasksToRegister = List.copyOf(builder.humanTasksToRegister);
+        this.humanTaskTransitions = List.copyOf(builder.humanTaskTransitions);
         // Every operation category is named here, and the guard has to grow with each one. An origin
         // counts as an operation: recording a deployment, workload or correlation identity changes
         // stored state and is a legitimate write on its own, which is what lets a caller that learns
@@ -55,7 +59,8 @@ public final class ExecutionBatch {
                 && idempotency == null && events.isEmpty() && origin.isEmpty()
                 && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()
                 && toolApprovalsToRegister.isEmpty()
-                && toolApprovalTransitions.isEmpty()) {
+                && toolApprovalTransitions.isEmpty()
+                && humanTasksToRegister.isEmpty() && humanTaskTransitions.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -257,6 +262,24 @@ public final class ExecutionBatch {
         return toolApprovalTransitions;
     }
 
+    /**
+     * Human tasks registered atomically with this batch's execution changes.
+     *
+     * @return immutable registrations in insertion order.
+     */
+    public List<HumanTaskRegistration> humanTasksToRegister() {
+        return humanTasksToRegister;
+    }
+
+    /**
+     * Human-task lifecycle changes applied atomically with this batch.
+     *
+     * @return immutable transitions in insertion order.
+     */
+    public List<HumanTaskTransition> humanTaskTransitions() {
+        return humanTaskTransitions;
+    }
+
 /**
  * Defines the builder contract exposed to Ravenroot integrators.
  */
@@ -274,6 +297,8 @@ public final class ExecutionBatch {
         private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
         private final List<ToolApprovalRegistration> toolApprovalsToRegister = new ArrayList<>();
         private final List<ToolApprovalTransition> toolApprovalTransitions = new ArrayList<>();
+        private final List<HumanTaskRegistration> humanTasksToRegister = new ArrayList<>();
+        private final List<HumanTaskTransition> humanTaskTransitions = new ArrayList<>();
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -419,6 +444,30 @@ public final class ExecutionBatch {
         public Builder applyToolApproval(ToolApprovalTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             toolApprovalTransitions.add(transition);
+            return this;
+        }
+
+        /**
+         * Registers one first-class durable human task in this transaction.
+         *
+         * @param registration immutable task registration.
+         * @return this builder.
+         */
+        public Builder registerHumanTask(HumanTaskRegistration registration) {
+            if (registration == null) throw new IllegalArgumentException("registration cannot be null");
+            humanTasksToRegister.add(registration);
+            return this;
+        }
+
+        /**
+         * Applies one generation-fenced human-task transition in this transaction.
+         *
+         * @param transition generation-fenced lifecycle transition.
+         * @return this builder.
+         */
+        public Builder applyHumanTask(HumanTaskTransition transition) {
+            if (transition == null) throw new IllegalArgumentException("transition cannot be null");
+            humanTaskTransitions.add(transition);
             return this;
         }
 

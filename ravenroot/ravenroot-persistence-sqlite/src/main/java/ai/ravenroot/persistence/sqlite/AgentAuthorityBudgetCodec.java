@@ -109,7 +109,8 @@ final class AgentAuthorityBudgetCodec {
         uuid(out, registration.grantId()); nullableUuid(out, registration.parentGrantId());
         uuids(out, registration.contributingParentGrantIds()); out.writeLong(registration.depth());
         strings(out, registration.dataScopes()); strings(out, registration.authorityScopes());
-        vector(out, registration.ceilings()); instant(out, registration.absoluteDeadline());
+        vector(out, registration.ceilings()); out.writeLong(registration.maximumTotalTokens());
+        instant(out, registration.absoluteDeadline());
         AgentAuthorityBinding binding = grant.binding(); text(out, binding.nodeId());
         uuid(out, binding.invocationId()); uuids(out, binding.causalParentInvocationIds());
         text(out, grant.state().name()); vector(out, grant.spent()); vector(out, grant.reserved());
@@ -118,7 +119,7 @@ final class AgentAuthorityBudgetCodec {
     private static DurableAgentAuthorityBudget.DurableAgentGrant grant(DataInputStream in) throws IOException {
         UUID id = uuid(in), parent = nullableUuid(in); Set<UUID> parents = uuids(in); long depth = in.readLong();
         var registration = new AgentAuthorityGrantRegistration(id, parent, parents, depth, strings(in),
-                strings(in), vector(in), instant(in));
+                strings(in), vector(in), in.readLong(), instant(in));
         var binding = new AgentAuthorityBinding(id, text(in), uuid(in), uuids(in));
         return new DurableAgentAuthorityBudget.DurableAgentGrant(registration, binding,
                 AgentGrantState.valueOf(text(in)), vector(in), vector(in));
@@ -168,10 +169,12 @@ final class AgentAuthorityBudgetCodec {
         if (bytes.length > MAX_TEXT_BYTES) throw new IllegalArgumentException("agent authority text is too large");
         out.writeInt(bytes.length); out.write(bytes);
     }
-    private static String text(DataInputStream in) throws IOException {
+    static String text(DataInputStream in) throws IOException {
         int length = in.readInt();
         if (length < 0 || length > MAX_TEXT_BYTES) throw new IllegalArgumentException("invalid agent authority text length");
-        return new String(in.readNBytes(length), StandardCharsets.UTF_8);
+        byte[] bytes = new byte[length];
+        in.readFully(bytes);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
     private static void strings(DataOutputStream out, Set<String> values) throws IOException {
         out.writeInt(values.size()); for (String value : values.stream().sorted().toList()) text(out, value);

@@ -38,7 +38,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -390,8 +392,12 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                         ceilings.teamActive());
             }
         }
+        long combinedTokens = request.maximumTotalTokens() == 0
+                ? addExact(ceilings.inputTokens(), ceilings.outputTokens())
+                : Math.min(request.maximumTotalTokens(),
+                addExact(ceilings.inputTokens(), ceilings.outputTokens()));
         return new AgentAuthorityGrantRegistration(grantId, primary, parents, depth, data,
-                Set.copyOf(authority), ceilings, deadline);
+                Set.copyOf(authority), ceilings, combinedTokens, deadline);
     }
 
     private AgentAuthorityRootRegistration root(ai.ravenroot.api.security.SecurityContext security,
@@ -612,7 +618,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                     childRequest.resources(), clock.instant());
             derived = new AgentAuthorityGrantRegistration(derived.grantId(), grantId, Set.of(grantId),
                     parent.registration().depth() + 1, childRequest.dataScopes(), childRequest.authorityScopes(),
-                    derived.ceilings(), derived.absoluteDeadline());
+                    derived.ceilings(), derived.maximumTotalTokens(), derived.absoluteDeadline());
             try {
                 recorder.record(List.of(), List.of(event(child, "AGENT_CHILD_AUTHORITY_CREATED", "RESERVED",
                                 AgentBudgetVector.ZERO)),
@@ -633,23 +639,40 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         private ModelReservation reserve(long ordinal) {
             ExecutionKey key = key(message);
             DurableAgentAuthorityBudget budget = budget(key).orElseThrow(AgentAuthorityBudgetService.this::refused);
+            Instant now = clock.instant();
+            RemainingCapacity remaining = remainingCapacity(budget, grantId, now);
+            if (remaining.vector().turns() == 0 || remaining.deadlineMillis() == 0) throw refused();
             long input = policy.maximumInputTokensPerTurn();
-            long output = request.maximumOutputTokensPerTurn() == 0 ? policy.maximumOutputTokensPerTurn()
-                    : Math.min(policy.maximumOutputTokensPerTurn(), request.maximumOutputTokensPerTurn());
+            if (remaining.vector().inputTokens() < input
+                    || remaining.maximumTotalTokens() <= input) throw refused();
+            long output = Math.min(request.maximumOutputTokensPerTurn() == 0
+                    ? policy.maximumOutputTokensPerTurn()
+                    : Math.min(policy.maximumOutputTokensPerTurn(), request.maximumOutputTokensPerTurn()),
+                    remaining.vector().outputTokens());
+            output = Math.min(output, remaining.maximumTotalTokens() - input);
+            long inputCost = exactCost(input, 0);
+            if (inputCost > remaining.vector().costMicros()) throw refused();
+            if (policy.outputTokenRateMicros() > 0) {
+                output = Math.min(output,
+                        (remaining.vector().costMicros() - inputCost) / policy.outputTokenRateMicros());
+            }
+            if (output == 0) throw refused();
             long cost = exactCost(input, output);
+            long elapsed = Math.min(request.maximumDuration().toMillis(),
+                    Math.min(remaining.vector().elapsedMillis(), remaining.deadlineMillis()));
+            if (elapsed == 0) throw refused();
             AgentBudgetVector requested = new AgentBudgetVector(1, input, output,
-                    request.maximumDuration().toMillis(), cost, 0, 0, 0, 0);
+                    elapsed, cost, 0, 0, 0, 0);
             String operationKey = AgentOperationKey.of(key, grantId, message.nodeId(), message.invocationId(),
                     AgentOperationKey.Kind.MODEL_TURN, ordinal, null);
             UUID reservationId = UUID.nameUUIDFromBytes(operationKey.getBytes(StandardCharsets.UTF_8));
             AgentBudgetReservation reservation = new AgentBudgetReservation(reservationId, grantId, operationKey,
                     requested, AgentBudgetVector.ZERO, AgentReservationState.HELD);
             recorder.record(List.of(), List.of(event(message, "AGENT_MODEL_RESERVED", "RESERVED", requested)),
-                    List.of(new AgentBudgetOperation.Hold(reservation, budget.root().bootEpoch(), budget.controlEpoch()),
-                            new AgentBudgetOperation.Dispatch(reservationId, budget.root().bootEpoch(),
-                                    budget.controlEpoch())));
+                    List.of(new AgentBudgetOperation.Hold(reservation, budget.root().bootEpoch(),
+                            budget.controlEpoch())));
             recordTelemetry(requested, AgentBudgetTelemetry.Outcome.RESERVED);
-            return new ModelReservation(message, reservationId, requested, clock.instant(), recorder);
+            return new ModelReservation(message, reservationId, requested, now, recorder);
         }
 
         @Override public void complete() { terminate(new AgentBudgetOperation.ExhaustGrant(grantId)); }
@@ -661,7 +684,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
 
         private void terminate(AgentBudgetOperation operation) {
             if (!terminal.compareAndSet(false, true)) return;
-            turns.values().forEach(ModelReservation::indeterminate);
+            turns.values().forEach(ModelReservation::cancel);
             recorder.record(List.of(), List.of(event(message, operation instanceof AgentBudgetOperation.ExhaustGrant
                             ? "AGENT_AUTHORITY_EXHAUSTED" : "AGENT_AUTHORITY_CANCELLED", "RELEASED",
                     AgentBudgetVector.ZERO)), List.of(operation));
@@ -670,7 +693,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
 
         private void cancelForKill() {
             if (!terminal.compareAndSet(false, true)) return;
-            turns.values().forEach(ModelReservation::indeterminate);
+            turns.values().forEach(ModelReservation::cancel);
             detach();
         }
 
@@ -690,6 +713,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         private final AgentBudgetVector requested;
         private final Instant started;
         private final ExecutionRecorder recorder;
+        private final AtomicBoolean dispatched = new AtomicBoolean();
         private final AtomicBoolean terminal = new AtomicBoolean();
 
         private ModelReservation(NodeMessage message, UUID reservationId, AgentBudgetVector requested,
@@ -698,7 +722,36 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             this.started = started; this.recorder = recorder;
         }
 
+        @Override public long maximumOutputTokens() { return requested.outputTokens(); }
+
+        @Override public Duration maximumDuration() { return Duration.ofMillis(requested.elapsedMillis()); }
+
+        @Override public void dispatch() {
+            if (terminal.get()) throw refused();
+            if (!dispatched.compareAndSet(false, true)) return;
+            DurableAgentAuthorityBudget budget = budget(key(message)).orElseThrow(
+                    AgentAuthorityBudgetService.this::refused);
+            try {
+                recorder.record(List.of(), List.of(event(message, "AGENT_MODEL_DISPATCHED", "USED",
+                                nonRefundable(requested))),
+                        List.of(new AgentBudgetOperation.Dispatch(reservationId, budget.root().bootEpoch(),
+                                budget.controlEpoch())));
+            } catch (RuntimeException failure) {
+                dispatched.set(false);
+                throw failure;
+            }
+        }
+
+        @Override public void release() {
+            if (dispatched.get()) throw refused();
+            if (!terminal.compareAndSet(false, true)) return;
+            recorder.record(List.of(), List.of(event(message, "AGENT_MODEL_RELEASED", "RELEASED", requested)),
+                    List.of(new AgentBudgetOperation.Release(reservationId)));
+            recordTelemetry(requested, AgentBudgetTelemetry.Outcome.RELEASED);
+        }
+
         @Override public void settle(Optional<Long> inputTokens, Optional<Long> outputTokens) {
+            if (!dispatched.get()) throw refused();
             if (!terminal.compareAndSet(false, true)) return;
             boolean valid = inputTokens != null && inputTokens.isPresent() && inputTokens.get() >= 0
                     && inputTokens.get() <= requested.inputTokens()
@@ -717,12 +770,25 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         }
 
         @Override public void indeterminate() {
+            if (!dispatched.get()) {
+                release();
+                return;
+            }
             if (!terminal.compareAndSet(false, true)) return;
             recorder.record(List.of(), List.of(event(message, "AGENT_MODEL_INDETERMINATE", "INDETERMINATE",
                             requested)),
                     List.of(new AgentBudgetOperation.MarkIndeterminate(reservationId)));
             recordTelemetry(requested, AgentBudgetTelemetry.Outcome.INDETERMINATE);
         }
+
+        private void cancel() {
+            if (dispatched.get()) indeterminate(); else release();
+        }
+    }
+
+    private static AgentBudgetVector nonRefundable(AgentBudgetVector requested) {
+        return new AgentBudgetVector(requested.turns(), 0, 0, 0, 0,
+                requested.toolCalls(), 0, 0, 0);
     }
 
     private long exactCost(long input, long output) {
@@ -733,4 +799,43 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             throw refused();
         }
     }
+
+    private long addExact(long left, long right) {
+        try {
+            return Math.addExact(left, right);
+        } catch (ArithmeticException overflow) {
+            throw refused();
+        }
+    }
+
+    private RemainingCapacity remainingCapacity(DurableAgentAuthorityBudget budget, UUID leafGrantId,
+                                                  Instant now) {
+        AgentBudgetVector remaining = budget.root().maxima().minus(
+                budget.spent().plus(budget.reserved()));
+        long maximumTotalTokens = Long.MAX_VALUE;
+        Instant deadline = budget.root().absoluteDeadline();
+        var found = new LinkedHashMap<UUID, DurableAgentAuthorityBudget.DurableAgentGrant>();
+        var queue = new ArrayDeque<UUID>();
+        queue.add(leafGrantId);
+        while (!queue.isEmpty()) {
+            UUID grantId = queue.remove();
+            var grant = budget.grants().get(grantId);
+            if (grant == null || grant.state() != AgentGrantState.ACTIVE) throw refused();
+            if (found.putIfAbsent(grantId, grant) != null) continue;
+            remaining = minimum(remaining, grant.registration().ceilings().minus(
+                    grant.spent().plus(grant.reserved())));
+            long usedTokens = addExact(addExact(grant.spent().inputTokens(), grant.spent().outputTokens()),
+                    addExact(grant.reserved().inputTokens(), grant.reserved().outputTokens()));
+            if (usedTokens > grant.registration().maximumTotalTokens()) throw refused();
+            maximumTotalTokens = Math.min(maximumTotalTokens,
+                    grant.registration().maximumTotalTokens() - usedTokens);
+            deadline = minimum(deadline, grant.registration().absoluteDeadline());
+            queue.addAll(grant.registration().contributingParentGrantIds());
+        }
+        long deadlineMillis = deadline.isAfter(now) ? Duration.between(now, deadline).toMillis() : 0;
+        return new RemainingCapacity(remaining, maximumTotalTokens, deadlineMillis);
+    }
+
+    private record RemainingCapacity(AgentBudgetVector vector, long maximumTotalTokens,
+                                     long deadlineMillis) { }
 }

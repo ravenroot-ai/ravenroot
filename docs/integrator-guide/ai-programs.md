@@ -23,7 +23,9 @@ remain untrusted data.
 
 Agent authority and spend are process-rooted and durable. Every model turn reserves finite input,
 output, elapsed-time, and cost ceilings before egress; missing or invalid provider usage is charged at
-the full reservation. Tool proposals and turns are non-refundable once dispatched. Child grants must
+the full reservation. The author-requested total-token ceiling is enforced atomically across input and
+output usage, including retries and recovery. Tool proposals and turns are non-refundable once
+dispatched. Child grants must
 be strict subsets of their parent authority or finite ceilings, and cancellation releases active
 team slots without refunding cumulative fan-out.
 

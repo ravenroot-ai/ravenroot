@@ -34,6 +34,12 @@ final class AiTestSupport {
                     new ai.ravenroot.api.node.service.AgentResourceSession() {
                 @Override public ai.ravenroot.api.node.service.AgentModelReservation reserveModelTurn(long ordinal) {
                     return new ai.ravenroot.api.node.service.AgentModelReservation() {
+                        @Override public long maximumOutputTokens() { return Long.MAX_VALUE; }
+                        @Override public java.time.Duration maximumDuration() {
+                            return java.time.Duration.ofDays(3650);
+                        }
+                        @Override public void dispatch() { }
+                        @Override public void release() { }
                         @Override public void settle(java.util.Optional<Long> inputTokens,
                                                      java.util.Optional<Long> outputTokens) { }
                         @Override public void indeterminate() { }
@@ -59,6 +65,20 @@ final class AiTestSupport {
         final AtomicInteger completes = new AtomicInteger();
         final AtomicInteger cancels = new AtomicInteger();
         final AtomicInteger suspends = new AtomicInteger();
+        final AtomicInteger modelDispatches = new AtomicInteger();
+        final AtomicInteger modelReleases = new AtomicInteger();
+        final AtomicInteger modelIndeterminate = new AtomicInteger();
+        private final long maximumOutputTokens;
+        private final java.time.Duration maximumDuration;
+
+        TrackingAgentResources() {
+            this(Long.MAX_VALUE, java.time.Duration.ofDays(3650));
+        }
+
+        TrackingAgentResources(long maximumOutputTokens, java.time.Duration maximumDuration) {
+            this.maximumOutputTokens = maximumOutputTokens;
+            this.maximumDuration = maximumDuration;
+        }
 
         @Override public ai.ravenroot.api.node.service.AgentResourceSession admit(
                 ai.ravenroot.api.execution.NodeMessage message,
@@ -78,9 +98,25 @@ final class AiTestSupport {
             return new ai.ravenroot.api.node.service.AgentResourceSession() {
                 @Override public ai.ravenroot.api.node.service.AgentModelReservation reserveModelTurn(long ordinal) {
                     return new ai.ravenroot.api.node.service.AgentModelReservation() {
+                        private final java.util.concurrent.atomic.AtomicBoolean dispatched =
+                                new java.util.concurrent.atomic.AtomicBoolean();
+                        private final java.util.concurrent.atomic.AtomicBoolean terminal =
+                                new java.util.concurrent.atomic.AtomicBoolean();
+                        @Override public long maximumOutputTokens() { return maximumOutputTokens; }
+                        @Override public java.time.Duration maximumDuration() { return maximumDuration; }
+                        @Override public void dispatch() {
+                            if (dispatched.compareAndSet(false, true)) modelDispatches.incrementAndGet();
+                        }
+                        @Override public void release() {
+                            if (terminal.compareAndSet(false, true)) modelReleases.incrementAndGet();
+                        }
                         @Override public void settle(java.util.Optional<Long> inputTokens,
-                                                     java.util.Optional<Long> outputTokens) { }
-                        @Override public void indeterminate() { }
+                                                     java.util.Optional<Long> outputTokens) {
+                            terminal.compareAndSet(false, true);
+                        }
+                        @Override public void indeterminate() {
+                            if (terminal.compareAndSet(false, true)) modelIndeterminate.incrementAndGet();
+                        }
                     };
                 }
                 @Override public ai.ravenroot.api.node.service.AgentResourceSession createChild(

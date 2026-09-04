@@ -12,6 +12,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -94,6 +95,42 @@ class AgentNodeBehaviorTest {
         assertEquals(1, result.attributes().get("agent.turns"));
         assertEquals(0, result.attributes().get("agent.toolCalls"));
         assertEquals(0, behavior.admissionEntries());
+    }
+
+    @Test
+    @DisplayName("the durable permit tightens max tokens and HTTP timeout before model egress")
+    void durablePermitBoundsTheActualOutboundRequest() throws Exception {
+        var resources = new AiTestSupport.TrackingAgentResources(7, Duration.ofMillis(123));
+        var http = new AiTestSupport.ScriptedHttp()
+                .resources(resources)
+                .then(AiTestSupport.answers("done"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        resultOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi",
+                "maxTokens", 64L, "timeoutMs", 5_000)), http));
+
+        var request = (PayloadValue.MapValue) PayloadJson.read(http.bodies().getFirst(), PayloadLimits.DEFAULTS);
+        assertEquals(PayloadValue.of(7L), request.entries().get("max_tokens"));
+        assertEquals(Duration.ofMillis(123), http.deadlines().getFirst());
+    }
+
+    @Test
+    @DisplayName("local request preparation failure releases the held permit without model egress")
+    void localPreparationFailureReleasesBeforeDispatch() {
+        var resources = new AiTestSupport.TrackingAgentResources(7, Duration.ZERO);
+        var http = new AiTestSupport.ScriptedHttp()
+                .resources(resources)
+                .then(AiTestSupport.answers("must not be sent"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(0, http.calls());
+        assertEquals(0, resources.modelDispatches.get());
+        assertEquals(1, resources.modelReleases.get());
+        assertEquals(0, resources.modelIndeterminate.get());
     }
 
     @Test

@@ -41,6 +41,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
@@ -62,9 +63,12 @@ class AgentAuthorityBudgetServiceTest {
             var session = fixture.budgets.admit(fixture.message, resources());
             var reservation = session.reserveModelTurn(1);
             var held = fixture.budget().reservations().values().iterator().next();
-            assertEquals(AgentReservationState.DISPATCHED, held.state());
+            assertEquals(AgentReservationState.HELD, held.state());
             assertEquals(new AgentBudgetVector(1, 100, 20, 1_000, 160, 0, 0, 0, 0),
                     held.requested());
+            reservation.dispatch();
+            held = fixture.budget().reservations().get(held.reservationId());
+            assertEquals(AgentReservationState.DISPATCHED, held.state());
 
             reservation.settle(Optional.empty(), Optional.empty());
 
@@ -76,6 +80,85 @@ class AgentAuthorityBudgetServiceTest {
                     fixture.budget().grants().values().iterator().next().state());
             assertEquals(0, fixture.budget().reserved().teamActive());
             assertEquals(1, fixture.budget().spent().teamCumulative());
+        }
+    }
+
+    @Test
+    void consecutiveModelTurnsReserveOnlyDurableRemainingTimeAndTokens() throws Exception {
+        var clock = new MutableClock(Instant.parse("2026-01-01T00:00:00Z"));
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding(), clock)) {
+            var bounded = new AgentResourceRequest(4, 240, 20, Duration.ofSeconds(1));
+            var session = fixture.budgets.admit(fixture.message, bounded);
+            var first = session.reserveModelTurn(1);
+            var firstStored = fixture.budget().reservations().values().iterator().next();
+            assertEquals(new AgentBudgetVector(1, 100, 20, 1_000, 160, 0, 0, 0, 0),
+                    firstStored.requested());
+            first.dispatch();
+            clock.advance(Duration.ofMillis(100));
+            first.settle(Optional.of(100L), Optional.of(20L));
+            session.suspend();
+
+            var restarted = new AgentAuthorityBudgetService(fixture.store, clock, policy(1),
+                    AgentBudgetTelemetry.discarding());
+            try (var binding = restarted.bindLive(fixture.key, fixture.recorder)) {
+                var retry = restarted.admit(fixture.message, bounded);
+                var second = retry.reserveModelTurn(2);
+                var secondStored = fixture.budget().reservations().values().stream()
+                        .filter(reservation -> reservation.state() == AgentReservationState.HELD)
+                        .findFirst().orElseThrow();
+                assertEquals(new AgentBudgetVector(1, 100, 20, 900, 160, 0, 0, 0, 0),
+                        secondStored.requested());
+                assertEquals(120, secondStored.requested().inputTokens()
+                        + secondStored.requested().outputTokens(),
+                        "retry must reserve exactly the durable combined-token remainder");
+                assertEquals(secondStored.requested().outputTokens(), second.maximumOutputTokens());
+                assertEquals(secondStored.requested().elapsedMillis(), second.maximumDuration().toMillis());
+                second.dispatch();
+                clock.advance(Duration.ofMillis(200));
+                second.settle(Optional.of(10L), Optional.of(5L));
+
+                AgentBudgetVector spent = fixture.budget().spent();
+                assertEquals(2, spent.turns());
+                assertEquals(110, spent.inputTokens());
+                assertEquals(25, spent.outputTokens());
+                assertEquals(300, spent.elapsedMillis());
+                assertEquals(185, spent.costMicros());
+                var finalRemainder = retry.reserveModelTurn(3);
+                var finalStored = fixture.budget().reservations().values().stream()
+                        .filter(reservation -> reservation.state() == AgentReservationState.HELD)
+                        .findFirst().orElseThrow();
+                assertEquals(new AgentBudgetVector(1, 100, 5, 700, 115, 0, 0, 0, 0),
+                        finalStored.requested());
+                assertEquals(5, finalRemainder.maximumOutputTokens(),
+                        "only an outbound-enforced output cap may consume the combined remainder");
+                finalRemainder.release();
+                clock.advance(Duration.ofMillis(700));
+                assertThrows(NodePackageServiceException.class, () -> retry.reserveModelTurn(4));
+                assertEquals(3, fixture.budget().reservations().size(),
+                        "an expired deadline must not dispatch a zero-duration reservation");
+                retry.complete();
+            }
+        }
+    }
+
+    @Test
+    void localPreparationFailureReleasesHeldModelEconomicsWithoutDispatchSpend() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var session = fixture.budgets.admit(fixture.message, resources());
+            var permit = session.reserveModelTurn(1);
+            UUID reservationId = fixture.budget().reservations().keySet().iterator().next();
+
+            permit.release();
+
+            assertEquals(AgentReservationState.RELEASED,
+                    fixture.budget().reservations().get(reservationId).state());
+            AgentBudgetVector spent = fixture.budget().spent();
+            assertEquals(0, spent.turns());
+            assertEquals(0, spent.inputTokens());
+            assertEquals(0, spent.outputTokens());
+            assertEquals(0, spent.elapsedMillis());
+            assertEquals(0, spent.costMicros());
+            session.cancel();
         }
     }
 
@@ -318,7 +401,9 @@ class AgentAuthorityBudgetServiceTest {
                 dimension.name() + ':' + outcome.name() + ':' + amount);
         try (Fixture fixture = new Fixture(policy(1), telemetry)) {
             var session = fixture.budgets.admit(fixture.message, resources());
-            session.reserveModelTurn(1).settle(Optional.of(2L), Optional.of(3L));
+            var reservation = session.reserveModelTurn(1);
+            reservation.dispatch();
+            reservation.settle(Optional.of(2L), Optional.of(3L));
             session.complete();
         }
         assertTrue(seen.stream().allMatch(value -> value.matches("[A-Z_]+:[A-Z_]+:[0-9]+")));
@@ -358,7 +443,7 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     private static AgentResourceRequest resources() {
-        return new AgentResourceRequest(4, 100, 20, Duration.ofSeconds(1));
+        return new AgentResourceRequest(4, 1_000, 20, Duration.ofSeconds(1));
     }
 
     private static RequestContext operator() {
@@ -372,7 +457,7 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     private static final class Fixture implements AutoCloseable {
-        private final InMemoryExecutionStore store = new InMemoryExecutionStore(CLOCK);
+        private final InMemoryExecutionStore store;
         private final ExecutionKey key = new ExecutionKey("tenant-a", UUID.randomUUID());
         private final UUID traversalId = UUID.randomUUID();
         private final UUID invocationId = UUID.randomUUID();
@@ -387,6 +472,11 @@ class AgentAuthorityBudgetServiceTest {
         private AutoCloseable binding;
 
         private Fixture(AgentAuthorityBudgetPolicy policy, AgentBudgetTelemetry telemetry) {
+            this(policy, telemetry, CLOCK);
+        }
+
+        private Fixture(AgentAuthorityBudgetPolicy policy, AgentBudgetTelemetry telemetry, Clock clock) {
+            store = new InMemoryExecutionStore(clock);
             var attempt = new NodeAttempt(attemptId, 1, NodeAttemptStatus.RUNNING);
             var invocation = new NodeInvocation(invocationId, "agent", Set.of(),
                     NodeInvocationStatus.RUNNING, List.of(attempt));
@@ -397,7 +487,7 @@ class AgentAuthorityBudgetServiceTest {
                             ProcessInstanceStatus.RUNNING, Map.of(traversalId, traversal)),
                             new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join().revision();
             recorder = ExecutionRecorder.open(store, key, "budget-test", Duration.ofSeconds(30), revision);
-            budgets = new AgentAuthorityBudgetService(store, CLOCK, policy, telemetry);
+            budgets = new AgentAuthorityBudgetService(store, clock, policy, telemetry);
             binding = budgets.bindLive(key, recorder);
         }
 
@@ -449,5 +539,15 @@ class AgentAuthorityBudgetServiceTest {
             detachRecorder();
             store.close();
         }
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+
+        private MutableClock(Instant now) { this.now = now; }
+        private void advance(Duration amount) { now = now.plus(amount); }
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
     }
 }

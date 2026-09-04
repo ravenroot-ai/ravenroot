@@ -808,6 +808,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
          */
         private volatile OutboundCall<OutboundHttpResponse> inFlight;
         private volatile AgentModelReservation inFlightBudget;
+        private volatile boolean modelDispatched;
         /** Expected durable approval suspension is detach-only, never grant cancellation. */
         private volatile boolean suspended;
         /** Set once the run is over, by any route. Read before every step the loop would take next. */
@@ -1038,13 +1039,6 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             turns++;
-            byte[] body;
-            try {
-                body = AgentTurn.writeRequest(settings.model(), messages, tools, settings.tuning());
-            } catch (RuntimeException failure) {
-                result.completeExceptionally(sanitize(failure));
-                return;
-            }
             OutboundCall<OutboundHttpResponse> call;
             final AgentModelReservation turnBudget;
             try {
@@ -1054,11 +1048,46 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             inFlightBudget = turnBudget;
+            modelDispatched = false;
+            byte[] body;
+            long effectiveTimeout;
+            try {
+                long permittedOutput = turnBudget.maximumOutputTokens();
+                long permittedMillis = turnBudget.maximumDuration().toMillis();
+                if (permittedOutput <= 0 || permittedMillis <= 0) {
+                    throw new IllegalStateException("agent resource permit is empty");
+                }
+                Optional<Long> effectiveOutput = settings.tuning().maxTokens()
+                        .map(configured -> Math.min(configured, permittedOutput));
+                if (effectiveOutput.isEmpty() && permittedOutput < Long.MAX_VALUE) {
+                    effectiveOutput = Optional.of(permittedOutput);
+                }
+                var effectiveTuning = new OpenAiCompatibleChat.Tuning(effectiveOutput,
+                        settings.tuning().temperature(), settings.tuning().topP(), settings.tuning().seed());
+                body = AgentTurn.writeRequest(settings.model(), messages, tools, effectiveTuning);
+                effectiveTimeout = Math.min(remaining, permittedMillis);
+            } catch (RuntimeException failure) {
+                turnBudget.release();
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            if (over || result.isDone()) {
+                turnBudget.release();
+                return;
+            }
+            try {
+                turnBudget.dispatch();
+                modelDispatched = true;
+            } catch (RuntimeException failure) {
+                turnBudget.release();
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
             try {
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
-                        Duration.ofMillis(remaining),
+                        Duration.ofMillis(effectiveTimeout),
                         settings.profile().credentialBinding().orElse(null)));
             } catch (RuntimeException failure) {
                 turnBudget.indeterminate();
@@ -1344,7 +1373,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
         void abort() {
             over = true;
             AgentModelReservation budget = inFlightBudget;
-            if (budget != null) budget.indeterminate();
+            if (budget != null) {
+                if (modelDispatched) budget.indeterminate(); else budget.release();
+            }
             OutboundCall<OutboundHttpResponse> current = inFlight;
             if (current != null) {
                 current.cancel();

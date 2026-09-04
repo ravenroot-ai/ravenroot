@@ -100,6 +100,8 @@ public final class AgentAuthorityBudgetFold {
                         && (!replacement.dataScopes().containsAll(grant.registration().dataScopes())
                         || !replacement.authorityScopes().containsAll(grant.registration().authorityScopes())
                         || !grant.registration().ceilings().componentwiseAtMost(replacement.maxima())
+                        || grant.registration().maximumTotalTokens() > combinedCeiling(
+                                replacement.maxima().inputTokens(), replacement.maxima().outputTokens())
                         || grant.registration().absoluteDeadline().isAfter(replacement.absoluteDeadline()))) {
                     throw new IllegalStateException("active grant is not valid after reboot");
                 }
@@ -124,7 +126,11 @@ public final class AgentAuthorityBudgetFold {
         }
         requireActive(current, now);
         Set<UUID> parents = registration.contributingParentGrantIds();
+        if (!operation.binding().grantId().equals(registration.grantId())) {
+            throw new IllegalStateException("agent grant binding does not match registration");
+        }
         AgentBudgetVector parentCeiling = current.root().maxima();
+        long parentTotalTokens = combinedCeiling(parentCeiling.inputTokens(), parentCeiling.outputTokens());
         Set<String> data = current.root().dataScopes();
         Set<String> authority = current.root().authorityScopes();
         Instant parentDeadline = current.root().absoluteDeadline();
@@ -135,7 +141,11 @@ public final class AgentAuthorityBudgetFold {
                 if (parent == null || parent.state() != AgentGrantState.ACTIVE) {
                     throw new IllegalStateException("contributing parent grant is not active");
                 }
+                if (!operation.binding().causalParentInvocationIds().contains(parent.binding().invocationId())) {
+                    throw new IllegalStateException("contributing parent grant is not a causal parent invocation");
+                }
                 parentCeiling = componentMinimum(parentCeiling, parent.registration().ceilings());
+                parentTotalTokens = Math.min(parentTotalTokens, parent.registration().maximumTotalTokens());
                 data = intersection(data, parent.registration().dataScopes());
                 authority = intersection(authority, parent.registration().authorityScopes());
                 if (parent.registration().absoluteDeadline().isBefore(parentDeadline)) {
@@ -151,12 +161,14 @@ public final class AgentAuthorityBudgetFold {
         if (!data.containsAll(registration.dataScopes())
                 || !authority.containsAll(registration.authorityScopes())
                 || !registration.ceilings().componentwiseAtMost(parentCeiling)
+                || registration.maximumTotalTokens() > parentTotalTokens
                 || registration.absoluteDeadline().isAfter(parentDeadline)) {
             throw new IllegalStateException("child grant expands parent authority");
         }
         boolean attenuated = !registration.dataScopes().equals(data)
                 || !registration.authorityScopes().equals(authority)
                 || !registration.ceilings().equals(parentCeiling)
+                || registration.maximumTotalTokens() != parentTotalTokens
                 || registration.absoluteDeadline().isBefore(parentDeadline);
         if (!attenuated) throw new IllegalStateException("child grant must be strictly attenuated overall");
         AgentBudgetVector teamCharge = new AgentBudgetVector(0, 0, 0, 0, 0, 0,
@@ -208,6 +220,15 @@ public final class AgentAuthorityBudgetFold {
             if (!ancestor.registration().ceilings().contains(
                     ancestor.spent().plus(ancestor.reserved()), reservation.requested())) {
                 throw new IllegalStateException("agent grant budget exhausted");
+            }
+            long usedTokens = combinedTokens(
+                    ancestor.spent().inputTokens(), ancestor.spent().outputTokens(),
+                    ancestor.reserved().inputTokens(), ancestor.reserved().outputTokens());
+            long requestedTokens = combinedTokens(
+                    reservation.requested().inputTokens(), reservation.requested().outputTokens());
+            if (usedTokens > ancestor.registration().maximumTotalTokens()
+                    || requestedTokens > ancestor.registration().maximumTotalTokens() - usedTokens) {
+                throw new IllegalStateException("agent grant combined token budget exhausted");
             }
         }
         if (!current.root().maxima().contains(current.spent().plus(current.reserved()), reservation.requested())) {
@@ -413,6 +434,21 @@ public final class AgentAuthorityBudgetFold {
                 Math.min(a.costMicros(), b.costMicros()), Math.min(a.toolCalls(), b.toolCalls()),
                 Math.min(a.delegationDepth(), b.delegationDepth()),
                 Math.min(a.teamCumulative(), b.teamCumulative()), Math.min(a.teamActive(), b.teamActive()));
+    }
+
+    private static long combinedTokens(long... values) {
+        long total = 0;
+        try {
+            for (long value : values) total = Math.addExact(total, value);
+            return total;
+        } catch (ArithmeticException overflow) {
+            throw new IllegalStateException("agent combined token accounting overflow", overflow);
+        }
+    }
+
+    private static long combinedCeiling(long inputTokens, long outputTokens) {
+        return inputTokens > Long.MAX_VALUE - outputTokens
+                ? Long.MAX_VALUE : inputTokens + outputTokens;
     }
 
     private static DurableAgentAuthorityBudget copy(DurableAgentAuthorityBudget current,

@@ -2245,6 +2245,25 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void combinedTokenCeilingIsAtomicAcrossDurableRetries() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1, largeBudget(), 10);
+        UUID grantId = fixture.grantIds().getFirst();
+        AgentBudgetReservation first = hold(fixture, grantId, 1,
+                new AgentBudgetVector(1, 4, 3, 1, 1, 0, 0, 0, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(first.reservationId(), 7, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Settle(first.reservationId(), first.requested()));
+
+        ExecutionStoreFailure excessiveRetry = failureOf(() -> hold(fixture, grantId, 2,
+                new AgentBudgetVector(1, 2, 2, 1, 1, 0, 0, 0, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, excessiveRetry,
+                "separate input/output headroom must not bypass the combined token ceiling");
+        hold(fixture, grantId, 3, new AgentBudgetVector(1, 2, 1, 1, 1, 0, 0, 0, 0));
+        assertEquals(3, budget(fixture.key()).reserved().inputTokens()
+                + budget(fixture.key()).reserved().outputTokens());
+    }
+
+    @Test
     final void childAuthorityMustBeStrictlyAttenuatedAndEveryParentBoundsDiamondFanout() {
         assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
         AgentBudgetVector parentCeiling = new AgentBudgetVector(100, 100, 100, 100, 100, 100, 5, 1, 1);
@@ -2261,6 +2280,17 @@ public abstract class ExecutionStoreContract {
         ExecutionStoreFailure expanded = failureOf(() -> registerGrant(fixture, unattenuated,
                 invalidInvocation, Set.of(fixture.invocationIds().get(0))));
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, expanded);
+
+        UUID unrelatedInvocation = addInvocation(fixture, Set.of(
+                fixture.invocationIds().get(0), fixture.invocationIds().get(1)));
+        AgentAuthorityGrantRegistration unrelatedParent = new AgentAuthorityGrantRegistration(UUID.randomUUID(),
+                left.grantId(), Set.of(left.grantId(), right.grantId()), 2,
+                Set.of(), Set.of("tool:a"), new AgentBudgetVector(90, 90, 90, 90, 90, 90, 2, 0, 0),
+                left.absoluteDeadline());
+        ExecutionStoreFailure unrelated = failureOf(() -> registerGrant(fixture, unrelatedParent,
+                unrelatedInvocation, Set.of(fixture.invocationIds().get(0))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, unrelated,
+                "every contributing grant must bind to a causal parent invocation");
 
         UUID diamondInvocation = addInvocation(fixture, Set.of(
                 fixture.invocationIds().get(0), fixture.invocationIds().get(1)));
@@ -2414,6 +2444,12 @@ public abstract class ExecutionStoreContract {
 
     private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants,
                                                   AgentBudgetVector grantCeiling) {
+        return agentBudgetFixture(maxima, topLevelGrants, grantCeiling,
+                Math.addExact(grantCeiling.inputTokens(), grantCeiling.outputTokens()));
+    }
+
+    private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants,
+                                                  AgentBudgetVector grantCeiling, long maximumTotalTokens) {
         ExecutionKey key = newKey();
         UUID traversalId = UUID.randomUUID();
         StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
@@ -2433,7 +2469,7 @@ public abstract class ExecutionStoreContract {
                             List.of(), NodeCommand.PROCESS)));
             AgentAuthorityGrantRegistration grant = new AgentAuthorityGrantRegistration(grantId, null, Set.of(),
                     1, Set.of("tenant:read"), Set.of("tool:a", "tool:b"), grantCeiling,
-                    clock().instant().plus(Duration.ofHours(1)));
+                    maximumTotalTokens, clock().instant().plus(Duration.ofHours(1)));
             builder.applyAgentBudget(new AgentBudgetOperation.RegisterGrant(grant,
                     new AgentAuthorityBinding(grantId, "agent-" + i, invocationId, Set.of()), 7, 0));
         }

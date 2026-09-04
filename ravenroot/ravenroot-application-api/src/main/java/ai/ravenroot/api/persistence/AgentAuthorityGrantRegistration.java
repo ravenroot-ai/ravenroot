@@ -10,7 +10,15 @@ public record AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
                                                long depth, Set<String> dataScopes,
                                                Set<String> authorityScopes,
                                                AgentBudgetVector ceilings,
+                                               long maximumTotalTokens,
                                                Instant absoluteDeadline) {
+    public AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
+            Set<UUID> contributingParentGrantIds, long depth, Set<String> dataScopes,
+            Set<String> authorityScopes, AgentBudgetVector ceilings, Instant absoluteDeadline) {
+        this(grantId, parentGrantId, contributingParentGrantIds, depth, dataScopes, authorityScopes,
+                ceilings, combinedTokenCeiling(ceilings), absoluteDeadline);
+    }
+
     public AgentAuthorityGrantRegistration {
         if (grantId == null) throw new IllegalArgumentException("grantId is required");
         contributingParentGrantIds = Set.copyOf(contributingParentGrantIds == null
@@ -26,7 +34,16 @@ public record AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
         dataScopes = scopes(dataScopes, "dataScopes");
         authorityScopes = scopes(authorityScopes, "authorityScopes");
         if (ceilings == null) throw new IllegalArgumentException("ceilings are required");
+        if (maximumTotalTokens < 0 || maximumTotalTokens > combinedTokenCeiling(ceilings)) {
+            throw new IllegalArgumentException("maximumTotalTokens is outside the token ceilings");
+        }
         if (absoluteDeadline == null) throw new IllegalArgumentException("absoluteDeadline is required");
+    }
+
+    private static long combinedTokenCeiling(AgentBudgetVector ceilings) {
+        if (ceilings == null) throw new IllegalArgumentException("ceilings are required");
+        return ceilings.inputTokens() > Long.MAX_VALUE - ceilings.outputTokens()
+                ? Long.MAX_VALUE : ceilings.inputTokens() + ceilings.outputTokens();
     }
 
     private static Set<String> scopes(Set<String> source, String name) {

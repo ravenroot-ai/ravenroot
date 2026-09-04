@@ -257,6 +257,7 @@ class RepositoryConfigurationTest(unittest.TestCase):
         self.assertIn("ravenroot-discord", artifacts)
         self.assertIn("ravenroot-git-workspace", artifacts)
         self.assertIn("ravenroot-github", artifacts)
+        self.assertIn("ravenroot-slack", artifacts)
         self.assertTrue(EXCLUDED_ARTIFACTS.isdisjoint(artifacts))
         self.assertNotIn("ravenroot-dev-harness", artifacts)
         self.assertNotIn("ravenroot-sample", artifacts)

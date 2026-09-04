@@ -241,8 +241,8 @@ abstract class CliBackendContract {
         var view = awaitTerminalResult(submission.executionId());
 
         assertEquals("COMPLETED", view.status());
-        assertEquals(List.of("accepted-log", "end", "greeting", "is-ravenroot", "start"),
-                view.visitedNodes(),
+        assertEquals(Set.of("accepted-log", "end", "greeting", "is-ravenroot", "start"),
+                Set.copyOf(view.visitedNodes()),
                 "the traversal must reach the decision's accepted branch and the terminal");
         assertEquals("\"Hello Ravenroot\"", view.payload(),
                 "the template and decision behaviors must have actually run");

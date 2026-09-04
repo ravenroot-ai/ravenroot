@@ -308,7 +308,8 @@ public final class RouteTable {
             // visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON
             // array with no repeats. GraphExecutionResult holds every one of them as a Set, so a node
             // reached, defaulted, bypassed or failed-and-handled more than once in one traversal still
-            // appears exactly once in this response. The event projections preserve per-visit counts.
+            // appears exactly once in this response. Their lexical serialisation is deterministic
+            // presentation, not visit order. The event projections preserve ordered evidence.
             //
             // /v1/events/recent's durable projection carries the event type but not the node id:
             // RavenrootServer#recentDurableEvents serialises "type":event.eventType() verbatim, while
@@ -353,7 +354,10 @@ public final class RouteTable {
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
                             + "so a node reached, defaulted, bypassed or failed-and-handled more than once "
                             + "in this traversal still appears exactly once here, and none of the four "
-                            + "says how many times. A fifth field, untakenEdges (#519), is not one of "
+                            + "says how many times. Their arrays are sorted for deterministic presentation, "
+                            + "but that lexical order is not traversal chronology and must not be read as "
+                            + "one. Use invocation or event history when visit order or repeats matter. "
+                            + "A fifth field, untakenEdges (#519), is not one of "
                             + "these four and is not a node list: each entry is a string naming one "
                             + "outgoing edge of a node this run bypassed -- "
                             + "\"<source>-><target> [outcome=<outcome>]\" -- that the node's own "
@@ -473,6 +477,32 @@ public final class RouteTable {
                             + "window -- all three indistinguishable by design, exactly like GET "
                             + "/v1/executions/{id}'s own 404. 501 when this deployment has no "
                             + "inventory-capable execution store composed.", true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            // A distinct path and entry for the same reason /traversals has one: this table is keyed
+            // per path, and {id} here is a processInstanceId because a manifest is pinned once per
+            // process instance. registersContext is false -- this is a sub-route inside the
+            // /v1/executions context, dispatched by RavenrootServer's own segment matching, exactly
+            // like /traversals and the cancel/pause/resume trio.
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/manifest",
+                    "Reports the identity of the dependency set one process instance was accepted "
+                            + "against, and whether this deployment still resolves it (#153). {id} is a "
+                            + "processInstanceId, like GET /v1/executions/{id}/traversals and unlike "
+                            + "every other /v1/executions sub-route. The body carries "
+                            + "manifestFormatVersion, manifestDigest, the pinned graphVersion, graphId "
+                            + "and graphVersionId, pinnedAt, a compatible verdict, an "
+                            + "incompatibleDimensions list of dimension names and dimensionsTruncated. "
+                            + "It deliberately carries no value from the pinned dependency set -- no "
+                            + "capability set, no execution limit, no node-package identity and no "
+                            + "package count -- because those describe the deployment rather than the "
+                            + "caller's execution; the comparison's own values stay in the server-side "
+                            + "diagnostic a refused recovery raises. 404 when no manifest is pinned for "
+                            + "the instance, when it belongs to another tenant, and when it was "
+                            + "accepted before this deployment began recording them -- all three "
+                            + "indistinguishable by design. 501 when this deployment composed no "
+                            + "manifest store, and when a stored manifest no longer verifies.",
+                    true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
                             ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),

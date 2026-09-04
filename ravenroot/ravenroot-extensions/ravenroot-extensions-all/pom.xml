@@ -47,6 +47,11 @@
         </dependency>
         <dependency>
             <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-slack</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-jdbc</artifactId>
             <version>${project.version}</version>
         </dependency>

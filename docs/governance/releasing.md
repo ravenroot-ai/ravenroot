@@ -156,7 +156,7 @@ coordinates:
   `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-github`, `ravenroot-jdbc`,
   `ravenroot-kafka`, `ravenroot-mail`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
-  `ravenroot-openapi-server`, `ravenroot-spel`, `ravenroot-telegram`, and
+  `ravenroot-openapi-server`, `ravenroot-slack`, `ravenroot-spel`, `ravenroot-telegram`, and
   `ravenroot-websocket` extensions.
 
 The example node project, sandbox-supervisor conformance fixture, optional Akka build, development

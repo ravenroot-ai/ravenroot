@@ -8,7 +8,7 @@ public enum ToolApprovalStatus {
     APPROVED,
     /** Explicitly denied with no effect. */
     DENIED,
-    /** Store-clock expiry won with no effect. */
+    /** The store-clock deadline elapsed before effect authority was consumed, including after approval. */
     EXPIRED,
     /** Explicitly cancelled with no effect. */
     CANCELLED,

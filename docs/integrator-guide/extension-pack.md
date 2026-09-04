@@ -44,6 +44,7 @@ The current reviewed membership is:
 | `ravenroot-filesystem` | `ai.ravenroot.extensions.filesystem.FilesystemNodePackage` |
 | `ravenroot-git-workspace` | `ai.ravenroot.extensions.gitworkspace.GitWorkspaceNodePackage` |
 | `ravenroot-github` | `ai.ravenroot.extensions.github.GithubNodePackage` |
+| `ravenroot-slack` | `ai.ravenroot.extensions.slack.SlackNodePackage` |
 | `ravenroot-jdbc` | `ai.ravenroot.extensions.jdbc.JdbcNodePackage` |
 | `ravenroot-kafka` | `ai.ravenroot.extensions.kafka.KafkaNodePackage` |
 | `ravenroot-mail` | `ai.ravenroot.extensions.mail.MailNodePackage` |

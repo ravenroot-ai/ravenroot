@@ -240,7 +240,12 @@ public final class RavenrootServerMain {
                 executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
                 executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
-                graphExecutionLimits, agentBudgets);
+                graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore());
+        // Every recovery path verifies against the application's own resolver rather than one built
+        // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
+        // two composition sites was updated and the other was not, and the refusals that followed
+        // would look like corrupt manifests rather than like a composition mistake.
+        var executionManifests = application.executionManifests();
         final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
         if (toolApprovals == null && humanTasks == null) {
             approvalRecovery = null;
@@ -254,7 +259,8 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets);
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
+                        executionManifests);
                 dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
                         executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor));
             }
@@ -263,7 +269,8 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets);
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
+                        executionManifests);
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor));
             }
@@ -389,6 +396,9 @@ public final class RavenrootServerMain {
                 }
                 if (agentBudgets != null) {
                     server.installAgentAuthorityControl(agentBudgets);
+                }
+                if (executionManifests != null) {
+                    server.installExecutionManifests(executionManifests);
                 }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(

@@ -344,13 +344,17 @@ final class PausedExecutionObservabilityTest {
      * delivery is synchronous, so a listener for that event runs inside the critical section. This
      * test stands there and, from inside it:</p>
      * <ol>
-     *   <li>starts a resume on another thread, and waits until the hold has actually disappeared from
-     *       the runtime. <b>That wait is the discriminator.</b> The hold can only vanish while this
-     *       thread owns the monitor if the removal is not inside it; when the removal is where it
-     *       belongs, the resuming thread is still parked on the monitor and the hold is still there,
-     *       so the wait simply expires;</li>
+     *   <li>starts a resume on another thread and gives it a window to act, then <b>asserts that the
+     *       hold is still there.</b> That assertion is the discriminator, and it is asserted rather
+     *       than merely used: the hold can only vanish while this thread owns the monitor if
+     *       something that belongs inside the monitor is outside it, so this one line fails on the
+     *       misplaced removal <em>and</em> on a publication reordered around the monitor — the
+     *       realistic refactor, same thread, publish just after the release. That second case used to
+     *       slip through: the resumer would be unblocked, the window would exit early, and the test
+     *       would decay into an ordinary race that failed only sometimes;</li>
      *   <li>then pauses again on this thread, which already owns the monitor and so cannot be
-     *       excluded by anything.</li>
+     *       excluded by anything. This is what constructs the defective sequence for the invariant
+     *       below, which stands as a second line of defence behind the discriminator.</li>
      * </ol>
      *
      * <p>With the removal misplaced that second pause finds an empty map, installs a hold and
@@ -418,13 +422,30 @@ final class PausedExecutionObservabilityTest {
                      Thread.currentThread().interrupt();
                      throw new IllegalStateException(interrupted);
                  }
-                 // The discriminator. A hold cannot disappear while this thread owns the monitor
-                 // unless the removal happens outside it. When the removal is correctly placed the
-                 // resuming thread is parked on the monitor, the hold stays, and this expires.
+                 // The discriminator. A hold cannot disappear while this thread owns the traversal's
+                 // control monitor unless something that should be inside that monitor is outside it.
+                 // When everything is where it belongs the resuming thread is parked on the monitor,
+                 // the hold stays, and this window simply expires.
+                 //
+                 // Parked rather than spun: under correct code this loop always runs to its deadline,
+                 // so a busy wait would burn a core on every green build of a module three lanes
+                 // contend for. A millisecond poll is just as prompt against the defect, which needs
+                 // only microseconds to become visible.
                  long deadline = System.nanoTime() + REMOVAL_WINDOW.toNanos();
                  while (runner.isPaused(traversalId) && System.nanoTime() < deadline) {
-                     Thread.onSpinWait();
+                     try {
+                         TimeUnit.MILLISECONDS.sleep(1);
+                     } catch (InterruptedException interrupted) {
+                         Thread.currentThread().interrupt();
+                         break;
+                     }
                  }
+                 // Recorded here and asserted in the test body rather than asserted here. An
+                 // assertion thrown from a listener survives today only because AssertionError is an
+                 // Error and this monitor swallows RuntimeException -- a distinction no test should
+                 // depend on, because widening that catch to Throwable would delete this check
+                 // without a single build going red.
+                 round.heldWhileMonitorOwned = runner.isPaused(traversalId);
                  // Reentrant: this thread already owns the monitor, so nothing can exclude this pause.
                  runner.pauseTraversal(traversalId);
              })) {
@@ -439,6 +460,11 @@ final class PausedExecutionObservabilityTest {
                 assertFalse(round.armed.get(),
                         "round " + index + ": the choreography never ran, so this round asserted "
                                 + "nothing about the case it exists for");
+                assertEquals(Boolean.TRUE, round.heldWhileMonitorOwned,
+                        "round " + index + ": while this traversal's control monitor was held, its "
+                                + "hold must still have been in place. That it was not means a step "
+                                + "that belongs inside that monitor happened outside it -- either the "
+                                + "removal, or the publication that must not be reordered around it.");
                 round.resumer.join(BOUND.toMillis());
 
                 List<ExecutionEventType> lifecycle = lifecycle(round.events);
@@ -466,20 +492,32 @@ final class PausedExecutionObservabilityTest {
     }
 
     /**
-     * How long the choreography waits for a misplaced removal to become visible.
+     * How long the choreography waits for a misplaced step to become visible.
      *
-     * <p>Not a timing assumption about the product: it bounds a wait for work that has already been
-     * started and, when the removal is correctly placed, is expected to expire on every round. It is
-     * therefore the test's own cost when the code is right, and generous enough that a loaded machine
-     * cannot turn a real removal into a missed one.</p>
+     * <p>Not a timing assumption about the product, and deliberately <strong>one-sided</strong>. Under
+     * correct code the verdict does not depend on it at all: the resuming thread is provably parked on
+     * a monitor this thread owns, so the hold is still there for any window, including a zero-length
+     * one. Under the defect it bounds nothing but a wait for an already-started thread to perform a
+     * single map removal — microseconds of work with orders of magnitude of headroom here.</p>
+     *
+     * <p>So a window that is too short can only cost detection, never produce a red build on correct
+     * code: the failure direction is a silent pass. That asymmetry is what makes it safe to keep this
+     * short, and short is worth having, because under correct code the loop always runs to the
+     * deadline and this is therefore the test's own cost on every green build.</p>
      */
-    private static final Duration REMOVAL_WINDOW = Duration.ofMillis(300);
+    private static final Duration REMOVAL_WINDOW = Duration.ofMillis(100);
 
     /** One round's recorded events, its re-entrancy guard, and the thread performing its resume. */
     private static final class Round {
         private final List<ExecutionEventType> events = Collections.synchronizedList(new ArrayList<>());
         private final AtomicBoolean armed = new AtomicBoolean(true);
         private volatile Thread resumer;
+        /**
+         * Whether the hold was still in place at the end of the window, observed while this
+         * traversal's control monitor was held. {@code null} until the choreography has run, so a
+         * round that never reached it is distinguishable from one that observed {@code false}.
+         */
+        private volatile Boolean heldWhileMonitorOwned;
     }
 
     /**

@@ -1389,9 +1389,25 @@ public final class GraphRunner implements AutoCloseable {
      * by the removal happening inside the lock. That is pinned by
      * {@code PausedExecutionObservabilityTest}, which fails if the removal moves back out.</p>
      *
-     * <p>{@link PauseHold#announced} is a different matter and is load bearing: a re-entry path
-     * ({@link #executeFrom}, {@link #executeAfterHumanTask}) can find a hold this runner has already
-     * announced, and without the check it would announce it a second time.</p>
+     * <h2>Why {@link PauseHold#announced} is nevertheless kept</h2>
+     * <p>Not because it can fire. It cannot, and an earlier version of this note claimed otherwise:
+     * it said a re-entry path could meet a hold this runner had already announced. Reaching that
+     * needs two entry-path invocations for one traversal on one runner, and {@code coordinators}'
+     * {@code putIfAbsent} refuses the second until {@link #release} has run — which removes the hold
+     * first. So the state this guard excludes is not reachable, and removing the guard breaks no
+     * test.</p>
+     *
+     * <p>It stays because of <em>what</em> makes it unreachable, which is the opposite of the case
+     * for the withdrawn flag above. That one was excluded by a property this class enforces here and
+     * a test now pins. This one is excluded by the coordinator interlock — a different invariant, in
+     * a different part of this class, that no pause test covers and that a future change to re-entry
+     * could weaken without any of them noticing. A one-line idempotence guard on a publish, standing
+     * behind an unpinned invariant, is worth its cost; the same guard standing behind a pinned one
+     * was not.</p>
+     *
+     * <p>The field itself is load bearing on the other side and is pinned there:
+     * {@link #releasePauseGate} reads it to decide whether a release has a pause to pair with, which
+     * is what {@code aHoldWithdrawnBeforeItWasAnnouncedPublishesNeitherEvent} constrains.</p>
      *
      * <p>The caller must hold {@code control}'s monitor. Publishing inside it rather than after it is
      * deliberate: {@link #releasePauseGate} publishes {@code EXECUTION_RESUMED} under the same
@@ -1639,10 +1655,14 @@ public final class GraphRunner implements AutoCloseable {
      * thread is free before the scheduler does anything at all.</p>
      */
     private boolean releasePauseGate(UUID traversalId, GateRelease release, GateReleaseReason reason) {
-        // The removal, the withdrawal and the publication all happen under this traversal's one
-        // control monitor, the same monitor a pause installs and announces under. That is what stops
-        // a pause from landing between a removal and its publication -- see #controlFor for the
-        // sequence that produced, and the reading it gave an observer.
+        // The removal and the publication happen under this traversal's one control monitor, the
+        // same monitor a pause installs and announces under. That is what stops a pause from landing
+        // between them -- see #controlFor for the sequence that produced, and the reading it gave an
+        // observer.
+        //
+        // This is not a shape to preserve by convention: PausedExecutionObservabilityTest constructs
+        // the interleaving and fails if either step moves out, so the property is pinned rather than
+        // merely written down here.
         TraversalControl control = controlFor(traversalId);
         PauseHold hold;
         synchronized (control) {

@@ -53,6 +53,12 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     private final String workerId;
     private final Duration leaseTtl;
     private final GraphExecutionLimits executionLimits;
+    /**
+     * Verifies that this runtime resolves what the execution was accepted against, or {@code null}
+     * when no manifest store is composed and this executor behaves exactly as it did before
+     * manifests existed.
+     */
+    private final ai.ravenroot.core.manifest.ExecutionManifestService manifests;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     private final Map<PendingWork.HandlerTrigger, ExecutionRecorder> awaitingAcknowledgement
             = new ConcurrentHashMap<>();
@@ -133,6 +139,41 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     GraphExecutionLimits executionLimits,
                                                     ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
                                                             agentBudgets) {
+        this(definitions, executions, tasks, approvals, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, executionLimits, agentBudgets, null);
+    }
+
+    /**
+     * Full production composition that also refuses to resume an execution this runtime cannot
+     * reproduce.
+     *
+     * @param definitions durable graph definitions the pinned document is read from.
+     * @param executions durable execution state.
+     * @param tasks durable human-task coordinator.
+     * @param approvals durable tool-approval coordinator, or {@code null}.
+     * @param engine execution engine the rebuilt runner dispatches through.
+     * @param behaviors trusted behavior catalog.
+     * @param monitor execution monitor that observes the resumed traversal.
+     * @param identities source of identifiers for the resumed traversal.
+     * @param workerId identity this executor claims leases under.
+     * @param leaseTtl how long a claimed lease lives.
+     * @param executionLimits operator-owned admission and traversal limits.
+     * @param agentBudgets agent authority budget service, or {@code null}.
+     * @param manifests manifest verification service, or {@code null} to verify nothing.
+     */
+    public PinnedGraphHumanTaskContinuationExecutor(GraphDefinitionStore definitions,
+                                                    ExecutionStore executions,
+                                                    HumanTaskService tasks,
+                                                    ToolApprovalService approvals,
+                                                    ExecutionEngine engine,
+                                                    BehaviorRegistry behaviors,
+                                                    ExecutionMonitor monitor,
+                                                    ExecutionIdentitySource identities,
+                                                    String workerId, Duration leaseTtl,
+                                                    GraphExecutionLimits executionLimits,
+                                                    ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                            agentBudgets,
+                                                    ai.ravenroot.core.manifest.ExecutionManifestService manifests) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
@@ -145,6 +186,28 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
         this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
         this.agentBudgets = agentBudgets;
+        this.manifests = manifests;
+    }
+
+    /**
+     * Refuses to rebuild a graph for an execution this runtime cannot reproduce.
+     *
+     * <p>Runs before the pinned document is loaded and before any lease or runner exists, so a
+     * refusal costs nothing and claims nothing. Both refusals are typed — a missing, unreadable or
+     * digest-mismatched manifest as
+     * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}, an environment that
+     * resolves differently as
+     * {@link ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException} — and either leaves
+     * the claimed work unacknowledged and reclaimable rather than dispatched.</p>
+     *
+     * <p>The policy compared against is
+     * {@link ai.ravenroot.api.application.ExecutionPolicy#STANDARD} because that is the policy this
+     * executor rebuilds the runner under.</p>
+     */
+    private void verifyManifest(ai.ravenroot.api.persistence.ExecutionKey key) {
+        if (manifests != null) {
+            manifests.verify(key, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+        }
     }
 
     @Override
@@ -153,6 +216,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         try {
             GraphExecutionContinuationCheckpoint.read(task.request().continuationVersion(),
                     task.request().continuation());
+            verifyManifest(task.key());
             manager = prepare(task).manager();
             return task.status().terminal();
         } catch (RuntimeException unavailable) {
@@ -174,6 +238,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             GraphExecutionContinuationCheckpoint.Decoded checkpoint =
                     GraphExecutionContinuationCheckpoint.read(task.request().continuationVersion(),
                             task.request().continuation());
+            verifyManifest(claim.key());
             Prepared prepared = prepare(task);
             GraphManager manager = prepared.manager();
             long revision;

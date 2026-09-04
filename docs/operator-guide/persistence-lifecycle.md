@@ -19,6 +19,16 @@ Definitions are stored with execution state, so they are inside the same backup 
 
 Storing the document is what this release adds. **Ravenroot does not yet read it back to resume work**: no runtime reconstructs a graph from a stored definition, and reclaiming stored definitions is not yet an exposed operator command. Both arrive in a following change. Until then, treat these definitions as retained evidence that an accepted execution's graph is recoverable, not as a recovery procedure you can run today.
 
+## Execution manifests
+
+Accepting an execution also records the dependency set it was resolved against: the document's content address, the submission policy and unknown-behavior stance it runs under, the graph and traversal limits in force, digests identifying the engine, the execution store and the program runtime, and every installed node package by id, version and SDK contract. The record is written after the document and before the execution, so an accepted execution always has one, and acceptance is refused if it cannot be written. It is immutable, scoped to one tenant, and holds references, versions and digests only — there is no field in it a credential could occupy.
+
+Before an execution is first dispatched, and before it is recovered, resumed, restarted after a hold or taken over by another worker, the record is read back, checked against the digest stored beside it, and compared with what the deployment resolves now. Every dimension is compared exactly. If anything differs, or the record is missing or damaged, the work is refused rather than run: on the recovery loop the claimed item is left claimable and unacknowledged, so nothing is lost and nothing is silently run against a different environment. `GET /v1/executions/{id}/manifest` reports one instance's record identity and the current verdict, naming each differing dimension without disclosing the deployment's own configuration.
+
+Three limits are worth knowing before you rely on this. A node package is identified by its id, its version and the Node SDK contract it was built against, and **not** by a content digest — a package republished under an unchanged version is not detected. A program artifact's source is inside the pinned document, so its content is pinned with the document, but its approval state is deliberately not pinned and is re-checked when the artifact is executed, so revoking an artifact still stops work that was already accepted. And an execution accepted before a deployment began recording these is refused by the paths that verify, rather than reconstructed from the environment the restarted process happens to compose; nothing backfills such a record, because a backfilled one would describe today and claim to describe the moment of acceptance.
+
+Plan an upgrade with that intolerance in mind: changing an execution limit, an engine capability set or an installed node package version will make retained work refuse to resume until the change is reverted or that work is abandoned deliberately.
+
 ## Authority
 
 Only an operator may drain, copy or replace durable state, restore a deployment, or approve an upgrade. API consumers observe these transitions but do not perform storage mutation.

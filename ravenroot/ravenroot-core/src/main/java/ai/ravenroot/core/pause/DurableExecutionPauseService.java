@@ -70,6 +70,12 @@ public final class DurableExecutionPauseService {
     private final Duration leaseTtl;
     private final GraphExecutionLimits executionLimits;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
+    /**
+     * Verifies that this runtime resolves what the held execution was accepted against, or
+     * {@code null} when no manifest store is composed and this service behaves exactly as it did
+     * before manifests existed.
+     */
+    private final ai.ravenroot.core.manifest.ExecutionManifestService manifests;
 
     /**
      * Composes the service against the stores and runtime a continuation has to rebuild from.
@@ -121,6 +127,35 @@ public final class DurableExecutionPauseService {
                                         GraphExecutionLimits executionLimits,
                                         ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
                                                 agentBudgets) {
+        this(definitions, executions, engine, behaviors, monitor, identities, workerId, leaseTtl,
+                executionLimits, agentBudgets, null);
+    }
+
+    /**
+     * Full production composition that also refuses to resume a held execution this runtime cannot
+     * reproduce.
+     *
+     * @param definitions pinned graph-definition store.
+     * @param executions durable execution store.
+     * @param engine execution engine used for resumed traversal work.
+     * @param behaviors trusted behavior registry.
+     * @param monitor execution event monitor.
+     * @param identities trusted execution identity source.
+     * @param workerId recovery worker identity.
+     * @param leaseTtl claimed execution lease duration.
+     * @param executionLimits operator-owned admission and traversal limits.
+     * @param agentBudgets finite agent authority mediator, or {@code null} when unavailable.
+     * @param manifests manifest verification service, or {@code null} to verify nothing.
+     */
+    public DurableExecutionPauseService(GraphDefinitionStore definitions, ExecutionStore executions,
+                                        ExecutionEngine engine, BehaviorRegistry behaviors,
+                                        ExecutionMonitor monitor, ExecutionIdentitySource identities,
+                                        String workerId, Duration leaseTtl,
+                                        GraphExecutionLimits executionLimits,
+                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                agentBudgets,
+                                        ai.ravenroot.core.manifest.ExecutionManifestService manifests) {
+        this.manifests = manifests;
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.engine = Objects.requireNonNull(engine, "engine");
@@ -362,7 +397,26 @@ public final class DurableExecutionPauseService {
         return new NodeCommand(NodeDirective.valueOf(request.commandDirective()), request.commandName());
     }
 
+    /**
+     * Refuses to rebuild a graph for a held execution this runtime cannot reproduce.
+     *
+     * <p>Runs first, before the pinned document is read and before the hold's node is looked up, so a
+     * refusal claims nothing. An absent, unreadable or digest-mismatched manifest arrives as
+     * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}; a runtime that resolves
+     * something different arrives as
+     * {@link ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException} naming each differing
+     * dimension. The policy compared against is
+     * {@link ai.ravenroot.api.application.ExecutionPolicy#STANDARD}, which is the policy this service
+     * rebuilds the runner under.</p>
+     */
+    private void verifyManifest(ai.ravenroot.api.persistence.ExecutionKey key) {
+        if (manifests != null) {
+            manifests.verify(key, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+        }
+    }
+
     private Prepared prepare(DurableExecutionPause pause) {
+        verifyManifest(pause.key());
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(pause.key().tenantId(),
                         new GraphContentId(pause.request().graphVersionPin().reference())))
                 .toCompletableFuture().join();

@@ -134,6 +134,16 @@ public final class DefaultGraphDeployment implements GraphDeployment {
      */
     private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
+    /**
+     * Records what each accepted traversal's dependencies resolved to, or {@code null} when nothing
+     * records them.
+     *
+     * <p>Composed rather than built here for the same reason the recovery executors take one: a
+     * deployment-hosted traversal and a submitted execution must be pinned against one description of
+     * the runtime, or a recovery would refuse one of the two for a difference that is really two
+     * resolvers disagreeing.</p>
+     */
+    private final ai.ravenroot.core.manifest.ExecutionManifestService executionManifests;
     private final Duration inboxRetention;
     /**
      * This pod's worker identity for lease ownership, and how long a traversal's lease lives.
@@ -378,6 +388,42 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 Clock.systemUTC(), graphDefinitionStore, graphExecutionLimits, agentBudgets);
     }
 
+    /**
+     * Full production composition that also records what each accepted traversal was resolved against.
+     *
+     * @param id deployment identity.
+     * @param engine execution engine this deployment's domain is opened on.
+     * @param behaviors trusted behavior catalog.
+     * @param monitor execution monitor that observes this deployment's traversals.
+     * @param identitySource source of identifiers for accepted traversals.
+     * @param graphMl the GraphML document this deployment hosts.
+     * @param ingressBufferCapacity bound on the trusted ingress buffer.
+     * @param executionStore durable execution state, or {@code null}.
+     * @param inboxRetention how long a durable inbox record is retained.
+     * @param workerId identity this deployment claims leases under.
+     * @param executionLeaseTtl how long a traversal's lease lives.
+     * @param requestReplyLimits bounds on live request/reply ingress.
+     * @param graphDefinitionStore durable graph definitions, or {@code null} to retain no document.
+     * @param graphExecutionLimits operator-owned admission and traversal limits.
+     * @param agentBudgets agent authority budget service, or {@code null}.
+     * @param executionManifests manifest service, or {@code null} to record none.
+     */
+    public DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                                  ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                                  byte[] graphMl, int ingressBufferCapacity,
+                                  ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                                  Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                                  RequestReplyLimits requestReplyLimits,
+                                  ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                  GraphExecutionLimits graphExecutionLimits,
+                                  ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                  ai.ravenroot.core.manifest.ExecutionManifestService executionManifests) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                Clock.systemUTC(), graphDefinitionStore, graphExecutionLimits, agentBudgets,
+                executionManifests);
+    }
+
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
     DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
                            ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
@@ -399,6 +445,22 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
                            GraphExecutionLimits graphExecutionLimits,
                            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
+                graphDefinitionStore, graphExecutionLimits, agentBudgets, null);
+    }
+
+    private DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits, Clock clock,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                           ai.ravenroot.core.manifest.ExecutionManifestService executionManifests) {
+        this.executionManifests = executionManifests;
         this.graphDefinitionStore = graphDefinitionStore;
         this.agentBudgets = agentBudgets;
         this.workerId = Objects.requireNonNull(workerId, "workerId");
@@ -1136,6 +1198,11 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         // pays a lookup rather than a thousandth copy.
         recordGraphDefinition(security);
         var key = new ai.ravenroot.api.persistence.ExecutionKey(security.tenantId(), processInstanceId);
+        // Then the manifest, and only then the acceptance -- the same ordering, for the same reason,
+        // as the submission path. A deployment-hosted traversal is an accepted execution like any
+        // other, and one accepted without a manifest would be refused by every recovery path that
+        // verifies one.
+        recordExecutionManifest(security, key);
         var traversal = new ai.ravenroot.api.application.Traversal(traversalId, manager.start().id(),
                 ai.ravenroot.api.application.TraversalStatus.ACCEPTED, java.util.Map.of());
         var accepted = new ai.ravenroot.api.application.ProcessInstance(processInstanceId,
@@ -1180,6 +1247,29 @@ public final class DefaultGraphDeployment implements GraphDeployment {
      * store is composed. A deployment with a definition store and no execution store therefore
      * commits nothing, correctly: there is no pin to protect.</p>
      */
+    /**
+     * Pins what this traversal's process instance was resolved against.
+     *
+     * <p>Reached only from {@link #openTraversalRecorder}, which returns before this when no execution
+     * store is composed, so a deployment carrying a manifest service and no execution store records
+     * nothing -- correctly, because there is no acceptance to protect.</p>
+     *
+     * <p>{@link ExecutionPolicy#STANDARD} is what is pinned because it is what a deployment-hosted
+     * traversal runs under: this deployment's runner is built without a policy parameter and takes
+     * that default. Recording the policy the traversal actually runs under, rather than a placeholder,
+     * is what lets a later recovery compare like with like.</p>
+     */
+    private void recordExecutionManifest(SecurityContext security,
+                                         ai.ravenroot.api.persistence.ExecutionKey key) {
+        if (executionManifests == null) {
+            return;
+        }
+        var contentId = new ai.ravenroot.api.persistence.GraphContentId(graphVersion);
+        executionManifests.pin(key, contentId,
+                ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(contentId),
+                ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+    }
+
     private void recordGraphDefinition(SecurityContext security) {
         if (graphDefinitionStore == null) {
             return;

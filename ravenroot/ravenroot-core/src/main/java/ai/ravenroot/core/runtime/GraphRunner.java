@@ -1592,12 +1592,24 @@ public final class GraphRunner implements AutoCloseable {
      * three of them can quietly stop enforcing. It is one method so that a fifth entry path gets the
      * behaviour by calling it rather than by remembering it.</p>
      *
-     * <h2>The startup window is a real state for join deadlines, not only for events</h2>
-     * <p>A hold can be installed before the coordinator exists. Nothing is armed yet at that moment,
-     * so there is nothing to suspend — but the coordinator has to be told it is born held, because a
-     * branch reaching a fan-in during the hold would otherwise arm a live deadline against a
-     * traversal an operator has frozen. That is one call, made here, under the monitor that already
-     * orders every other decision about this hold.</p>
+     * <h2>Suspending here is unreachable today, and is kept deliberately</h2>
+     * <p>The {@code suspendTimeouts} call below cannot currently change any outcome, and saying so is
+     * more useful than a plausible story about what it prevents. It is reached only by a hold
+     * installed before {@code coordinators.putIfAbsent} — a hold landing in the window between that
+     * line and this one finds the coordinator and is swept by {@link #pauseTraversal} instead. In
+     * that earlier window the traversal's only hop is the start node's own dispatch, and it parks on
+     * the gate in {@link #run}, so no branch can reach a fan-in and no deadline can be armed for this
+     * call to suspend. Deleting the line leaves the whole core suite green.</p>
+     *
+     * <p>It stays for the reason {@link PauseBoundary#unfinishedInvocation()} stays: what makes it
+     * unreachable is a property of a <em>different</em> part of this class — where the pause gate
+     * sits relative to the first dispatch — rather than anything stated or enforced here. Two of the
+     * four entry paths already synthesise a node completion and call
+     * {@code dispatchSuccessors} without passing through that gate, so the shape this excludes is one
+     * hop of re-entry design away from being reachable, and it would be reachable silently. The rule
+     * it enforces is the same rule {@link #pauseTraversal} enforces, expressed as the same one call,
+     * so keeping it costs a line and removes a way for a future entry path to be wrong by
+     * omission.</p>
      */
     private void beginPublishing(UUID traversalId, ExecutionMonitor.ExecutionIdentity identity,
                                  JoinCoordinator coordinator) {
@@ -1973,9 +1985,18 @@ public final class GraphRunner implements AutoCloseable {
                 // traversal are the ones this lock allows, and re-arming outside it would let a
                 // second hold install itself between the removal and the re-arm -- leaving a
                 // deadline running against a traversal that is holding, which is the whole defect.
-                // It calls the scheduler under the monitor, as the settlement above calls the store
-                // under it; the monitor is per traversal, is taken by control operations only, and
-                // serialises no graph work.
+                //
+                // This calls Scheduler#schedule under the monitor, as the settlement above calls the
+                // store under it. The monitor is per traversal, is taken by control operations only,
+                // and serialises no graph work, so the cost is bounded to this traversal's own
+                // control calls. Note what is NOT relied on: Scheduler's contract does not forbid an
+                // implementation that runs a zero-delay task inline on the calling thread, and the
+                // budget re-armed here can legitimately be zero. Such a task would run the timeout
+                // path under this monitor and re-enter these lines through the coordinator -- which
+                // is safe, because an intrinsic monitor is reentrant and JoinCoordinator#onTimeout
+                // takes only its own locks. It is called out because it is the one path on which a
+                // scheduler implementation, rather than this class, decides what runs here. Both
+                // bundled engines dispatch to an executor, so nothing runs inline today.
                 JoinCoordinator coordinator = coordinators.get(traversalId);
                 if (coordinator != null) {
                     coordinator.resumeTimeouts();

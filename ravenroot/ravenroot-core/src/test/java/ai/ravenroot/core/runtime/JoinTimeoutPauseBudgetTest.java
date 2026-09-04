@@ -213,6 +213,38 @@ final class JoinTimeoutPauseBudgetTest {
     }
 
     /**
+     * A clock stepped backwards across two holds cannot restore budget the join has already spent.
+     *
+     * <p>The single-hold case above is bounded by the configured timeout, and for one interval that
+     * is the same answer. Over a sequence it is not: this join is resumed with eighteen seconds and
+     * the clock then steps back twenty before the next hold, so a ceiling of the configured thirty
+     * would hand it back twelve seconds it had provably consumed — restored by a clock adjustment
+     * rather than by any decision anyone took. The bound has to be what this deadline last had, not
+     * what the graph first gave it.</p>
+     */
+    @Test
+    void aBackwardsClockAcrossTwoHoldsCannotRestoreBudgetTheJoinHasAlreadySpent() throws Exception {
+        var fixture = new Fixture(2, 2);
+        fixture.start();
+        fixture.arrive(0);
+        fixture.awaitDeadlineArmed();
+
+        clock.advance(Duration.ofSeconds(12));
+        assertTrue(fixture.runner.pauseTraversal(fixture.traversalId()));
+        assertTrue(fixture.runner.resumeTraversal(fixture.traversalId()));
+
+        clock.advance(Duration.ofSeconds(-20));
+        assertTrue(fixture.runner.pauseTraversal(fixture.traversalId()));
+        assertTrue(fixture.runner.resumeTraversal(fixture.traversalId()));
+
+        assertEquals(List.of(BUDGET, Duration.ofSeconds(18), Duration.ofSeconds(18)), fixture.delays(),
+                "the second hold may cost the join nothing, but it must not give back the twelve "
+                        + "seconds the first one had already charged");
+
+        fixture.close();
+    }
+
+    /**
      * A branch that arrives at the join while the traversal is held opens its bucket and records a
      * budget, but arms nothing.
      *

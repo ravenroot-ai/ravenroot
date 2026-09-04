@@ -1317,11 +1317,17 @@ final class JoinCoordinator {
          *       {@link Scheduler#schedule} takes a non-negative delay by contract, and a join whose
          *       budget was already spent at the pause boundary is owed exactly no more of it — so it
          *       times out immediately on resume rather than during the hold.</li>
-         *   <li><b>Never more than the configured timeout.</b> The measurement is a wall clock's, so
-         *       a backwards adjustment during a hold would otherwise hand the join more budget than
-         *       its graph ever gave it. Forwards it can only take budget away, which the clamp above
-         *       floors. This is the bound that keeps a clock step from changing the contract rather
-         *       than only the timing.</li>
+         *   <li><b>Never more than this deadline already had.</b> The measurement is a wall clock's,
+         *       so a backwards adjustment would otherwise hand the join budget it had already spent.
+         *       Forwards it can only take budget away, which the clamp above floors.
+         *       <p>The ceiling is {@link #armedBudget} rather than {@link JoinSpec#timeout()}, and
+         *       the difference shows up only after the first hold. Clamping to the configured
+         *       timeout bounds a <em>single</em> interval correctly but not a sequence of them: a
+         *       join resumed with eighteen seconds, whose clock then steps back twenty before the
+         *       next hold, would be handed the full thirty again — budget it had provably already
+         *       spent, restored by an adjustment rather than by any decision. A budget is monotone
+         *       over a deadline's life, so its own previous value is the tight bound and the
+         *       configured timeout is merely the first one.</p></li>
          * </ul>
          *
          * @return the remaining budget, or {@code null} when this join has no deadline
@@ -1338,8 +1344,8 @@ final class JoinCoordinator {
             if (left.isNegative()) {
                 left = Duration.ZERO;
             }
-            if (left.compareTo(spec.timeout()) > 0) {
-                left = spec.timeout();
+            if (left.compareTo(armedBudget) > 0) {
+                left = armedBudget;
             }
             return left;
         }
@@ -1537,6 +1543,15 @@ final class JoinCoordinator {
          * {@link #suspendBudgetLocked()}.</p>
          */
         private void holdDeadline() {
+            if (!spec.hasTimeout()) {
+                // Guarded exactly as releaseDeadline is, and the asymmetry was the whole defect:
+                // without it a join that has no deadline to suspend was still marked held, and
+                // nothing ever cleared the mark, because the resume returns before reaching it. Inert
+                // -- armTimeoutFor leaves on the same condition -- but a flag that is true forever on
+                // a join the flag has no meaning for is a fact waiting to be read by the next rule
+                // added here.
+                return;
+            }
             ScheduledTask task;
             synchronized (timeoutLock) {
                 held = true;

@@ -278,6 +278,143 @@ final class JoinTimeoutPauseBudgetTest {
         fixture.close();
     }
 
+    /**
+     * A hold taken before a human-task re-entry holds the join that re-entry dispatches into.
+     *
+     * <h2>Why this path can arm a deadline during a hold and the ordinary one cannot</h2>
+     * <p>{@code GraphRunner.run} is where a hop parks on a hold, and it guards a hop that is about to
+     * <em>start a node</em>. A branch entering a fan-in never starts one — {@code dispatch} hands it
+     * to {@code JoinCoordinator.arrive} instead — so a fan-in is reached without passing the gate.
+     * On an ordinary submission that costs nothing, because the traversal's first hop is the start
+     * node's own dispatch and it does park. {@code executeAfterHumanTask} has no first hop to park:
+     * it synthesises the re-entered node's completion and calls {@code dispatchSuccessors}
+     * directly. So when that node's successor is a timed join, the re-entry arms a deadline
+     * immediately, and the only thing that can stop it is the coordinator having been told, as it was
+     * created, that its traversal is already held.</p>
+     *
+     * <h2>What is constructed, and what would be left to chance</h2>
+     * <p>The hold is installed <em>before</em> {@code executeAfterHumanTask} is called, so it precedes
+     * the coordinator's own existence: {@code pauseTraversal} finds no coordinator and suspends
+     * nothing, which makes {@code beginPublishing} the only site that can mark this one held. The
+     * traversal is left provably frozen — one branch arrives at a quorum of two, the other is never
+     * dispatched at all because the re-entry starts below the fan-out — so the join is open, is owed
+     * a deadline, and cannot settle while the assertion is taken.</p>
+     *
+     * <p>The wait is for the join to be <em>reached</em>, counting live and suspended together, and
+     * the split is asserted afterwards. Waiting for the suspended count directly would turn a
+     * regression into a timeout whose message names the wait rather than the defect; this way a
+     * runtime that armed the deadline fails saying so.</p>
+     */
+    @Test
+    void aHoldTakenBeforeAHumanTaskReEntryHoldsTheJoinItReEntersInto() throws Exception {
+        engine = new JoinTestEngine();
+        var registry = new BehaviorRegistry();
+        registry.register("effect", message -> CompletableFuture.completedFuture(
+                NodeResult.continueWith("unused: the re-entry synthesises this node's completion")));
+        registry.register("other", message -> new CompletableFuture<>());
+
+        var key = new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+
+        try (var store = new ai.ravenroot.core.persistence.InMemoryExecutionStore();
+             var manager = GraphManager.from(reEntryIntoTimedJoin())) {
+            // Deliberately NOT closed, and this is the one test in this file that leaves a runner
+            // open. Closing it here deadlocks the test thread, on a defect that predates this change
+            // and is not part of it: GraphRunner#close terminates the coordinator, which completes
+            // the branch parked at this join exceptionally, and that completion runs synchronously
+            // into executeAfterHumanTask's terminal handler -- which blocks on
+            // release(...).toCompletableFuture().join() while the first terminate() is still on the
+            // stack below it. JoinCoordinator's `termination` javadoc names exactly this: "a consumer
+            // that BLOCKS on this stage from inside a parked branch's continuation would deadlock
+            // itself." #execute composes its cleanup into the returned stage and is unaffected; the
+            // three re-entry paths block. Reported separately rather than fixed here, because fixing
+            // it changes the teardown contract of three entry paths and belongs to its own change.
+            //
+            // What is leaked is heap the JVM reclaims: one coordinator, one parked future and this
+            // traversal's admission entries. The engine's threads are closed by @AfterEach, and the
+            // manual scheduler owns none.
+            var runner = new GraphRunner(manager, engine, registry, monitor,
+                    ExecutionIdentitySource.randomUuids(), joinStore, clock);
+
+            long revision = acceptReentryAtEffect(store, key, traversalId);
+            try (var recorder = ExecutionRecorder.open(store, key, "human-task-join-hold",
+                    Duration.ofSeconds(30), revision)) {
+
+                assertTrue(runner.pauseTraversal(traversalId),
+                        "the hold is taken before the coordinator exists, so nothing is suspended yet");
+                assertEquals(0, runner.suspendedJoinTimeoutCount(),
+                        "and there is nothing to suspend: no join has been reached on this runner");
+
+                runner.executeAfterHumanTask(TestIdentities.TENANT_A, key.processInstanceId(),
+                        traversalId, "effect", "v1", recorder, NodeResult.continueWith("resumed"));
+
+                long deadline = System.nanoTime() + BOUND.toNanos();
+                while (System.nanoTime() < deadline
+                        && runner.liveJoinTimeoutCount() + runner.suspendedJoinTimeoutCount() == 0) {
+                    Thread.sleep(2);
+                }
+
+                assertTrue(runner.isPaused(traversalId),
+                        "the traversal is still held: nothing has released the hold");
+                assertEquals(0, runner.liveJoinTimeoutCount(),
+                        "a re-entry that dispatches into a fan-in must not arm a live deadline "
+                                + "against a traversal an operator has already frozen");
+                assertEquals(1, runner.suspendedJoinTimeoutCount(),
+                        "the join was reached and its budget recorded rather than started");
+                assertEquals(List.of(), engine.manualScheduler().requestedDelays(),
+                        "and the scheduler was never asked for anything");
+
+                assertTrue(runner.resumeTraversal(traversalId), "the hold is releasable");
+                assertEquals(List.of(BUDGET), engine.manualScheduler().requestedDelays(),
+                        "the resume owes this bucket its whole budget: it never ran");
+            }
+        }
+    }
+
+    /**
+     * {@code start} fans out to {@code effect} and {@code other}, both feeding a timed fan-in.
+     *
+     * <p>A re-entry at {@code effect} dispatches into the join with {@code other} never having run,
+     * so the join opens on one arrival of a quorum of two and stays open for the whole test.</p>
+     */
+    private static ai.ravenroot.core.graph.GraphDefinition reEntryIntoTimedJoin() {
+        return new ai.ravenroot.core.graph.GraphDefinition(List.of(
+                ai.ravenroot.core.graph.GraphNode.start("start"),
+                ai.ravenroot.core.graph.GraphNode.behavior("effect", "effect"),
+                ai.ravenroot.core.graph.GraphNode.behavior("other", "other"),
+                new ai.ravenroot.core.graph.GraphNode("join",
+                        ai.ravenroot.core.graph.NodeKind.PASSTHROUGH, null,
+                        JoinMiniGraphs.quorumWithTimeout(2, BUDGET_ISO)),
+                ai.ravenroot.core.graph.GraphNode.error("error"),
+                ai.ravenroot.core.graph.GraphNode.end("end")), List.of(
+                ai.ravenroot.core.graph.GraphEdge.to("start", "effect"),
+                ai.ravenroot.core.graph.GraphEdge.to("start", "other"),
+                ai.ravenroot.core.graph.GraphEdge.to("effect", "join"),
+                ai.ravenroot.core.graph.GraphEdge.to("other", "join"),
+                ai.ravenroot.core.graph.GraphEdge.to("join", "end")));
+    }
+
+    /** Stores a traversal accepted at {@code effect}, which is the state a re-entry resumes from. */
+    private static long acceptReentryAtEffect(ai.ravenroot.api.persistence.ExecutionStore store,
+                                              ai.ravenroot.api.persistence.ExecutionKey key,
+                                              UUID traversalId) {
+        var traversal = new ai.ravenroot.api.application.Traversal(traversalId, "effect",
+                ai.ravenroot.api.application.TraversalStatus.ACCEPTED, java.util.Map.of());
+        var created = store.apply(ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                .expecting(ai.ravenroot.api.persistence.RevisionExpectation.notPresent())
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessCreated(
+                        new ai.ravenroot.api.application.ProcessInstance(key.processInstanceId(),
+                                ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED,
+                                java.util.Map.of(traversalId, traversal)),
+                        new ai.ravenroot.api.persistence.GraphVersionPin("v1")))
+                .build()).toCompletableFuture().join();
+        return store.apply(ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(created.revision()))
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                        ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING))
+                .build()).toCompletableFuture().join().revision();
+    }
+
     // ------------------------------------------------------------------ the races, constructed
 
     /**

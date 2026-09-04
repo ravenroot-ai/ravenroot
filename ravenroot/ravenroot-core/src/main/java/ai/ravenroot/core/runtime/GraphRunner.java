@@ -1592,24 +1592,30 @@ public final class GraphRunner implements AutoCloseable {
      * three of them can quietly stop enforcing. It is one method so that a fifth entry path gets the
      * behaviour by calling it rather than by remembering it.</p>
      *
-     * <h2>Suspending here is unreachable today, and is kept deliberately</h2>
-     * <p>The {@code suspendTimeouts} call below cannot currently change any outcome, and saying so is
-     * more useful than a plausible story about what it prevents. It is reached only by a hold
-     * installed before {@code coordinators.putIfAbsent} — a hold landing in the window between that
-     * line and this one finds the coordinator and is swept by {@link #pauseTraversal} instead. In
-     * that earlier window the traversal's only hop is the start node's own dispatch, and it parks on
-     * the gate in {@link #run}, so no branch can reach a fan-in and no deadline can be armed for this
-     * call to suspend. Deleting the line leaves the whole core suite green.</p>
+     * <h2>The startup window is a real state for join deadlines, not only for events</h2>
+     * <p>A hold can be installed before the coordinator exists — before
+     * {@code coordinators.putIfAbsent} — and {@link #pauseTraversal} then has nothing to suspend and
+     * suspends nothing. Nothing is armed at that moment either, so the {@code suspendTimeouts} call
+     * below cancels no timer. What it does is tell the coordinator it is <em>born held</em>, so that
+     * a branch reaching a fan-in later in this same entry path records its budget instead of arming
+     * a live deadline against a traversal an operator has already frozen.</p>
      *
-     * <p>It stays for the reason {@link PauseBoundary#unfinishedInvocation()} stays: what makes it
-     * unreachable is a property of a <em>different</em> part of this class — where the pause gate
-     * sits relative to the first dispatch — rather than anything stated or enforced here. Two of the
-     * four entry paths already synthesise a node completion and call
-     * {@code dispatchSuccessors} without passing through that gate, so the shape this excludes is one
-     * hop of re-entry design away from being reachable, and it would be reachable silently. The rule
-     * it enforces is the same rule {@link #pauseTraversal} enforces, expressed as the same one call,
-     * so keeping it costs a line and removes a way for a future entry path to be wrong by
-     * omission.</p>
+     * <p><strong>That is reachable now, on two of this method's four callers, and not a precaution
+     * against a future one.</strong> {@link #executeFrom} and {@link #executeAfterHumanTask} do not
+     * re-enter through {@link #run}: they synthesise the re-entered node's completion and call
+     * {@code dispatchSuccessors} directly. A successor that is a fan-in is therefore reached through
+     * {@code dispatch} and {@code JoinCoordinator.arrive} <em>without passing the pause gate at
+     * all</em> — the gate only guards a hop that is about to start a node, and a branch entering a
+     * join is handed to the join instead of starting one. So on a human-task or tool-approval
+     * re-entry whose next node is a timed join, the hold installed before this method ran is the only
+     * thing standing between an operator's freeze and a running deadline, and this line is what makes
+     * it stand. {@code aHoldTakenBeforeAHumanTaskReEntryHoldsTheJoinItReEntersInto} constructs
+     * exactly that, and fails with a live deadline on a paused traversal if this call is removed.</p>
+     *
+     * <p>{@link #execute} is the caller for which it is redundant rather than the rule: its first hop
+     * is the start node's own dispatch, which does park on the gate, so no branch of it can reach a
+     * fan-in during the window. The rule is stated once here for all four rather than four times with
+     * two of them omitted.</p>
      */
     private void beginPublishing(UUID traversalId, ExecutionMonitor.ExecutionIdentity identity,
                                  JoinCoordinator coordinator) {

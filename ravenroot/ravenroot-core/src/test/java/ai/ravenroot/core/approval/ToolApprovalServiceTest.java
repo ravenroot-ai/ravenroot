@@ -27,6 +27,8 @@ import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import org.junit.jupiter.api.Test;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Clock;
@@ -38,6 +40,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -124,6 +131,39 @@ class ToolApprovalServiceTest {
             assertEquals(1, await(store.claimPendingWork(TENANT, "worker", 10,
                     java.time.Duration.ofSeconds(10))).stream()
                     .filter(PendingWork.HandlerTrigger.class::isInstance).count());
+        }
+    }
+
+    @Test
+    void stalePendingReadCannotApplyLifecycleAfterAnotherDecisionWins() throws Exception {
+        try (var store = new InMemoryExecutionStore(fixed(NOW));
+             var staleReader = Executors.newSingleThreadExecutor(r ->
+                     new Thread(r, "stale-approval-reader"))) {
+            Fixture fixture = createRunning(store, NOW.plusSeconds(60), false);
+            var pendingRead = new CountDownLatch(1);
+            var winnerCommitted = new CountDownLatch(1);
+            var intercepted = new AtomicBoolean();
+            ExecutionStore raced = pauseFirstApprovalRead(store, pendingRead, winnerCommitted,
+                    intercepted);
+            var service = new ToolApprovalService(raced, fixed(NOW));
+            service.request(fixture.key, fixture.request, "create");
+
+            var staleApproval = CompletableFuture.supplyAsync(() ->
+                    service.approve(approver(), fixture.key.processInstanceId(), fixture.approvalId),
+                    staleReader);
+            assertTrue(pendingRead.await(5, TimeUnit.SECONDS));
+            ToolApprovalResult winner = service.deny(
+                    approver(), fixture.key.processInstanceId(), fixture.approvalId);
+            winnerCommitted.countDown();
+            ToolApprovalResult loser = staleApproval.get(5, TimeUnit.SECONDS);
+
+            assertEquals(ToolApprovalResult.Code.DENIED, winner.code());
+            assertEquals(ToolApprovalResult.Code.ALREADY_SETTLED, loser.code());
+            assertEquals(ToolApprovalStatus.DENIED,
+                    await(store.loadToolApproval(fixture.key, fixture.approvalId)).orElseThrow().status());
+            assertTrue(await(store.readJournal(TENANT, 0, 100)).stream().anyMatch(row ->
+                    "TOOL_APPROVAL_CONFLICTING_DECISION".equals(row.envelope().eventType())),
+                    "the stale losing decision remains durably audited");
         }
     }
 
@@ -227,6 +267,38 @@ class ToolApprovalServiceTest {
 
     private static Clock fixed(Instant instant) {
         return Clock.fixed(instant, ZoneOffset.UTC);
+    }
+
+    private static ExecutionStore pauseFirstApprovalRead(
+            ExecutionStore delegate, CountDownLatch pendingRead, CountDownLatch winnerCommitted,
+            AtomicBoolean intercepted) {
+        return (ExecutionStore) Proxy.newProxyInstance(ToolApprovalServiceTest.class.getClassLoader(),
+                new Class<?>[] {ExecutionStore.class}, (proxy, method, arguments) -> {
+                    try {
+                        Object result = method.invoke(delegate, arguments);
+                        if ("loadToolApproval".equals(method.getName())
+                                && Thread.currentThread().getName().equals("stale-approval-reader")
+                                && intercepted.compareAndSet(false, true)) {
+                            @SuppressWarnings("unchecked")
+                            CompletionStage<Object> loaded = (CompletionStage<Object>) result;
+                            return loaded.thenApply(value -> {
+                                pendingRead.countDown();
+                                try {
+                                    if (!winnerCommitted.await(5, TimeUnit.SECONDS)) {
+                                        throw new IllegalStateException("winning decision did not commit");
+                                    }
+                                } catch (InterruptedException interrupted) {
+                                    Thread.currentThread().interrupt();
+                                    throw new IllegalStateException("approval race interrupted", interrupted);
+                                }
+                                return value;
+                            });
+                        }
+                        return result;
+                    } catch (InvocationTargetException invoked) {
+                        throw invoked.getCause();
+                    }
+                });
     }
 
     private static String digest(String value) throws Exception {

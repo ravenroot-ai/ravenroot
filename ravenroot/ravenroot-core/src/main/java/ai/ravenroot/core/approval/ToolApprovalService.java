@@ -463,6 +463,19 @@ public final class ToolApprovalService {
                         resumeTraversalOf(approval.key(), approval.request().approvalId()));
             }
             StoredProcessInstance stored = load(approval.key());
+            DurableToolApproval confirmed = await(store.loadToolApproval(approval.key(),
+                    approval.request().approvalId())).orElse(null);
+            if (confirmed == null) {
+                return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
+            }
+            if (confirmed.status() != approval.status() || !confirmed.actor().equals(approval.actor())) {
+                // The aggregate and approval are separate reads. If another decision landed between
+                // them, building lifecycle transitions from the old PENDING value against the new
+                // completed aggregate would be invalid rather than a useful CAS attempt. Re-enter
+                // through the state checks above. A decision landing after this confirmation bumps
+                // the aggregate revision and is caught by the batch expectation instead.
+                continue;
+            }
             UUID resumeTraversalId = UUID.randomUUID();
             ToolApprovalTransition approvalTransition = switch (target) {
                 case APPROVED -> new ToolApprovalTransition.Approved(approval.request().approvalId(), actor);
@@ -515,6 +528,16 @@ public final class ToolApprovalService {
             } catch (ExecutionStoreException conflict) {
                 if (conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
                         && attempt < MAX_WRITE_ATTEMPTS) continue;
+                if (conflict.failure() instanceof ExecutionStoreFailure.InvalidRequest) {
+                    DurableToolApproval winner = await(store.loadToolApproval(approval.key(),
+                            approval.request().approvalId())).orElse(null);
+                    if (winner != null && !winner.status().canTransitionTo(target)) {
+                        // A decision may have completed the invocation after our approval read but
+                        // before our process read. Reclassify only when the approval now proves that
+                        // exact race; otherwise InvalidRequest remains a caller defect.
+                        continue;
+                    }
+                }
                 if (conflict.failure() instanceof ExecutionStoreFailure.ToolApprovalNotResolvable refusal) {
                     if (refusal.requested() == ToolApprovalStatus.EXPIRED
                             && target != ToolApprovalStatus.EXPIRED) {

@@ -84,6 +84,11 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case JOIN_ITERATION_BACKLOG -> "A join is holding state for several iterations.";
             case JOIN_ARRIVAL_DISCARDED -> "A duplicate or late join arrival was ignored.";
             case JOIN_FAILED -> "Join conditions could not be satisfied.";
+            // "Holding" rather than "stopped", because a paused traversal has not stopped: it keeps
+            // its state, it is still listed live and it is still cancellable. A reader told an
+            // execution had stopped would go looking for a result that is not coming.
+            case EXECUTION_PAUSED -> "Execution was paused and is holding before its next node.";
+            case EXECUTION_RESUMED -> "Execution was resumed and is running again.";
             case EXECUTION_COMPLETED -> "Execution completed successfully.";
             case EXECUTION_FAILED -> "Execution failed. Protected diagnostics may contain more detail.";
         };

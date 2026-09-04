@@ -506,6 +506,35 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+ * Whether a hold is currently in place on the traversal identified by {@code traversalId}.
+ *
+ * <p>The read counterpart of {@link #pauseTraversal}, and the authority behind the {@code paused}
+ * qualifier on both read surfaces — {@link LiveExecution#paused()} and
+ * {@link ExecutionOutcome#paused()}. It reads the same bookkeeping {@code pauseTraversal} mutates,
+ * so a listing that says a traversal is holding and a pause command that answers
+ * {@code ALREADY_PAUSED} are one fact rather than two projections that can disagree.</p>
+ *
+ * <h4>Why the outcome vocabulary needs this and could not be derived without it</h4>
+ * <p>{@link #pauseTraversal} answers a boolean, so "already holding" and "nothing here to hold"
+ * arrive identically. They used to be separated by asking whether the traversal was still listed
+ * live, which is a sound inference only while {@code false} can mean nothing except "a hold is
+ * already in place" — and it cannot. A traversal that has been asked to stop, and one that has
+ * begun to end, both answer {@code false} while still being listed, and both were therefore
+ * reported as already paused with nothing holding them. This method answers the question directly,
+ * so each outcome is read from the state it names.</p>
+ *
+ * <p>Default {@code false} for implementations that track no active executions, matching
+ * {@link #pauseTraversal}'s own default: never a claim that something is being held.</p>
+ *
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @return {@code true} while this implementation is holding that traversal, {@code false} when it
+ * is running normally, has ended, or was never active here
+ */
+    default boolean executionPaused(UUID traversalId) {
+        return false;
+    }
+
+    /**
  * ADR 0012's engine-wide drain, exposed as an operator command: refuses further
  * execution starts and stops every running node cooperatively, then waits up to {@code bound} for
  * every node to terminate. The underlying runtime is left up either way -- this is drain, not

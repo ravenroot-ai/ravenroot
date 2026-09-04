@@ -233,6 +233,10 @@ public final class RemoteBackend implements CliBackend {
         Object payloadValue = body.get("payload");
         String payload = payloadValue == null ? null : MinimalJson.write(payloadValue);
         return new ResultView(MinimalJson.asString(body.get("executionId")), MinimalJson.asString(body.get("status")),
+                // "paused" defaults to false rather than throwing, the same convention "degraded"
+                // and "handledFailure" below already follow: an older server that predates the field
+                // sends no such key, and its executions were never held on a pause.
+                Boolean.TRUE.equals(body.get("paused")),
                 Boolean.TRUE.equals(body.get("degraded")),
                 MinimalJson.asArray(body.get("visitedNodes")).stream().map(MinimalJson::asString).sorted().toList(),
                 MinimalJson.asArray(body.get("defaultedNodes")).stream().map(MinimalJson::asString).sorted().toList(),
@@ -265,11 +269,15 @@ public final class RemoteBackend implements CliBackend {
         var body = MinimalJson.asObject(MinimalJson.parse(get("/v1/executions/live")));
         return MinimalJson.asArray(body.get("executions")).stream().map(entry -> {
             var execution = MinimalJson.asObject(entry);
+            // "paused" defaults to false rather than throwing: an older server that predates the
+            // field sends no such key, and an execution that server never held a pause on is,
+            // truthfully, not paused.
             return new LiveView(MinimalJson.asString(execution.get("processInstanceId")),
                     MinimalJson.asString(execution.get("traversalId")),
                     MinimalJson.asString(execution.get("executionId")),
                     MinimalJson.asString(execution.get("graphVersion")),
-                    MinimalJson.asString(execution.get("startedAt")));
+                    MinimalJson.asString(execution.get("startedAt")),
+                    Boolean.TRUE.equals(execution.get("paused")));
         }).toList();
     }
 

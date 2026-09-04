@@ -24,6 +24,7 @@ object:
   "baseRef": "refs/heads/dev",
   "issueRefPrefix": "refs/heads/issues/",
   "gitExecutable": "/usr/bin/git",
+  "processShellExecutable": "/bin/sh",
   "objectFormat": "sha1",
   "deadlineMs": 30000,
   "maxConcurrency": 4,
@@ -36,7 +37,7 @@ object:
 
 `credentialRef` and `credentialUsername` must either both be present or both be absent. HTTPS and
 credentialless absolute `file:` remotes are supported. URL user-info, query strings and fragments
-are refused. The root and executable must already exist as ordinary absolute paths. The root must be
+are refused. The root and both executables must already exist as ordinary absolute paths. The root must be
 dedicated to this package and writable only by the Ravenroot operator identity. Object format is
 `sha1` or `sha256`; deadlines are 100 ms through five minutes; concurrency is 1 through 64; output is
 1 KiB through 1 MiB; and verification scans 1 through 10,000 first-parent commits.
@@ -49,6 +50,14 @@ directory. The secret is never placed in argv, environment variables, URLs, Git 
 payloads, results, durable state, or diagnostics. The cache is rejected, stopped, reaped, and removed
 before completion. Platforms that cannot prove the directory owner, Unix socket type, and file
 identities fail closed.
+
+`processShellExecutable` is an operator-pinned POSIX shell used only with package-owned,
+non-interpolating supervision programs. Before Git starts, Ravenroot proves that the shell can place
+a child in a distinct process group. The configured Git installation and its built-in helpers are
+part of the trusted operator installation and must not deliberately escape that group by creating a
+new session. Cancellation, timeout, and normal completion signal and poll the exact process group to
+absence before locks or permits are released; unrelated groups are never signalled. Platforms
+without these process-group semantics fail closed.
 
 ## Payloads and results
 
@@ -71,12 +80,12 @@ Conflicts and concurrent ref movement do not mutate that ref. Verification fetch
 base again, accepts the commit when it is reachable, or compares its internally computed full tree
 with the bounded first-parent history. No patch, path subset, or provider-side status is equivalent.
 
-Association records atomically retain the task/base/branch binding, operation identity and phase,
+Association records atomically retain the task/base/branch/workspace binding, operation identity and phase,
 fence generation, expected and target tips, accepted commit and tree, and reconciled outcome. A
 restart therefore completes an already-published CAS, resumes a recorded safe CAS, or returns
 `conflict` without guessing. Schema versions, exact keys, task-to-filename digests, directory
-identities, linked-worktree Git directories, executable identity, and repository-local config are
-validated before use.
+identities, the exact linked-worktree administrative directory and its reciprocal `gitdir` and
+`commondir` links, both executable identities, and repository-local config are validated before use.
 
 ## Confinement and lifecycle
 
@@ -86,12 +95,16 @@ terminal prompts, ambient credential helpers, hooks, fsmonitor, external diff/me
 submodules, maintenance, signing, redirects and protocols other than the configured HTTPS or file
 transport are disabled. The repository config has a small allowlist, preventing URL rewrites,
 filters, helpers, hooks, and arbitrary commands from becoming durable ambient behavior.
+Each fetch is followed by strict object-graph validation. Ravenroot refuses to continue when its
+private repository exceeds 250,000 filesystem entries or 2 GiB. Operators must additionally place
+the dedicated root on a quota-enforced filesystem because a portable JVM cannot prevent a fetch
+from transiently consuming space before the post-fetch check.
 
 Provisioned workspaces and their association are intentionally retained. Version 1 has no cleanup
 operation and performs no automatic destructive workspace or ref cleanup. Operators may inspect and
 remove a validated association, workspace, and issue ref under their own change procedure. Ravenroot
 removes only its exact invocation-owned credential socket directory. Cancellation and timeout cancel
-credential resolution, terminate and forcibly reap the invocation's known descendant process tree,
+credential resolution, terminate and forcibly reap the invocation's private process group,
 drain bounded stdout/stderr concurrently, and release locks and concurrency permits only after the
 owned tree is gone. Unrelated sibling processes are never targeted.
 
@@ -99,6 +112,6 @@ Focused verification:
 
 ```sh
 mvn -f ravenroot/pom.xml -pl ravenroot-extensions/ravenroot-git-workspace -am \
-  '-Dtest=GitWorkspace*Test,NodeActionBinaryCompatibilityTest,NodeActionCancellationForwardingTest' \
+  '-Dtest=GitWorkspace*Test,GitCredentialSessionTest,NodeActionBinaryCompatibilityTest,NodeActionCancellationForwardingTest' \
   -Dsurefire.failIfNoSpecifiedTests=false test
 ```

@@ -9,6 +9,7 @@ import java.time.Duration;
 /** Immutable operator authority; graph content can select this profile but cannot widen it. */
 public record GitWorkspaceProfile(String tenant, String name, Path root, String remote,
                                   String baseRef, String issueRefPrefix, Path gitExecutable,
+                                  Path processShellExecutable,
                                   String objectFormat, String credentialRef, String credentialUsername,
                                   Duration deadline, int maxConcurrency, int maxOutputBytes,
                                   int historyScanLimit) {
@@ -17,6 +18,10 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
                 || Files.isSymbolicLink(root) || !Files.isDirectory(root, LinkOption.NOFOLLOW_LINKS)
                 || gitExecutable == null || !gitExecutable.isAbsolute() || Files.isSymbolicLink(gitExecutable)
                 || !Files.isRegularFile(gitExecutable, LinkOption.NOFOLLOW_LINKS)
+                || processShellExecutable == null || !processShellExecutable.isAbsolute()
+                || Files.isSymbolicLink(processShellExecutable)
+                || !Files.isRegularFile(processShellExecutable, LinkOption.NOFOLLOW_LINKS)
+                || !Files.isExecutable(processShellExecutable)
                 || !Files.isExecutable(gitExecutable) || !safeRef(baseRef) || !safeRefPrefix(issueRefPrefix)
                 || !("sha1".equals(objectFormat) || "sha256".equals(objectFormat))
                 || deadline == null || deadline.compareTo(Duration.ofMillis(100)) < 0
@@ -30,8 +35,12 @@ public record GitWorkspaceProfile(String tenant, String name, Path root, String 
             root = root.toRealPath();
             Path executableParent = gitExecutable.getParent().toRealPath();
             gitExecutable = executableParent.resolve(gitExecutable.getFileName()).normalize();
+            Path shellParent = processShellExecutable.getParent().toRealPath();
+            processShellExecutable = shellParent.resolve(processShellExecutable.getFileName()).normalize();
             if (Files.isSymbolicLink(gitExecutable)
-                    || !Files.isRegularFile(gitExecutable, LinkOption.NOFOLLOW_LINKS)) {
+                    || !Files.isRegularFile(gitExecutable, LinkOption.NOFOLLOW_LINKS)
+                    || Files.isSymbolicLink(processShellExecutable)
+                    || !Files.isRegularFile(processShellExecutable, LinkOption.NOFOLLOW_LINKS)) {
                 throw new java.io.IOException();
             }
         } catch (java.io.IOException unavailable) {

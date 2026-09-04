@@ -18,7 +18,7 @@ public final class EnvironmentGitWorkspaceProfileResolver implements GitWorkspac
     private static final PayloadLimits LIMITS = new PayloadLimits(32 * 1024, 4, 64, 4096, 8192, 128);
     private static final Set<String> REQUIRED = Set.of("root", "remote", "baseRef", "issueRefPrefix",
             "gitExecutable", "objectFormat", "deadlineMs", "maxConcurrency", "maxOutputBytes",
-            "historyScanLimit");
+            "historyScanLimit", "processShellExecutable");
     private final Map<String, String> environment;
 
     public EnvironmentGitWorkspaceProfileResolver() {
@@ -46,7 +46,8 @@ public final class EnvironmentGitWorkspaceProfileResolver implements GitWorkspac
             if (!values.keySet().equals(expected)) return Optional.empty();
             return Optional.of(new GitWorkspaceProfile(tenant, profile, Path.of(text(values, "root")),
                     text(values, "remote"), text(values, "baseRef"), text(values, "issueRefPrefix"),
-                    Path.of(text(values, "gitExecutable")), text(values, "objectFormat"),
+                    Path.of(text(values, "gitExecutable")), Path.of(text(values, "processShellExecutable")),
+                    text(values, "objectFormat"),
                     credentialled ? text(values, "credentialRef") : null,
                     credentialled ? text(values, "credentialUsername") : null,
                     Duration.ofMillis(integer(values, "deadlineMs")), integer(values, "maxConcurrency"),

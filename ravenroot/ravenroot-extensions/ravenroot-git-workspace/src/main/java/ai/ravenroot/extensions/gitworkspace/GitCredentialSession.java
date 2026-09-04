@@ -227,7 +227,7 @@ final class GitCredentialSession implements AutoCloseable {
         }
     }
 
-    private static byte[] credentialInput(GitWorkspaceProfile profile, char[] secret, boolean password) {
+    static byte[] credentialInput(GitWorkspaceProfile profile, char[] secret, boolean password) {
         URI remote = URI.create(profile.remote());
         String path = remote.getRawPath();
         while (path.startsWith("/")) path = path.substring(1);

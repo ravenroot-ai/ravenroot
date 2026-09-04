@@ -10,6 +10,7 @@ public final class GitWorkspaceFailure extends RuntimeException {
         GIT_UNAVAILABLE,
         GIT_FAILED,
         OUTPUT_LIMIT_EXCEEDED,
+        RESOURCE_LIMIT_EXCEEDED,
         DEADLINE_EXCEEDED,
         CANCELLED,
         SATURATED

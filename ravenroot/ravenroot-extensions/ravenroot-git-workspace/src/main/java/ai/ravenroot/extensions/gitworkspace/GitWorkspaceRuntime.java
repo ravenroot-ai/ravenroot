@@ -5,6 +5,16 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.service.OutboundCall;
 
 import java.time.Duration;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.PosixFilePermission;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
@@ -134,11 +144,39 @@ final class GitWorkspaceRuntime {
     }
 
     static final class Control {
+        private static final String GROUP_SUPERVISOR = """
+                control=$1
+                shift
+                leader=
+                cleanup() {
+                  trap - EXIT HUP INT TERM
+                  if [ -n "$leader" ]; then kill -KILL -"$leader" 2>/dev/null || :; fi
+                }
+                trap cleanup EXIT HUP INT TERM
+                set -m || exit 125
+                exec 3>&1 4>&2
+                exec 1>/dev/null 2>/dev/null
+                while :; do :; done &
+                leader=$!
+                kill -0 -"$leader" 2>/dev/null || exit 125
+                kill -KILL -"$leader" 2>/dev/null || exit 125
+                wait "$leader" 2>/dev/null || :
+                leader=
+                "$@" 1>&3 2>&4 3>&- 4>&- &
+                leader=$!
+                printf '%s\\n' "$leader" > "$control" || exit 125
+                wait "$leader"
+                result=$?
+                exit "$result"
+                """;
+        private static final String GROUP_SIGNAL = "kill -\"$1\" -\"$2\" 2>/dev/null";
         private enum Terminal { ACTIVE, CANCELLED, TIMED_OUT }
         private final long deadlineNanos;
         private final java.util.function.LongSupplier ticker;
         private final AtomicReference<Terminal> terminal = new AtomicReference<>(Terminal.ACTIVE);
-        private final java.util.Set<ProcessHandle> owned = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        private final Set<ProcessHandle> owned = java.util.concurrent.ConcurrentHashMap.newKeySet();
+        private final Map<Long, Boundary> boundaries = new java.util.concurrent.ConcurrentHashMap<>();
+        private final Object boundaryRegistration = new Object();
         private final AtomicReference<OutboundCall<?>> credential = new AtomicReference<>();
 
         Control(long deadlineNanos, java.util.function.LongSupplier ticker) {
@@ -169,13 +207,69 @@ final class GitWorkspaceRuntime {
             return true;
         }
 
-        void own(Process value) {
-            remember(value.toHandle());
-            if (terminal.get() != Terminal.ACTIVE) terminateProcess();
+        Process startGrouped(ProcessBuilder builder, Path shell, Object shellIdentity, Path privateHome)
+                throws IOException {
+            synchronized (boundaryRegistration) {
+                check();
+                validateExecutable(shell, shellIdentity);
+                Path groupFile = Files.createTempFile(privateHome, ".process-group-", ".pid");
+                Object groupFileIdentity = fileKey(groupFile);
+                try {
+                    Files.setPosixFilePermissions(groupFile, Set.of(PosixFilePermission.OWNER_READ,
+                            PosixFilePermission.OWNER_WRITE));
+                    List<String> child = List.copyOf(builder.command());
+                    List<String> supervised = new java.util.ArrayList<>(child.size() + 5);
+                    supervised.add(shell.toString());
+                    supervised.add("-c");
+                    supervised.add(GROUP_SUPERVISOR);
+                    supervised.add("ravenroot-git-process-group");
+                    supervised.add(groupFile.toString());
+                    supervised.addAll(child);
+                    builder.command(supervised);
+                    Process process = builder.start();
+                    owned.add(process.toHandle());
+                    long group;
+                    try {
+                        group = awaitGroup(process, groupFile, groupFileIdentity);
+                    } catch (IOException | RuntimeException registrationFailed) {
+                        process.destroy();
+                        try {
+                            if (!process.waitFor(200, TimeUnit.MILLISECONDS)) process.destroyForcibly();
+                            process.waitFor(1, TimeUnit.SECONDS);
+                        } catch (InterruptedException interrupted) {
+                            process.destroyForcibly();
+                            Thread.currentThread().interrupt();
+                        }
+                        owned.remove(process.toHandle());
+                        throw registrationFailed;
+                    }
+                    Boundary boundary = new Boundary(process.toHandle(), group, groupFile, groupFileIdentity,
+                            shell, shellIdentity, privateHome);
+                    boundaries.put(process.pid(), boundary);
+                    if (terminal.get() != Terminal.ACTIVE) {
+                        reapOwned();
+                        check();
+                    }
+                    return process;
+                } catch (IOException | RuntimeException failed) {
+                    try { Files.deleteIfExists(groupFile); } catch (IOException ignored) { }
+                    throw failed;
+                }
+            }
         }
 
-        void settled(Process value) {
-            remember(value.toHandle());
+        boolean settled(Process value) {
+            synchronized (boundaryRegistration) {
+                Boundary boundary = boundaries.get(value.pid());
+                if (boundary == null) return !value.isAlive();
+                boolean gone = settleBoundary(boundary);
+                boolean removed = gone && removeControl(boundary);
+                if (removed) {
+                    boundaries.remove(value.pid(), boundary);
+                    owned.remove(value.toHandle());
+                }
+                return removed && !value.isAlive();
+            }
         }
 
         void credential(OutboundCall<?> value) {
@@ -203,39 +297,126 @@ final class GitWorkspaceRuntime {
         }
 
         boolean reapOwned() {
-            boolean restoreInterrupt = Thread.interrupted();
-            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-            boolean force = false;
-            try {
-                while (System.nanoTime() - until < 0) {
-                    owned.stream().filter(ProcessHandle::isAlive).forEach(this::remember);
-                    java.util.List<ProcessHandle> live = owned.stream().filter(ProcessHandle::isAlive).toList();
-                    if (live.isEmpty()) return true;
-                    for (ProcessHandle handle : live.reversed()) {
-                        if (force) handle.destroyForcibly(); else handle.destroy();
+            synchronized (boundaryRegistration) {
+                boolean complete = true;
+                for (Boundary boundary : List.copyOf(boundaries.values())) {
+                    boolean gone = settleBoundary(boundary);
+                    boolean removed = gone && removeControl(boundary);
+                    complete &= removed;
+                    if (removed) {
+                        boundaries.remove(boundary.root().pid(), boundary);
+                        owned.remove(boundary.root());
                     }
-                    force = true;
-                    try { Thread.sleep(10); }
-                    catch (InterruptedException interrupted) { restoreInterrupt = true; }
                 }
-                owned.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
-                long forcedUntil = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
-                while (System.nanoTime() - forcedUntil < 0) {
-                    owned.stream().filter(ProcessHandle::isAlive).forEach(this::remember);
-                    if (owned.stream().noneMatch(ProcessHandle::isAlive)) return true;
-                    try { Thread.sleep(10); }
-                    catch (InterruptedException interrupted) { restoreInterrupt = true; }
+                for (ProcessHandle handle : List.copyOf(owned)) {
+                    if (handle.isAlive()) handle.destroy();
                 }
-                return owned.stream().noneMatch(ProcessHandle::isAlive);
+                long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (owned.stream().anyMatch(ProcessHandle::isAlive) && System.nanoTime() - until < 0) {
+                    owned.stream().filter(ProcessHandle::isAlive).forEach(ProcessHandle::destroyForcibly);
+                    pause();
+                }
+                return complete && boundaries.isEmpty() && owned.stream().noneMatch(ProcessHandle::isAlive);
+            }
+        }
+
+        private long awaitGroup(Process process, Path file, Object identity) throws IOException {
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+            while (System.nanoTime() - until < 0) {
+                validateFile(file, identity);
+                String raw = Files.readString(file, StandardCharsets.US_ASCII);
+                if (raw.matches("[0-9]+\\n")) {
+                    long group = Long.parseLong(raw.trim());
+                    if (group <= 1) throw new IOException("invalid process group");
+                    return group;
+                }
+                if (!raw.isEmpty() && raw.endsWith("\n")) throw new IOException("invalid process group");
+                if (!process.isAlive()) throw new IOException("process group supervisor exited");
+                pause();
+            }
+            throw new IOException("process group registration timed out");
+        }
+
+        private boolean settleBoundary(Boundary boundary) {
+            boolean restoreInterrupt = Thread.interrupted();
+            try {
+                if (!signal(boundary, "0")) {
+                    if (boundary.root().isAlive()) boundary.root().destroyForcibly();
+                    return true;
+                }
+                signal(boundary, "TERM");
+                long gentle = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(200);
+                while (signal(boundary, "0") && System.nanoTime() - gentle < 0) pause();
+                signal(boundary, "KILL");
+                long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+                while (signal(boundary, "0") && System.nanoTime() - until < 0) pause();
+                if (boundary.root().isAlive()) boundary.root().destroyForcibly();
+                return !signal(boundary, "0");
             } finally {
                 if (restoreInterrupt) Thread.currentThread().interrupt();
             }
         }
 
-        private void remember(ProcessHandle root) {
-            owned.add(root);
-            root.descendants().forEach(owned::add);
+        private boolean signal(Boundary boundary, String signal) {
+            try {
+                validateExecutable(boundary.shell(), boundary.shellIdentity());
+                ProcessBuilder builder = new ProcessBuilder(boundary.shell().toString(), "-c", GROUP_SIGNAL,
+                        "ravenroot-git-process-group-signal", signal, Long.toString(boundary.group()));
+                builder.directory(boundary.privateHome().toFile());
+                builder.environment().clear();
+                Process process = builder.start();
+                if (!process.waitFor(1, TimeUnit.SECONDS)) {
+                    process.destroyForcibly();
+                    process.waitFor(1, TimeUnit.SECONDS);
+                    return true;
+                }
+                return process.exitValue() == 0;
+            } catch (IOException | InterruptedException | RuntimeException failed) {
+                if (failed instanceof InterruptedException) Thread.currentThread().interrupt();
+                return true;
+            }
         }
+
+        private static boolean removeControl(Boundary boundary) {
+            try {
+                validateFile(boundary.groupFile(), boundary.groupFileIdentity());
+                Files.delete(boundary.groupFile());
+                return true;
+            } catch (IOException replaced) {
+                return false;
+            }
+        }
+
+        private static void validateExecutable(Path path, Object identity) throws IOException {
+            BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (!attributes.isRegularFile() || Files.isSymbolicLink(path)
+                    || !java.util.Objects.equals(identity, attributes.fileKey())) throw new IOException();
+        }
+
+        private static void validateFile(Path path, Object identity) throws IOException {
+            BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS);
+            if (!attributes.isRegularFile() || Files.isSymbolicLink(path)
+                    || !java.util.Objects.equals(identity, attributes.fileKey()) || attributes.size() > 32) {
+                throw new IOException();
+            }
+        }
+
+        private static Object fileKey(Path path) throws IOException {
+            Object value = Files.readAttributes(path, BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS).fileKey();
+            if (value == null) throw new IOException();
+            return value;
+        }
+
+        private static void pause() {
+            try { Thread.sleep(10); }
+            catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+        }
+
+        private record Boundary(ProcessHandle root, long group, Path groupFile, Object groupFileIdentity,
+                                Path shell, Object shellIdentity, Path privateHome) { }
     }
 
     private static final class Gate {

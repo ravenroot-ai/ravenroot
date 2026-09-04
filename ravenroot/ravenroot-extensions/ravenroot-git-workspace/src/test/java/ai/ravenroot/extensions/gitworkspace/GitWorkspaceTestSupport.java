@@ -47,7 +47,7 @@ final class GitWorkspaceTestSupport {
 
     GitWorkspaceProfile profile(int historyLimit) {
         return new GitWorkspaceProfile(TENANT, PROFILE, root, remote.toUri().toASCIIString(),
-                "refs/heads/dev", "refs/heads/issues/", git, "sha1", null, null,
+                "refs/heads/dev", "refs/heads/issues/", git, Path.of("/bin/sh"), "sha1", null, null,
                 Duration.ofSeconds(30), 4, 256 * 1024, historyLimit);
     }
 

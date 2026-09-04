@@ -21,6 +21,7 @@ final class GitCommandRunner {
     private final Path hooks;
     private final GitWorkspaceRuntime.Control control;
     private final Object executableIdentity;
+    private final Object shellIdentity;
 
     GitCommandRunner(GitWorkspaceProfile profile, Path home, Path hooks,
                      GitWorkspaceRuntime.Control control) {
@@ -31,7 +32,9 @@ final class GitCommandRunner {
         try {
             this.executableIdentity = Files.readAttributes(profile.gitExecutable(), BasicFileAttributes.class,
                     LinkOption.NOFOLLOW_LINKS).fileKey();
-            if (executableIdentity == null) throw new IOException();
+            this.shellIdentity = Files.readAttributes(profile.processShellExecutable(), BasicFileAttributes.class,
+                    LinkOption.NOFOLLOW_LINKS).fileKey();
+            if (executableIdentity == null || shellIdentity == null) throw new IOException();
         } catch (IOException unsupported) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
         }
@@ -73,13 +76,12 @@ final class GitCommandRunner {
         }
         final Process process;
         try {
-            process = builder.start();
+            process = control.startGrouped(builder, profile.processShellExecutable(), shellIdentity, home);
         } catch (IOException unavailable) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_UNAVAILABLE);
         } finally {
             environment.clear();
         }
-        control.own(process);
         AtomicLong total = new AtomicLong();
         AtomicBoolean overflow = new AtomicBoolean();
         ByteArrayOutputStream stdout = rejectOutput ? null : new ByteArrayOutputStream();
@@ -92,6 +94,9 @@ final class GitCommandRunner {
                 if (rejectOutput && input != null) Arrays.fill(input, (byte) 0);
             }
             int exit = process.waitFor();
+            if (!control.settled(process)) {
+                throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
+            }
             joinDrain(out);
             joinDrain(err);
             control.check();
@@ -101,7 +106,7 @@ final class GitCommandRunner {
             if (rejectOutput && total.get() != 0) {
                 throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
             }
-            return new Result(exit, stdout == null ? "" : stdout.toString(StandardCharsets.UTF_8));
+            return new Result(exit, stdout == null ? "" : decode(stdout.toByteArray()));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             control.terminateProcess();
@@ -110,9 +115,7 @@ final class GitCommandRunner {
         } catch (IOException failed) {
             control.terminateProcess();
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
-        } finally {
-            control.settled(process);
-        }
+        } finally { control.settled(process); }
     }
 
     Process startDaemon(List<String> arguments) {
@@ -120,13 +123,12 @@ final class GitCommandRunner {
         ProcessBuilder builder = builder(arguments, null);
         final Process process;
         try {
-            process = builder.start();
+            process = control.startGrouped(builder, profile.processShellExecutable(), shellIdentity, home);
         } catch (IOException unavailable) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_UNAVAILABLE);
         } finally {
             builder.environment().clear();
         }
-        control.own(process);
         AtomicLong total = new AtomicLong();
         AtomicBoolean overflow = new AtomicBoolean();
         drain(process.getInputStream(), null, total, overflow);
@@ -170,6 +172,10 @@ final class GitCommandRunner {
                     LinkOption.NOFOLLOW_LINKS);
             if (!attributes.isRegularFile() || Files.isSymbolicLink(profile.gitExecutable())
                     || !java.util.Objects.equals(executableIdentity, attributes.fileKey())) throw new IOException();
+            BasicFileAttributes shell = Files.readAttributes(profile.processShellExecutable(),
+                    BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
+            if (!shell.isRegularFile() || Files.isSymbolicLink(profile.processShellExecutable())
+                    || !java.util.Objects.equals(shellIdentity, shell.fileKey())) throw new IOException();
         } catch (IOException replaced) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
         }
@@ -230,6 +236,19 @@ final class GitCommandRunner {
         values.add(Map.entry("rerere.enabled", "false"));
         values.add(Map.entry("http.followRedirects", "false"));
         return values;
+    }
+
+    private static String decode(byte[] value) {
+        try {
+            return StandardCharsets.UTF_8.newDecoder()
+                    .onMalformedInput(java.nio.charset.CodingErrorAction.REPORT)
+                    .onUnmappableCharacter(java.nio.charset.CodingErrorAction.REPORT)
+                    .decode(java.nio.ByteBuffer.wrap(value)).toString();
+        } catch (java.nio.charset.CharacterCodingException invalid) {
+            throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
+        } finally {
+            Arrays.fill(value, (byte) 0);
+        }
     }
 
     record Result(int exitCode, String stdout) {

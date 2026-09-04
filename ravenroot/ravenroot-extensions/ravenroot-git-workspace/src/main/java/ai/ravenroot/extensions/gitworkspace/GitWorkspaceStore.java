@@ -17,6 +17,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.nio.file.attribute.UserPrincipal;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
@@ -28,7 +30,7 @@ import java.util.concurrent.Callable;
 
 /** Private durable layout, association records, and cross-process fencing. */
 final class GitWorkspaceStore {
-    private static final String VERSION = "git-workspace-state.v1";
+    private static final String VERSION = "git-workspace-state.v2";
     private static final PayloadLimits STATE_LIMITS = new PayloadLimits(16 * 1024, 3, 32, 4096, 8192, 128);
     private final Path root;
     private final Path privateRoot;
@@ -38,20 +40,24 @@ final class GitWorkspaceStore {
     private final Path home;
     private final Path hooks;
     private final Path lock;
+    private final UserPrincipal owner;
+    private final Object lockIdentity;
     private final Map<Path, Object> directoryIdentities;
 
     GitWorkspaceStore(GitWorkspaceProfile profile) {
         root = profile.root();
-        privateRoot = directory(root.resolve(".ravenroot-git-workspace-v1"));
+        owner = owner(root);
+        privateRoot = directory(root.resolve(".ravenroot-git-workspace-v1"), owner);
         String profileKey = digest(profile.tenant() + "\0" + profile.name() + "\0" + profile.remote());
-        Path profiles = directory(privateRoot.resolve("profiles"));
-        Path owned = directory(profiles.resolve(profileKey));
+        Path profiles = directory(privateRoot.resolve("profiles"), owner);
+        Path owned = directory(profiles.resolve(profileKey), owner);
         repository = owned.resolve("repository.git");
-        workspaces = directory(owned.resolve("workspaces"));
-        associations = directory(owned.resolve("associations"));
-        home = directory(owned.resolve("home"));
-        hooks = directory(owned.resolve("hooks-disabled"));
-        lock = regularFile(owned.resolve("repository.lock"));
+        workspaces = directory(owned.resolve("workspaces"), owner);
+        associations = directory(owned.resolve("associations"), owner);
+        home = directory(owned.resolve("home"), owner);
+        hooks = directory(owned.resolve("hooks-disabled"), owner);
+        lock = regularFile(owned.resolve("repository.lock"), owner);
+        lockIdentity = fileKey(lock);
         directoryIdentities = Map.of(root, fileKey(root), privateRoot, fileKey(privateRoot),
                 profiles, fileKey(profiles), owned, fileKey(owned), workspaces, fileKey(workspaces),
                 associations, fileKey(associations), home, fileKey(home), hooks, fileKey(hooks));
@@ -66,6 +72,8 @@ final class GitWorkspaceStore {
         return workspaces.resolve(digest(taskId));
     }
 
+    String workspaceIdentity(String taskId) { return digest(taskId); }
+
     String relativeWorkspace(String taskId) {
         return root.relativize(workspace(taskId)).toString().replace(root.getFileSystem().getSeparator(), "/");
     }
@@ -75,6 +83,13 @@ final class GitWorkspaceStore {
         Path state = statePath(taskId);
         if (!Files.exists(state, LinkOption.NOFOLLOW_LINKS)) return Optional.empty();
         if (Files.isSymbolicLink(state) || !Files.isRegularFile(state, LinkOption.NOFOLLOW_LINKS)) {
+            throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.STATE_CORRUPT);
+        }
+        try {
+            if (!owner.equals(Files.getOwner(state, LinkOption.NOFOLLOW_LINKS))) {
+                throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.STATE_CORRUPT);
+            }
+        } catch (IOException invalid) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.STATE_CORRUPT);
         }
         try {
@@ -137,6 +152,8 @@ final class GitWorkspaceStore {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.CANCELLED);
         } catch (GitWorkspaceFailure failure) {
             throw failure;
+        } catch (WorkspaceConflict conflict) {
+            throw conflict;
         } catch (Exception failure) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.STATE_CORRUPT);
         }
@@ -169,6 +186,7 @@ final class GitWorkspaceStore {
         Map<String, PayloadValue> values = new LinkedHashMap<>();
         values.put("version", new PayloadValue.TextValue(VERSION));
         values.put("taskId", new PayloadValue.TextValue(association.taskId()));
+        values.put("workspaceIdentity", new PayloadValue.TextValue(association.workspaceIdentity()));
         values.put("baseRevision", new PayloadValue.TextValue(association.baseRevision()));
         values.put("issueBranch", new PayloadValue.TextValue(association.issueBranch()));
         values.put("phase", new PayloadValue.TextValue(association.phase().name()));
@@ -186,8 +204,9 @@ final class GitWorkspaceStore {
             if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(target)) {
                 throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.STATE_CORRUPT);
             }
-            try (FileChannel file = FileChannel.open(temporary, StandardOpenOption.CREATE_NEW,
-                    StandardOpenOption.WRITE)) {
+            try (FileChannel file = FileChannel.open(temporary, Set.of(StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.WRITE), PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rw-------")))) {
                 ByteBuffer buffer = ByteBuffer.wrap(bytes);
                 while (buffer.hasRemaining()) file.write(buffer);
                 file.force(true);
@@ -220,13 +239,14 @@ final class GitWorkspaceStore {
             PayloadValue decoded = PayloadJson.read(bytes, STATE_LIMITS);
             if (!(decoded instanceof PayloadValue.MapValue object)) throw new IllegalArgumentException();
             Map<String, PayloadValue> values = object.entries();
-            Set<String> exact = Set.of("version", "taskId", "baseRevision", "issueBranch", "phase",
+            Set<String> exact = Set.of("version", "taskId", "workspaceIdentity", "baseRevision", "issueBranch", "phase",
                     "fenceGeneration", "operationId", "expectedRefTip", "acceptedRevision",
                     "acceptedTree", "targetRefTip", "result");
             if (!values.keySet().equals(exact) || !VERSION.equals(text(values, "version"))) {
                 throw new IllegalArgumentException();
             }
-            Association result = new Association(text(values, "taskId"), text(values, "baseRevision"),
+            Association result = new Association(text(values, "taskId"), text(values, "workspaceIdentity"),
+                    text(values, "baseRevision"),
                     text(values, "issueBranch"), Phase.valueOf(text(values, "phase")),
                     Long.parseLong(text(values, "fenceGeneration")), text(values, "operationId"),
                     text(values, "expectedRefTip"), text(values, "acceptedRevision"),
@@ -246,11 +266,14 @@ final class GitWorkspaceStore {
                 BasicFileAttributes attributes = Files.readAttributes(path, BasicFileAttributes.class,
                         LinkOption.NOFOLLOW_LINKS);
                 if (!attributes.isDirectory() || Files.isSymbolicLink(path)
-                        || !java.util.Objects.equals(expected.getValue(), attributes.fileKey())) {
+                        || !java.util.Objects.equals(expected.getValue(), attributes.fileKey())
+                        || !owner.equals(Files.getOwner(path, LinkOption.NOFOLLOW_LINKS))) {
                     throw new IOException();
                 }
             }
-            if (Files.isSymbolicLink(lock) || !Files.isRegularFile(lock, LinkOption.NOFOLLOW_LINKS)) {
+            if (Files.isSymbolicLink(lock) || !Files.isRegularFile(lock, LinkOption.NOFOLLOW_LINKS)
+                    || !java.util.Objects.equals(lockIdentity, fileKey(lock))
+                    || !owner.equals(Files.getOwner(lock, LinkOption.NOFOLLOW_LINKS))) {
                 throw new IOException();
             }
         } catch (IOException replaced) {
@@ -258,24 +281,30 @@ final class GitWorkspaceStore {
         }
     }
 
-    private static Path directory(Path path) {
+    private static Path directory(Path path, UserPrincipal owner) {
         try {
-            if (Files.notExists(path, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(path);
+            try { Files.createDirectory(path, PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rwx------"))); }
+            catch (java.nio.file.FileAlreadyExistsException concurrent) { /* validate the winner below */ }
             if (Files.isSymbolicLink(path) || !Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException();
             }
+            if (!owner.equals(Files.getOwner(path, LinkOption.NOFOLLOW_LINKS))) throw new IOException();
             return path.toRealPath(LinkOption.NOFOLLOW_LINKS);
         } catch (IOException failed) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
         }
     }
 
-    private static Path regularFile(Path path) {
+    private static Path regularFile(Path path, UserPrincipal owner) {
         try {
-            if (Files.notExists(path, LinkOption.NOFOLLOW_LINKS)) Files.createFile(path);
+            try { Files.createFile(path, PosixFilePermissions.asFileAttribute(
+                    PosixFilePermissions.fromString("rw-------"))); }
+            catch (java.nio.file.FileAlreadyExistsException concurrent) { /* validate the winner below */ }
             if (Files.isSymbolicLink(path) || !Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException();
             }
+            if (!owner.equals(Files.getOwner(path, LinkOption.NOFOLLOW_LINKS))) throw new IOException();
             return path;
         } catch (IOException failed) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
@@ -305,6 +334,13 @@ final class GitWorkspaceStore {
         }
     }
 
+    private static UserPrincipal owner(Path path) {
+        try { return Files.getOwner(path, LinkOption.NOFOLLOW_LINKS); }
+        catch (IOException unavailable) {
+            throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
+        }
+    }
+
     static String digest(String value) {
         try {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
@@ -321,11 +357,12 @@ final class GitWorkspaceStore {
     enum Phase { PROVISIONING, READY, INTEGRATING, VERIFYING }
     enum Result { PENDING, CONTINUE, CONFLICT, UNMERGED }
 
-    record Association(String taskId, String baseRevision, String issueBranch, Phase phase,
+    record Association(String taskId, String workspaceIdentity, String baseRevision, String issueBranch, Phase phase,
                        long fenceGeneration, String operationId, String expectedRefTip,
                        String acceptedRevision, String acceptedTree, String targetRefTip, Result result) {
         Association {
             if (taskId == null || !taskId.matches("[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+                    || !digest(taskId).equals(workspaceIdentity)
                     || !oid(baseRevision, false, false, 0) || !GitWorkspaceProfile.safeRef(issueBranch)
                     || phase == null || fenceGeneration < 1 || !digestValue(operationId)
                     || !oid(expectedRefTip, true, true, baseRevision.length())
@@ -340,27 +377,28 @@ final class GitWorkspaceStore {
         }
 
         static Association initial(GitWorkspaceRequest request) {
-            return new Association(request.taskId(), request.baseRevision(), request.issueBranch(),
+            return new Association(request.taskId(), digest(request.taskId()), request.baseRevision(), request.issueBranch(),
                     Phase.PROVISIONING, 1, operationId(request), "", "", "", "", Result.PENDING);
         }
 
         boolean sameBinding(Association other) {
-            return taskId.equals(other.taskId) && baseRevision.equals(other.baseRevision)
+            return taskId.equals(other.taskId) && workspaceIdentity.equals(other.workspaceIdentity)
+                    && baseRevision.equals(other.baseRevision)
                     && issueBranch.equals(other.issueBranch);
         }
         Association begin(GitWorkspaceRequest request, Phase next, String expectedTip,
                           String accepted, String tree) {
-            return new Association(taskId, baseRevision, issueBranch, next, fenceGeneration + 1,
+            return new Association(taskId, workspaceIdentity, baseRevision, issueBranch, next, fenceGeneration + 1,
                     operationId(request), empty(expectedTip), empty(accepted), empty(tree), "", Result.PENDING);
         }
 
         Association withTarget(String target) {
-            return new Association(taskId, baseRevision, issueBranch, phase, fenceGeneration, operationId,
+            return new Association(taskId, workspaceIdentity, baseRevision, issueBranch, phase, fenceGeneration, operationId,
                     expectedRefTip, acceptedRevision, acceptedTree, empty(target), Result.PENDING);
         }
 
         Association complete(Result completed) {
-            return new Association(taskId, baseRevision, issueBranch, Phase.READY, fenceGeneration, operationId,
+            return new Association(taskId, workspaceIdentity, baseRevision, issueBranch, Phase.READY, fenceGeneration, operationId,
                     expectedRefTip, acceptedRevision, acceptedTree, targetRefTip, completed);
         }
 

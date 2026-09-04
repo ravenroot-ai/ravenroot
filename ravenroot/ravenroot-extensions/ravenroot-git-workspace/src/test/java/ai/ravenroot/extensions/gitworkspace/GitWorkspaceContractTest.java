@@ -11,6 +11,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class GitWorkspaceContractTest {
     @TempDir Path temporary;
@@ -37,6 +38,14 @@ class GitWorkspaceContractTest {
             GitWorkspaceFailure failure = assertThrows(GitWorkspaceFailure.class,
                     () -> GitWorkspaceRequest.parse(hostile, fixture.profile(10)));
             assertEquals(GitWorkspaceFailure.Code.INVALID_INPUT, failure.code());
+        }
+    }
+
+    @Test
+    void maliciousAndAmbiguousRefsAreRefused() {
+        for (String ref : Set.of("refs/heads/../escape", "refs/heads/topic.lock", "refs/heads/a@{1}",
+                "refs/heads/a//b", "refs/tags/not-a-branch", "refs/heads/line\nfeed", "-option")) {
+            assertFalse(GitWorkspaceProfile.safeRef(ref), ref);
         }
     }
 }

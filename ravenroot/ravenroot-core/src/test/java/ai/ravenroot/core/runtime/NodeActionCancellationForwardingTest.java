@@ -12,6 +12,9 @@ import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.graph.GraphDefinition;
+import ai.ravenroot.core.graph.GraphEdge;
+import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.NodeKind;
 import org.junit.jupiter.api.Test;
 
@@ -64,6 +67,31 @@ class NodeActionCancellationForwardingTest {
         assertEquals("aware", handler.handle(message(), signal).toCompletableFuture().join().payload());
         assertSame(signal, observed.get());
         assertEquals("legacy", handler.handle(message()).toCompletableFuture().join().payload());
+    }
+
+    @Test
+    void graphRunnerForwardsItsEngineCancellationSignalToTheOperationalHandler() throws Exception {
+        AtomicReference<CancellationSignal> observed = new AtomicReference<>();
+        BehaviorRegistry registry = new BehaviorRegistry().register("cancellation-probe", new NodeHandler() {
+            @Override public java.util.concurrent.CompletionStage<NodeResult> handle(NodeMessage message) {
+                return CompletableFuture.completedFuture(NodeResult.continueWith("legacy"));
+            }
+            @Override public java.util.concurrent.CompletionStage<NodeResult> handle(
+                    NodeMessage message, CancellationSignal cancellation) {
+                observed.set(cancellation);
+                return CompletableFuture.completedFuture(NodeResult.continueWith("aware"));
+            }
+        });
+        GraphDefinition graph = new GraphDefinition(List.of(GraphNode.start("start"),
+                GraphNode.behavior("probe", "cancellation-probe"), GraphNode.error("error"),
+                GraphNode.end("end")), List.of(GraphEdge.to("start", "probe"), GraphEdge.to("probe", "end")));
+        try (var engine = new SameThreadExecutionEngine();
+             var manager = GraphManager.from(graph);
+             var runner = new GraphRunner(manager, engine, registry, new ExecutionMonitor())) {
+            assertEquals("aware", runner.execute(new SecurityContext("request", "tenant", "subject",
+                    PrincipalType.WORKLOAD, "issuer"), "input").toCompletableFuture().get().payload());
+        }
+        assertSame(StubEngineLifecycle.NEVER_CANCELLED, observed.get());
     }
 
     private static NodeMessage message() {

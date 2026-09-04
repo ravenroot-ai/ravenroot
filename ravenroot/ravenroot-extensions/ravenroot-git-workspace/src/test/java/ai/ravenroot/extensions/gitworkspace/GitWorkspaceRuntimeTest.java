@@ -7,7 +7,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.PosixFilePermissions;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CopyOnWriteArrayList;
@@ -26,33 +28,28 @@ class GitWorkspaceRuntimeTest {
         Path root = Files.createDirectory(temporary.resolve("root"));
         Path remote = Files.createDirectory(temporary.resolve("remote"));
         Path pidFile = temporary.resolve("owned-pids");
-        Path git = Path.of(GitWorkspaceTestSupport.run(temporary, "sh", "-c", "command -v git").trim());
+        Path git = executable("waiter", """
+                #!/bin/sh
+                (trap '' TERM HUP INT; /bin/sleep 60) &
+                child=$!
+                printf '%s %s\n' "$$" "$child" > "$1"
+                wait
+                """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+                Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
         TestCancellation cancellation = new TestCancellation();
         Process sibling = new ProcessBuilder("/bin/sleep", "60").start();
         try {
             var future = runtime.submit(profile, cancellation, control -> {
-                Process owned;
-                try {
-                    owned = new ProcessBuilder("/bin/sh", "-c",
-                            "(/bin/sh -c 'trap \"\" TERM; /bin/sleep 60') & child=$!; "
-                                    + "echo $$ $child > \"$1\"; wait", "owned", pidFile.toString()).start();
-                    control.own(owned);
-                    owned.waitFor();
-                    return NodeResult.continueWith(Map.of());
-                } catch (InterruptedException interrupted) {
-                    Thread.currentThread().interrupt();
-                    control.check();
-                    throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.CANCELLED);
-                } catch (java.io.IOException failed) {
-                    throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
-                }
+                GitWorkspaceStore store = new GitWorkspaceStore(profile);
+                new GitCommandRunner(profile, store.home(), store.hooks(), control)
+                        .run(List.of(pidFile.toString()));
+                return NodeResult.continueWith(Map.of());
             });
-            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
-            while (!Files.exists(pidFile) && System.nanoTime() - until < 0) Thread.sleep(5);
+            long until = System.nanoTime() + TimeUnit.SECONDS.toNanos(7);
+            while (!Files.exists(pidFile) && !future.isDone() && System.nanoTime() - until < 0) Thread.sleep(5);
             assertTrue(Files.exists(pidFile));
             long[] ownedPids = java.util.Arrays.stream(Files.readString(pidFile).trim().split(" "))
                     .mapToLong(Long::parseLong).toArray();
@@ -80,33 +77,62 @@ class GitWorkspaceRuntimeTest {
     void deadlineReapsProcessBeforeReportingTimeout() throws Exception {
         Path root = Files.createDirectory(temporary.resolve("deadline-root"));
         Path remote = Files.createDirectory(temporary.resolve("deadline-remote"));
-        Path git = Path.of(GitWorkspaceTestSupport.run(temporary, "sh", "-c", "command -v git").trim());
+        Path pidFile = temporary.resolve("deadline-pid");
+        Path git = executable("deadline-waiter", """
+                #!/bin/sh
+                printf '%s\n' "$$" > "$1"
+                exec /bin/sleep 60
+                """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "deadline", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                "sha1", null, null, Duration.ofMillis(200), 1, 64 * 1024, 10);
+                Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(3), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
-        java.util.concurrent.atomic.AtomicLong pid = new java.util.concurrent.atomic.AtomicLong();
         var future = runtime.submit(profile, new TestCancellation(), control -> {
-            try {
-                Process process = new ProcessBuilder("/bin/sleep", "60").start();
-                pid.set(process.pid());
-                control.own(process);
-                process.waitFor();
-                return NodeResult.continueWith(Map.of());
-            } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                control.check();
-                throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.CANCELLED);
-            } catch (java.io.IOException failed) {
-                throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
-            }
+            GitWorkspaceStore store = new GitWorkspaceStore(profile);
+            new GitCommandRunner(profile, store.home(), store.hooks(), control)
+                    .run(List.of(pidFile.toString()));
+            return NodeResult.continueWith(Map.of());
         });
         CompletionException failure = org.junit.jupiter.api.Assertions.assertThrows(
                 CompletionException.class, future::join);
         assertEquals(GitWorkspaceFailure.Code.DEADLINE_EXCEEDED,
                 assertInstanceOf(GitWorkspaceFailure.class, failure.getCause()).code());
-        assertTrue(pid.get() > 0);
-        assertFalse(ProcessHandle.of(pid.get()).map(ProcessHandle::isAlive).orElse(false));
+        long pid = Long.parseLong(Files.readString(pidFile).trim());
+        assertFalse(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false));
+    }
+
+    @Test
+    void forkAndExitOrphanIsGoneBeforeSuccessfulCompletion() throws Exception {
+        Path root = Files.createDirectory(temporary.resolve("orphan-root"));
+        Path remote = Files.createDirectory(temporary.resolve("orphan-remote"));
+        Path pidFile = temporary.resolve("orphan-pid");
+        Path git = executable("fork-and-exit", """
+                #!/bin/sh
+                (trap '' TERM HUP INT; /bin/sleep 60) &
+                printf '%s\n' "$!" > "$1"
+                exit 0
+                """);
+        GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "orphan", root,
+                remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
+                Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(8), 1, 64 * 1024, 10);
+        GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
+
+        runtime.submit(profile, new TestCancellation(), control -> {
+            GitWorkspaceStore store = new GitWorkspaceStore(profile);
+            new GitCommandRunner(profile, store.home(), store.hooks(), control)
+                    .run(List.of(pidFile.toString())).requireSuccess();
+            return NodeResult.continueWith(Map.of());
+        }).join();
+
+        long pid = Long.parseLong(Files.readString(pidFile).trim());
+        assertFalse(ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false));
+    }
+
+    private Path executable(String name, String contents) throws Exception {
+        Path executable = temporary.resolve(name);
+        Files.writeString(executable, contents);
+        Files.setPosixFilePermissions(executable, PosixFilePermissions.fromString("rwx------"));
+        return executable;
     }
 
     private static final class TestCancellation implements CancellationSignal {

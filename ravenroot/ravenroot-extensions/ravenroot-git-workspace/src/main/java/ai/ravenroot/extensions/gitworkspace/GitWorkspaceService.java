@@ -17,6 +17,8 @@ import java.util.Set;
 
 /** Confined provision, deterministic integration, and remote-base verification operations. */
 final class GitWorkspaceService {
+    private static final long MAX_REPOSITORY_BYTES = 2L * 1024 * 1024 * 1024;
+    private static final long MAX_REPOSITORY_ENTRIES = 250_000;
     private static final String REMOTE_BASE = "refs/ravenroot/base";
     private static final String RESULT_VERSION = "git-workspace.result.v1";
     private static final String IDENTITY_NAME = "Ravenroot Git Workspace";
@@ -78,7 +80,7 @@ final class GitWorkspaceService {
         String current = refTip(request.issueBranch());
         if (state.phase() == GitWorkspaceStore.Phase.READY) {
             if (current == null || !workspaceValid(request.taskId())) conflict();
-            return result(request, state.result(), current);
+            return result(request, GitWorkspaceStore.Result.CONTINUE, current);
         }
         if (state.phase() != GitWorkspaceStore.Phase.PROVISIONING
                 || !state.targetRefTip().equals(request.baseRevision())) conflict();
@@ -308,6 +310,35 @@ final class GitWorkspaceService {
                     null, helper);
             if (fetched.exitCode() != 0) throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.GIT_FAILED);
         }
+        enforceRepositoryCeiling();
+        git.run(repo("fsck", "--strict", "--no-reflogs", "--no-progress")).requireSuccess();
+    }
+
+    private void enforceRepositoryCeiling() {
+        long entries = 0;
+        long bytes = 0;
+        try (var paths = Files.walk(store.repository())) {
+            var iterator = paths.iterator();
+            while (iterator.hasNext()) {
+                control.check();
+                Path path = iterator.next();
+                if (++entries > MAX_REPOSITORY_ENTRIES || Files.isSymbolicLink(path)) {
+                    throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.RESOURCE_LIMIT_EXCEEDED);
+                }
+                if (Files.isRegularFile(path, LinkOption.NOFOLLOW_LINKS)) {
+                    bytes = Math.addExact(bytes, Files.size(path));
+                    if (bytes > MAX_REPOSITORY_BYTES) {
+                        throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.RESOURCE_LIMIT_EXCEEDED);
+                    }
+                } else if (!Files.isDirectory(path, LinkOption.NOFOLLOW_LINKS)) {
+                    throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
+                }
+            }
+        } catch (GitWorkspaceFailure failure) {
+            throw failure;
+        } catch (IOException | ArithmeticException failed) {
+            throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.RESOURCE_LIMIT_EXCEEDED);
+        }
     }
 
     private void requireCommit(String oid) {
@@ -355,6 +386,9 @@ final class GitWorkspaceService {
     private Path validateLinkedWorkspace(String taskId) {
         Path workspace = store.workspace(taskId);
         store.validateWorkspacePath(workspace);
+        GitWorkspaceStore.Association association = store.association(taskId)
+                .orElseThrow(GitWorkspaceStore.WorkspaceConflict::new);
+        if (!association.workspaceIdentity().equals(store.workspaceIdentity(taskId))) conflict();
         Path marker = workspace.resolve(".git");
         try {
             if (Files.isSymbolicLink(marker) || !Files.isRegularFile(marker, LinkOption.NOFOLLOW_LINKS)
@@ -366,15 +400,37 @@ final class GitWorkspaceService {
             Path gitDirectory = Path.of(value.substring("gitdir: ".length()));
             if (!gitDirectory.isAbsolute()) gitDirectory = workspace.resolve(gitDirectory);
             gitDirectory = gitDirectory.normalize();
-            Path allowed = store.repository().resolve("worktrees").toRealPath();
+            Path common = store.repository().toRealPath();
+            Path allowed = common.resolve("worktrees").toRealPath();
+            Path expected = allowed.resolve(association.workspaceIdentity()).normalize();
             Path real = gitDirectory.toRealPath();
-            if (Files.isSymbolicLink(gitDirectory) || !real.startsWith(allowed) || !Files.isDirectory(real)) {
+            if (Files.isSymbolicLink(gitDirectory) || !real.equals(expected)
+                    || !Files.isDirectory(real, LinkOption.NOFOLLOW_LINKS)) {
                 throw new IOException();
             }
+            Path reciprocal = real.resolve("gitdir");
+            Path commonMarker = real.resolve("commondir");
+            if (Files.isSymbolicLink(reciprocal) || Files.isSymbolicLink(commonMarker)
+                    || !Files.isRegularFile(reciprocal, LinkOption.NOFOLLOW_LINKS)
+                    || !Files.isRegularFile(commonMarker, LinkOption.NOFOLLOW_LINKS)
+                    || Files.size(reciprocal) > 4096 || Files.size(commonMarker) > 4096) {
+                throw new IOException();
+            }
+            Path reciprocalTarget = resolveMarker(real, Files.readString(reciprocal, StandardCharsets.UTF_8));
+            Path commonTarget = resolveMarker(real, Files.readString(commonMarker, StandardCharsets.UTF_8));
+            if (!reciprocalTarget.equals(marker.toAbsolutePath().normalize())
+                    || !commonTarget.toRealPath().equals(common)) throw new IOException();
             return real;
         } catch (IOException | RuntimeException invalid) {
             throw GitWorkspaceFailure.of(GitWorkspaceFailure.Code.AUTHORITY_REFUSED);
         }
+    }
+
+    private static Path resolveMarker(Path parent, String value) throws IOException {
+        String trimmed = value.trim();
+        if (trimmed.isEmpty() || trimmed.indexOf('\n') >= 0 || trimmed.indexOf('\r') >= 0) throw new IOException();
+        Path parsed = Path.of(trimmed);
+        return (parsed.isAbsolute() ? parsed : parent.resolve(parsed)).toAbsolutePath().normalize();
     }
 
     private boolean workspaceValid(String taskId) {

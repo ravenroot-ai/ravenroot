@@ -63,31 +63,77 @@ public interface RetryClassifier {
      */
     static RetryClassifier failClosed() {
         return failure -> {
-            Throwable cause = unwrap(failure);
-            if (cause instanceof RetryClassified classified) {
-                Retryability stated = classified.retryability();
-                return stated == null ? Retryability.DETERMINISTIC_REJECT : stated;
-            }
-            if (cause instanceof ExecutionStoreException stored && stored.failure() != null) {
-                return stored.failure().retryability();
-            }
-            if (cause instanceof CancellationException) {
-                // Stated rather than left to the fall-through below. The two produce the same value
-                // today, and a later reader loosening the fall-through must not silently loosen this
-                // one with it: a cancelled attempt is not a transient condition worth another try.
-                return Retryability.DETERMINISTIC_REJECT;
-            }
-            return Retryability.DETERMINISTIC_REJECT;
+            Retryability stated = statedClassification(failure);
+            return stated == null ? Retryability.DETERMINISTIC_REJECT : stated;
         };
     }
 
     /**
-     * A classifier that treats the named throwable types as {@link Retryability#RETRYABLE_NO_EFFECT}
-     * and delegates everything else to {@link #failClosed()}.
+     * The classification the failure itself asserts, or {@code null} when it asserts nothing.
      *
-     * <p>This is the author's channel: the runtime cannot know that <em>this</em> node's
-     * {@code SocketTimeoutException} left no effect, and the author can. Names are matched against
-     * the failure's own class and every supertype, by both fully qualified and simple name, so
+     * <h4>Why this is separate from {@link #failClosed()}, and why it may not be folded back in</h4>
+     * <p>{@code failClosed} answers {@link Retryability#DETERMINISTIC_REJECT} for two different
+     * facts: "this failure said it is deterministic" and "this failure said nothing". Collapsing them
+     * is right for a caller that only wants a decision, and <strong>wrong</strong> for
+     * {@link #declaredRetryable(Set)}, which must widen the second and must not touch the first. That
+     * is not a hypothetical distinction: with the two folded together, an author declaring
+     * {@code retry.retryOn=RuntimeException} silently overrode a connector's own
+     * {@link Retryability#INDETERMINATE} — "the POST may already have landed" — and the effect was
+     * repeated automatically. This method exists so that the difference is representable and the
+     * ordering below is structural rather than a comment.</p>
+     *
+     * <p>Three sources are consulted, in the order a reader would expect them to bind: the failure's
+     * own statement through {@link RetryClassified}, which is how a connector says precisely what it
+     * knows; an {@link ExecutionStoreException}, which already carries a classification on its
+     * failure and needs no second opinion; and a {@link CancellationException}, which is stated
+     * explicitly rather than left to fall through, because "cancelled" must never be readable as a
+     * transient condition worth another attempt.</p>
+     *
+     * <p>A {@link RetryClassified} returning {@code null} has not classified anything and is treated
+     * as silence, not as a refusal — the widening below may then apply to it, which is correct: the
+     * implementation declined to answer, so the author's declaration is the only statement there is.
+     * The interface's own contract already tells implementations to return
+     * {@link Retryability#INDETERMINATE} rather than {@code null} when they cannot decide.</p>
+     *
+     * @param failure the throwable as delivered, wrapped or not; never {@code null}
+     * @return the asserted classification, or {@code null} when nothing was asserted
+     */
+    private static Retryability statedClassification(Throwable failure) {
+        Throwable cause = unwrap(failure);
+        if (cause instanceof RetryClassified classified) {
+            return classified.retryability();
+        }
+        if (cause instanceof ExecutionStoreException stored && stored.failure() != null) {
+            return stored.failure().retryability();
+        }
+        if (cause instanceof CancellationException) {
+            return Retryability.DETERMINISTIC_REJECT;
+        }
+        return null;
+    }
+
+    /**
+     * A classifier that widens the named throwable types to
+     * {@link Retryability#RETRYABLE_NO_EFFECT}, and changes nothing a failure stated about itself.
+     *
+     * <h4>The allowlist may only widen silence, never a stated classification</h4>
+     * <p>{@link #statedClassification(Throwable)} is consulted <strong>first</strong>, and whatever it
+     * asserts is returned untouched. The declaration applies only when the failure asserted nothing.
+     * The ordering is the safety property, and reversing it is not a subtle regression: an author
+     * declaring a family — {@code retry.retryOn=RuntimeException}, which the tests and this Javadoc
+     * both encourage — would otherwise match before a connector's own
+     * {@link Retryability#INDETERMINATE} was ever read, and the runtime would automatically repeat an
+     * effect that may already have landed. It would also override a
+     * {@link CancellationException}, turning a stop into a retry loop.</p>
+     *
+     * <p>What the author's channel is <em>for</em> is unaffected: the runtime cannot know that
+     * <em>this</em> node's {@code SocketTimeoutException} left no effect, and the author can. That
+     * exception states nothing about itself, so the declaration is the only statement there is and it
+     * binds. A connector precise enough to implement {@link RetryClassified} has already answered the
+     * question the declaration was guessing at, and its answer wins.</p>
+     *
+     * <p>Names are matched against the failure's own class and every supertype — superclasses and
+     * interfaces, transitively — by both fully qualified and simple name, so
      * {@code java.io.IOException} covers a subclass the author never enumerated and
      * {@code IOException} works without the package. Matching is exact and case-sensitive: an
      * approximate match here authorises repeating an effect nobody named.</p>
@@ -100,24 +146,64 @@ public interface RetryClassifier {
      *
      * @param retryableTypeNames throwable class names the author declares safe to retry; {@code null}
      *                           or empty yields exactly {@link #failClosed()}
-     * @return a classifier honouring the allowlist over the fail-closed default
+     * @return a classifier that widens unclassified failures named here, and defers to every
+     *         classification a failure states about itself
      */
     static RetryClassifier declaredRetryable(Set<String> retryableTypeNames) {
         if (retryableTypeNames == null || retryableTypeNames.isEmpty()) {
             return failClosed();
         }
         Set<String> declared = Set.copyOf(retryableTypeNames);
-        RetryClassifier fallback = failClosed();
         return failure -> {
-            Throwable cause = unwrap(failure);
-            for (Class<?> type = cause.getClass(); type != null && type != Object.class;
-                    type = type.getSuperclass()) {
-                if (declared.contains(type.getName()) || declared.contains(type.getSimpleName())) {
-                    return Retryability.RETRYABLE_NO_EFFECT;
-                }
+            Retryability stated = statedClassification(failure);
+            if (stated != null) {
+                return stated;
             }
-            return fallback.classify(failure);
+            return namesAnySupertypeOf(declared, unwrap(failure))
+                    ? Retryability.RETRYABLE_NO_EFFECT
+                    : Retryability.DETERMINISTIC_REJECT;
         };
+    }
+
+    /**
+     * Whether {@code declared} names {@code cause}'s own type or any of its supertypes.
+     *
+     * <p>Walks superclasses <em>and</em> interfaces, transitively, which is what "every supertype"
+     * means and what an author reading that sentence would expect. The superclass-only walk this
+     * replaces could never match an interface name, so a declaration naming one silently retried
+     * nothing — the quiet direction, but still a promise the code did not keep.</p>
+     *
+     * <p>Breadth-first over a worklist rather than recursion, and guarded by a visited set, because
+     * the interface graph is a DAG: a type implementing two interfaces that share a super-interface
+     * would otherwise be walked through it twice, and a deep hierarchy would be walked
+     * exponentially.</p>
+     *
+     * @param declared    the author's exact names, fully qualified or simple
+     * @param cause       the unwrapped failure whose hierarchy is searched
+     * @return whether any type in that hierarchy is named
+     */
+    private static boolean namesAnySupertypeOf(Set<String> declared, Throwable cause) {
+        var pending = new java.util.ArrayDeque<Class<?>>();
+        var seen = new java.util.HashSet<Class<?>>();
+        pending.add(cause.getClass());
+        while (!pending.isEmpty()) {
+            Class<?> type = pending.poll();
+            if (type == Object.class || !seen.add(type)) {
+                continue;
+            }
+            if (declared.contains(type.getName()) || declared.contains(type.getSimpleName())) {
+                return true;
+            }
+            // Guarded, because an interface reached through getInterfaces() has a null superclass and
+            // ArrayDeque refuses null outright. Object itself is skipped above rather than here: every
+            // throwable extends it, so naming it would widen the allowlist to everything.
+            Class<?> parent = type.getSuperclass();
+            if (parent != null) {
+                pending.add(parent);
+            }
+            java.util.Collections.addAll(pending, type.getInterfaces());
+        }
+        return false;
     }
 
     /**

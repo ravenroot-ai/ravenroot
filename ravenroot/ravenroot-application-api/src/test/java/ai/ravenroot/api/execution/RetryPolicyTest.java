@@ -9,6 +9,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
@@ -172,6 +173,113 @@ class RetryPolicyTest {
                         .classify(new java.net.SocketTimeoutException("timed out")),
                 "matching is case-sensitive: an approximate match authorises repeating an effect "
                         + "nobody named");
+    }
+
+    // ------------------------------------------------------ the allowlist may only widen silence
+
+    /**
+     * The regression cell. An author's family-level declaration must not override a connector's own
+     * {@link Retryability#INDETERMINATE}.
+     *
+     * <p>Asserted through {@link RetryPolicy#decide(int, Throwable)} and not only through the
+     * classifier, because the classifier's answer is an intermediate value and the decision is what
+     * actually repeats the effect. Before the fix this produced
+     * {@code Retry[nextOrdinal=2, classification=RETRYABLE_NO_EFFECT]} for a failure that had said,
+     * in as many words, that its effect may already have landed.</p>
+     *
+     * <p>Both declaration shapes are exercised — the concrete supertype and {@code Exception}, which
+     * names practically everything — because the defect was in the <em>ordering</em> of the two
+     * consultations, so any name that matches at all is enough to reproduce it.</p>
+     */
+    @Test
+    @DisplayName("an allowlist naming a supertype leaves a stated INDETERMINATE non-retryable")
+    void aDeclaredSupertypeCannotOverrideAStatedIndeterminate() {
+        for (String declaredName : List.of("RuntimeException", "java.lang.RuntimeException", "Exception")) {
+            var policy = new RetryPolicy(5, FLAT, RetryClassifier.declaredRetryable(Set.of(declaredName)));
+            Throwable stated = new StatedFailure(Retryability.INDETERMINATE);
+
+            var stop = assertInstanceOf(RetryDecision.Stop.class, policy.decide(1, stated),
+                    "declaring '" + declaredName + "' must not repeat an effect that may have landed");
+            assertEquals(RetryPolicy.REASON_NOT_RETRYABLE, stop.reason());
+            assertEquals(Retryability.INDETERMINATE, stop.classification(),
+                    "the connector's own statement must reach the decision unchanged, not be "
+                            + "replaced by the author's guess about the same failure");
+            assertEquals(Retryability.INDETERMINATE,
+                    RetryClassifier.declaredRetryable(Set.of(declaredName)).classify(stated));
+        }
+    }
+
+    @Test
+    @DisplayName("an allowlist naming a supertype leaves a CancellationException non-retryable")
+    void aDeclaredSupertypeCannotTurnACancellationIntoARetry() {
+        var policy = new RetryPolicy(5, FLAT,
+                RetryClassifier.declaredRetryable(Set.of("RuntimeException")));
+
+        var stop = assertInstanceOf(RetryDecision.Stop.class,
+                policy.decide(1, new java.util.concurrent.CancellationException("stopped")),
+                "a cancelled attempt is not a transient condition, whatever the author declared: "
+                        + "retrying it would make cancel a loop rather than a stop");
+        assertEquals(Retryability.DETERMINISTIC_REJECT, stop.classification());
+    }
+
+    @Test
+    @DisplayName("a store failure's own classification survives an allowlist that names its type")
+    void aDeclaredSupertypeCannotOverrideAStoreFailuresOwnClassification() {
+        var conflict = new ExecutionStoreException(new ExecutionStoreFailure.ConcurrencyConflict(
+                new ExecutionKey("t", UUID.randomUUID()), RevisionExpectation.exactly(1), 2));
+
+        assertEquals(conflict.failure().retryability(),
+                RetryClassifier.declaredRetryable(Set.of("RuntimeException")).classify(conflict),
+                "the port already answered this; an author naming the exception's supertype is not a "
+                        + "second opinion that outranks it");
+    }
+
+    @Test
+    @DisplayName("the allowlist still widens a failure that states nothing, which is what it is for")
+    void anUnclassifiedFailureIsStillWidenedByTheDeclaration() {
+        var policy = new RetryPolicy(3, FLAT,
+                RetryClassifier.declaredRetryable(Set.of("java.io.IOException")));
+
+        var retry = assertInstanceOf(RetryDecision.Retry.class,
+                policy.decide(1, new java.net.SocketTimeoutException("says nothing about itself")),
+                "the fix must not disable the author's channel, only stop it overruling a statement");
+        assertEquals(Retryability.RETRYABLE_NO_EFFECT, retry.classification());
+    }
+
+    @Test
+    @DisplayName("a RetryClassified that returns null has stated nothing, so the declaration binds")
+    void aClassifierReturningNullIsSilenceRatherThanARefusal() {
+        var policy = new RetryPolicy(3, FLAT,
+                RetryClassifier.declaredRetryable(Set.of("StatedFailure")));
+
+        assertInstanceOf(RetryDecision.Retry.class, policy.decide(1, new StatedFailure(null)),
+                "an implementation that declined to answer has not refused; its own contract says to "
+                        + "return INDETERMINATE when it cannot decide, and this is what happens when "
+                        + "it does not");
+    }
+
+    @Test
+    @DisplayName("an interface name matches, because 'every supertype' includes the ones it implements")
+    void theSupertypeWalkReachesInterfacesAndNotOnlySuperclasses() {
+        assertEquals(Retryability.RETRYABLE_NO_EFFECT,
+                RetryClassifier.declaredRetryable(Set.of("TransientMarker"))
+                        .classify(new MarkedFailure()),
+                "a superclass-only walk could never match an interface, so a declaration naming one "
+                        + "silently retried nothing");
+        assertEquals(Retryability.RETRYABLE_NO_EFFECT,
+                RetryClassifier.declaredRetryable(Set.of(TransientMarker.class.getName()))
+                        .classify(new MarkedFailure()));
+    }
+
+    /** An interface an author might name to cover a family of connector failures. */
+    private interface TransientMarker {
+    }
+
+    /** States nothing about itself, so the declaration is the only statement there is. */
+    private static final class MarkedFailure extends RuntimeException implements TransientMarker {
+        private MarkedFailure() {
+            super("marked");
+        }
     }
 
     @Test

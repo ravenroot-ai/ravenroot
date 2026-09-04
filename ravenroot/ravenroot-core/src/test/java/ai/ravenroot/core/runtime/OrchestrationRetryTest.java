@@ -672,6 +672,83 @@ class OrchestrationRetryTest {
                 "got: " + retry.authorMessage().value());
     }
 
+    /**
+     * A tool approval suspension is never retried, even when the recorder cannot confirm the wait.
+     *
+     * <h2>Why the unconfirmed case is the one worth pinning</h2>
+     * <p>A <em>confirmed</em> suspension never reaches the retry decision at all: the branch above it
+     * answers first and suspends the traversal, and #58's own suite covers that. What falls through
+     * is a suspension the recorder could not confirm — the approval was resolved concurrently, or the
+     * identity on the durable record does not match this delivery — and the merged behaviour records
+     * that as an ordinary node failure.</p>
+     *
+     * <p>An ordinary node failure is exactly what a retry policy acts on. So a node declaring a
+     * family, {@code retry.retryOn=RuntimeException}, would have this widened to
+     * {@code RETRYABLE_NO_EFFECT} and the tool call would run again — repeating a call whose approval
+     * is in question, and spending a durable attempt with its own effect identity on each pass. The
+     * refusal in {@code retryDecision} is what stops that, and it is the only thing that does.</p>
+     *
+     * <p>The signal's constructor is package-private to the package that mints it, which is right:
+     * only the code that commits the fenced approval batch may claim a durable wait exists.
+     * Reflection here reaches across that boundary in a test rather than widening the production
+     * type for one, and it fails loudly if the shape ever changes.</p>
+     */
+    @Test
+    @DisplayName("an unconfirmed tool approval suspension is not retried, however the node declared")
+    void anApprovalSuspensionIsNeverRetriedEvenWhenItsWaitIsUnconfirmed() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var entries = new AtomicInteger();
+        var behaviors = new BehaviorRegistry().register("work", message -> {
+            entries.incrementAndGet();
+            return CompletableFuture.failedFuture(unconfirmedApprovalSuspension());
+        });
+
+        // The broadest declaration an author can write, and the one the classifier tests encourage.
+        ExecutionKey key = run(retryingGraphRetryingEverything(5), behaviors, store, true);
+
+        assertEquals(1, entries.get(),
+                "a suspended tool call was retried: the call runs again while its approval is still "
+                        + "in question, once per attempt, each with its own effect identity");
+        assertEquals(1, attemptsOfWorkNode(store, key).size(),
+                "and no second durable attempt may be committed for it");
+        assertEquals(0, countOf(ExecutionEventType.NODE_RETRY_SCHEDULED));
+    }
+
+    /**
+     * A suspension carrying an approval id no store knows, so no recorder can confirm its wait.
+     *
+     * <p>Unchecked, because it is called from inside a node behaviour's lambda where a checked
+     * exception has nowhere to go. A failure to construct it is a broken fixture, not a condition
+     * the test is about, so it surfaces immediately rather than being reported as a node failure the
+     * assertions would then misread.</p>
+     */
+    private static Throwable unconfirmedApprovalSuspension() {
+        try {
+            var type = Class.forName(
+                    "ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension");
+            var constructor = type.getDeclaredConstructor(UUID.class);
+            constructor.setAccessible(true);
+            return (Throwable) constructor.newInstance(UUID.randomUUID());
+        } catch (ReflectiveOperationException unavailable) {
+            throw new AssertionError("the approval suspension signal changed shape", unavailable);
+        }
+    }
+
+    /** The retrying graph with an allowlist broad enough to widen anything unclassified. */
+    private static GraphDefinition retryingGraphRetryingEverything(int maxAttempts) {
+        return new GraphDefinition(List.of(
+                GraphNode.start("start"),
+                new GraphNode("work", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "work", Map.of(
+                        NodeRetryProperty.MAX_ATTEMPTS, String.valueOf(maxAttempts),
+                        NodeRetryProperty.INITIAL_BACKOFF, "1",
+                        NodeRetryProperty.BACKOFF_MULTIPLIER, "1.0",
+                        NodeRetryProperty.MAX_BACKOFF, "1",
+                        NodeRetryProperty.RETRY_ON, "RuntimeException")),
+                GraphNode.error("error"), GraphNode.end("end")), List.of(
+                GraphEdge.to("start", "work"),
+                GraphEdge.to("work", "end")));
+    }
+
     // ------------------------------------------------------------------ no policy, no change
 
     @Test

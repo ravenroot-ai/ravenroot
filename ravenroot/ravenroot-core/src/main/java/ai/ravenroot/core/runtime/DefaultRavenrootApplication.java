@@ -120,6 +120,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
     /** Optional durable managed-tool suspension coordinator, absent for compatibility embedders. */
     private final ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
+    private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     /** Optional durable first-class human-task coordinator. */
     private final ai.ravenroot.core.humantask.HumanTaskService humanTasks;
 
@@ -338,7 +339,19 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
                                        ai.ravenroot.core.approval.ToolApprovalService toolApprovals) {
         this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
-                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, null);
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, null, null);
+    }
+
+    /** Terminal composition including finite first-party agent resources. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, null, agentBudgets);
     }
 
     /** Terminal composition including both durable external-decision coordinators. */
@@ -349,10 +362,24 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
                                        ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
                                        ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks, null);
+    }
+
+    /** Terminal composition including durable decisions and finite first-party agent resources. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.graphDefinitionStore = graphDefinitionStore;
         this.toolApprovals = toolApprovals;
         this.humanTasks = humanTasks;
+        this.agentBudgets = agentBudgets;
         this.engine = engine;
         this.monitor = monitor;
         this.behaviors = behaviors;
@@ -1102,6 +1129,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         executionResults.started(resultKey, processInstanceId);
         java.util.concurrent.CompletionStage<GraphExecutionResult> execution;
         AutoCloseable approvalBinding = null;
+        AutoCloseable budgetBinding = null;
         AutoCloseable humanTaskBinding = null;
         try {
             // The definition is made durable BEFORE the acceptance that pins it. The ordering is not
@@ -1122,6 +1150,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             approvalBinding = toolApprovals == null || recorder == null ? null
                     : toolApprovals.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);
+            budgetBinding = agentBudgets == null || recorder == null ? null
+                    : agentBudgets.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
+                            security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);
@@ -1130,45 +1161,73 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             null, null, recorder),
                     "execution result");
             AutoCloseable binding = approvalBinding;
+            AutoCloseable resourceBinding = budgetBinding;
             AutoCloseable taskBinding = humanTaskBinding;
             execution.whenComplete((result, error) -> {
+                Throwable terminalFailure = unwrapFailure(error);
+                RuntimeException cleanupFailure = null;
                 // This is the seam where the result used to be dropped. `result` was already
                 // in scope and simply unused -- the engine had computed the payload, the visited
                 // nodes and the defaulted nodes, and the lambda ignored all three. Capturing it
                 // first, before any teardown, so a cleanup failure below cannot cost the caller the
                 // answer it is about to ask for.
-                if (unwrapFailure(error) instanceof
-                        ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
-                        || unwrapFailure(error) instanceof
-                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
-                    // The durable aggregate is WAITING. It is neither a failed result nor live
-                    // in-memory work; the handler-trigger path creates the fresh traversal.
-                } else if (error != null || result == null) {
-                    executionResults.failed(resultKey, processInstanceId);
-                } else {
-                    executionResults.completed(resultKey, result);
+                try {
+                    if (terminalFailure instanceof
+                            ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
+                            || terminalFailure instanceof
+                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
+                        // The durable aggregate is WAITING. It is neither a failed result nor live
+                        // in-memory work; the handler-trigger path creates the fresh traversal.
+                    } else if (error != null || result == null) {
+                        executionResults.failed(resultKey, processInstanceId);
+                    } else {
+                        executionResults.completed(resultKey, result);
+                    }
+                } catch (RuntimeException resultFailure) {
+                    cleanupFailure = resultFailure;
+                }
+                if (agentBudgets != null && !(terminalFailure instanceof
+                        ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension)
+                        && !(terminalFailure instanceof
+                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension)) {
+                    cleanupFailure = cleanup(cleanupFailure, () -> agentBudgets.finishProcess(
+                            new ai.ravenroot.api.persistence.ExecutionKey(
+                                    security.tenantId(), processInstanceId),
+                            error == null && result != null));
                 }
                 if (recorder != null) {
                     // Orderly shutdown of this traversal's lease: hands the instance back at once
                     // rather than leaving it locked for a whole TTL. Best-effort, because a crash
                     // does neither and must reach the same state by expiry (ADR 0010 section 13.1).
-                    recorder.close();
+                    cleanupFailure = cleanup(cleanupFailure, recorder::close);
                 }
                 closeApprovalBinding(binding);
+                closeApprovalBinding(resourceBinding);
                 closeApprovalBinding(taskBinding);
                 activeExecutions.remove(traversalId, active);
                 // Completion normally runs on the actor dispatcher. Node teardown waits for actor
                 // acknowledgements and must therefore never block that dispatcher.
-                Thread.startVirtualThread(active::close);
+                try {
+                    Thread.startVirtualThread(active::close);
+                } catch (RuntimeException teardownDispatchFailure) {
+                    cleanupFailure = combine(cleanupFailure, teardownDispatchFailure);
+                    cleanupFailure = cleanup(cleanupFailure, active::close);
+                }
+                if (cleanupFailure != null) throw cleanupFailure;
             });
         } catch (RuntimeException | Error startupFailure) {
             closeApprovalBinding(approvalBinding);
+            closeApprovalBinding(budgetBinding);
             closeApprovalBinding(humanTaskBinding);
             activeExecutions.remove(traversalId, active);
             // A submission that never started is recorded FAILED rather than erased. The caller
             // is told the start failed by this throw, but a second caller holding the same id -- a
             // retry, an operator, the UI -- must not be told the id never existed.
-            executionResults.failed(resultKey, processInstanceId);
+            try {
+                executionResults.failed(resultKey, processInstanceId);
+            } catch (RuntimeException cleanupFailure) {
+                startupFailure.addSuppressed(cleanupFailure);
+            }
             try {
                 active.close();
             } catch (RuntimeException | Error cleanupFailure) {
@@ -1186,6 +1245,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (Exception ignored) {
             // Removing an in-memory lookup entry is best effort and holds no durable authority.
         }
+    }
+
+    private static RuntimeException cleanup(RuntimeException first, Runnable action) {
+        try {
+            action.run();
+            return first;
+        } catch (RuntimeException failure) {
+            if (first == null) return failure;
+            if (failure != first) first.addSuppressed(failure);
+            return first;
+        }
+    }
+
+    private static RuntimeException combine(RuntimeException first, RuntimeException next) {
+        if (first == null) return next;
+        if (first != next) first.addSuppressed(next);
+        return first;
     }
 
     private static Throwable unwrapFailure(Throwable failure) {
@@ -1455,7 +1531,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return durablePauses.updateAndGet(existing -> existing != null ? existing
                 : new ai.ravenroot.core.pause.DurableExecutionPauseService(graphDefinitionStore,
                         executionStore, engine, behaviors, monitor, identitySource, workerId,
-                        executionLeaseTtl));
+                        executionLeaseTtl, agentBudgets));
     }
 
     /**
@@ -1777,15 +1853,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes) {
         return deployments.computeIfAbsent(id, key -> {
-            // The definition store is threaded through, but this composition supplies no execution
-            // store, so a hosted traversal here is not durably recorded and is therefore not durably
-            // bound to a definition. That is the pre-existing shape of deployment registration and
-            // this change does not alter it; giving deployments durable execution state is separate
-            // work. Passing the store now is what keeps the two from having to be threaded twice --
-            // see DefaultGraphDeployment's constructor that takes both, which is where the binding
-            // actually happens.
             var created = new DefaultGraphDeployment(key, engine, behaviors, monitor, identitySource, graphMlBytes,
-                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, graphDefinitionStore);
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executionStore,
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, workerId, executionLeaseTtl,
+                    ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
+                            DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                    graphDefinitionStore, agentBudgets);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });

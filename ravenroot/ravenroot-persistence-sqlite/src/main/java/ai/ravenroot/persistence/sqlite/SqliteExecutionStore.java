@@ -7,6 +7,11 @@ import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -171,7 +176,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoreCapability.INVENTORY_RETENTION,
             StoreCapability.TOOL_APPROVALS,
             StoreCapability.HUMAN_TASKS,
-            StoreCapability.EXECUTION_PAUSES);
+            StoreCapability.EXECUTION_PAUSES,
+            StoreCapability.AGENT_AUTHORITY_BUDGETS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -401,6 +407,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // a wait -- and a re-entry -- atomic with the transitions beside it.
         writeHandlers(key, batch, folded, revision);
         writeToolApprovals(key, batch, folded, pin, revision, now);
+        writeAgentAuthorityBudget(key, batch, folded, now);
         writeExecutionPauses(key, batch, folded, pin, revision);
         writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
@@ -425,6 +432,71 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 ProcessInstance state = readAggregate(key, meta);
                 return new StoredProcessInstance(state, meta.revision(), meta.graphVersionPin(),
                         key.tenantId(), meta.updatedAt());
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> readAgentAuthorityBudget(key));
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return async(() -> inReadTransaction(null, this::readAgentAuthorityControl));
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return async(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            return inWriteTransaction(null, () -> {
+                AgentAuthorityControl current = readAgentAuthorityControl();
+                if (current.state() != expectedState || current.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                long nextEpoch;
+                try {
+                    nextEpoch = Math.addExact(expectedEpoch, 1);
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control epoch is exhausted"));
+                }
+                long releasedTeamActive = targetState == AgentAuthorityControlState.KILLED
+                        ? killAgentAuthorityBudgets(expectedEpoch) : 0;
+                AgentAuthorityControl next;
+                try {
+                    next = new AgentAuthorityControl(targetState, nextEpoch, clock.instant(),
+                            Math.addExact(current.teamActiveReleased(), releasedTeamActive));
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority release aggregate is exhausted"));
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "UPDATE agent_authority_control SET state = ?, epoch = ?, "
+                                + "changed_at_epoch_second = ?, changed_at_nano = ?, "
+                                + "team_active_released = ? "
+                                + "WHERE singleton = 1 AND state = ? AND epoch = ?")) {
+                    statement.setString(1, next.state().name());
+                    statement.setLong(2, next.epoch());
+                    statement.setLong(3, next.changedAt().getEpochSecond());
+                    statement.setInt(4, next.changedAt().getNano());
+                    statement.setLong(5, next.teamActiveReleased());
+                    statement.setString(6, expectedState.name());
+                    statement.setLong(7, expectedEpoch);
+                    if (statement.executeUpdate() != 1) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority control expectation is stale"));
+                    }
+                }
+                return next;
             });
         });
     }
@@ -2556,6 +2628,147 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
             }
             updateToolApproval(current.apply(transition, revision));
+        }
+    }
+
+    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT aggregate FROM agent_authority_budget WHERE tenant_id = ? "
+                        + "AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                try {
+                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes(1)));
+                } catch (RuntimeException corrupted) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+            }
+        }
+    }
+
+    private AgentAuthorityControl readAgentAuthorityControl() throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state, epoch, changed_at_epoch_second, changed_at_nano, team_active_released "
+                        + "FROM agent_authority_control WHERE singleton = 1");
+             ResultSet rows = statement.executeQuery()) {
+            if (!rows.next()) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is unavailable"));
+            }
+            try {
+                return new AgentAuthorityControl(AgentAuthorityControlState.valueOf(rows.getString(1)),
+                        rows.getLong(2), Instant.ofEpochSecond(rows.getLong(3), rows.getInt(4)),
+                        rows.getLong(5));
+            } catch (RuntimeException invalid) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is invalid"));
+            }
+        }
+    }
+
+    private long killAgentAuthorityBudgets(long expectedEpoch) throws SQLException {
+        var replacements = new ArrayList<BudgetReplacement>();
+        long releasedTeamActive = 0;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                ExecutionKey key = new ExecutionKey(rows.getString(1), UUID.fromString(rows.getString(2)));
+                DurableAgentAuthorityBudget budget;
+                try {
+                    budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes(3));
+                } catch (RuntimeException invalid) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+                if (budget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                        && budget.controlEpoch() == expectedEpoch) {
+                    DurableAgentAuthorityBudget killed = AgentAuthorityBudgetFold.apply(key, budget,
+                            new AgentBudgetOperation.KillRoot(expectedEpoch), clock.instant());
+                    try {
+                        releasedTeamActive = Math.addExact(releasedTeamActive,
+                                budget.reserved().teamActive() - killed.reserved().teamActive());
+                    } catch (ArithmeticException overflow) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority release aggregate is exhausted"));
+                    }
+                    replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
+                }
+            }
+        }
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE agent_authority_budget SET aggregate = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            for (BudgetReplacement replacement : replacements) {
+                update.setBytes(1, replacement.aggregate());
+                update.setString(2, replacement.key().tenantId());
+                update.setString(3, replacement.key().processInstanceId().toString());
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+        return releasedTeamActive;
+    }
+
+    private record BudgetReplacement(ExecutionKey key, byte[] aggregate) { }
+
+    private void writeAgentAuthorityBudget(ExecutionKey key, ExecutionBatch batch,
+                                           ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.agentBudgetOperations().isEmpty()) return;
+        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(key).orElse(null);
+        AgentAuthorityControl control = readAgentAuthorityControl();
+        for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+            requireAgentAuthorityControl(operation, control);
+            if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                var invocation = folded.traversals().values().stream()
+                        .flatMap(traversal -> traversal.invocations().values().stream())
+                        .filter(candidate -> candidate.invocationId().equals(register.binding().invocationId()))
+                        .findFirst().orElse(null);
+                if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                        || !invocation.parentInvocationIds()
+                                .equals(register.binding().causalParentInvocationIds())) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent grant binding does not name the post-fold invocation"));
+                }
+            }
+            try {
+                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+            } catch (IllegalArgumentException | IllegalStateException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+        }
+        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        if (encoded.length > config.maxPayloadBytes()) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length, config.maxPayloadBytes()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO agent_authority_budget (tenant_id, process_instance_id, aggregate) "
+                        + "VALUES (?, ?, ?) ON CONFLICT(tenant_id, process_instance_id) "
+                        + "DO UPDATE SET aggregate = excluded.aggregate")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setBytes(3, encoded);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void requireAgentAuthorityControl(AgentBudgetOperation operation,
+                                                      AgentAuthorityControl control) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (control.state() != AgentAuthorityControlState.ACTIVE
+                || control.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "agent authority control is not active for this epoch"));
         }
     }
 

@@ -621,7 +621,34 @@ final class SqliteSchema {
                 "CREATE UNIQUE INDEX execution_pause_held_traversal ON execution_pause "
                         + "(tenant_id, traversal_id) WHERE status = 'HELD'",
                 "CREATE INDEX execution_pause_by_traversal ON execution_pause "
-                        + "(tenant_id, traversal_id)")));
+                        + "(tenant_id, traversal_id)")),
+                new SchemaMigration(11, "process-rooted agent authority budgets", List.of(
+                """
+                CREATE TABLE agent_authority_budget (
+                    tenant_id            TEXT NOT NULL,
+                    process_instance_id  TEXT NOT NULL,
+                    aggregate            BLOB NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """)),
+                new SchemaMigration(12, "store-global agent authority control epoch", List.of(
+                """
+                CREATE TABLE agent_authority_control (
+                    singleton             INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    state                 TEXT    NOT NULL CHECK(state IN ('ACTIVE', 'KILLED')),
+                    epoch                 INTEGER NOT NULL CHECK(epoch >= 0),
+                    changed_at_epoch_second INTEGER NOT NULL,
+                    changed_at_nano         INTEGER NOT NULL
+                )
+                """,
+                "INSERT INTO agent_authority_control "
+                        + "(singleton, state, epoch, changed_at_epoch_second, changed_at_nano) "
+                        + "VALUES (1, 'ACTIVE', 0, 0, 0)")),
+                new SchemaMigration(13, "agent authority kill release aggregate", List.of(
+                "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
+                        + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")));
     }
 
     static int currentVersion() {

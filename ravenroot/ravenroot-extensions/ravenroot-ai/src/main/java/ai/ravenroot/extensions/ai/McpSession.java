@@ -254,8 +254,10 @@ final class McpSession {
                 // names only content-type and MCP needs three more.
                 case DESTINATION_FORBIDDEN, RESOLUTION_REFUSED, PROTOCOL_REFUSED, TLS_REFUSED ->
                         McpRefusal.Reason.SERVER_REQUEST_REFUSED;
-                case CREDENTIAL_UNAVAILABLE, ADMISSION_REFUSED, SERVICE_UNAVAILABLE, TRANSPORT_FAILED ->
+                case CREDENTIAL_UNAVAILABLE, ADMISSION_REFUSED, SERVICE_UNAVAILABLE, TRANSPORT_FAILED,
+                        EFFECT_OUTCOME_INDETERMINATE ->
                         McpRefusal.Reason.SERVER_UNREACHABLE;
+                case BUDGET_EXHAUSTED -> McpRefusal.Reason.SERVER_REQUEST_REFUSED;
             });
         }
         return new McpRefusal(McpRefusal.Reason.SERVER_UNREACHABLE);

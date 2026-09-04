@@ -88,7 +88,8 @@ import java.util.function.Consumer;
  * without any additional instrumentation); and a join-wait histogram
  * ({@code ravenroot.join.wait}) for latency-style alerting on fan-in joins specifically.</p>
  */
-final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
+final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
+        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry {
 
     static final String INSTRUMENTATION_NAME = "ai.ravenroot.observability.otel";
 
@@ -158,14 +159,20 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
      */
     static final AttributeKey<String> METRIC_ATTR_RETRY_CLASSIFICATION =
             AttributeKey.stringKey("ravenroot.retry_classification");
+    static final AttributeKey<String> METRIC_ATTR_AGENT_DIMENSION =
+            AttributeKey.stringKey("ravenroot.agent_budget.dimension");
+    static final AttributeKey<String> METRIC_ATTR_AGENT_OUTCOME =
+            AttributeKey.stringKey("ravenroot.agent_budget.outcome");
 
     static final Set<AttributeKey<?>> METRIC_LABEL_ALLOWLIST =
-            Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE, METRIC_ATTR_RETRY_CLASSIFICATION);
+            Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE, METRIC_ATTR_RETRY_CLASSIFICATION,
+                    METRIC_ATTR_AGENT_DIMENSION, METRIC_ATTR_AGENT_OUTCOME);
 
     private final Tracer tracer;
     private final LongCounter eventCounter;
     private final LongCounter orchestrationRetries;
     private final LongCounter connectorRetries;
+    private final LongCounter agentBudget;
     private final DoubleHistogram nodeDuration;
     private final DoubleHistogram executionDuration;
     private final DoubleHistogram joinWait;
@@ -192,6 +199,10 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
                         + "attempt, as reported by the node itself. Never inferred: a node that "
                         + "reports nothing contributes nothing, which is distinct from reporting a "
                         + "single attempt. Bounded: labeled only by ravenroot.node_type.")
+                .build();
+        this.agentBudget = meter.counterBuilder("ravenroot.agent_budget.total")
+                .setDescription("Identifier-free agent authority and budget aggregates. Bounded: "
+                        + "labeled only by fixed dimension and outcome enums.")
                 .build();
         this.nodeDuration = meter.histogramBuilder("ravenroot.node.duration")
                 .setDescription("Node invocation duration, start to terminal outcome (completed or "
@@ -259,6 +270,15 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
             // the span should be marked.
             case JOIN_ITERATION_BACKLOG -> annotateJoin(event, "ravenroot.join.iteration_backlog", StatusCode.UNSET);
         }
+    }
+
+    @Override
+    public void record(ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Dimension dimension,
+                       ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Outcome outcome,
+                       long amount) {
+        if (amount <= 0) return;
+        agentBudget.add(amount, Attributes.of(METRIC_ATTR_AGENT_DIMENSION, dimension.name(),
+                METRIC_ATTR_AGENT_OUTCOME, outcome.name()));
     }
 
     private void startTraversal(ExecutionEvent event) {

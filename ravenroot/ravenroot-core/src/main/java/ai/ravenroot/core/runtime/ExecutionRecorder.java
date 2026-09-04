@@ -2,6 +2,7 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
@@ -222,8 +223,15 @@ public final class ExecutionRecorder implements AutoCloseable {
      * design does not survive losing.</p>
      */
     public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events) {
+        record(transitions, events, List.of());
+    }
+
+    /** Adds durable agent accounting to the same fenced commit as its lifecycle and audit events. */
+    public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+                                    List<AgentBudgetOperation> agentBudgetOperations) {
         requireFence();
-        if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())) {
+        if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
+                && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())) {
             return;
         }
         var batch = ExecutionBatch.to(key)
@@ -247,6 +255,9 @@ public final class ExecutionRecorder implements AutoCloseable {
             // GraphRunner.ExecutionState.
             events.forEach(batch::publish);
         }
+        if (agentBudgetOperations != null) {
+            agentBudgetOperations.forEach(batch::applyAgentBudget);
+        }
         try {
             StoredProcessInstance applied = await(store.apply(batch.build()));
             revision = applied.revision();
@@ -269,6 +280,15 @@ public final class ExecutionRecorder implements AutoCloseable {
                                                      HandlerRegistration handler,
                                                      TimerSchedule timer,
                                                      EventEnvelope event) {
+        suspendForToolApproval(approval, handler, timer, event, null);
+    }
+
+    /** Approval wait plus its optional HELD economic reservation, in one fenced commit. */
+    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+                                                     HandlerRegistration handler,
+                                                     TimerSchedule timer,
+                                                     EventEnvelope event,
+                                                     AgentBudgetOperation budgetOperation) {
         requireFence();
         if (!approval.traversalId().equals(handler.traversalId())
                 || !approval.invocationId().equals(handler.invocationId())
@@ -291,6 +311,7 @@ public final class ExecutionRecorder implements AutoCloseable {
         if (store.supports(StoreCapability.EVENT_JOURNAL)) {
             batch.publish(event);
         }
+        if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();
     }
@@ -424,6 +445,13 @@ public final class ExecutionRecorder implements AutoCloseable {
     /** Commits the exact redeemed effect outcome through this recorder's current claim fence. */
     public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
                                                   EventEnvelope event) {
+        completeToolApproval(approvalId, succeeded, event, null);
+    }
+
+    /** Outcome transition plus optional reservation settlement through the same claim fence. */
+    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+                                                  EventEnvelope event,
+                                                  AgentBudgetOperation budgetOperation) {
         requireFence();
         Objects.requireNonNull(approvalId, "approvalId");
         var transition = succeeded
@@ -437,6 +465,7 @@ public final class ExecutionRecorder implements AutoCloseable {
             if (store.supports(StoreCapability.EVENT_JOURNAL)) {
                 batch.publish(Objects.requireNonNull(event, "event"));
             }
+            if (budgetOperation != null) batch.applyAgentBudget(budgetOperation);
             try {
                 StoredProcessInstance applied = await(store.apply(batch.build()));
                 revision = applied.revision();

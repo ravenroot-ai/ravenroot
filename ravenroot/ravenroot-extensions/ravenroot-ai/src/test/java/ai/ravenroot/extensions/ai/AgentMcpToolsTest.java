@@ -3,6 +3,8 @@ package ai.ravenroot.extensions.ai;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.ToolCallAuthorization;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -21,6 +23,7 @@ import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -160,6 +163,42 @@ class AgentMcpToolsTest {
                 params.entries().get("arguments"));
         assertEquals(Map.of(), arguments.entries());
         assertAuditPair(events, ToolCallAuditEvent.Disposition.SUCCEEDED);
+    }
+
+    @Test
+    @DisplayName("post-effect accounting failure terminates without repeating the provider or tool")
+    void postEffectAccountingFailureCannotLookRetryableToTheAgentLoop() {
+        var completions = new AtomicInteger();
+        var alpha = new McpDouble("alpha", "search").returning("effect-complete");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .authorizing((message, tool, arguments) -> new ToolCallAuthorization() {
+                    private final java.util.UUID callId = java.util.UUID.randomUUID();
+                    @Override public java.util.UUID callId() { return callId; }
+                    @Override public Disposition disposition() { return Disposition.ALLOW; }
+                    @Override public String argumentsDigest() { return "sha256:test"; }
+                    @Override public byte[] canonicalArguments() { return "{}".getBytes(
+                            java.nio.charset.StandardCharsets.UTF_8); }
+                    @Override public void complete(Outcome outcome) {
+                        completions.incrementAndGet();
+                        throw new NodePackageServiceException(
+                                NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE);
+                    }
+                })
+                .chatting(AiTestSupport.asksFor("call-1", "alpha__search"),
+                        AiTestSupport.answers("must-not-run"))
+                .serving(ALPHA, alpha);
+
+        ExecutionException raised = assertThrows(ExecutionException.class,
+                () -> agent(http, "alpha", AiTestSupport.mcpProfile("alpha", ALPHA, "search"))
+                        .handle(AiTestSupport.message("a payload")).toCompletableFuture().get());
+        Throwable cause = raised.getCause();
+        while (cause instanceof CompletionException && cause.getCause() != null) cause = cause.getCause();
+        NodePackageServiceException indeterminate = assertInstanceOf(NodePackageServiceException.class, cause);
+        assertEquals(NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE,
+                indeterminate.reason());
+        assertEquals(List.of("search"), alpha.calledTools());
+        assertEquals(1, http.chatCalls());
+        assertEquals(1, completions.get());
     }
 
     @Test
@@ -386,7 +425,9 @@ class AgentMcpToolsTest {
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(new McpProfile("alpha", java.net.URI.create(ALPHA),
                         java.util.Optional.empty(), 5_000, 1024 * 1024, 1, Set.of("search"))));
+        var resources = new AiTestSupport.TrackingAgentResources();
         var http = new AiTestSupport.RoutedHttp(CHAT)
+                .resources(resources)
                 .chattingForever()
                 .serving(ALPHA, new McpDouble("alpha", "search"));
 
@@ -398,10 +439,14 @@ class AgentMcpToolsTest {
 
         AgentException failure = failureOf(behavior.create(configuration("alpha"), http));
         assertEquals(AgentException.Code.CAPACITY_UNAVAILABLE, failure.code());
+        assertEquals(2, resources.admissions.get());
+        assertEquals(1, resources.cancels.get(),
+                "the run refused after admission must cancel its durable grant");
 
         // And the refusal released the model-profile lease it had already taken before reaching the
         // full server -- the unwind path that only this ordering exercises.
         holding.cancel(true);
+        assertEquals(2, resources.cancels.get());
         assertEquals(0, behavior.mcpAdmissionEntries());
         assertEquals(0, behavior.admissionEntries());
     }
@@ -413,7 +458,8 @@ class AgentMcpToolsTest {
         // has no path that could return one. Adding CREDENTIAL_RESOLUTION here would replace that
         // property with a promise.
         assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP,
-                        NodePackageCapability.TOOL_AUTHORIZATION),
+                        NodePackageCapability.TOOL_AUTHORIZATION,
+                        NodePackageCapability.AGENT_RESOURCES),
                 new AgentNodeBehavior().requiredServices());
         assertTrue(new AgentNodeBehavior().descriptor().properties().stream()
                 .anyMatch(property -> "mcpServers".equals(property.name())));
@@ -529,6 +575,9 @@ class AgentMcpToolsTest {
         var http = new AiTestSupport.RoutedHttp(CHAT)
                 .chattingForeverAndFailingCancellation()
                 .serving(ALPHA, new McpDouble("alpha", "search"));
+        var resources = new AiTestSupport.TrackingAgentResources().failingCancellation(
+                new IllegalStateException("resource cleanup failed"));
+        http.resources(resources);
         var behavior = new AgentNodeBehavior(
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
@@ -543,6 +592,8 @@ class AgentMcpToolsTest {
         // the other holding.
         assertEquals(0, behavior.admissionEntries());
         assertEquals(0, behavior.mcpAdmissionEntries());
+        assertEquals(1, resources.cancels.get(),
+                "a throwing transport cancellation must not skip durable attempt cleanup");
 
         // And a second run is admitted, which is the property an operator actually has: the first
         // assertion says the counter reads zero, this one says the capacity is really back.

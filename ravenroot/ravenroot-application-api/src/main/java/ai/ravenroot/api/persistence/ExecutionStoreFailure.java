@@ -450,6 +450,17 @@ public sealed interface ExecutionStoreFailure {
         }
     }
 
+    /** A tool-approval transition conflicts with the first durable lifecycle winner. */
+    record ToolApprovalNotResolvable(UUID approvalId, ToolApprovalStatus current,
+                                     ToolApprovalStatus requested) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "tool approval " + approvalId + " is " + current
+                    + " and cannot transition to " + requested;
+        }
+    }
+
 /**
  * Convenience for adapters that reject a batch before any key context exists.
  * @param reason machine-readable reason for the store failure.

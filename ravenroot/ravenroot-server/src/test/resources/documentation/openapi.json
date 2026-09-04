@@ -552,6 +552,29 @@
         }
       }
     },
+    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}": {
+      "post": {
+        "summary": "Approves, denies, or cancels one exact durable tool call. The authenticated tenant and qualified approver identity are authoritative; unknown and cross-tenant approvals are indistinguishable, and the response never contains arguments or continuation state.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "approvalId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "decision", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/executions/{id}/traversals": {
       "get": {
         "summary": "Lists one durable process instance's traversals from the inventory (#154), alongside this tenant's inventory retention floor as retainedFrom -- the same field GET /v1/executions/inventory carries, present here too so an operator diagnosing an absence has it on whichever of the two listings they are holding. Unlike every other /v1/executions sub-route, {id} here is a processInstanceId, not the executionId/traversalId GET /v1/executions/{id} and the cancel/pause/resume trio use -- a process instance can contain more than one traversal, so a traversal id could not address this route's question. 404 when the instance is absent, belongs to another tenant, or was purged past its terminal retention window -- all three indistinguishable by design, exactly like GET /v1/executions/{id}'s own 404. 501 when this deployment has no inventory-capable execution store composed.",

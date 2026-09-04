@@ -538,12 +538,11 @@ class OrchestrationRetryTest {
                                 + "sweep reads SCHEDULED as 'provably never started' and runs it "
                                 + "a second time");
                 assertEquals(0, runner.admissionGateCount(),
-                        "the refused retry left an admission gate behind. release() drops this "
-                                + "traversal's gates and then releases the pause gate ON_CALLER, so "
-                                + "the parked retry runs on that same thread and asks for admission "
-                                + "after its gates are gone -- creating a fresh one that nothing "
-                                + "removes until the runner closes. One entry per retrying node per "
-                                + "traversal, on a server whose runners outlive their traversals");
+                        "a traversal that has ended must leave no admission gate behind. This is the "
+                                + "end-to-end statement of the property; which of the two layered "
+                                + "refusals produces it depends on the order of two lines in "
+                                + "release(), so the mechanism itself is pinned by "
+                                + "TraversalAdmissionRegistryTest rather than here");
             }
         }
     }

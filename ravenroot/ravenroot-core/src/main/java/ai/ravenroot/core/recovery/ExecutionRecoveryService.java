@@ -32,11 +32,11 @@ import java.util.concurrent.CompletionStage;
  * {@code claimPendingWork}, {@code claimDueTimers} and {@code ack}.
  *
  * <h2>What recovery means here</h2>
- * <p>Making outstanding items <em>dispatchable</em> with correct lease, fencing and idempotency
- * semantics — not resuming execution. Resuming would require re-parsing the graph, and the graph
- * bytes are stored nowhere; only a hash is pinned, and no definition store exists. Parked and
- * recovered state is meaningful and human-decidable without the definition, which is why this is a
- * complete unit of work even without a definition store.</p>
+ * <p>Generic attempt recovery makes outstanding items <em>dispatchable</em> with correct lease,
+ * fencing and idempotency semantics; it does not reconstruct arbitrary graph execution. Reserved
+ * handler triggers may instead carry a bounded, versioned continuation that a trusted
+ * {@link RecoveryDispatcher} understands. Unsupported continuations remain claimable and
+ * unacknowledged, so recovery fails closed without losing the durable wait.</p>
  *
  * <h2>The one rule the whole thing rests on</h2>
  * <p><strong>The {@code RUNNING} transition is committed under the fence before the engine send.</strong>
@@ -93,11 +93,42 @@ public final class ExecutionRecoveryService {
     public List<RecoveryOutcome> sweepOnce() {
         var outcomes = new ArrayList<RecoveryOutcome>();
         for (String tenantId : tenantIds) {
-            for (PendingWork item : await(store.claimPendingWork(tenantId, workerId, batchLimit, leaseTtl))) {
-                outcomes.add(recover(item));
-            }
+            outcomes.addAll(sweepOnce(tenantId));
         }
         return List.copyOf(outcomes);
+    }
+
+    /** Runs the same bounded sweep for one configured tenant, used by authenticated decision routes. */
+    public List<RecoveryOutcome> sweepOnce(String tenantId) {
+        if (!tenantIds.contains(Objects.requireNonNull(tenantId, "tenantId"))) return List.of();
+        var outcomes = new ArrayList<RecoveryOutcome>();
+        for (PendingWork.TimerDue timer : await(store.claimDueTimers(
+                tenantId, workerId, batchLimit, leaseTtl))) {
+            outcomes.add(dispatchTimer(timer));
+        }
+        for (PendingWork item : await(store.claimPendingWork(
+                tenantId, workerId, batchLimit, leaseTtl))) {
+            outcomes.add(recover(item));
+        }
+        return List.copyOf(outcomes);
+    }
+
+    /** Drives only timers a trusted dispatcher explicitly recognises, then acknowledges their fence. */
+    private RecoveryOutcome dispatchTimer(PendingWork.TimerDue timer) {
+        if (!dispatcher.canDispatch(timer)) {
+            return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
+                    "no timer dispatcher available");
+        }
+        try {
+            dispatcher.dispatch(timer, timer.workItemId().toString());
+            acknowledge(timer);
+            afterAcknowledged(timer);
+            return new RecoveryOutcome.HandlerDispatched(timer.key(), timer.workItemId(),
+                    timer.traversalId());
+        } catch (RuntimeException unavailable) {
+            return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
+                    "timer dispatch unavailable");
+        }
     }
 
     /**
@@ -164,9 +195,12 @@ public final class ExecutionRecoveryService {
     }
 
     private RecoveryOutcome recover(PendingWork item) {
+        if (item instanceof PendingWork.HandlerTrigger trigger) {
+            return dispatchHandler(trigger);
+        }
         if (!(item instanceof PendingWork.AttemptDispatch attemptItem)) {
-            // Timers and handler triggers carry no ambiguity of their own: they are signals to a
-            // waiting invocation, not effects that may already have happened. They are left
+            // Timers carry no ambiguity of their own: they are signals to a waiting invocation,
+            // not effects that may already have happened. They are left
             // unacknowledged so nothing is lost, because a lost timer is worse than a duplicate one.
             return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
                     "no dispatcher for " + item.getClass().getSimpleName());
@@ -193,6 +227,23 @@ public final class ExecutionRecoveryService {
             case WAITING -> acknowledgeStale(attemptItem, "waiting on a timer or trigger");
             case COMPLETED, FAILED -> acknowledgeStale(attemptItem, "already terminal");
         };
+    }
+
+    private RecoveryOutcome dispatchHandler(PendingWork.HandlerTrigger trigger) {
+        if (!dispatcher.canDispatch(trigger)) {
+            return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                    "no handler re-entry dispatcher available");
+        }
+        try {
+            dispatcher.dispatch(trigger, trigger.workItemId().toString());
+            acknowledge(trigger);
+            afterAcknowledged(trigger);
+            return new RecoveryOutcome.HandlerDispatched(trigger.key(), trigger.workItemId(),
+                    trigger.traversalId());
+        } catch (RuntimeException unavailable) {
+            return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                    "handler re-entry dispatch unavailable");
+        }
     }
 
     /**
@@ -284,6 +335,15 @@ public final class ExecutionRecoveryService {
         } catch (ExecutionStoreException alreadyGone) {
             // An item another worker acknowledged first, or one whose instance vanished. Both mean
             // the acknowledgement's purpose is already served.
+        }
+    }
+
+    private void afterAcknowledged(PendingWork item) {
+        try {
+            dispatcher.afterAcknowledged(item);
+        } catch (RuntimeException cleanupFailure) {
+            // A dispatcher cleanup cannot undo the durable acknowledgement. Any retained lease is
+            // bounded by its TTL, so keep the successful recovery outcome truthful.
         }
     }
 

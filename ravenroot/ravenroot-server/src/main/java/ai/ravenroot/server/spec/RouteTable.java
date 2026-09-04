@@ -485,6 +485,15 @@ public final class RouteTable {
                             + "silently successful.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
+                    "Approves, denies, or cancels one exact durable tool call. The authenticated "
+                            + "tenant and qualified approver identity are authoritative; unknown and "
+                            + "cross-tenant approvals are indistinguishable, and the response never "
+                            + "contains arguments or continuation state.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "

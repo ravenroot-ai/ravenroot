@@ -1,6 +1,7 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.persistence.EventEnvelope;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -11,10 +12,21 @@ import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.application.NodeAttemptStatus;
+import ai.ravenroot.api.application.NodeInvocationStatus;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.execution.NodeMessage;
 
 import java.time.Duration;
 import java.util.List;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Executors;
@@ -142,6 +154,29 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /**
+     * Adopts the instance lease already acquired by a pending-work claim.
+     * The raw claim projection is the authority; this method never issues a second claim that could
+     * advance the fence between approval redemption and its effect.
+     */
+    public static ExecutionRecorder resumeClaimed(ExecutionStore store,
+                                                   ai.ravenroot.api.persistence.PendingWork claimed,
+                                                   String workerId, Duration leaseTtl, long revision) {
+        Objects.requireNonNull(claimed, "claimed");
+        Objects.requireNonNull(workerId, "workerId");
+        var lease = new LeaseHandle(claimed.key(), workerId, claimed.fencingToken(),
+                claimed.leaseExpiresAt().minus(leaseTtl), claimed.leaseExpiresAt());
+        var renewals = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            var thread = new Thread(runnable,
+                    "ravenroot-reentry-lease-" + claimed.key().processInstanceId());
+            thread.setDaemon(true);
+            return thread;
+        });
+        var recorder = new ExecutionRecorder(store, claimed.key(), leaseTtl, lease, revision, renewals);
+        recorder.startRenewing();
+        return recorder;
+    }
+
+    /**
      * Renewal runs on a period well inside the TTL, because its purpose is to keep <em>healthy</em>
      * long-running work out of the recovery sweep's hands. Without it a node that legitimately runs
      * longer than one TTL would have its instance become claimable while it is still executing, and
@@ -222,6 +257,104 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
     }
 
+    /**
+     * Commits one managed tool suspension through this recorder's live fence.
+     *
+     * <p>The approval, handler, timer, journal row, and three WAITING transitions are one batch.
+     * No independent writer can race the runner's revision between the node dispatch and this wait.</p>
+     */
+    public synchronized void suspendForToolApproval(ToolApprovalRegistration approval,
+                                                     HandlerRegistration handler,
+                                                     TimerSchedule timer,
+                                                     EventEnvelope event) {
+        requireFence();
+        if (!approval.traversalId().equals(handler.traversalId())
+                || !approval.invocationId().equals(handler.invocationId())
+                || !approval.approvalId().equals(handler.handlerId())) {
+            throw new IllegalArgumentException("approval and handler scope do not match");
+        }
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease)
+                .apply(new ExecutionTransition.AttemptTransitioned(approval.traversalId(),
+                        approval.invocationId(), approval.attemptId(), NodeAttemptStatus.WAITING))
+                .apply(new ExecutionTransition.InvocationTransitioned(approval.traversalId(),
+                        approval.invocationId(), NodeInvocationStatus.WAITING))
+                .apply(new ExecutionTransition.TraversalTransitioned(approval.traversalId(),
+                        TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .registerToolApproval(approval)
+                .registerHandler(handler)
+                .scheduleTimer(timer);
+        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+            batch.publish(event);
+        }
+        StoredProcessInstance applied = await(store.apply(batch.build()));
+        revision = applied.revision();
+    }
+
+    /** Commits the exact redeemed effect outcome through this recorder's current claim fence. */
+    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+                                                  EventEnvelope event) {
+        requireFence();
+        Objects.requireNonNull(approvalId, "approvalId");
+        var transition = succeeded
+                ? new ai.ravenroot.api.persistence.ToolApprovalTransition.Succeeded(approvalId)
+                : new ai.ravenroot.api.persistence.ToolApprovalTransition.Failed(approvalId);
+        for (int writeAttempt = 1; writeAttempt <= 3; writeAttempt++) {
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease)
+                    .applyToolApproval(transition);
+            if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+                batch.publish(Objects.requireNonNull(event, "event"));
+            }
+            try {
+                StoredProcessInstance applied = await(store.apply(batch.build()));
+                revision = applied.revision();
+                return;
+            } catch (ExecutionStoreException failed) {
+                if (failed.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
+                        && writeAttempt < 3) {
+                    revision = await(store.load(key)).revision();
+                    continue;
+                }
+                if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                        || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                    loseFence(failed.failure());
+                }
+                throw failed;
+            }
+        }
+    }
+
+    /** Confirms that a core signal names the exact invocation this recorder durably suspended. */
+    public synchronized boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
+        if (!key.tenantId().equals(message.security().tenantId())
+                || !key.processInstanceId().equals(message.processInstanceId())) {
+            return false;
+        }
+        DurableToolApproval approval = await(store.loadToolApproval(key, approvalId)).orElse(null);
+        if (approval == null || approval.status() != ToolApprovalStatus.PENDING) return false;
+        ToolApprovalRegistration request = approval.request();
+        return request.traversalId().equals(message.traversalId())
+                && request.invocationId().equals(message.invocationId())
+                && request.attemptId().equals(message.attemptId())
+                && request.nodeId().equals(message.nodeId())
+                && request.requester().equals(message.security());
+    }
+
+    /** Immutable graph pin this fenced recorder is writing under. */
+    public synchronized GraphVersionPin graphVersionPin() {
+        return await(store.load(key)).graphVersionPin();
+    }
+
+    /** Current fenced aggregate snapshot used to seed a trusted re-entry runner. */
+    public synchronized ai.ravenroot.api.application.ProcessInstance storedState() {
+        requireFence();
+        return await(store.load(key)).state();
+    }
+
     private void loseFence(ExecutionStoreFailure because) {
         fenceLost = true;
         fenceLostBecause = because;
@@ -296,6 +429,12 @@ public final class ExecutionRecorder implements AutoCloseable {
         } catch (RuntimeException expiryWillHandleIt) {
             // A failed release is the crash path, which the store already handles by expiry.
         }
+    }
+
+    /** Stops local renewal while retaining the claim for the caller's subsequent acknowledgement. */
+    public void detachForAcknowledgement() {
+        if (renewalTask != null) renewalTask.cancel(false);
+        renewals.shutdownNow();
     }
 
     private static <T> T await(CompletionStage<T> stage) {

@@ -34,6 +34,9 @@ import ai.ravenroot.api.execution.ConnectorRetryReport;
 import ai.ravenroot.api.execution.RavenNode;
 import ai.ravenroot.api.execution.RetryDecision;
 import ai.ravenroot.api.execution.RetryPolicy;
+import ai.ravenroot.api.node.ToolCallContinuationAction;
+import ai.ravenroot.api.node.ToolCallContinuationInput;
+import ai.ravenroot.api.node.ToolCallContinuationResult;
 import ai.ravenroot.api.persistence.JoinStore;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphCanonicalForm;
@@ -45,6 +48,7 @@ import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.persistence.InMemoryJoinStore;
+import ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -814,8 +818,14 @@ public final class GraphRunner implements AutoCloseable {
                 // branch is reported as that branch's join failure rather than as a success with no
                 // result and an end node that never ran.
                 .thenCompose(error -> {
-                    // The outcome is decided here, and everything below is teardown. Both lines run
-                    // BEFORE that teardown, and the ordering is load-bearing on both counts.
+                    // This run of the traversal is over here, and everything below is teardown.
+                    // "Over" and "decided" are not the same thing any more: a durable tool approval
+                    // suspension reaches this stage having settled nothing, and is re-entered later
+                    // through executeFrom on a fresh ExecutionState. Both lines run on that path too
+                    // and must: the branches of THIS run are not resumed, so a sibling asleep in a
+                    // backoff would otherwise wake into a state object nobody reads any more, behind
+                    // a recorder its caller has closed. Both lines run BEFORE the teardown, and the
+                    // ordering is load-bearing on both counts.
                     //
                     // Sealing first, because `release` frees this traversal's pause gate on its way
                     // past -- and a retry parked on that gate would otherwise be handed a thread
@@ -837,6 +847,9 @@ public final class GraphRunner implements AutoCloseable {
                 })
                 .thenCompose(error -> {
                     Throwable outcome = error;
+                    if (unwrap(outcome) instanceof VerifiedToolApprovalSuspension verified) {
+                        return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
+                    }
                     if (outcome == null) {
                         try {
                             state.executionCompleted();
@@ -869,17 +882,123 @@ public final class GraphRunner implements AutoCloseable {
                 });
     }
 
+    /**
+     * Continues from the exact node named by a stored approval on its already-created re-entry
+     * traversal. The package action receives a fresh invocation identity and core owns all routing.
+     */
+    public CompletionStage<Boolean> executeFrom(SecurityContext security, UUID processInstanceId,
+                                                UUID traversalId, String nodeId, String graphVersion,
+                                                ExecutionRecorder recorder,
+                                                java.util.function.Function<NodeMessage,
+                                                        ToolCallContinuationInput> inputFactory,
+                                                java.util.function.Consumer<Boolean> effectCompletion,
+                                                ToolCallContinuationAction action) {
+        java.util.Objects.requireNonNull(action, "action");
+        java.util.Objects.requireNonNull(effectCompletion, "effectCompletion");
+        GraphNode node = graph.node(nodeId);
+        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
+                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var state = new ExecutionState(processInstanceId, traversalId, node.id(),
+                new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
+                recorder.storedState());
+        var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
+                joinSpecs, clock, timeoutRelinquishedObserver);
+        if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Traversal is already running on this runner"));
+        }
+        state.reentryStarted();
+        monitor.executionStarted(identity);
+        UUID invocationId = identitySource.nextNodeInvocationId();
+        UUID attemptId = identitySource.nextNodeAttemptId();
+        UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
+                NodeCommand.PROCESS, state.traversalAcceptedEventId());
+        NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
+                invocationId, attemptId, Set.of(), node.id(), null, Map.of(), NodeCommand.PROCESS);
+        CompletionStage<ToolCallContinuationResult> resumed;
+        try {
+            resumed = java.util.Objects.requireNonNull(action.resume(inputFactory.apply(delivered)),
+                    "continuation result stage");
+        } catch (RuntimeException failure) {
+            resumed = CompletableFuture.failedFuture(failure);
+        }
+        return resumed.handle((continued, failure) -> {
+                    if (failure != null) {
+                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        throw new CompletionException(unwrap(failure));
+                    }
+                    effectCompletion.accept(continued.effectSucceeded());
+                    return continued;
+                })
+                .thenCompose(continued -> continued.nodeResult().handle((rawResult, failure) -> {
+                    if (failure != null) {
+                        Throwable cause = unwrap(failure);
+                        if (cause instanceof DurableToolApprovalSuspension suspension
+                                && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
+                            throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
+                        }
+                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        throw new CompletionException(cause);
+                    }
+                    UUID completedEventId = state.nodeCompleted(
+                            invocationId, attemptId, startedEventId, false, false);
+                    NodeResult result = markSyntheticProvenance(node, delivered, rawResult);
+                    List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
+                    if (next.isEmpty() && !"continue".equals(result.outcome())) {
+                        next = graph.nextEdges(node.id(), "continue");
+                    }
+                    return dispatchSuccessors(next, node, result, delivered, completedEventId,
+                            state, identity, coordinator, IterationContext.EMPTY);
+                }).thenCompose(next -> next.thenApply(ignored -> continued.effectSucceeded())))
+                .handle((succeeded, failure) -> {
+                    Throwable outcome = unwrap(failure);
+                    // The same two lines execute() runs when its outcome is decided, and for the same
+                    // reason: this re-entry dispatches successors, those successors retry, and
+                    // dispatchSuccessors abandons a branch's siblings on the first failure -- so a
+                    // sibling can be asleep in a backoff when this method settles.
+                    //
+                    // Sealing before release() rather than relying on the terminal transitions above
+                    // is what the suspension path needs. It writes neither terminal transition by
+                    // design, so `terminal` stays false; release() then frees the pause gate on the
+                    // caller's thread, and a retry parked there would find every guard open and
+                    // dispatch a node into a traversal that has suspended awaiting a human. Its
+                    // ExecutionState is discarded at that point and the resume builds a new one, so
+                    // nothing it wrote would ever be read.
+                    state.beginClosing();
+                    cancelBackoffs(traversalId);
+                    try {
+                        if (failure == null) state.executionCompleted();
+                        else if (!(outcome instanceof VerifiedToolApprovalSuspension)) state.executionFailed();
+                    } finally {
+                        release(traversalId, coordinator).toCompletableFuture().join();
+                    }
+                    if (outcome instanceof VerifiedToolApprovalSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
+                    if (failure != null) throw new CompletionException(outcome);
+                    return succeeded;
+                });
+    }
+
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {
         coordinators.remove(traversalId, coordinator);
         cancelledTraversals.remove(traversalId);
-        traversalAdmission.release(traversalId);
         // ON_CALLER: this runs on the traversal's own completion path, not on anyone's request
         // thread. A gate found here USED TO have no hop waiting on it -- the traversal had reached
         // its end, so nothing was parked before its next hop. A retry breaks that: it parks on this
         // gate after its backoff, so releasing here can hand a thread to work the traversal no
         // longer wants. That is why the caller seals the traversal before reaching this line; the
         // released retry then finds its RUNNING commit refused and stops, instead of dispatching.
+        //
+        // Released BEFORE admission is torn down, and the order is deliberate. A hop parked here
+        // still needs the resources the next line destroys, and releasing it afterwards meant its
+        // refusal came from an admission registry that had already been dismantled -- correct by
+        // coincidence of teardown order rather than by anything anyone decided about the traversal.
+        // This way the seal above is what stops it, which is the refusal that means something, and
+        // reacquire's gate-absence check stays what it is meant to be: the backstop for a retry that
+        // reaches admission after this method has returned, on its own thread.
         releasePauseGate(traversalId, GateRelease.ON_CALLER);
+        traversalAdmission.release(traversalId);
         CompletionStage<Void> joins = coordinator.terminate().exceptionally(ignored -> null);
         CompletionStage<Void> actors = releaseTraversalInstances(traversalId);
         return CompletableFuture.allOf(joins.toCompletableFuture(), actors.toCompletableFuture());
@@ -1437,6 +1556,27 @@ public final class GraphRunner implements AutoCloseable {
                         workers.release(instance);
                     }
                     if (error != null) {
+                        // A durable tool approval suspension is NOT a failure, and it is answered
+                        // before anything else looks at this throwable. It means "this node is
+                        // waiting for a human to approve a tool call", and the recorder has just
+                        // confirmed that wait is durably recorded -- so the traversal suspends and is
+                        // later re-entered through executeFrom.
+                        //
+                        // The order between this and the retry decision below is load-bearing, and
+                        // reversing it is the mistake this comment exists to prevent. A suspension
+                        // states nothing about itself, so a node whose author wrote a family-level
+                        // retry.retryOn -- retry.retryOn=RuntimeException, which the retry tests
+                        // encourage -- would have it widened to RETRYABLE_NO_EFFECT and RETRIED: the
+                        // tool call would run again, raise the same suspension, and burn an attempt
+                        // per approval, each one a fresh durable attempt with its own effect
+                        // identity. retryDecision refuses this type outright as a second line, but
+                        // this ordering is the first and neither is redundant: only this branch knows
+                        // the wait was confirmed, and only it can suspend rather than fail.
+                        Throwable failure = unwrap(error);
+                        if (failure instanceof DurableToolApprovalSuspension suspension
+                                && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
+                            throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
+                        }
                         // What the connector said about its own internal loop, read once and reported
                         // on whichever settlement this failure produces. Never inferred: a connector
                         // that implements nothing reports NOT_REPORTED, which is silence rather than
@@ -1690,10 +1830,37 @@ public final class GraphRunner implements AutoCloseable {
     private RetryDecision.Retry retryDecision(NodeRuntimeDefinition definition, int attemptOrdinal,
                                               Throwable error) {
         RetryPolicy policy = definition.retryPolicy();
-        if (!policy.enabled()) {
+        if (!policy.enabled() || isApprovalSuspension(error)) {
             return null;
         }
         return policy.decide(attemptOrdinal, error) instanceof RetryDecision.Retry retry ? retry : null;
+    }
+
+    /**
+     * Whether this throwable is a node asking to suspend for a tool approval rather than failing.
+     *
+     * <h4>Why a suspension is refused here and not classified in the policy</h4>
+     * <p>{@code RetryClassifier} lives in the API module and cannot name
+     * {@link DurableToolApprovalSuspension}, which is core's; and even if it could, the fail-closed
+     * default is not enough on its own. A suspension states nothing about itself, so a node whose
+     * author declared a family — {@code retry.retryOn=RuntimeException} — would have it widened to
+     * {@code RETRYABLE_NO_EFFECT} and retried. That would re-run the tool call, raise the same
+     * suspension again, and spend one durable attempt per approval, each with its own effect
+     * identity. So the refusal belongs where the type is visible, which is here.</p>
+     *
+     * <p>This catches the <em>unconfirmed</em> case specifically. A confirmed suspension never
+     * reaches this method: the branch above answers it first and suspends the traversal. What reaches
+     * here is a suspension the recorder could not confirm — the node asked to wait and nothing
+     * durable backs the wait — which the merged behaviour records as an ordinary node failure.
+     * Refusing to retry it keeps that outcome exactly as {@code #58} defined it for a node with no
+     * retry policy, instead of letting a policy quietly change what an unbacked suspension does.</p>
+     *
+     * @param error the throwable this attempt produced, wrapped or not
+     * @return whether it is an approval suspension, which is never a retryable failure
+     */
+    private static boolean isApprovalSuspension(Throwable error) {
+        return ai.ravenroot.api.execution.RetryClassifier.unwrap(error)
+                instanceof DurableToolApprovalSuspension;
     }
 
     /**
@@ -2188,6 +2355,21 @@ public final class GraphRunner implements AutoCloseable {
 
     private static Throwable unwrap(Throwable error) {
         return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    /** Marker created only after the recorder confirms the core-minted signal's durable wait. */
+    private static final class VerifiedToolApprovalSuspension extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private final DurableToolApprovalSuspension signal;
+
+        private VerifiedToolApprovalSuspension(DurableToolApprovalSuspension signal) {
+            super(null, null, false, false);
+            this.signal = signal;
+        }
+
+        private DurableToolApprovalSuspension signal() {
+            return signal;
+        }
     }
 
     /**
@@ -3482,8 +3664,40 @@ public final class GraphRunner implements AutoCloseable {
                     .transitionTraversal(traversalId, TraversalStatus.RUNNING);
         }
 
+        private ExecutionState(UUID processInstanceId, UUID traversalId, String ingressNodeId,
+                               BranchLiveness liveness, ExecutionRecorder recorder,
+                               ExecutionMonitor.ExecutionIdentity identity,
+                               ExecutionIdentitySource identitySource, Clock clock,
+                               ProcessInstance storedLifecycle) {
+            this.traversalId = traversalId;
+            this.recorder = recorder;
+            this.liveness = liveness;
+            this.identity = identity;
+            this.identitySource = identitySource;
+            this.clock = clock;
+            this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
+            this.lifecycle = java.util.Objects.requireNonNull(storedLifecycle, "storedLifecycle");
+            if (!lifecycle.processInstanceId().equals(processInstanceId)
+                    || !lifecycle.traversals().containsKey(traversalId)
+                    || !lifecycle.traversals().get(traversalId).ingressNodeId().equals(ingressNodeId)) {
+                throw new IllegalArgumentException("stored re-entry traversal scope mismatch");
+            }
+        }
+
+        private synchronized void reentryStarted() {
+            var transition = new ExecutionTransition.TraversalTransitioned(
+                    traversalId, TraversalStatus.RUNNING);
+            record(List.of(transition), List.of());
+            lifecycle = fold(lifecycle, List.of(transition));
+        }
+
         private UUID traversalAcceptedEventId() {
             return traversalAcceptedEventId;
+        }
+
+        /** Accepts a suspension only when this exact delivered invocation is durably waiting. */
+        private boolean acceptsApprovalSuspension(UUID approvalId, NodeMessage delivered) {
+            return recorder != null && recorder.confirmsToolApproval(approvalId, delivered);
         }
 
         /**
@@ -3562,8 +3776,11 @@ public final class GraphRunner implements AutoCloseable {
          * that was already over — its result unrecordable, its effect real.</p>
          *
          * <p>So the two flags answer two different questions and both are needed. {@code terminal}
-         * is "this traversal's end is written"; this is "this traversal has stopped accepting new
-         * work".</p>
+         * is "this traversal's end is written"; this is "this run of the traversal has stopped
+         * accepting new work". A durable tool approval suspension is where the two visibly come
+         * apart: it writes neither terminal transition, because the traversal is waiting for a human
+         * and will be re-entered, so {@code terminal} stays false while this is set — and it must be
+         * set, because the branches of the suspended run are not the ones the re-entry resumes.</p>
          *
          * <h4>Only the retry paths read it, and the reason is not that nothing else is in flight</h4>
          * <p>An earlier version of this note claimed that a traversal whose outcome is decided has no

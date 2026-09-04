@@ -41,6 +41,26 @@ public interface ToolCallAuthorization {
     byte[] canonicalArguments();
 
     /**
+     * Persists a versioned continuation for a call that requires approval and returns the typed
+     * signal the node must propagate to the runtime.
+     *
+     * <p>This method is additive so older service implementations remain binary-compatible. Its
+     * default refuses without manufacturing a suspension: only a trusted managed service that has
+     * durably recorded the exact call may return its core-owned suspension signal.</p>
+     *
+     * @param continuationVersion positive decoder version owned by the node package
+     * @param continuation bounded opaque checkpoint needed to resume after restart
+     * @return an exception to propagate; a durable implementation returns a suspension signal
+     */
+    default RuntimeException suspend(int continuationVersion, byte[] continuation) {
+        if (continuationVersion < 1) {
+            throw new IllegalArgumentException("continuationVersion must be positive");
+        }
+        Objects.requireNonNull(continuation, "continuation");
+        return new NodePackageServiceException(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+    }
+
+    /**
      * Records the terminal result of an allowed effect.
      * @param outcome sanitized effect outcome
      */

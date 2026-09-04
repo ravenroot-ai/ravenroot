@@ -266,6 +266,15 @@ public final class NodePackages {
             };
         }
 
+        @Override
+        public java.util.Optional<ai.ravenroot.api.node.ToolCallContinuationAction>
+                createToolCallContinuation(GraphNode node) {
+            if (!serviceAware) return java.util.Optional.empty();
+            NodeConfiguration configuration = new NodeConfiguration(
+                    node.id(), node.behavior(), node.properties());
+            return behavior.createToolCallContinuation(configuration, services);
+        }
+
         InboundSource createSource(GraphNode node, InboundSourceContext context) {
             if (!(behavior instanceof InboundSourceCapable capable)) {
                 throw new IllegalStateException("Behavior '" + node.behavior()

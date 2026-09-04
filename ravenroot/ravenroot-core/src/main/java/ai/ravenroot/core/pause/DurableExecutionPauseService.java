@@ -217,18 +217,25 @@ public final class DurableExecutionPauseService {
             recorder = ExecutionRecorder.open(executions, pause.key(), workerId, leaseTtl,
                     executions.load(pause.key()).toCompletableFuture().join().revision());
         } catch (RuntimeException unavailable) {
-            manager.close();
+            unavailable = cleanup(unavailable, manager::close);
             throw unavailable;
         }
-        var runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+        GraphRunner runner;
+        try {
+            runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
+                    GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+        } catch (RuntimeException setupFailure) {
+            setupFailure = cleanup(setupFailure, recorder::close);
+            setupFailure = cleanup(setupFailure, manager::close);
+            throw setupFailure;
+        }
         AutoCloseable budgetBinding;
         try {
             budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(pause.key(), recorder);
         } catch (RuntimeException unavailable) {
-            runner.close();
-            recorder.close();
-            manager.close();
+            unavailable = cleanup(unavailable, runner::close);
+            unavailable = cleanup(unavailable, recorder::close);
+            unavailable = cleanup(unavailable, manager::close);
             throw unavailable;
         }
         try {
@@ -236,41 +243,44 @@ public final class DurableExecutionPauseService {
                     new ExecutionPauseTransition.Resumed(request.pauseId(), actor), traversalId,
                     TraversalStatus.RUNNING, ProcessInstanceStatus.RUNNING);
         } catch (RuntimeException notSettled) {
-            runner.close();
-            close(budgetBinding);
-            recorder.close();
-            manager.close();
+            notSettled = cleanup(notSettled, runner::close);
+            notSettled = cleanup(notSettled, () -> close(budgetBinding));
+            notSettled = cleanup(notSettled, recorder::close);
+            notSettled = cleanup(notSettled, manager::close);
             throw notSettled;
         }
-        CompletionStage<Void> result = runner.executeFromPause(request.requester(),
-                pause.key().processInstanceId(), traversalId, request.nodeId(),
-                request.graphVersionPin().reference(), recorder, request.afterInvocationId(),
-                continuation.payloadValue(), continuation.attributeValues(), commandOf(request));
+        CompletionStage<Void> result;
+        try {
+            result = runner.executeFromPause(request.requester(),
+                    pause.key().processInstanceId(), traversalId, request.nodeId(),
+                    request.graphVersionPin().reference(), recorder, request.afterInvocationId(),
+                    continuation.payloadValue(), continuation.attributeValues(), commandOf(request));
+        } catch (RuntimeException setupFailure) {
+            setupFailure = cleanup(setupFailure, runner::close);
+            setupFailure = cleanup(setupFailure, () -> close(budgetBinding));
+            setupFailure = cleanup(setupFailure, recorder::close);
+            setupFailure = cleanup(setupFailure, manager::close);
+            throw setupFailure;
+        }
         // Pekko may complete on the node's own actor-dispatcher thread, and runner shutdown waits for
         // that node, so cleanup moves off the completion thread rather than waiting on itself.
         return Optional.of(result.whenCompleteAsync((ignored, failure) -> {
             Throwable cause = unwrap(failure);
+            RuntimeException cleanupFailure = null;
             try {
                 if (agentBudgets != null && (cause == null
                         || !(cause instanceof DurableHumanTaskSuspension
                         || cause instanceof DurableToolApprovalSuspension))) {
                     agentBudgets.finishProcess(pause.key(), failure == null);
                 }
-            } finally {
-                try {
-                    close(budgetBinding);
-                } finally {
-                    try {
-                        runner.close();
-                    } finally {
-                        try {
-                            recorder.close();
-                        } finally {
-                            manager.close();
-                        }
-                    }
-                }
+            } catch (RuntimeException finalizationFailure) {
+                cleanupFailure = finalizationFailure;
             }
+            cleanupFailure = cleanup(cleanupFailure, () -> close(budgetBinding));
+            cleanupFailure = cleanup(cleanupFailure, runner::close);
+            cleanupFailure = cleanup(cleanupFailure, recorder::close);
+            cleanupFailure = cleanup(cleanupFailure, manager::close);
+            if (cleanupFailure != null) throw cleanupFailure;
         }, CLEANUP_EXECUTOR));
     }
 
@@ -293,7 +303,13 @@ public final class DurableExecutionPauseService {
         ExecutionKey key = pause.key();
         ExecutionRecorder recorder = ExecutionRecorder.open(executions, key, workerId, leaseTtl,
                 executions.load(key).toCompletableFuture().join().revision());
-        AutoCloseable budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(key, recorder);
+        AutoCloseable budgetBinding;
+        try {
+            budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(key, recorder);
+        } catch (RuntimeException setupFailure) {
+            setupFailure = cleanup(setupFailure, recorder::close);
+            throw setupFailure;
+        }
         try {
             ProcessInstance stored = recorder.storedState();
             boolean lastLiveTraversal = stored.traversals().values().stream()
@@ -364,6 +380,17 @@ public final class DurableExecutionPauseService {
             binding.close();
         } catch (Exception failure) {
             throw new IllegalStateException("failed to release agent authority binding", failure);
+        }
+    }
+
+    private static RuntimeException cleanup(RuntimeException first, Runnable action) {
+        try {
+            action.run();
+            return first;
+        } catch (RuntimeException failure) {
+            if (first == null) return failure;
+            if (failure != first) first.addSuppressed(failure);
+            return first;
         }
     }
 }

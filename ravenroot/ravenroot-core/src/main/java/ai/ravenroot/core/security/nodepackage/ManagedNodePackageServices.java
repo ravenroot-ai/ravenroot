@@ -298,7 +298,20 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         } else {
             recordTool(delivered, callId, tool, digest, auditDisposition, reason);
             if (disposition == ToolCallAuthorization.Disposition.ALLOW) {
-                reservation = reserveTool(delivered, callId);
+                try {
+                    reservation = reserveTool(delivered, callId);
+                } catch (RuntimeException accountingRefusal) {
+                    try {
+                        recordTool(delivered, callId, tool, digest,
+                                ToolCallAuditEvent.Disposition.FAILED, "BUDGET_REFUSED");
+                    } catch (RuntimeException auditFailure) {
+                        accountingRefusal.addSuppressed(auditFailure);
+                    }
+                    var terminal = new NodePackageServiceException(
+                            NodePackageServiceException.Reason.BUDGET_EXHAUSTED);
+                    terminal.addSuppressed(accountingRefusal);
+                    throw terminal;
+                }
             }
         }
         return new ManagedToolCall(callId, disposition, digest, canonical, delivered, tool,

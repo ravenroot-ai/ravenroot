@@ -549,8 +549,16 @@ public final class DefaultGraphDeployment implements GraphDeployment {
             generation = ++ingressGeneration;
             startedSources = startSources(security, openedManager, generation);
         } catch (RuntimeException | Error failure) {
-            rollback(builtRunner, openedManager, openedDomain);
-            recordFailure(failure);
+            try {
+                rollback(builtRunner, openedManager, openedDomain);
+            } catch (RuntimeException | Error cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                recordFailure(failure);
+            } catch (RuntimeException | Error stateFailure) {
+                failure.addSuppressed(stateFailure);
+            }
             // The interface contract: "a stage completed exceptionally if startup failed after
             // rolling back". The rollback above already ran; this is what makes the stage exceptional.
             throw failure;

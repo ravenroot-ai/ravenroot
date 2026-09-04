@@ -242,6 +242,118 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     @Test
+    void concurrentMismatchedRootAdmissionNeverReturnsTheWrongDeterministicSession() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var reduced = new AgentResourceRequest(3, 900, 10, Duration.ofMillis(900));
+            var first = CompletableFuture.supplyAsync(
+                    () -> admit(fixture, fixture.message, resources(), ready, start));
+            var second = CompletableFuture.supplyAsync(
+                    () -> admit(fixture, fixture.message, reduced, ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            awaitBoth(first, second);
+
+            assertEquals(1, List.of(first, second).stream()
+                    .filter(result -> !result.isCompletedExceptionally()).count());
+            assertEquals(1, fixture.budget().grants().size());
+            AgentResourceSession winner = first.isCompletedExceptionally() ? second.join() : first.join();
+            winner.complete();
+        }
+    }
+
+    @Test
+    void concurrentMismatchedChildCreationNeverReturnsTheWrongDeterministicSession() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession parent = fixture.budgets.admit(fixture.message, resources());
+            NodeMessage child = fixture.addChildMessage();
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var full = new AgentChildResourceRequest(child, Set.of("data-a"), Set.of(),
+                    new AgentResourceRequest(3, 90, 10, Duration.ofMillis(900)));
+            var reduced = new AgentChildResourceRequest(child, Set.of(), Set.of(),
+                    new AgentResourceRequest(2, 80, 8, Duration.ofMillis(800)));
+            var first = CompletableFuture.supplyAsync(() -> createChild(parent, full, ready, start));
+            var second = CompletableFuture.supplyAsync(() -> createChild(parent, reduced, ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            awaitBoth(first, second);
+
+            assertEquals(1, List.of(first, second).stream()
+                    .filter(result -> !result.isCompletedExceptionally()).count());
+            assertEquals(2, fixture.budget().grants().size());
+            AgentResourceSession winner = first.isCompletedExceptionally() ? second.join() : first.join();
+            winner.complete();
+            parent.complete();
+        }
+    }
+
+    @Test
+    void mixedAgentParentsCannotDropCancelledOrRestrictedAuthority() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession permissive = fixture.budgets.admit(fixture.message, resources());
+            NodeMessage cancelledMessage = fixture.addMessage("cancelled-parent", UUID.randomUUID(), Set.of());
+            AgentResourceSession cancelled = fixture.budgets.admit(cancelledMessage, resources());
+            cancelled.cancel();
+            NodeMessage cancelledFanIn = fixture.addMessage("cancelled-fan-in", UUID.randomUUID(),
+                    Set.of(fixture.invocationId, cancelledMessage.invocationId()));
+
+            assertThrows(NodePackageServiceException.class,
+                    () -> fixture.budgets.admit(cancelledFanIn, resources()));
+            assertThrows(NodePackageServiceException.class, () -> permissive.createChild(
+                    new AgentChildResourceRequest(cancelledFanIn, Set.of(), Set.of(), resources())));
+
+            NodeMessage restrictedMessage = fixture.addMessage("restricted-parent", UUID.randomUUID(),
+                    Set.of(fixture.invocationId));
+            AgentResourceSession restricted = permissive.createChild(new AgentChildResourceRequest(
+                    restrictedMessage, Set.of(), Set.of("runtime:delegate"),
+                    new AgentResourceRequest(3, 90, 10, Duration.ofMillis(900))));
+            NodeMessage restrictedFanIn = fixture.addMessage("restricted-fan-in", UUID.randomUUID(),
+                    Set.of(fixture.invocationId, restrictedMessage.invocationId()));
+
+            AgentResourceSession attenuated = fixture.budgets.admit(restrictedFanIn,
+                    new AgentResourceRequest(2, 80, 8, Duration.ofMillis(800)));
+            var fanInGrant = fixture.budget().grants().values().stream()
+                    .filter(grant -> grant.binding().invocationId().equals(restrictedFanIn.invocationId()))
+                    .findFirst().orElseThrow();
+            assertEquals(Set.of(), fanInGrant.registration().dataScopes(),
+                    "every causal agent parent must contribute to the intersection");
+            NodeMessage explicitChild = fixture.addMessage("explicit-restricted", UUID.randomUUID(),
+                    Set.of(fixture.invocationId, restrictedMessage.invocationId()));
+            assertThrows(NodePackageServiceException.class, () -> permissive.createChild(
+                    new AgentChildResourceRequest(explicitChild, Set.of("data-a"), Set.of(),
+                            new AgentResourceRequest(1, 40, 4, Duration.ofMillis(400)))));
+            attenuated.complete();
+            restricted.complete();
+            permissive.complete();
+        }
+    }
+
+    @Test
+    void mixedAgentParentsCannotDropANonDelegatingParent() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession permissive = fixture.budgets.admit(fixture.message, resources());
+            NodeMessage nonDelegatingMessage = fixture.addMessage("non-delegating-parent",
+                    UUID.randomUUID(), Set.of(fixture.invocationId));
+            AgentResourceSession nonDelegating = permissive.createChild(new AgentChildResourceRequest(
+                    nonDelegatingMessage, Set.of("data-a"), Set.of(),
+                    new AgentResourceRequest(3, 90, 10, Duration.ofMillis(900))));
+            NodeMessage fanIn = fixture.addMessage("non-delegating-fan-in", UUID.randomUUID(),
+                    Set.of(fixture.invocationId, nonDelegatingMessage.invocationId()));
+
+            assertThrows(NodePackageServiceException.class,
+                    () -> fixture.budgets.admit(fanIn, resources()));
+            assertThrows(NodePackageServiceException.class, () -> permissive.createChild(
+                    new AgentChildResourceRequest(fanIn, Set.of(), Set.of(), resources())));
+            assertEquals(2, fixture.budget().grants().size(),
+                    "the forbidden fan-in must not silently omit the non-delegating parent");
+            nonDelegating.complete();
+            permissive.complete();
+        }
+    }
+
+    @Test
     void completedParentPreservesCausalAttenuationWhileCancelledParentCannotResetAuthority() throws Exception {
         try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
             AgentResourceSession parent = fixture.budgets.admit(fixture.message, resources());
@@ -353,7 +465,19 @@ class AgentAuthorityBudgetServiceTest {
                         request.invocationId(), request.attemptId(), request.tool(), request.canonicalArguments(),
                         request.argumentsDigest(), ToolCallContinuationInput.Decision.APPROVED,
                         request.continuationVersion(), checkpoint, request.continuationDigest());
-                var resumed = fixture.budgets.resume(input, resources());
+                var ready = new CountDownLatch(2);
+                var start = new CountDownLatch(1);
+                var first = CompletableFuture.supplyAsync(
+                        () -> resume(fixture.budgets, input, resources(), ready, start));
+                var second = CompletableFuture.supplyAsync(() -> resume(fixture.budgets, input,
+                        new AgentResourceRequest(3, 900, 10, Duration.ofMillis(900)), ready, start));
+                assertTrue(ready.await(5, TimeUnit.SECONDS));
+                start.countDown();
+                awaitBoth(first, second);
+                assertEquals(1, List.of(first, second).stream()
+                        .filter(result -> !result.isCompletedExceptionally()).count(),
+                        "a mismatched concurrent resume must not replace or reuse the live session");
+                var resumed = first.isCompletedExceptionally() ? second.join() : first.join();
                 assertEquals(held.reservationId(), fixture.budget().reservations().values().iterator().next()
                         .reservationId(), "re-entry must never mint a second tool reservation");
                 resumed.suspend();
@@ -632,6 +756,31 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     @Test
+    void allowedToolWhoseReservationIsRefusedHasCorrelatedTerminalAudit() throws Exception {
+        var events = new ArrayList<ToolCallAuditEvent>();
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            fixture.budgets.admit(fixture.message, resources());
+            var managed = managedTools(fixture, ToolDecision.Disposition.ALLOW, events);
+            fixture.budgets.trip(operator());
+
+            NodePackageServiceException failure = assertThrows(NodePackageServiceException.class,
+                    () -> managed.toolAuthorization().authorize(fixture.message, "alpha__search",
+                            "{}".getBytes(StandardCharsets.UTF_8)));
+            assertEquals(NodePackageServiceException.Reason.BUDGET_EXHAUSTED, failure.reason());
+            assertEquals(ai.ravenroot.api.persistence.Retryability.DETERMINISTIC_REJECT,
+                    failure.retryability(), "a refused pre-effect reservation cannot resemble a retryable effect");
+            assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT,
+                            ToolCallAuditEvent.Disposition.FAILED),
+                    events.stream().map(ToolCallAuditEvent::disposition).toList());
+            assertEquals(events.get(0).callId(), events.get(1).callId());
+            assertEquals(events.get(0).argumentsDigest(), events.get(1).argumentsDigest());
+            assertEquals("BUDGET_REFUSED", events.get(1).reason());
+            assertEquals(0, fixture.budget().reservations().size(),
+                    "reservation refusal must happen before any tool effect can be represented");
+        }
+    }
+
+    @Test
     void killRequiresBothPlatformRoleAndScopeAndIsRuntimeWide() throws Exception {
         var seen = new ArrayList<String>();
         AgentBudgetTelemetry telemetry = (dimension, outcome, amount) -> seen.add(
@@ -674,6 +823,12 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     private static AgentResourceSession admit(Fixture fixture, CountDownLatch ready, CountDownLatch start) {
+        return admit(fixture, fixture.message, resources(), ready, start);
+    }
+
+    private static AgentResourceSession admit(Fixture fixture, NodeMessage message,
+                                               AgentResourceRequest request,
+                                               CountDownLatch ready, CountDownLatch start) {
         ready.countDown();
         try {
             if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("admission race did not start");
@@ -681,7 +836,26 @@ class AgentAuthorityBudgetServiceTest {
             Thread.currentThread().interrupt();
             throw new AssertionError(interrupted);
         }
-        return fixture.budgets.admit(fixture.message, resources());
+        return fixture.budgets.admit(message, request);
+    }
+
+    private static AgentResourceSession resume(AgentAuthorityBudgetService budgets,
+                                                ToolCallContinuationInput input,
+                                                AgentResourceRequest request,
+                                                CountDownLatch ready, CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("resume race did not start");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
+        return budgets.resume(input, request);
+    }
+
+    private static void awaitBoth(CompletableFuture<?> first, CompletableFuture<?> second) throws Exception {
+        CompletableFuture.allOf(first.handle((ignored, failure) -> null),
+                second.handle((ignored, failure) -> null)).get(5, TimeUnit.SECONDS);
     }
 
     private static ai.ravenroot.api.node.service.NodePackageServices managedTools(
@@ -773,6 +947,17 @@ class AgentAuthorityBudgetServiceTest {
                     List.of());
             return new NodeMessage(security, key.processInstanceId(), traversalId, childInvocationId,
                     childAttemptId, Set.of(invocationId), "child", null, Map.of());
+        }
+
+        private NodeMessage addMessage(String nodeId, UUID id, Set<UUID> parents) {
+            UUID attemptId = UUID.randomUUID();
+            var attempt = new NodeAttempt(attemptId, 1, NodeAttemptStatus.RUNNING);
+            var invocation = new NodeInvocation(id, nodeId, parents,
+                    NodeInvocationStatus.RUNNING, List.of(attempt));
+            recorder.record(List.of(new ExecutionTransition.InvocationAdded(traversalId, invocation)),
+                    List.of());
+            return new NodeMessage(security, key.processInstanceId(), traversalId, id,
+                    attemptId, parents, nodeId, null, Map.of());
         }
 
         private NodeMessage addFreshTraversalMessage() {

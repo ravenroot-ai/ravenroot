@@ -140,7 +140,10 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             InvocationKey invocation = InvocationKey.of(message);
             Session session = new Session(message, request, grantId, control.epoch(), recorder, false);
             Session prior = sessions.putIfAbsent(invocation, session);
-            if (prior != null) return prior;
+            if (prior != null) {
+                prior.requireSameAdmission(message, request, grantId, control.epoch(), false);
+                return prior;
+            }
             var operations = new ArrayList<AgentBudgetOperation>();
             try {
                 if (budget == null) {
@@ -155,12 +158,6 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                 DurableAgentAuthorityBudget projected = budget;
                 if (projected == null || !projected.grants().containsKey(grantId)) {
                     Set<UUID> parents = parentGrants(projected, message.parentInvocationIds());
-                    boolean knownAgentParent = projected != null && projected.grants().values().stream()
-                            .anyMatch(grant -> message.parentInvocationIds().contains(
-                                    grant.binding().invocationId()));
-                    if (knownAgentParent && parents.isEmpty()) {
-                        throw refused();
-                    }
                     AgentAuthorityGrantRegistration grant = grant(projected, grantId, parents, request,
                             clock.instant());
                     long bootEpoch = projected == null ? policy.bootEpoch() : projected.root().bootEpoch();
@@ -199,6 +196,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                 .orElseThrow(this::refused);
         ToolApprovalRegistration exact = approval.request();
         if (!matchesDecision(approval, continuation.decision())
+                || !exact.requester().equals(current.security())
                 || !exact.traversalId().equals(continuation.originalTraversalId())
                 || !exact.invocationId().equals(continuation.originalInvocationId())
                 || !exact.attemptId().equals(continuation.originalAttemptId())
@@ -231,7 +229,11 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         ExecutionRecorder recorder = recorder(key);
         Session session = new Session(current, request, reservation.grantId(), control.epoch(), recorder, true);
         InvocationKey invocation = InvocationKey.of(current);
-        sessions.put(invocation, session);
+        Session prior = sessions.putIfAbsent(invocation, session);
+        if (prior != null) {
+            prior.requireSameAdmission(current, request, reservation.grantId(), control.epoch(), true);
+            return prior;
+        }
         aliases.put(invocation, reservation.grantId());
         return session;
     }
@@ -410,10 +412,17 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
     private Set<UUID> parentGrants(DurableAgentAuthorityBudget budget, Set<UUID> invocationIds) {
         if (budget == null || invocationIds.isEmpty()) return Set.of();
         var result = new LinkedHashSet<UUID>();
-        for (var grant : budget.grants().values()) {
-            if (grant.state() != AgentGrantState.CANCELLED
-                    && grant.registration().authorityScopes().contains(INTERNAL_DELEGATION_SCOPE)
-                    && invocationIds.contains(grant.binding().invocationId())) {
+        for (UUID invocationId : invocationIds) {
+            var matches = budget.grants().values().stream()
+                    .filter(grant -> grant.binding().invocationId().equals(invocationId))
+                    .toList();
+            if (matches.size() > 1) throw refused();
+            if (matches.size() == 1) {
+                var grant = matches.getFirst();
+                if (grant.state() == AgentGrantState.CANCELLED
+                        || !grant.registration().authorityScopes().contains(INTERNAL_DELEGATION_SCOPE)) {
+                    throw refused();
+                }
                 result.add(grant.registration().grantId());
             }
         }
@@ -602,6 +611,12 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                 Math.min(a.teamCumulative(), b.teamCumulative()), Math.min(a.teamActive(), b.teamActive()));
     }
 
+    private static boolean sameRequestedResources(AgentAuthorityGrantRegistration existing,
+                                                  AgentAuthorityGrantRegistration candidate) {
+        return existing.ceilings().equals(candidate.ceilings())
+                && existing.maximumTotalTokens() == candidate.maximumTotalTokens();
+    }
+
     private static <T> T await(java.util.concurrent.CompletionStage<T> stage) {
         return stage.toCompletableFuture().join();
     }
@@ -652,6 +667,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         private final UUID grantId;
         private final long admittedRuntimeEpoch;
         private final ExecutionRecorder recorder;
+        private final boolean resumed;
         private final ConcurrentHashMap<Long, ModelReservation> turns = new ConcurrentHashMap<>();
         private final AtomicBoolean terminal = new AtomicBoolean();
         private final CompletableFuture<Void> admission = new CompletableFuture<>();
@@ -660,12 +676,29 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                         long admittedRuntimeEpoch, ExecutionRecorder recorder, boolean admitted) {
             this.message = message; this.request = request; this.grantId = grantId;
             this.admittedRuntimeEpoch = admittedRuntimeEpoch; this.recorder = recorder;
+            this.resumed = admitted;
             if (admitted) admission.complete(null);
         }
 
         private void admissionSucceeded() { admission.complete(null); }
 
         private void admissionFailed(RuntimeException failure) { admission.completeExceptionally(failure); }
+
+        private void requireSameAdmission(NodeMessage candidate, AgentResourceRequest candidateRequest,
+                                          UUID candidateGrantId, long candidateEpoch,
+                                          boolean candidateResumed) {
+            if (!grantId.equals(candidateGrantId)
+                    || admittedRuntimeEpoch != candidateEpoch
+                    || resumed != candidateResumed
+                    || !request.equals(candidateRequest)
+                    || !message.security().equals(candidate.security())
+                    || !message.processInstanceId().equals(candidate.processInstanceId())
+                    || !message.nodeId().equals(candidate.nodeId())
+                    || !message.invocationId().equals(candidate.invocationId())
+                    || !message.parentInvocationIds().equals(candidate.parentInvocationIds())) {
+                throw refused();
+            }
+        }
 
         @Override public AgentModelReservation reserveModelTurn(long ordinal) {
             requirePermit();
@@ -686,23 +719,50 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                     AgentAuthorityBudgetService.this::refused);
             var parent = current.grants().get(grantId);
             if (parent == null || parent.state() != AgentGrantState.ACTIVE
-                    || !parent.registration().authorityScopes().contains(INTERNAL_DELEGATION_SCOPE)
-                    || !parent.registration().dataScopes().containsAll(childRequest.dataScopes())
-                    || !parent.registration().authorityScopes().containsAll(childRequest.authorityScopes())) {
+                    || !parent.registration().authorityScopes().contains(INTERNAL_DELEGATION_SCOPE)) {
                 throw refused();
             }
+            Set<UUID> parentGrantIds = parentGrants(current, child.parentInvocationIds());
+            if (!parentGrantIds.contains(grantId)) throw refused();
+            for (UUID parentGrantId : parentGrantIds) {
+                var contributing = current.grants().get(parentGrantId);
+                if (!contributing.registration().dataScopes().containsAll(childRequest.dataScopes())
+                        || !contributing.registration().authorityScopes().containsAll(
+                        childRequest.authorityScopes())) {
+                    throw refused();
+                }
+            }
             UUID childGrantId = grantId(key(child), child.invocationId(), admittedRuntimeEpoch);
-            AgentAuthorityGrantRegistration derived = grant(current, childGrantId, Set.of(grantId),
+            AgentAuthorityGrantRegistration derived = grant(current, childGrantId, parentGrantIds,
                     childRequest.resources(), clock.instant());
-            derived = new AgentAuthorityGrantRegistration(derived.grantId(), grantId, Set.of(grantId),
-                    parent.registration().depth() + 1, childRequest.dataScopes(), childRequest.authorityScopes(),
+            derived = new AgentAuthorityGrantRegistration(derived.grantId(), grantId, parentGrantIds,
+                    derived.depth(), childRequest.dataScopes(), childRequest.authorityScopes(),
                     derived.ceilings(), derived.maximumTotalTokens(), derived.absoluteDeadline());
             InvocationKey childKey = InvocationKey.of(child);
             Session childSession = new Session(child, childRequest.resources(), childGrantId,
                     admittedRuntimeEpoch, recorder, false);
             Session existingSession = sessions.putIfAbsent(childKey, childSession);
-            if (existingSession != null) return existingSession;
+            if (existingSession != null) {
+                existingSession.requireSameAdmission(child, childRequest.resources(), childGrantId,
+                        admittedRuntimeEpoch, false);
+                return existingSession;
+            }
             boolean newlyRegistered = !current.grants().containsKey(childGrantId);
+            if (!newlyRegistered) {
+                var existingGrant = current.grants().get(childGrantId);
+                var expectedBinding = new AgentAuthorityBinding(childGrantId, child.nodeId(),
+                        child.invocationId(), child.parentInvocationIds());
+                if (existingGrant.state() != AgentGrantState.ACTIVE
+                        || !existingGrant.binding().equals(expectedBinding)
+                        || !existingGrant.registration().contributingParentGrantIds().equals(parentGrantIds)
+                        || !existingGrant.registration().dataScopes().equals(childRequest.dataScopes())
+                        || !existingGrant.registration().authorityScopes().equals(
+                        childRequest.authorityScopes())
+                        || !sameRequestedResources(existingGrant.registration(), derived)) {
+                    sessions.remove(childKey, childSession);
+                    throw refused();
+                }
+            }
             try {
                 recorder.record(List.of(), List.of(event(child, "AGENT_CHILD_AUTHORITY_CREATED", "RESERVED",
                                 AgentBudgetVector.ZERO)),

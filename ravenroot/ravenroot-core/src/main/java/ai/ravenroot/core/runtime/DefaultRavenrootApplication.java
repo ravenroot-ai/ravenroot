@@ -1165,34 +1165,41 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             AutoCloseable taskBinding = humanTaskBinding;
             execution.whenComplete((result, error) -> {
                 Throwable terminalFailure = unwrapFailure(error);
+                RuntimeException cleanupFailure = null;
                 // This is the seam where the result used to be dropped. `result` was already
                 // in scope and simply unused -- the engine had computed the payload, the visited
                 // nodes and the defaulted nodes, and the lambda ignored all three. Capturing it
                 // first, before any teardown, so a cleanup failure below cannot cost the caller the
                 // answer it is about to ask for.
-                if (terminalFailure instanceof
-                        ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
-                        || terminalFailure instanceof
-                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
-                    // The durable aggregate is WAITING. It is neither a failed result nor live
-                    // in-memory work; the handler-trigger path creates the fresh traversal.
-                } else if (error != null || result == null) {
-                    executionResults.failed(resultKey, processInstanceId);
-                } else {
-                    executionResults.completed(resultKey, result);
+                try {
+                    if (terminalFailure instanceof
+                            ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
+                            || terminalFailure instanceof
+                            ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
+                        // The durable aggregate is WAITING. It is neither a failed result nor live
+                        // in-memory work; the handler-trigger path creates the fresh traversal.
+                    } else if (error != null || result == null) {
+                        executionResults.failed(resultKey, processInstanceId);
+                    } else {
+                        executionResults.completed(resultKey, result);
+                    }
+                } catch (RuntimeException resultFailure) {
+                    cleanupFailure = resultFailure;
                 }
                 if (agentBudgets != null && !(terminalFailure instanceof
                         ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension)
                         && !(terminalFailure instanceof
                         ai.ravenroot.core.humantask.DurableHumanTaskSuspension)) {
-                    agentBudgets.finishProcess(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), error == null && result != null);
+                    cleanupFailure = cleanup(cleanupFailure, () -> agentBudgets.finishProcess(
+                            new ai.ravenroot.api.persistence.ExecutionKey(
+                                    security.tenantId(), processInstanceId),
+                            error == null && result != null));
                 }
                 if (recorder != null) {
                     // Orderly shutdown of this traversal's lease: hands the instance back at once
                     // rather than leaving it locked for a whole TTL. Best-effort, because a crash
                     // does neither and must reach the same state by expiry (ADR 0010 section 13.1).
-                    recorder.close();
+                    cleanupFailure = cleanup(cleanupFailure, recorder::close);
                 }
                 closeApprovalBinding(binding);
                 closeApprovalBinding(resourceBinding);
@@ -1200,7 +1207,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 activeExecutions.remove(traversalId, active);
                 // Completion normally runs on the actor dispatcher. Node teardown waits for actor
                 // acknowledgements and must therefore never block that dispatcher.
-                Thread.startVirtualThread(active::close);
+                try {
+                    Thread.startVirtualThread(active::close);
+                } catch (RuntimeException teardownDispatchFailure) {
+                    cleanupFailure = combine(cleanupFailure, teardownDispatchFailure);
+                    cleanupFailure = cleanup(cleanupFailure, active::close);
+                }
+                if (cleanupFailure != null) throw cleanupFailure;
             });
         } catch (RuntimeException | Error startupFailure) {
             closeApprovalBinding(approvalBinding);
@@ -1210,7 +1223,11 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // A submission that never started is recorded FAILED rather than erased. The caller
             // is told the start failed by this throw, but a second caller holding the same id -- a
             // retry, an operator, the UI -- must not be told the id never existed.
-            executionResults.failed(resultKey, processInstanceId);
+            try {
+                executionResults.failed(resultKey, processInstanceId);
+            } catch (RuntimeException cleanupFailure) {
+                startupFailure.addSuppressed(cleanupFailure);
+            }
             try {
                 active.close();
             } catch (RuntimeException | Error cleanupFailure) {
@@ -1228,6 +1245,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         } catch (Exception ignored) {
             // Removing an in-memory lookup entry is best effort and holds no durable authority.
         }
+    }
+
+    private static RuntimeException cleanup(RuntimeException first, Runnable action) {
+        try {
+            action.run();
+            return first;
+        } catch (RuntimeException failure) {
+            if (first == null) return failure;
+            if (failure != first) first.addSuppressed(failure);
+            return first;
+        }
+    }
+
+    private static RuntimeException combine(RuntimeException first, RuntimeException next) {
+        if (first == null) return next;
+        if (first != next) first.addSuppressed(next);
+        return first;
     }
 
     private static Throwable unwrapFailure(Throwable failure) {

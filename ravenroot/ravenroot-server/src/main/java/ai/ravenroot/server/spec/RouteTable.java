@@ -308,7 +308,8 @@ public final class RouteTable {
             // visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON
             // array with no repeats. GraphExecutionResult holds every one of them as a Set, so a node
             // reached, defaulted, bypassed or failed-and-handled more than once in one traversal still
-            // appears exactly once in this response. The event projections preserve per-visit counts.
+            // appears exactly once in this response. Their lexical serialisation is deterministic
+            // presentation, not visit order. The event projections preserve ordered evidence.
             //
             // /v1/events/recent's durable projection carries the event type but not the node id:
             // RavenrootServer#recentDurableEvents serialises "type":event.eventType() verbatim, while
@@ -353,7 +354,10 @@ public final class RouteTable {
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
                             + "so a node reached, defaulted, bypassed or failed-and-handled more than once "
                             + "in this traversal still appears exactly once here, and none of the four "
-                            + "says how many times. A fifth field, untakenEdges (#519), is not one of "
+                            + "says how many times. Their arrays are sorted for deterministic presentation, "
+                            + "but that lexical order is not traversal chronology and must not be read as "
+                            + "one. Use invocation or event history when visit order or repeats matter. "
+                            + "A fifth field, untakenEdges (#519), is not one of "
                             + "these four and is not a node list: each entry is a string naming one "
                             + "outgoing edge of a node this run bypassed -- "
                             + "\"<source>-><target> [outcome=<outcome>]\" -- that the node's own "

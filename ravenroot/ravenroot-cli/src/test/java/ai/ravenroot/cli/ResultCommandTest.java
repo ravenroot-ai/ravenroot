@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.util.List;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -49,11 +50,18 @@ class ResultCommandTest {
         String printed = bytes.toString();
         assertTrue(printed.contains("execution-id=e1"), printed);
         assertTrue(printed.contains("status=COMPLETED"), printed);
-        assertTrue(printed.contains("visited-nodes=start,end"), printed);
+        assertEquals(Set.of("start", "end"), printedValues(printed, "visited-nodes="));
         assertTrue(printed.contains("payload=\"hello\""), printed);
         assertTrue(printed.contains("degraded=false"), printed);
         assertFalse(printed.contains("defaulted-nodes="),
                 "a clean run must not print an empty defaulted-nodes line");
+    }
+
+    private static Set<String> printedValues(String output, String prefix) {
+        String line = output.lines().filter(candidate -> candidate.startsWith(prefix)).findFirst()
+                .orElseThrow(() -> new AssertionError("Missing line " + prefix + " in " + output));
+        String values = line.substring(prefix.length());
+        return values.isEmpty() ? Set.of() : Set.copyOf(List.of(values.split(",")));
     }
 
     /** The case the endpoint exists for: success that is not actually clean. */

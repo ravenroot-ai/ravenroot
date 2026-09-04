@@ -75,4 +75,10 @@ CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Au
 
 `ravenroot inventory` follows the HTTP route's own `nextCursor` internally until the tenant's whole answer is read, so its output is never a truncated first page; there is no `--after`-style flag because there is nothing left to continue. `ravenroot traversals` lists one instance's traversals directly — that listing is not paginated on either transport.
 
+`GET /v1/executions/{id}` returns `visitedNodes` as unique membership, not a path or timeline. The
+`ravenroot result` command presents the same membership as `visited-nodes=`. HTTP and CLI currently
+sort node identifiers for deterministic presentation, but that lexical order is not visit order and
+must not be interpreted as one. Use invocation or event history when chronology or repeated visits
+matter.
+
 See [Application and HTTP integration](../integrator-guide/application-http.md) and [Authentication troubleshooting](../troubleshooting/identity-browser.md).

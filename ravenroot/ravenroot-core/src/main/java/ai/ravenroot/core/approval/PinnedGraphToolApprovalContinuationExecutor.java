@@ -14,6 +14,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.StoredGraphDefinition;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
@@ -23,6 +24,8 @@ import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.core.runtime.GraphRunner;
+import ai.ravenroot.core.runtime.GraphExecutionLimits;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 
 import java.io.ByteArrayInputStream;
 import java.time.Duration;
@@ -49,6 +52,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     private final ExecutionIdentitySource identities;
     private final String workerId;
     private final Duration leaseTtl;
+    private final GraphExecutionLimits executionLimits;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     private final Map<PendingWork.HandlerTrigger, ExecutionRecorder> awaitingAcknowledgement
             = new ConcurrentHashMap<>();
@@ -62,9 +66,10 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        ExecutionIdentitySource identities,
                                                        String workerId, Duration leaseTtl) {
         this(definitions, executions, approvals, null, engine, behaviors, monitor, identities,
-                workerId, leaseTtl, null);
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, null);
     }
 
+    /** Additive composition with both durable decision services and default graph limits. */
     public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
                                                        ExecutionStore executions,
                                                        ToolApprovalService approvals,
@@ -75,9 +80,39 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        ExecutionIdentitySource identities,
                                                        String workerId, Duration leaseTtl) {
         this(definitions, executions, approvals, humanTasks, engine, behaviors, monitor, identities,
-                workerId, leaseTtl, null);
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, null);
     }
 
+    /** Additive operator limits for hosts that do not compose durable human tasks. */
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl,
+                                                       GraphExecutionLimits executionLimits) {
+        this(definitions, executions, approvals, null, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, executionLimits, null);
+    }
+
+    /** Full durable-decision composition with explicit graph limits. */
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       HumanTaskService humanTasks,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl,
+                                                       GraphExecutionLimits executionLimits) {
+        this(definitions, executions, approvals, humanTasks, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, executionLimits, null);
+    }
+
+    /** Additive finite agent-resource composition with default graph limits. */
     public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
                                                        ExecutionStore executions,
                                                        ToolApprovalService approvals,
@@ -88,7 +123,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        String workerId, Duration leaseTtl,
                                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this(definitions, executions, approvals, null, engine, behaviors, monitor, identities,
-                workerId, leaseTtl, agentBudgets);
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, agentBudgets);
     }
 
     /** Creates a continuation executor with both durable decision and resource services. */
@@ -102,6 +137,22 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        ExecutionIdentitySource identities,
                                                        String workerId, Duration leaseTtl,
                                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(definitions, executions, approvals, humanTasks, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, agentBudgets);
+    }
+
+    /** Full production composition with durable decisions, graph limits, and finite agent resources. */
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       HumanTaskService humanTasks,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl,
+                                                       GraphExecutionLimits executionLimits,
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.approvals = Objects.requireNonNull(approvals, "approvals");
@@ -112,6 +163,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         this.identities = Objects.requireNonNull(identities, "identities");
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
+        this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
         this.agentBudgets = agentBudgets;
     }
 
@@ -123,14 +175,17 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                     approval.request().graphVersionPin().reference(), approval.request().nodeId());
             manager = prepared.manager();
             var request = approval.request();
+            GraphExecutionContinuationCheckpoint.Decoded checkpoint =
+                    GraphExecutionContinuationCheckpoint.read(request.continuationVersion(),
+                            request.continuation());
             NodeMessage original = new NodeMessage(request.requester(), approval.key().processInstanceId(),
                     request.traversalId(), request.invocationId(), request.attemptId(), Set.of(),
                     request.nodeId(), null, Map.of(), NodeCommand.PROCESS);
             prepared.action().validate(new ToolCallContinuationInput(original, request.approvalId(),
                     request.traversalId(), request.invocationId(), request.attemptId(), request.tool(),
                     request.canonicalArguments(), request.argumentsDigest(),
-                    decision(approval.status()), request.continuationVersion(),
-                    request.continuation(), request.continuationDigest()));
+                    decision(approval.status()), checkpoint.innerVersion(), checkpoint.inner(),
+                    ToolApprovalRegistration.digest(checkpoint.inner())));
             return true;
         } catch (RuntimeException unavailable) {
             return false;
@@ -148,6 +203,8 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                     new IllegalArgumentException("continuation claim scope mismatch"));
         }
         try {
+            GraphExecutionContinuationCheckpoint.Decoded checkpoint =
+                    GraphExecutionContinuationCheckpoint.read(continuation.version(), continuation.checkpoint());
             Prepared prepared = prepare(continuation.requester().tenantId(),
                     continuation.graphVersionPin().reference(), continuation.nodeId());
             GraphManager manager = prepared.manager();
@@ -176,7 +233,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             GraphRunner runner;
             try {
                 runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                        GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                        GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
                 setupFailure = cleanup(setupFailure, manager::close);
@@ -186,7 +243,8 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             AutoCloseable budgetBinding = null;
             try {
                 approvalBinding = bindLive(new ExecutionKey(
-                        continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
+                        continuation.requester().tenantId(), continuation.processInstanceId()), recorder,
+                        runner::continuationBudget);
                 budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(new ExecutionKey(
                         continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
             } catch (RuntimeException bindingFailure) {
@@ -212,14 +270,14 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                 continuation.originalTraversalId(), continuation.originalInvocationId(),
                                 continuation.originalAttemptId(), continuation.tool(),
                                 continuation.canonicalArguments(), continuation.argumentsDigest(),
-                                decision(continuation.decision()), continuation.version(),
-                                continuation.checkpoint(), continuation.checkpointDigest()),
+                                decision(continuation.decision()), checkpoint.innerVersion(),
+                                checkpoint.inner(), ToolApprovalRegistration.digest(checkpoint.inner())),
                         succeeded -> {
                             if (approvedEffect) {
                                 approvals.completeFenced(recorder, storedApproval, succeeded,
                                         continuation.approvalId().toString());
                             }
-                        }, prepared.action());
+                        }, prepared.action(), checkpoint.budget());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure,
                         () -> closeBinding(approvalResourceBinding));
@@ -325,11 +383,13 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         return first;
     }
 
-    private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
-        AutoCloseable approvalBinding = approvals.bindLive(key, recorder);
+    private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder,
+                                   java.util.function.Function<NodeMessage,
+                                           ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot> budget) {
+        AutoCloseable approvalBinding = approvals.bindLive(key, recorder, budget);
         if (humanTasks == null) return approvalBinding;
         try {
-            AutoCloseable taskBinding = humanTasks.bindLive(key, recorder);
+            AutoCloseable taskBinding = humanTasks.bindLive(key, recorder, budget);
             return () -> {
                 try {
                     closeBinding(taskBinding);
@@ -356,7 +416,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(
                 tenantId, new GraphContentId(pin))).toCompletableFuture().join();
         GraphManager manager = GraphManager.readGraphMl(
-                new ByteArrayInputStream(stored.canonical().bytes()));
+                new ByteArrayInputStream(stored.canonical().bytes()), executionLimits.graphMl());
         try {
             GraphVersionSnapshot snapshot = GraphVersionSnapshot.create(
                     new GraphVersionKey(stored.identity().graphId(), stored.identity().versionId()),

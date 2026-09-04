@@ -354,8 +354,16 @@ final class JoinTimeoutPauseBudgetTest {
                 assertEquals(0, runner.suspendedJoinTimeoutCount(),
                         "and there is nothing to suspend: no join has been reached on this runner");
 
+                // The budget-carrying overload, deliberately: the seven-argument one is a legacy
+                // shim that fails every call with LEGACY_BUDGET_UNAVAILABLE, so a test calling it
+                // would compile, pass its "no live deadline" assertion vacuously, and never reach the
+                // join at all. Counters as PausedExecutionObservabilityTest's re-entry uses them --
+                // one step taken (start to effect) and one in-flight hop, which is the hop this
+                // re-entry resumes; the rest are zero because nothing has been amplified or measured
+                // and no actor is live.
                 runner.executeAfterHumanTask(TestIdentities.TENANT_A, key.processInstanceId(),
-                        traversalId, "effect", "v1", recorder, NodeResult.continueWith("resumed"));
+                        traversalId, "effect", "v1", recorder, NodeResult.continueWith("resumed"),
+                        new GraphExecutionBudgetSnapshot(1, 0, 0, 1, 0));
 
                 long deadline = System.nanoTime() + BOUND.toNanos();
                 while (System.nanoTime() < deadline

@@ -102,7 +102,7 @@ class SqliteExecutionManifestMigrationUpgradeTest {
 
         var key = new ExecutionKey("acme", UUID.randomUUID());
         ExecutionManifest manifest = manifest(key, "STANDARD",
-                List.of(new PinnedNodePackage("alpha.nodes", "1.4.2", "node-sdk-1")));
+                List.of(PinnedNodePackage.of("alpha.nodes", "1.4.2", "node-sdk-1")));
         try (var store = new SqliteExecutionManifestStore(
                 databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
             StoredExecutionManifest pinned = store.pin(manifest).toCompletableFuture().join();
@@ -168,6 +168,44 @@ class SqliteExecutionManifestMigrationUpgradeTest {
             assertInstanceOf(ExecutionManifestStoreFailure.StillReferenced.class, refused.failure(),
                     "retention must not remove a manifest an existing instance still needs");
             assertTrue(store.contains(key).toCompletableFuture().join());
+        }
+    }
+
+    /**
+     * A row whose stored identity cannot be decoded stops reclamation rather than being deleted by it.
+     *
+     * <p>Reclamation is the one operation that could plausibly "clean up" such a row, and that is
+     * exactly why it must not: proving a manifest unreferenced requires an identity to ask about, and
+     * a pass that deleted what it could not read would turn an unexplained corruption into silent
+     * data loss. The failure is classified as this port's own {@code Corrupted} rather than escaping
+     * as the execution store's, so a caller composing both cannot catch one and absorb the other.</p>
+     */
+    @Test
+    void reclamationRefusesRatherThanDeletingAManifestWhoseStoredIdentityIsCorrupt(
+            @TempDir Path directory) throws Exception {
+        Path databaseFile = directory.resolve("corrupt-identity.db");
+        var key = new ExecutionKey("acme", UUID.randomUUID());
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            store.pin(manifest(key, "STANDARD", List.of())).toCompletableFuture().join();
+        }
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databaseFile);
+             Statement statement = connection.createStatement()) {
+            statement.execute("UPDATE execution_manifest SET process_instance_id = 'not-a-uuid'");
+        }
+
+        try (var store = new SqliteExecutionManifestStore(
+                databaseFile, CLOCK, ExecutionManifestReferences.NONE)) {
+            ExecutionManifestStoreException refused = assertThrows(ExecutionManifestStoreException.class,
+                    () -> unwrap(() -> store.purgeUnreferencedManifests("acme")));
+            assertInstanceOf(ExecutionManifestStoreFailure.Corrupted.class, refused.failure());
+        }
+
+        try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + databaseFile);
+             Statement statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("SELECT COUNT(*) FROM execution_manifest")) {
+            assertTrue(rows.next() && rows.getInt(1) == 1,
+                    "the unreadable row is still there: refusing is not the same as removing");
         }
     }
 

@@ -192,15 +192,15 @@ public abstract class ExecutionManifestStoreContract {
     final void nodePackagesSurviveTheRoundTripSortedAndComplete() {
         ExecutionKey key = key(DEFAULT_TENANT);
         List<PinnedNodePackage> packages = List.of(
-                new PinnedNodePackage("zeta.nodes", "2.0.0", "node-sdk-1"),
-                new PinnedNodePackage("alpha.nodes", "1.4.2", "node-sdk-1"));
+                PinnedNodePackage.of("zeta.nodes", "2.0.0", "node-sdk-1"),
+                PinnedNodePackage.of("alpha.nodes", "1.4.2", "node-sdk-1"));
         ExecutionManifest manifest = manifest(key, "a", "STANDARD", packages);
         await(store().pin(manifest));
 
         List<PinnedNodePackage> read = await(store().load(key)).manifest().nodePackages();
         assertEquals(List.of(
-                new PinnedNodePackage("alpha.nodes", "1.4.2", "node-sdk-1"),
-                new PinnedNodePackage("zeta.nodes", "2.0.0", "node-sdk-1")), read,
+                PinnedNodePackage.of("alpha.nodes", "1.4.2", "node-sdk-1"),
+                PinnedNodePackage.of("zeta.nodes", "2.0.0", "node-sdk-1")), read,
                 "a manifest pins its packages in a stable order so its address does not depend on "
                         + "registration order");
     }
@@ -211,7 +211,7 @@ public abstract class ExecutionManifestStoreContract {
         ExecutionKey withOne = key(DEFAULT_TENANT);
         await(store().pin(manifest(withNone, "a", "STANDARD", List.of())));
         await(store().pin(manifest(withOne, "a", "STANDARD",
-                List.of(new PinnedNodePackage("alpha.nodes", "1.0.0", "node-sdk-1")))));
+                List.of(PinnedNodePackage.of("alpha.nodes", "1.0.0", "node-sdk-1")))));
 
         assertTrue(await(store().load(withNone)).manifest().nodePackages().isEmpty());
         assertNotEquals(await(store().load(withNone)).digest(), await(store().load(withOne)).digest(),
@@ -318,6 +318,49 @@ public abstract class ExecutionManifestStoreContract {
                 failureOf(() -> await(store().remove(key(DEFAULT_TENANT)))));
     }
 
+    @Test
+    final void purgingReclaimsOnlyTheManifestsRetainedWorkNoLongerNeeds() {
+        ExecutionKey needed = key(DEFAULT_TENANT);
+        ExecutionKey abandoned = key(DEFAULT_TENANT);
+        await(store().pin(manifest(needed, "a", "STANDARD")));
+        await(store().pin(manifest(abandoned, "b", "STANDARD")));
+        markReferenced(needed);
+
+        assertEquals(1L, await(store().purgeUnreferencedManifests(DEFAULT_TENANT)),
+                "exactly the manifest nothing needs, and it is counted");
+        assertTrue(await(store().contains(needed)),
+                "a manifest retained work still needs must survive every reclamation");
+        assertFalse(await(store().contains(abandoned)));
+    }
+
+    @Test
+    final void purgingNeverCrossesATenantBoundary() {
+        ExecutionKey mine = key(DEFAULT_TENANT);
+        ExecutionKey theirs = key(OTHER_TENANT);
+        await(store().pin(manifest(mine, "a", "STANDARD")));
+        await(store().pin(manifest(theirs, "a", "STANDARD")));
+
+        assertEquals(1L, await(store().purgeUnreferencedManifests(DEFAULT_TENANT)));
+        assertTrue(await(store().contains(theirs)),
+                "one tenant's reclamation decision has no authority over another tenant's manifests");
+    }
+
+    @Test
+    final void purgingIsIdempotentAndReportsZeroWhenThereIsNothingToReclaim() {
+        assertEquals(0L, await(store().purgeUnreferencedManifests(DEFAULT_TENANT)));
+        await(store().pin(manifest(key(DEFAULT_TENANT), "a", "STANDARD")));
+        assertEquals(1L, await(store().purgeUnreferencedManifests(DEFAULT_TENANT)));
+        assertEquals(0L, await(store().purgeUnreferencedManifests(DEFAULT_TENANT)),
+                "a second pass finds nothing rather than recounting what the first removed");
+    }
+
+    @Test
+    final void purgingRefusesABlankTenant() {
+        assertInstanceOf(ExecutionManifestStoreFailure.InvalidRequest.class,
+                failureOf(() -> await(store().purgeUnreferencedManifests(" "))),
+                "a blank tenant would make reclamation's scope ambiguous rather than empty");
+    }
+
     // ============================================================ durability
 
     @Test
@@ -325,7 +368,7 @@ public abstract class ExecutionManifestStoreContract {
         assumeCapability(StoreCapability.DURABLE);
         ExecutionKey key = key(DEFAULT_TENANT);
         ExecutionManifest manifest = manifest(key, "a", "STANDARD",
-                List.of(new PinnedNodePackage("alpha.nodes", "1.4.2", "node-sdk-1")));
+                List.of(PinnedNodePackage.of("alpha.nodes", "1.4.2", "node-sdk-1")));
         StoredExecutionManifest pinned = await(store().pin(manifest));
 
         ExecutionManifestStore reopened = reopen();
@@ -402,8 +445,8 @@ public abstract class ExecutionManifestStoreContract {
     @Test
     final void aRemovedNodePackageIsReportedAndAnAddedOneIsNot() {
         ExecutionKey key = key(DEFAULT_TENANT);
-        var required = new PinnedNodePackage("alpha.nodes", "1.4.2", "node-sdk-1");
-        var unrelated = new PinnedNodePackage("beta.nodes", "3.0.0", "node-sdk-1");
+        var required = PinnedNodePackage.of("alpha.nodes", "1.4.2", "node-sdk-1");
+        var unrelated = PinnedNodePackage.of("beta.nodes", "3.0.0", "node-sdk-1");
 
         ExecutionManifestCompatibility missing = ExecutionManifestCompatibility.compare(
                 manifest(key, "a", "STANDARD", List.of(required)),
@@ -424,13 +467,17 @@ public abstract class ExecutionManifestStoreContract {
         ExecutionKey key = key(DEFAULT_TENANT);
         ExecutionManifestCompatibility report = ExecutionManifestCompatibility.compare(
                 manifest(key, "a", "STANDARD",
-                        List.of(new PinnedNodePackage("alpha.nodes", "1.4.2", "node-sdk-1"))),
+                        List.of(PinnedNodePackage.of("alpha.nodes", "1.4.2", "node-sdk-1"))),
                 manifest(key, "a", "STANDARD",
-                        List.of(new PinnedNodePackage("alpha.nodes", "1.4.3", "node-sdk-1"))));
+                        List.of(PinnedNodePackage.of("alpha.nodes", "1.4.3", "node-sdk-1"))));
 
         assertEquals(ExecutionManifestDifference.Dimension.NODE_PACKAGE_CHANGED,
                 report.differences().get(0).dimension());
-        assertTrue(report.describe().contains("1.4.2") && report.describe().contains("1.4.3"));
+        assertTrue(report.describe().contains("alpha.nodes"),
+                "the report names the package an operator has to look at");
+        assertFalse(report.describe().contains("1.4.2") || report.describe().contains("1.4.3"),
+                "and not the versions themselves: the package declares those, this contract imposes "
+                        + "no shape on them, and they are recorded as a digest rather than as text");
     }
 
     // ============================================================ fixtures

@@ -141,6 +141,23 @@ public final class InMemoryExecutionManifestStore implements ExecutionManifestSt
     }
 
     @Override
+    public CompletionStage<Long> purgeUnreferencedManifests(String tenantId) {
+        return complete(() -> {
+            if (tenantId == null || tenantId.isBlank()) {
+                throw failure(new ExecutionManifestStoreFailure.InvalidRequest("tenantId cannot be blank"));
+            }
+            synchronized (monitor) {
+                var reclaimable = manifests.keySet().stream()
+                        .filter(key -> key.tenantId().equals(tenantId))
+                        .filter(key -> !references.isReferenced(key))
+                        .toList();
+                reclaimable.forEach(manifests::remove);
+                return (long) reclaimable.size();
+            }
+        });
+    }
+
+    @Override
     public void close() {
         synchronized (monitor) {
             manifests.clear();

@@ -476,6 +476,32 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
                             ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            // A distinct path and entry for the same reason /traversals has one: this table is keyed
+            // per path, and {id} here is a processInstanceId because a manifest is pinned once per
+            // process instance. registersContext is false -- this is a sub-route inside the
+            // /v1/executions context, dispatched by RavenrootServer's own segment matching, exactly
+            // like /traversals and the cancel/pause/resume trio.
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/manifest",
+                    "Reports the identity of the dependency set one process instance was accepted "
+                            + "against, and whether this deployment still resolves it (#153). {id} is a "
+                            + "processInstanceId, like GET /v1/executions/{id}/traversals and unlike "
+                            + "every other /v1/executions sub-route. The body carries "
+                            + "manifestFormatVersion, manifestDigest, the pinned graphVersion, graphId "
+                            + "and graphVersionId, pinnedAt, a compatible verdict, an "
+                            + "incompatibleDimensions list of dimension names and dimensionsTruncated. "
+                            + "It deliberately carries no value from the pinned dependency set -- no "
+                            + "capability set, no execution limit, no node-package identity and no "
+                            + "package count -- because those describe the deployment rather than the "
+                            + "caller's execution; the comparison's own values stay in the server-side "
+                            + "diagnostic a refused recovery raises. 404 when no manifest is pinned for "
+                            + "the instance, when it belongs to another tenant, and when it was "
+                            + "accepted before this deployment began recording them -- all three "
+                            + "indistinguishable by design. 501 when this deployment composed no "
+                            + "manifest store, and when a stored manifest no longer verifies.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/cancel",
                     "Cancels a traversal (#37). 200 with a CancelResult body distinguishing CANCELLED, "
                             + "ALREADY_CANCELLED and ALREADY_COMPLETED; unknown ownership fails closed as "

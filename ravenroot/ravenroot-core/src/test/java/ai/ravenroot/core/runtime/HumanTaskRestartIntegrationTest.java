@@ -536,6 +536,110 @@ class HumanTaskRestartIntegrationTest {
         }
     }
 
+    /**
+     * The same restart, against a runtime that records manifests and has none for this execution.
+     *
+     * <p>This is the human-task half of the verification hook, driven the whole way through the
+     * recovery loop rather than asserted against the service. The contrast with the test above is the
+     * point: identical setup, identical decision, and the only difference is a composed manifest
+     * service — after which the sweep must decline instead of resuming, and the resolved task must
+     * still be waiting to be acted on rather than settled by a run that should not have happened.</p>
+     */
+    @Test
+    void restartRefusesToResumeAPinnedGraphWhoseManifestThisRuntimeDoesNotHave(@TempDir Path directory)
+            throws Exception {
+        Path database = directory.resolve("human-task-manifest-refusal.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        String pin;
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks);
+
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(),
+                         ExecutionIdentitySource.randomUuids(), GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "live-worker", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
+                ExecutionException suspended = assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                Map.of("private", "not materialized"), pin, null, null, recorder)
+                                .toCompletableFuture().get(10, TimeUnit.SECONDS));
+                assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+            }
+        }
+
+        UUID taskId;
+        try (var store = new SqliteExecutionStore(database, CLOCK)) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            DurableHumanTask task = onlyTask(tasks);
+            taskId = task.request().taskId();
+            assertEquals(HumanTaskStatus.RESOLVED,
+                    tasks.resolve(approver(), taskId, task.generation(), response()).task().status());
+        }
+
+        var captures = new AtomicInteger();
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine();
+             var manifestStore =
+                     new ai.ravenroot.core.persistence.InMemoryExecutionManifestStore(CLOCK)) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks).register("capture", message -> {
+                captures.incrementAndGet();
+                return java.util.concurrent.CompletableFuture.completedFuture(
+                        NodeResult.continueWith(message.payload()));
+            });
+            var manifests = new ai.ravenroot.core.manifest.ExecutionManifestService(manifestStore,
+                    ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
+                            store.capabilities(), behaviors, UnknownBehaviorPolicy.passThrough(),
+                            GraphExecutionLimits.DEFAULTS, null),
+                    CLOCK);
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    null, engine, behaviors, new ExecutionMonitor(),
+                    ExecutionIdentitySource.randomUuids(), "recovery-worker", TTL,
+                    GraphExecutionLimits.DEFAULTS, null, manifests);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-worker",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().noneMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    () -> "an execution with no manifest must not be resumed: " + outcomes);
+            assertTrue(outcomes.stream().allMatch(RecoveryOutcome.Deferred.class::isInstance),
+                    outcomes::toString);
+            assertEquals(0, captures.get(), "no node beyond the task ran");
+            assertEquals(HumanTaskStatus.RESOLVED,
+                    store.loadHumanTask(TENANT, taskId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "the decision is untouched: a refusal must not settle work it declined to do");
+            var state = store.load(key).toCompletableFuture().join().state();
+            assertEquals(ProcessInstanceStatus.RUNNING, state.status(),
+                    "the instance is neither completed nor failed: the work was declined, not decided");
+            var resumeTraversal = state.traversals().values().stream()
+                    .filter(traversal -> !traversal.traversalId().equals(originalTraversal))
+                    .findFirst()
+                    .orElseThrow(() -> new AssertionError("no resume traversal was registered"));
+            assertEquals(TraversalStatus.ACCEPTED, resumeTraversal.status(),
+                    "the resume traversal the decision created is still waiting to be run");
+            assertTrue(resumeTraversal.invocations().isEmpty(),
+                    "and nothing in it was invoked -- deferred, not lost and not half-run");
+        }
+    }
+
     @Test
     void humanTaskRestartRestoresCumulativeGraphBudgetInsteadOfResettingIt(
             @TempDir Path directory) throws Exception {

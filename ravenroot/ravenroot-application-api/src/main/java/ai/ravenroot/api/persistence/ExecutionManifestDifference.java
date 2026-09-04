@@ -6,10 +6,16 @@ import java.util.Objects;
  * One dimension along which a pinned manifest and the current runtime disagree.
  *
  * <p>Both values are drawn from the manifest's own closed vocabulary — a version number, an enum
- * name, a constrained identifier or a hexadecimal digest — so a difference report is safe to return
- * to an operator, write to a log and project over the API without a redaction pass. That is the same
- * property the manifest itself has and for the same reason: there is no field either side could have
- * put a secret into.</p>
+ * name, a constrained identifier or a hexadecimal digest — so neither can carry a secret. That is the
+ * same property the manifest itself has, and for the same reason: there is no field either side could
+ * have put one into.</p>
+ *
+ * <p><strong>Not carrying a secret is not the same as being safe to hand to anyone.</strong> These
+ * two values describe the <em>deployment</em>: which node packages it has installed, a digest of the
+ * operator's execution limits, which engine it runs. That is exactly what an operator needs from a
+ * server-side diagnostic and exactly what a tenant has no claim on. A projection that crosses a
+ * tenant boundary reports {@link ExecutionManifestCompatibility#dimensions()} instead, which answers
+ * "can my execution still be reproduced" without answering "what is installed on your servers".</p>
  *
  * @param dimension which semantic dependency differs.
  * @param pinned the value recorded when the execution was accepted.

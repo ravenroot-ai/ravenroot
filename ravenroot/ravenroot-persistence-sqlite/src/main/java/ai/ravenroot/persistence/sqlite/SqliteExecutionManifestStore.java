@@ -194,6 +194,42 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
     }
 
     @Override
+    public CompletionStage<Long> purgeUnreferencedManifests(String tenantId) {
+        return async(() -> {
+            if (tenantId == null || tenantId.isBlank()) {
+                throw failure(new ExecutionManifestStoreFailure.InvalidRequest("tenantId cannot be blank"));
+            }
+            return inWriteTransaction(null, () -> {
+                var candidates = new ArrayList<UUID>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "SELECT process_instance_id FROM execution_manifest WHERE tenant_id = ?")) {
+                    statement.setString(1, tenantId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            // Through the one decoder every persisted identity in this module goes
+                            // through, so a corrupt id is classified rather than parsed leniently
+                            // here. A reclamation pass deliberately does not delete such a row: it
+                            // cannot prove the row is unreferenced without an identity to ask about,
+                            // and silently deleting durable state it could not read would be the one
+                            // outcome worse than refusing.
+                            candidates.add(decodeInstanceId(rows, tenantId));
+                        }
+                    }
+                }
+                long removed = 0;
+                for (UUID candidate : candidates) {
+                    var key = new ExecutionKey(tenantId, candidate);
+                    if (!instanceExists(key) && !references.isReferenced(key)) {
+                        deleteManifest(key);
+                        removed++;
+                    }
+                }
+                return removed;
+            });
+        });
+    }
+
+    @Override
     public void close() {
         if (!closed.compareAndSet(false, true)) {
             return;
@@ -283,14 +319,13 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
     private List<PinnedNodePackage> readPackages(ExecutionKey key) throws SQLException {
         var pinned = new ArrayList<PinnedNodePackage>();
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT package_id, version, sdk_contract FROM execution_manifest_package "
+                "SELECT package_id, identity_digest FROM execution_manifest_package "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY package_id")) {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    pinned.add(new PinnedNodePackage(rows.getString(1), rows.getString(2),
-                            rows.getString(3)));
+                    pinned.add(new PinnedNodePackage(rows.getString(1), rows.getString(2)));
                 }
             }
         }
@@ -334,16 +369,34 @@ public final class SqliteExecutionManifestStore implements ExecutionManifestStor
         }
         try (PreparedStatement statement = connection.prepareStatement(
                 "INSERT INTO execution_manifest_package (tenant_id, process_instance_id, package_id, "
-                        + "version, sdk_contract) VALUES (?, ?, ?, ?, ?)")) {
+                        + "identity_digest) VALUES (?, ?, ?, ?)")) {
             for (PinnedNodePackage pinned : manifest.nodePackages()) {
                 statement.setString(1, key.tenantId());
                 statement.setString(2, key.processInstanceId().toString());
                 statement.setString(3, pinned.packageId());
-                statement.setString(4, pinned.version());
-                statement.setString(5, pinned.sdkContract());
+                statement.setString(4, pinned.identityDigest());
                 statement.addBatch();
             }
             statement.executeBatch();
+        }
+    }
+
+    /**
+     * Decodes one stored process-instance id through this module's single decoder.
+     *
+     * <p>{@link StoredUuid} classifies a corrupt id as an <em>execution store</em> failure, which is
+     * the right classification for the store it was written for and the wrong type to escape this
+     * port: a caller composing all three stores must not catch one and silently absorb another. The
+     * verdict is reused and the type is translated, rather than a second decoder being written that
+     * could parse the same bytes differently.</p>
+     */
+    private UUID decodeInstanceId(ResultSet rows, String tenantId) throws SQLException {
+        try {
+            return StoredUuid.required(rows, "execution_manifest", "process_instance_id", tenantId);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException corrupt) {
+            throw new ExecutionManifestStoreException(new ExecutionManifestStoreFailure.Corrupted(
+                    new ExecutionKey(tenantId, new UUID(0L, 0L)),
+                    "stored execution_manifest.process_instance_id is not a canonical UUID"), corrupt);
         }
     }
 

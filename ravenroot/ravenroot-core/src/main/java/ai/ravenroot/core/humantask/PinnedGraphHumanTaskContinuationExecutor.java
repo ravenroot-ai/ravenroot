@@ -41,6 +41,8 @@ import java.util.concurrent.ForkJoinPool;
 
 /** Re-enters from a settled human task against the immutable graph bytes pinned at registration. */
 public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTaskContinuationExecutor {
+    private static final System.Logger LOGGER =
+            System.getLogger("ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor");
     private static final java.util.concurrent.Executor CLEANUP_EXECUTOR = ForkJoinPool.commonPool();
     private final GraphDefinitionStore definitions;
     private final ExecutionStore executions;
@@ -192,8 +194,9 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     /**
      * Refuses to rebuild a graph for an execution this runtime cannot reproduce.
      *
-     * <p>Runs before the pinned document is loaded and before any lease or runner exists, so a
-     * refusal costs nothing and claims nothing. Both refusals are typed — a missing, unreadable or
+     * <p>Called from {@code prepare} and from nowhere else, so this executor's graph cannot be
+     * rebuilt without passing through it. It runs before the pinned document is loaded and before any
+     * lease or runner exists, so a refusal costs nothing and claims nothing. Both refusals are typed — a missing, unreadable or
      * digest-mismatched manifest as
      * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}, an environment that
      * resolves differently as
@@ -210,16 +213,41 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         }
     }
 
+    /**
+     * Makes a manifest refusal visible instead of letting it vanish into a {@code false}.
+     *
+     * <p>{@code supports} answers a boolean, so a typed refusal cannot travel out of it. Every other
+     * reason it answers {@code false} is transient and resolves on the next sweep; a manifest refusal
+     * is permanent until an operator changes the deployment or abandons the work, so an unlogged one
+     * is an item that retries forever with nothing saying why.</p>
+     */
+    private void reportIfManifestRefusal(ai.ravenroot.api.persistence.ExecutionKey key,
+                                         RuntimeException failure) {
+        if (failure instanceof ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException
+                incompatible) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "ravenroot_manifest_refused tenant={0} process_instance={1} reason=incompatible {2}",
+                    key.tenantId(), key.processInstanceId(), incompatible.report().describe());
+            return;
+        }
+        var storeFailure = ai.ravenroot.api.persistence.ExecutionManifestStoreException.unwrap(failure);
+        if (storeFailure != null) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "ravenroot_manifest_refused tenant={0} process_instance={1} reason={2}",
+                    key.tenantId(), key.processInstanceId(), storeFailure.failure().describe());
+        }
+    }
+
     @Override
     public boolean supports(DurableHumanTask task) {
         GraphManager manager = null;
         try {
             GraphExecutionContinuationCheckpoint.read(task.request().continuationVersion(),
                     task.request().continuation());
-            verifyManifest(task.key());
             manager = prepare(task).manager();
             return task.status().terminal();
         } catch (RuntimeException unavailable) {
+            reportIfManifestRefusal(task.key(), unavailable);
             return false;
         } finally {
             if (manager != null) manager.close();
@@ -238,7 +266,6 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             GraphExecutionContinuationCheckpoint.Decoded checkpoint =
                     GraphExecutionContinuationCheckpoint.read(task.request().continuationVersion(),
                             task.request().continuation());
-            verifyManifest(claim.key());
             Prepared prepared = prepare(task);
             GraphManager manager = prepared.manager();
             long revision;
@@ -353,6 +380,10 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     }
 
     private Prepared prepare(DurableHumanTask task) {
+        // The task's own key, which execute() has already proven equal to the claim's before it gets
+        // here. Verifying from inside prepare is what makes this the only way in: a later call site
+        // would have to obtain a Prepared to rebuild anything, and obtaining one verifies.
+        verifyManifest(task.key());
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(task.key().tenantId(),
                 new GraphContentId(task.request().graphVersionPin().reference())))
                 .toCompletableFuture().join();

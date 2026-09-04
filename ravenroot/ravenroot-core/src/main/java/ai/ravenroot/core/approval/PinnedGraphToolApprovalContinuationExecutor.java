@@ -41,6 +41,8 @@ import java.util.concurrent.ForkJoinPool;
 /** Production trusted re-entry against the immutable graph bytes pinned by the approval. */
 public final class PinnedGraphToolApprovalContinuationExecutor
         implements ToolApprovalContinuationExecutor {
+    private static final System.Logger LOGGER =
+            System.getLogger("ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor");
     private static final java.util.concurrent.Executor CLEANUP_EXECUTOR = ForkJoinPool.commonPool();
     private final GraphDefinitionStore definitions;
     private final ExecutionStore executions;
@@ -215,8 +217,10 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     /**
      * Refuses to rebuild a graph for an execution this runtime cannot reproduce.
      *
-     * <p>Runs before the definition is loaded and before any lease or runner exists, so a refusal
-     * costs nothing and claims nothing. Both refusals are typed: an absent, unreadable or
+     * <p>Called from {@code prepare} and from nowhere else, so it is not possible to rebuild this
+     * executor's graph without passing through it — a later call site would have to obtain a
+     * {@code Prepared} to do anything, and obtaining one verifies. It runs before the definition is
+     * loaded and before any lease or runner exists, so a refusal costs nothing and claims nothing. Both refusals are typed: an absent, unreadable or
      * digest-mismatched manifest arrives as
      * {@link ai.ravenroot.api.persistence.ExecutionManifestStoreException}, and a runtime that
      * resolves something different arrives as
@@ -239,8 +243,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     public boolean supports(DurableToolApproval approval) {
         GraphManager manager = null;
         try {
-            verifyManifest(approval.key());
-            Prepared prepared = prepare(approval.request().requester().tenantId(),
+            Prepared prepared = prepare(approval.key(), approval.request().requester().tenantId(),
                     approval.request().graphVersionPin().reference(), approval.request().nodeId());
             manager = prepared.manager();
             var request = approval.request();
@@ -257,9 +260,39 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                     ToolApprovalRegistration.digest(checkpoint.inner())));
             return true;
         } catch (RuntimeException unavailable) {
+            reportIfManifestRefusal(approval.key(), unavailable);
             return false;
         } finally {
             if (manager != null) manager.close();
+        }
+    }
+
+    /**
+     * Makes a manifest refusal visible instead of letting it vanish into a {@code false}.
+     *
+     * <p>{@code supports} answers a boolean, so a typed refusal cannot travel out of it, and the
+     * recovery loop's {@code Deferred} outcome carries a reason this method has no way to reach.
+     * Every other reason this method returns {@code false} is transient by nature — a store that is
+     * briefly unavailable, an approval whose decision moved — and resolves itself on the next sweep.
+     * A manifest refusal is the opposite: it is permanent until an operator changes the deployment or
+     * abandons the work, so an unlogged one is an item that retries forever with nothing anywhere
+     * saying why. The bounded report is safe to log for the reason it exists: it names dimensions and
+     * digests, and this side of the boundary is the operator's.</p>
+     */
+    private void reportIfManifestRefusal(ai.ravenroot.api.persistence.ExecutionKey key,
+                                         RuntimeException failure) {
+        if (failure instanceof ai.ravenroot.core.manifest.ExecutionManifestIncompatibleException
+                incompatible) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "ravenroot_manifest_refused tenant={0} process_instance={1} reason=incompatible {2}",
+                    key.tenantId(), key.processInstanceId(), incompatible.report().describe());
+            return;
+        }
+        var storeFailure = ai.ravenroot.api.persistence.ExecutionManifestStoreException.unwrap(failure);
+        if (storeFailure != null) {
+            LOGGER.log(System.Logger.Level.WARNING,
+                    "ravenroot_manifest_refused tenant={0} process_instance={1} reason={2}",
+                    key.tenantId(), key.processInstanceId(), storeFailure.failure().describe());
         }
     }
 
@@ -274,8 +307,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         try {
             GraphExecutionContinuationCheckpoint.Decoded checkpoint =
                     GraphExecutionContinuationCheckpoint.read(continuation.version(), continuation.checkpoint());
-            verifyManifest(claim.key());
-            Prepared prepared = prepare(continuation.requester().tenantId(),
+            Prepared prepared = prepare(claim.key(), continuation.requester().tenantId(),
                     continuation.graphVersionPin().reference(), continuation.nodeId());
             GraphManager manager = prepared.manager();
             long revision;
@@ -482,7 +514,9 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                 || failure instanceof ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
     }
 
-    private Prepared prepare(String tenantId, String pin, String nodeId) {
+    private Prepared prepare(ai.ravenroot.api.persistence.ExecutionKey key, String tenantId,
+                             String pin, String nodeId) {
+        verifyManifest(key);
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(
                 tenantId, new GraphContentId(pin))).toCompletableFuture().join();
         GraphManager manager = GraphManager.readGraphMl(

@@ -320,6 +320,12 @@ class DefaultRavenrootApplicationExecutionManifestTest {
         }
 
         @Override
+        public CompletionStage<Long> purgeUnreferencedManifests(String tenantId) {
+            return CompletableFuture.failedFuture(new ExecutionManifestStoreException(
+                    new ExecutionManifestStoreFailure.Unavailable("refusing store")));
+        }
+
+        @Override
         public void close() {
         }
     }

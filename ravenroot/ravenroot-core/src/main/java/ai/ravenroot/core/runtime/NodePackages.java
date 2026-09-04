@@ -9,6 +9,7 @@ import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.node.NodePackage;
+import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
@@ -143,17 +144,22 @@ public final class NodePackages {
                 validated.add(safe);
             }
             // version() and sdkContract() were previously read only to admit the package and then
-            // dropped. They are carried into the plan so the registry can retain the package's full
-            // identity: an execution manifest cannot say whether the packages it ran with are the
-            // packages it was admitted with if all it has is an id.
-            plans.add(new RegistrationPlan(packageId, nodePackage.version(), nodePackage.sdkContract(),
+            // dropped. The pinned identity is built here, in the planning pass, and carried in the
+            // plan: an execution manifest cannot say whether the packages an execution ran with are
+            // the packages it was admitted with if all it has is an id. Built here rather than in the
+            // apply loop below so that nothing about it can fail after earlier packages have already
+            // registered -- the same plan-then-apply split every other check in this method observes.
+            // PinnedNodePackage.of imposes no shape on either string, so in fact nothing here can
+            // fail; the placement is what keeps that true if it ever changes.
+            plans.add(new RegistrationPlan(packageId,
+                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()),
                     serviceAware, packageServices, List.copyOf(validated)));
         }
 
         for (RegistrationPlan plan : plans) {
             plan.behaviors().forEach(behavior -> registry.registerPackageFactory(
                     new SdkNodeBehaviorFactory(behavior, plan.services(), plan.serviceAware()),
-                    plan.packageId(), plan.version(), plan.sdkContract()));
+                    plan.packageId(), plan.pinned()));
         }
         return registry;
     }
@@ -294,8 +300,7 @@ public final class NodePackages {
         }
     }
 
-    private record RegistrationPlan(String packageId, String version, String sdkContract,
-                                    boolean serviceAware, NodePackageServices services,
-                                    List<NodeBehavior> behaviors) {
+    private record RegistrationPlan(String packageId, PinnedNodePackage pinned, boolean serviceAware,
+                                    NodePackageServices services, List<NodeBehavior> behaviors) {
     }
 }

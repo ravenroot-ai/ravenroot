@@ -60,11 +60,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <em>both</em> stores, through the public constructor that accepts both, and that is the only
  * composition in which a deployment-hosted acceptance is durably bound.</p>
  *
- * <p><strong>The shipped server does not compose deployments this way.</strong> Deployment
- * registration builds deployments with no execution store, so their traversals are not durably
- * recorded and not durably bound; giving deployments durable execution state is separate work. These
- * assertions are about the capability being real and correct where it is composed, not about the
- * default server composition, and must not be read as covering it.</p>
+ * <p><strong>What the shipped server composes, stated as of this change.</strong>
+ * {@code DefaultRavenrootApplication.registerDeployment} passes its own execution store, definition
+ * store and manifest service to every deployment it builds, so a server started with a durable store
+ * does durably record and bind deployment-hosted traversals. That was not true when this class was
+ * written and the paragraph here said so; it is stated again rather than deleted because a reader
+ * checking whether these assertions cover the default composition needs the answer, and the answer
+ * has changed. What still bounds them is the store: a deployment composed without an execution store
+ * enters no durable-recording path at all, which is what the last test below pins.</p>
  */
 class DeploymentHostedGraphDefinitionBindingTest {
 

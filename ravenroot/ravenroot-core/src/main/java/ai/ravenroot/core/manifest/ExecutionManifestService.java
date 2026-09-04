@@ -27,9 +27,18 @@ import java.util.concurrent.CompletionStage;
  * another — and the resulting refusals would look like corruption rather than like a composition
  * mistake. One object holding one resolver makes that class of mistake unrepresentable.</p>
  *
+ * <h2>What verification refuses, and what it does not repair</h2>
+ * <p>{@link #verify} is a gate, not a restoration. It compares the pinned dependency set against what
+ * the caller is about to run under and refuses when they differ; it does not hand the pinned values
+ * back so the caller can adopt them. That matters most for the two the recovery paths get from the
+ * process rather than from the execution — the submission policy, which the pinned recovery runner
+ * hard-codes, and the execution limits, which it takes from current configuration. A composition
+ * holding a manifest refuses those cases instead of running them. A composition holding none runs
+ * them exactly as it did before, because there is nothing to compare against.</p>
+ *
  * <h2>Composition is the switch</h2>
  * <p>A runtime that composes no manifest service verifies nothing and behaves exactly as it did
- * before manifests existed. A runtime that composes one refuses to recover an execution that has no
+ * before manifests existed, including both substitutions named above. A runtime that composes one refuses to recover an execution that has no
  * manifest, including one accepted before manifests were introduced. That refusal is deliberate and
  * is the whole point: such an execution can only be recovered by resolving today's environment,
  * which is the substitution this contract exists to prevent. It is stated here rather than left to

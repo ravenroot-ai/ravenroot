@@ -138,6 +138,29 @@ public interface ExecutionManifestStore extends AutoCloseable {
      */
     CompletionStage<Void> remove(ExecutionKey key);
 
+    /**
+     * Removes every manifest of one tenant whose execution no longer exists.
+     *
+     * <p>Caller-invoked, never a background sweep, for the reason
+     * {@link GraphDefinitionStore#purgeUnreferencedDefinitions(String)} gives: retention that belongs
+     * to a caller stays an operation rather than becoming an adapter setting, so an operator decides
+     * when reclamation happens and can see what it did.</p>
+     *
+     * <p>This is the operation that keeps manifests from outliving everything that could need them.
+     * A manifest is committed before the acceptance that references it and is not removed when that
+     * execution's rows are, so two populations accumulate without it: manifests pinned for an
+     * acceptance that then failed, and manifests whose instance a later retention pass removed.
+     * Neither is reachable and neither would ever be reclaimed on its own.</p>
+     *
+     * <p>Reachability is recomputed inside the removal transaction and no stored reference count
+     * exists; see {@link ExecutionManifestReferences}. A manifest still needed is left in place and
+     * is not counted.</p>
+     *
+     * @param tenantId tenant whose unreferenced manifests may be reclaimed.
+     * @return the number of manifests removed.
+     */
+    CompletionStage<Long> purgeUnreferencedManifests(String tenantId);
+
     /** Releases this adapter's resources. Closing twice is legal and does nothing the second time. */
     @Override
     void close();

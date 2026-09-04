@@ -690,8 +690,7 @@ final class SqliteSchema {
                             tenant_id           TEXT NOT NULL,
                             process_instance_id TEXT NOT NULL,
                             package_id          TEXT NOT NULL,
-                            version             TEXT NOT NULL,
-                            sdk_contract        TEXT NOT NULL,
+                            identity_digest     TEXT NOT NULL CHECK(length(identity_digest) = 64),
                             PRIMARY KEY (tenant_id, process_instance_id, package_id),
                             FOREIGN KEY (tenant_id, process_instance_id)
                                 REFERENCES execution_manifest (tenant_id, process_instance_id)

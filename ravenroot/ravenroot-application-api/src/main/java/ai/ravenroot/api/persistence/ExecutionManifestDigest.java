@@ -69,8 +69,7 @@ public record ExecutionManifestDigest(String value) {
         parts.add(Integer.toString(manifest.nodePackages().size()));
         for (PinnedNodePackage pinned : manifest.nodePackages()) {
             parts.add(pinned.packageId());
-            parts.add(pinned.version());
-            parts.add(pinned.sdkContract());
+            parts.add(pinned.identityDigest());
         }
         return new ExecutionManifestDigest(component(MANIFEST_DOMAIN, parts));
     }

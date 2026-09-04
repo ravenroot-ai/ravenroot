@@ -34,14 +34,6 @@ final class ManifestTokens {
         return value;
     }
 
-    static String requireOptionalToken(String value, String name) {
-        if (value == null) {
-            throw new IllegalArgumentException(name + " cannot be null; use an empty string to record "
-                    + "that this deployment composes none");
-        }
-        return value.isEmpty() ? value : requireToken(value, name);
-    }
-
     static String requireEnumName(String value, String name) {
         if (value == null || !ENUM_NAME.matcher(value).matches()) {
             throw new IllegalArgumentException(name

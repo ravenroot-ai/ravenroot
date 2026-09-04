@@ -325,9 +325,9 @@ class PinnedGraphToolApprovalPreflightTest {
                 var rebuilt = new ai.ravenroot.api.persistence.ExecutionManifest(
                         accepted.formatVersion(), accepted.key(), accepted.graphContentId(),
                         accepted.graphIdentity(), accepted.runtime(),
-                        List.of(new ai.ravenroot.api.persistence.PinnedNodePackage(
+                        List.of(ai.ravenroot.api.persistence.PinnedNodePackage.of(
                                 resolver.nodePackages().get(0).packageId(), "0.0.1-before-the-upgrade",
-                                resolver.nodePackages().get(0).sdkContract())),
+                                ai.ravenroot.api.node.NodeSdk.CONTRACT)),
                         accepted.pinnedAt());
                 manifestStore.pin(rebuilt).toCompletableFuture().join();
                 assertEquals(1, resolver.nodePackages().size(),

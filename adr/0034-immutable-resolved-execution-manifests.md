@@ -17,10 +17,11 @@ an execution is accepted and the moment it is recovered, and none of them was re
 
 The consequence was silent rather than loud. A recovery read the pinned document, resolved the rest
 from the running process, and produced an execution that could differ from the one a caller was told
-had been accepted — without any surface reporting that a substitution had occurred. One case is
-concrete and reachable: every recovery path rebuilds its runner under the standard submission policy,
-so an execution admitted as structural test evidence would have come back invoking production
-behaviors.
+had been accepted — without any surface reporting that a substitution had occurred. Two cases are
+concrete and reachable rather than theoretical: the pinned recovery runner hard-codes the standard
+submission policy, so an execution admitted as structural test evidence comes back invoking
+production behaviors; and it takes execution limits from the recovering process rather than from the
+execution, so a traversal admitted under one set of bounds resumes under today's.
 
 Not every dependency the problem names has an identity this build can record. There is no planner and
 no versioned parser dialect, so there is no such version to pin. A node package's content digest
@@ -48,7 +49,16 @@ be recovered by substitution.
 Every field is an integer, an instant, a constrained identifier or a hexadecimal digest. A manifest
 has no free-form value channel, so a credential, a bearer token or an authorization snapshot cannot be
 represented in one. Adapter-supplied identities are digested rather than copied, which keeps that
-property true without validating third-party text and refusing an otherwise sound deployment.
+property true without validating third-party text and refusing an otherwise sound deployment. That
+applies to a node package's own declared version and SDK contract too: the Node SDK contract has never
+constrained their shape, so validating them would refuse a package the runtime has always accepted,
+inside plugin activation, at start-up.
+
+Not carrying a secret is not the same as being safe to hand to anyone. A comparison's two values
+describe the *deployment* — which packages are installed, a digest of the operator's limits, which
+engine is composed — and belong in a server-side diagnostic. A projection crossing a tenant boundary
+reports the differing dimensions and nothing else, which answers whether a caller's execution can
+still be reproduced without answering what is installed on the servers running it.
 
 Before initial dispatch and before every recovery, resume, restart after a hold and ownership
 takeover, the manifest is read back, re-digested from its stored fields, and compared for equality
@@ -61,11 +71,33 @@ A missing, corrupt, digest-mismatched or incompatible manifest fails closed with
 a bounded diagnostic naming each differing dimension and both of its values. No similar graph,
 package, artifact or policy is substituted. On the recovery loop that means the claimed work is
 neither dispatched nor acknowledged: it stays claimable, which is that loop's existing fail-closed
-answer.
+answer, and the refusal is logged because a boolean `supports` cannot carry the reason and the
+condition never resolves on its own.
+
+**The two reachable defects above are detected and refused, not repaired.** The pinned recovery
+runner still hard-codes the standard policy and still takes today's limits; what changes is that a
+composition holding a manifest refuses to reach it rather than running it. That distinction is
+load-bearing in both directions. A deployment that composes a manifest store gets a refusal instead
+of a silent substitution. A deployment that composes none — which is every constructor except the
+widest one, and therefore the default an embedder gets — verifies nothing, and both substitutions
+still happen exactly as before. Repairing them is separate work with its own decisions to make: a
+resumed pass-through traversal has no defined meaning today, and restoring limits would require the
+manifest to carry their values rather than a digest, which is a different disclosure decision than
+the one taken below.
+
+A comparison covers the dependency profile and the node packages. It does not cover the graph content
+address or the logical graph identity, because a caller obtains the "current" side by describing the
+runtime for the manifest it just read, so those fields are copied and could not differ. The graph is
+enforced more strongly elsewhere: the definition store re-derives a document's address from its bytes
+on every read. What is pinned and what is compared are therefore different sets, and the contract
+says so rather than leaving a reader to infer that a compatible verdict covers everything.
 
 Retention cannot remove a manifest whose execution still exists. Reachability is recomputed inside
 the removal transaction rather than tracked by a counter, and removal is refused rather than answered
-with silence.
+with silence. Reclamation is a caller-invoked operation over one tenant, mirroring the definition
+store's, because two populations otherwise accumulate that nothing would ever remove: manifests
+pinned for an acceptance that then failed, and manifests whose process instance a later retention
+pass deleted. As with definitions, no operator-facing surface invokes it in this release.
 
 Composing a manifest store is what turns both halves on. A deployment that composes none behaves
 exactly as it did before this record. A deployment that composes one refuses to recover an execution
@@ -82,9 +114,12 @@ substitution this record exists to prevent.
 - Enabling manifests on a database that already holds accepted executions makes those executions
   unrecoverable through the paths that verify. They remain readable and remain retained; what is
   refused is resuming them.
+- The two reachable recovery defects remain live wherever no manifest store is composed, which is
+  every composition that does not opt in. The manifest makes them refusable, not absent.
 - Three dependency classes are pinned less than completely, and the manifest's wording claims only
-  what it records. A node package is pinned by id, version and SDK contract but not by content
-  digest, so a package republished under an unchanged version is not detected. A program artifact's
+  what it records. A node package is pinned by id and by a digest of its declared version and SDK
+  contract, never by a content digest, so a package republished under an unchanged version is not
+  detected. A program artifact's
   content digest is pinned transitively, because its source lives in the document, but its approval
   state is deliberately not pinned and stays a live check at redemption. There is no parser version
   and no planner version because neither exists in this build.
@@ -92,6 +127,9 @@ substitution this record exists to prevent.
   outside the three defined ones is recorded as `unknown` rather than verbatim. Two different
   unrecognised stances therefore compare equal.
 - Verification adds one durable read per submission and one per recovery attempt.
+- A tenant reading the compatibility projection learns which dimensions changed and never what they
+  changed to. Diagnosing *why* a difference appeared requires the server-side record, which is
+  deliberate: the alternative discloses a deployment's inventory to anyone who submitted one graph.
 - The comparison is intolerant by design, so an operator changing an execution limit, an engine
   capability or an installed package version will find retained work refusing to resume until that
   change is reverted or the work is abandoned deliberately.

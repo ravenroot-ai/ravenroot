@@ -655,7 +655,37 @@ public final class GraphRunner implements AutoCloseable {
                 GraphExecutionLimits.DEFAULTS);
     }
 
-    /** Pinned recovery runner under the same operator limits as the original execution. */
+    /**
+     * Pinned recovery runner.
+     *
+     * <h2>Two things this constructor does not restore, stated because the name suggests otherwise</h2>
+     * <p>It hard-codes {@link ExecutionPolicy#STANDARD} and takes {@code executionLimits} from
+     * whatever the recovering process composes. Neither is read back from the execution being
+     * recovered, so a traversal admitted under {@link ExecutionPolicy#TEST_PASSTHROUGH} resumes here
+     * as an ordinary run that constructs and invokes behaviors, and a traversal admitted under one
+     * set of limits resumes under today's.</p>
+     *
+     * <p><strong>The execution manifest detects both; it does not fix either.</strong> A composition
+     * that pins manifests refuses to reach this constructor at all when the pinned policy or limits
+     * disagree with what the process resolves — the refusal is the correction, and the caller is told
+     * rather than quietly given different behavior. A composition with <em>no</em> manifest store
+     * verifies nothing, and every constructor of {@code DefaultRavenrootApplication} and of the three
+     * recovery services except the widest one passes {@code null} for it, so the default composition
+     * an embedder gets is one where both substitutions still happen silently. Restoring the two
+     * values here rather than refusing is a separate change: the policy case needs a resumed
+     * pass-through traversal to have a defined meaning, which it does not have today, and the limits
+     * case needs the manifest to carry the values rather than a digest of them, which is a different
+     * disclosure decision than the one this contract made.</p>
+     *
+     * @param graphManager the graph this runner traverses.
+     * @param snapshot the canonical definition this runner is pinned to.
+     * @param engine execution engine this runner dispatches through.
+     * @param behaviors trusted behavior catalog.
+     * @param monitor execution monitor that observes this traversal.
+     * @param identitySource source of identifiers for this traversal.
+     * @param shutdownBound how long node teardown may take.
+     * @param executionLimits limits this process composes, not the ones the execution was admitted under.
+     */
     public GraphRunner(GraphManager graphManager, GraphVersionSnapshot snapshot, ExecutionEngine engine,
                        BehaviorRegistry behaviors, ExecutionMonitor monitor,
                        ExecutionIdentitySource identitySource, Duration shutdownBound,

@@ -17,6 +17,17 @@ import java.util.Objects;
  * test, and a deployment that wants to proceed across a difference resolves it deliberately rather
  * than having it absorbed.</p>
  *
+ * <h2>What is pinned and what is compared are different sets</h2>
+ * <p>A manifest also pins the graph content address and the logical graph identity, and this
+ * comparison touches neither. That is not an omission: a caller obtains {@code current} by describing
+ * the runtime <em>for the manifest it just read</em>, so the graph fields are copied from the pinned
+ * manifest and could not differ here even if the stored document had been replaced. The graph is
+ * enforced elsewhere and more strongly — {@link GraphDefinitionStore#load(GraphDefinitionKey)}
+ * re-derives the document's address from its bytes on every read, so a document that no longer
+ * matches its pin fails there rather than being reported as a difference here. Reading this report as
+ * "everything the manifest pins agrees" would therefore be wrong; it says that every dimension
+ * <em>this</em> comparison covers agrees, and the definition load says the rest.</p>
+ *
  * <h2>Node packages are compared one way, deliberately</h2>
  * <p>A package the execution was admitted with that is now absent or resolves to a different
  * version is a difference. A package installed <em>since</em> acceptance that this execution never
@@ -56,6 +67,22 @@ public record ExecutionManifestCompatibility(List<ExecutionManifestDifference> d
      */
     public boolean compatible() {
         return differences.isEmpty();
+    }
+
+    /**
+     * The dimensions that disagree, without the values that disagree on them.
+     *
+     * <p>Exists because those two are addressed to different readers.
+     * {@link ExecutionManifestDifference#pinned()} and {@code observed()} describe the deployment —
+     * an installed package's identity, a digest of the operator's execution limits — and belong in a
+     * server-side diagnostic an operator reads. A tenant asking whether its own execution can still
+     * be reproduced needs to know <em>that</em> the packages changed, not which packages a deployment
+     * has installed. A projection crossing that boundary reports these and never the values.</p>
+     *
+     * @return each differing dimension, in this report's own order, with duplicates preserved.
+     */
+    public List<ExecutionManifestDifference.Dimension> dimensions() {
+        return differences.stream().map(ExecutionManifestDifference::dimension).toList();
     }
 
     /**
@@ -138,7 +165,7 @@ public record ExecutionManifestCompatibility(List<ExecutionManifestDifference> d
     }
 
     private static String identityOf(PinnedNodePackage pinned) {
-        return pinned.packageId() + "@" + pinned.version() + "+" + pinned.sdkContract();
+        return pinned.packageId() + "@" + pinned.identityDigest();
     }
 
     private static void add(List<ExecutionManifestDifference> found,

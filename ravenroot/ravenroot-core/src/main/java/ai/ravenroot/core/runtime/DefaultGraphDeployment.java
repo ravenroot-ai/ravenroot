@@ -1202,7 +1202,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         // as the submission path. A deployment-hosted traversal is an accepted execution like any
         // other, and one accepted without a manifest would be refused by every recovery path that
         // verifies one.
-        recordExecutionManifest(security, key);
+        recordExecutionManifest(key);
         var traversal = new ai.ravenroot.api.application.Traversal(traversalId, manager.start().id(),
                 ai.ravenroot.api.application.TraversalStatus.ACCEPTED, java.util.Map.of());
         var accepted = new ai.ravenroot.api.application.ProcessInstance(processInstanceId,
@@ -1240,27 +1240,22 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     }
 
     /**
-     * Commits the document this deployment hosts, so the pin written next addresses bytes the store
-     * actually holds. A failure propagates and the traversal is not accepted.
-     *
-     * <p>Reached only from {@link #openTraversalRecorder}, which returns before this when no execution
-     * store is composed. A deployment with a definition store and no execution store therefore
-     * commits nothing, correctly: there is no pin to protect.</p>
-     */
-    /**
      * Pins what this traversal's process instance was resolved against.
      *
      * <p>Reached only from {@link #openTraversalRecorder}, which returns before this when no execution
      * store is composed, so a deployment carrying a manifest service and no execution store records
      * nothing -- correctly, because there is no acceptance to protect.</p>
      *
-     * <p>{@link ExecutionPolicy#STANDARD} is what is pinned because it is what a deployment-hosted
-     * traversal runs under: this deployment's runner is built without a policy parameter and takes
-     * that default. Recording the policy the traversal actually runs under, rather than a placeholder,
-     * is what lets a later recovery compare like with like.</p>
+     * <p>Takes the {@code key} rather than a {@link SecurityContext}: the tenant is already inside
+     * the key its caller built, and a second parameter carrying the same tenant would be a second
+     * place for the two to disagree.</p>
+     *
+     * <p>{@link ai.ravenroot.api.application.ExecutionPolicy#STANDARD} is what is pinned because it
+     * is what a deployment-hosted traversal runs under: this deployment's runner is built without a
+     * policy parameter and takes that default. Recording the policy the traversal actually runs
+     * under, rather than a placeholder, is what lets a later recovery compare like with like.</p>
      */
-    private void recordExecutionManifest(SecurityContext security,
-                                         ai.ravenroot.api.persistence.ExecutionKey key) {
+    private void recordExecutionManifest(ai.ravenroot.api.persistence.ExecutionKey key) {
         if (executionManifests == null) {
             return;
         }
@@ -1270,6 +1265,14 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
     }
 
+    /**
+     * Commits the document this deployment hosts, so the pin written next addresses bytes the store
+     * actually holds. A failure propagates and the traversal is not accepted.
+     *
+     * <p>Reached only from {@link #openTraversalRecorder}, which returns before this when no execution
+     * store is composed. A deployment with a definition store and no execution store therefore
+     * commits nothing, correctly: there is no pin to protect.</p>
+     */
     private void recordGraphDefinition(SecurityContext security) {
         if (graphDefinitionStore == null) {
             return;

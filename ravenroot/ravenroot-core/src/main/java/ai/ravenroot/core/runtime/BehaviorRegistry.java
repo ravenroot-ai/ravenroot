@@ -33,10 +33,12 @@ public final class BehaviorRegistry {
      *
      * <p>{@link NodeCatalogSource} carries a bundle id and nothing else, and it is a published
      * catalog projection, so widening it would change a response shape for a reason unrelated to the
-     * catalog. This map is held beside it instead, and records the two facts a package declares about
-     * itself that the registry previously read and discarded: its own build version, and the Node SDK
-     * contract it was compiled against. Both are needed to say whether an execution's packages are
-     * the packages it was admitted with; a bundle id alone cannot distinguish two builds.</p>
+     * catalog. This map is held beside it instead, and records — as a digest, never as text — the two
+     * facts a package declares about itself that the registry previously read and discarded: its own
+     * build version, and the Node SDK contract it was compiled against. Both are needed to say
+     * whether an execution's packages are the packages it was admitted with; a bundle id alone cannot
+     * distinguish two builds. Nothing here constrains what a package may declare; see
+     * {@link PinnedNodePackage} for why that is not a detail.</p>
      *
      * <p>Keyed by package id rather than by behavior name because a package is the versioned unit —
      * the same reason {@link ai.ravenroot.api.node.NodePackage} states for versioning the package and
@@ -122,11 +124,12 @@ public final class BehaviorRegistry {
     }
 
     BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId,
-                                            String version, String sdkContract) {
+                                            PinnedNodePackage pinned) {
         registerFactory(factory, NodeCatalogSource.bundle(packageId));
         // Recorded after the registration succeeds, so a refused behavior never leaves an identity
-        // claiming a package contributed something it did not.
-        nodePackageIdentities.put(packageId, new PinnedNodePackage(packageId, version, sdkContract));
+        // claiming a package contributed something it did not. The identity itself was built during
+        // planning, so nothing about it can fail here.
+        nodePackageIdentities.put(packageId, pinned);
         return this;
     }
 

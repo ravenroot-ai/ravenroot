@@ -3293,18 +3293,18 @@ public final class RavenrootServer implements AutoCloseable {
      * {@code GET /v1/executions/{id}/manifest}: the identity of the dependency set one process
      * instance was accepted against, and whether this runtime still resolves it.
      *
-     * <p><strong>Identity and state, never the pinned configuration itself.</strong> The response
-     * carries the manifest's format version, its digest, the graph content address it pins, when it
-     * was pinned, and a compatibility verdict. It does not carry the engine's capability set, the
-     * operator's execution limits or the installed package inventory: those are deployment
-     * configuration, an authenticated tenant has no claim on them, and a caller does not need them
-     * to act on the verdict. A difference is reported by naming the dimension and the two digests,
-     * which is enough for an operator holding the deployment to know what changed and useless to
-     * anyone who is not.</p>
+     * <p><strong>Identity and state, never the pinned configuration and never a value from it.</strong>
+     * The response carries the manifest's format version, its digest, the graph content address it
+     * pins, when it was pinned, and a compatibility verdict whose differences are reported as
+     * dimension names alone. It carries no capability set, no execution limit, no package identity
+     * and no package count: all of those describe the deployment rather than the caller's execution,
+     * an authenticated tenant has no claim on them, and none of them is needed to act on the verdict.
+     * The comparison's own values remain available to an operator through the server-side diagnostic
+     * a refusal raises; see {@link ai.ravenroot.api.persistence.ExecutionManifestDifference}.</p>
      *
-     * <p>Every value in the response is a digest, a closed enum name or a bounded token, because
-     * that is all a manifest can hold; there is no field a credential could have reached, so no
-     * redaction pass stands between this projection and the record it renders.</p>
+     * <p>Every value in the response is a digest, a closed enum name or a bounded token, because that
+     * is all a manifest can hold; there is no field a credential could have reached, so no redaction
+     * pass stands between this projection and the record it renders.</p>
      *
      * <p>404 {@link ErrorCode#UNKNOWN_PROCESS_INSTANCE} when no manifest is pinned for the instance,
      * when it belongs to another tenant, and when it was accepted before manifests were recorded —
@@ -3363,15 +3363,30 @@ public final class RavenrootServer implements AutoCloseable {
         fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
     }
 
-    /** Bounded, non-secret identity and compatibility state only -- never the pinned configuration. */
+    /**
+     * The caller's own execution identity and a verdict, and nothing about this deployment.
+     *
+     * <p><strong>Dimension names only.</strong> A difference also carries the two values that
+     * disagree, and those describe the deployment rather than the execution: a node-package
+     * difference's values are an installed package's identity, and the engine, store and limits
+     * dimensions compare digests of operator configuration. Rendering them here would answer "what is
+     * installed on your servers" to any authenticated tenant that submitted one graph. The dimension
+     * alone answers the question this route exists for — can my execution still be reproduced, and
+     * along which axis has it stopped being reproducible — and the dimension vocabulary already
+     * distinguishes a package that is missing from one that changed.</p>
+     *
+     * <p>The count of pinned node packages is left out for the same reason: how many packages a
+     * deployment has installed is an inventory fact, and a number is still an answer.</p>
+     *
+     * <p>What remains is the caller's: the format version and digest of its own manifest, the graph
+     * address it already submitted or was handed back, when it was pinned, and the verdict.</p>
+     */
     private static String executionManifestJson(
             ai.ravenroot.api.persistence.StoredExecutionManifest stored,
             ai.ravenroot.api.persistence.ExecutionManifestCompatibility report) {
         var manifest = stored.manifest();
-        var differences = report.differences().stream()
-                .map(difference -> "{\"dimension\":\"" + difference.dimension()
-                        + "\",\"pinned\":\"" + escape(difference.pinned())
-                        + "\",\"observed\":\"" + escape(difference.observed()) + "\"}")
+        var differences = report.dimensions().stream()
+                .map(dimension -> "\"" + dimension + "\"")
                 .collect(java.util.stream.Collectors.joining(",", "[", "]"));
         return "{\"manifestFormatVersion\":" + manifest.formatVersion()
                 + ",\"manifestDigest\":\"" + stored.digest().value()
@@ -3379,10 +3394,9 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"graphId\":\"" + escape(manifest.graphIdentity().graphId())
                 + "\",\"graphVersionId\":\"" + escape(manifest.graphIdentity().versionId())
                 + "\",\"pinnedAt\":\"" + manifest.pinnedAt()
-                + "\",\"nodePackageCount\":" + manifest.nodePackages().size()
-                + ",\"compatible\":" + report.compatible()
-                + ",\"differences\":" + differences
-                + ",\"differencesTruncated\":" + report.truncated()
+                + "\",\"compatible\":" + report.compatible()
+                + ",\"incompatibleDimensions\":" + differences
+                + ",\"dimensionsTruncated\":" + report.truncated()
                 + "}";
     }
 

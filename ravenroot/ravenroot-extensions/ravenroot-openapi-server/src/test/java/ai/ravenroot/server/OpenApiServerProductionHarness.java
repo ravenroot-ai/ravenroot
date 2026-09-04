@@ -44,6 +44,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -62,6 +64,7 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
     private final RavenrootServerStartup.Handle handle;
     private final RavenrootServer server;
     private final List<Collision> collisions = new ArrayList<>();
+    private final ResponseControl responseControl = new ResponseControl();
 
     public static OpenApiServerProductionHarness start(NodePackage nodePackage, byte[] graph,
                                                        SecurityContext owner, Path directory) throws Exception {
@@ -75,7 +78,8 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
         this.owner = owner;
         this.directory = directory;
         Files.createDirectories(directory);
-        this.behaviors = NodePackages.registerAll(new BehaviorRegistry(), List.of(nodePackage, responsePackage()));
+        this.behaviors = NodePackages.registerAll(new BehaviorRegistry(),
+                List.of(nodePackage, responsePackage(responseControl)));
         this.engine = new PekkoExecutionEngine("openapi-production-" + System.nanoTime());
         var monitor = new ExecutionMonitor();
         this.store = new SqliteExecutionStore(directory.resolve("primary.db"), Clock.systemUTC());
@@ -126,6 +130,12 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
     public void stopGraph() throws Exception {
         deployment.stop().toCompletableFuture().get(5, TimeUnit.SECONDS);
     }
+
+    public void holdResponse() { responseControl.hold(); }
+
+    public void awaitHeldResponse() throws InterruptedException { responseControl.awaitEntered(); }
+
+    public void releaseResponse() { responseControl.release(); }
 
     public HttpResponse<String> post(String bearer, String contentType, String key) throws Exception {
         HttpRequest.Builder request = HttpRequest.newBuilder(uri(
@@ -206,7 +216,7 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
         };
     }
 
-    private static NodePackage responsePackage() {
+    private static NodePackage responsePackage(ResponseControl control) {
         return new NodePackage() {
             @Override public String id() { return "ai.ravenroot.test.openapi-response"; }
             @Override public String version() { return "1"; }
@@ -220,22 +230,49 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
                     }
 
                     @Override public NodeAction create(NodeConfiguration configuration) {
-                        return message -> {
-                            Map<?, ?> request = (Map<?, ?>) message.payload();
-                            Map<?, ?> exchange = (Map<?, ?>) request.get("requestReply");
-                            Map<String, Object> response = new java.util.LinkedHashMap<>();
-                            response.put("correlationId", exchange.get("correlationId"));
-                            response.put("operationId", request.get("operationId"));
-                            response.put("status", 200);
-                            response.put("headers", Map.of("result-id", "production"));
-                            response.put("mediaType", "application/json");
-                            response.put("body", Map.of("result", "accepted"));
-                            return java.util.concurrent.CompletableFuture.completedFuture(
-                                    NodeResult.continueWith(response));
-                        };
+                        return message -> control.response(message.payload());
                     }
                 });
             }
         };
+    }
+
+    private static final class ResponseControl {
+        private final AtomicReference<CompletableFuture<Void>> gate = new AtomicReference<>();
+        private final AtomicReference<CountDownLatch> entered = new AtomicReference<>();
+
+        private void hold() {
+            gate.set(new CompletableFuture<>());
+            entered.set(new CountDownLatch(1));
+        }
+
+        private void awaitEntered() throws InterruptedException {
+            CountDownLatch latch = entered.get();
+            if (latch == null || !latch.await(5, TimeUnit.SECONDS)) {
+                throw new AssertionError("response behavior was not entered");
+            }
+        }
+
+        private void release() {
+            CompletableFuture<Void> current = gate.getAndSet(null);
+            if (current != null) current.complete(null);
+        }
+
+        private java.util.concurrent.CompletionStage<NodeResult> response(Object payload) {
+            Map<?, ?> request = (Map<?, ?>) payload;
+            Map<?, ?> exchange = (Map<?, ?>) request.get("requestReply");
+            Map<String, Object> response = new java.util.LinkedHashMap<>();
+            response.put("correlationId", exchange.get("correlationId"));
+            response.put("operationId", request.get("operationId"));
+            response.put("status", 200);
+            response.put("headers", Map.of("result-id", "production"));
+            response.put("mediaType", "application/json");
+            response.put("body", Map.of("result", "accepted"));
+            CompletableFuture<Void> current = gate.get();
+            if (current == null) return CompletableFuture.completedFuture(NodeResult.continueWith(response));
+            CountDownLatch latch = entered.get();
+            if (latch != null) latch.countDown();
+            return current.thenApply(ignored -> NodeResult.continueWith(response));
+        }
     }
 }

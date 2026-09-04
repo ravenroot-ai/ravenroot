@@ -1,6 +1,8 @@
 package ai.ravenroot.extensions.openapi.server;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -188,6 +190,15 @@ class OpenApiIngressPlanTest {
                 Set.of("createOrder"), Set.of("idempotency-key", "x-trace", "result-id")));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"set-cookie", "set-cookie2", "www-authenticate", "proxy-authenticate",
+            "authentication-info", "proxy-authentication-info"})
+    void requestReplyCompilationRejectsCredentialPropagatingResponseHeaders(String header) {
+        OpenApiServerProfile profile = profileWithResponseHeader(header);
+        assertThrows(OpenApiServerException.class, () -> OpenApiIngressPlan.compileRequestReply(profile,
+                Set.of("createOrder"), Set.of("idempotency-key", "x-trace")));
+    }
+
     @Test void headAndBodylessStatusesRejectMediaAndBodyEvenWhenTheSchemaDeclaresContent() throws Exception {
         byte[] specification = """
                 {"openapi":"3.0.3","info":{"title":"T","version":"1"},"paths":{"/item":{"head":{
@@ -235,6 +246,14 @@ class OpenApiIngressPlanTest {
         result.put("mediaType", mediaType);
         result.put("body", body);
         return result;
+    }
+
+    static OpenApiServerProfile profileWithResponseHeader(String header) {
+        byte[] specification = new String(OpenApiServerTestSupport.SPEC, StandardCharsets.UTF_8)
+                .replace("\"result-id\"", "\"" + header + "\"").getBytes(StandardCharsets.UTF_8);
+        return new OpenApiServerProfile("orders", specification, OpenApiServerTestSupport.sha256(specification),
+                "/api", Set.of("createOrder", "specialOrder"), Set.of("USER"), "idempotency-key", null,
+                4096, 128, 1000, 2);
     }
 
     private static Map<String, String> with(Map<String, String> source, String key, String value) {

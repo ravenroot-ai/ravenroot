@@ -183,54 +183,55 @@ final class OpenApiRequestReplySource implements ManagedIngressSource {
             IngressRequest request, IngressRequestContext requestContext, long expectedGeneration,
             InboundSourceContext activeContext, OpenApiIngressPlan.Match match, String key,
             Instant deadline, RequestPermit requestPermit) {
-        var projectedCorrelation = new java.util.concurrent.atomic.AtomicReference<UUID>();
-        RequestReplyAdmission admission;
-        try {
-            admission = activeContext.requestReply().requestProjected(settings.profile().target(), exchange -> {
-                projectedCorrelation.set(exchange.correlationId());
-                if (!responses.open(exchange.correlationId(), activeContext.identity().tenantId(),
-                        exchange.processInstanceId(), exchange.traversalId(), activeContext.nodeId(),
-                        expectedGeneration)) {
-                    throw OpenApiValues.invalid();
-                }
-                return synchronousPayload(request, match, key, exchange);
-            }, deadline);
-        } catch (RuntimeException failure) {
-            UUID allocated = projectedCorrelation.get();
-            if (allocated != null) responses.close(allocated);
-            requestPermit.close();
-            return response(500);
-        }
-        if (admission instanceof RequestReplyAdmission.Refused refused) {
-            UUID allocated = projectedCorrelation.get();
-            if (allocated != null) responses.close(allocated);
-            requestPermit.close();
-            return response(refusalStatus(refused.reason()));
-        }
-        RequestReplyExchange exchange = ((RequestReplyAdmission.Accepted) admission).exchange();
-        if (!exchange.correlationId().equals(projectedCorrelation.get())) {
-            responses.close(exchange.correlationId());
-            exchange.cancel();
-            requestPermit.close();
-            return response(500);
-        }
-        Pending registered = new Pending(exchange, requestPermit);
+        UUID pendingId = UUID.randomUUID();
+        Pending registered = new Pending(requestPermit);
         synchronized (this) {
             if (state != State.ACTIVE || generation != expectedGeneration
-                    || pending.putIfAbsent(exchange.correlationId(), registered) != null) {
-                responses.close(exchange.correlationId());
-                exchange.cancel();
+                    || pending.putIfAbsent(pendingId, registered) != null) {
                 registered.release();
                 return response(503);
             }
         }
         try {
-            requestContext.cancellation().onCancel(exchange::cancel);
+            requestContext.cancellation().onCancel(registered::cancelForClient);
         } catch (RuntimeException invalidSignal) {
+            registered.cancelForClient();
+        }
+        if (registered.retired()) {
+            pending.remove(pendingId, registered);
+            return response(503);
+        }
+        RequestReplyAdmission admission;
+        try {
+            admission = activeContext.requestReply().requestProjected(settings.profile().target(), exchange -> {
+                if (!registered.openProof(exchange, activeContext)) {
+                    throw OpenApiValues.invalid();
+                }
+                return synchronousPayload(request, match, key, exchange);
+            }, deadline);
+        } catch (RuntimeException failure) {
+            pending.remove(pendingId, registered);
+            boolean retired = registered.retired();
+            registered.finishWithoutExchange();
+            return response(retired ? 503 : 500);
+        }
+        if (admission instanceof RequestReplyAdmission.Refused refused) {
+            pending.remove(pendingId, registered);
+            boolean retired = registered.retired();
+            registered.finishWithoutExchange();
+            return response(retired ? 503 : refusalStatus(refused.reason()));
+        }
+        RequestReplyExchange exchange = ((RequestReplyAdmission.Accepted) admission).exchange();
+        if (!registered.attach(exchange)) {
+            pending.remove(pendingId, registered);
+            boolean retired = registered.retired();
+            registered.finishWithoutExchange();
+            responses.close(exchange.correlationId());
             exchange.cancel();
+            return response(retired ? 503 : 500);
         }
         return exchange.completion().handle((outcome, failure) -> {
-            pending.remove(exchange.correlationId(), registered);
+            pending.remove(pendingId, registered);
             registered.release();
             try {
                 if (failure != null || outcome == null
@@ -243,7 +244,7 @@ final class OpenApiRequestReplySource implements ManagedIngressSource {
                 if (outcome.state() != RequestReplyTerminalState.COMPLETED
                         || !responses.consume(exchange.correlationId(), activeContext.identity().tenantId(),
                                 exchange.processInstanceId(), exchange.traversalId(), activeContext.nodeId(),
-                                expectedGeneration, outcome.payload())) {
+                                registered.bindingGeneration(), outcome.payload())) {
                     return empty(500);
                 }
                 return match.projectResponse(outcome.payload(), exchange.correlationId(),
@@ -337,26 +338,85 @@ final class OpenApiRequestReplySource implements ManagedIngressSource {
     }
 
     private final class Pending {
-        private final RequestReplyExchange exchange;
         private final RequestPermit permit;
+        private boolean retired;
+        private RequestReplyExchange exchange;
+        private ProjectedIdentity identity;
 
-        private Pending(RequestReplyExchange exchange, RequestPermit permit) {
-            this.exchange = exchange;
+        private Pending(RequestPermit permit) {
             this.permit = permit;
         }
 
         private void release() { permit.close(); }
 
+        private synchronized boolean openProof(ai.ravenroot.api.deployment.RequestReplyContext projected,
+                                               InboundSourceContext activeContext) {
+            if (retired || identity != null) return false;
+            ProjectedIdentity allocated = new ProjectedIdentity(
+                    projected.correlationId(), projected.binding().generation());
+            if (!responses.open(projected.correlationId(), activeContext.identity().tenantId(),
+                    projected.processInstanceId(), projected.traversalId(), activeContext.nodeId(),
+                    allocated.bindingGeneration())) {
+                return false;
+            }
+            identity = allocated;
+            return true;
+        }
+
+        private synchronized boolean attach(RequestReplyExchange accepted) {
+            if (retired || exchange != null || identity == null
+                    || !identity.correlationId().equals(accepted.correlationId())) {
+                return false;
+            }
+            exchange = accepted;
+            return true;
+        }
+
+        private synchronized boolean retired() { return retired; }
+
+        private synchronized long bindingGeneration() {
+            if (identity == null) throw OpenApiValues.invalid();
+            return identity.bindingGeneration();
+        }
+
+        private void finishWithoutExchange() {
+            ProjectedIdentity allocated;
+            synchronized (this) {
+                retired = true;
+                allocated = identity;
+            }
+            try {
+                if (allocated != null) responses.close(allocated.correlationId());
+            } finally {
+                release();
+            }
+        }
+
+        private void cancelForClient() { retireAndCancel(); }
+
         private void cancelForStop() {
+            retireAndCancel();
+        }
+
+        private void retireAndCancel() {
+            RequestReplyExchange current;
+            ProjectedIdentity allocated;
+            synchronized (this) {
+                retired = true;
+                current = exchange;
+                allocated = identity;
+            }
             boolean cancelled = false;
             try {
-                cancelled = exchange.cancel();
+                if (current != null) cancelled = current.cancel();
             } catch (RuntimeException failure) {
-                responses.close(exchange.correlationId());
+                if (allocated != null) responses.close(allocated.correlationId());
                 throw failure;
             }
             finally { release(); }
-            if (cancelled) responses.close(exchange.correlationId());
+            if ((current == null || cancelled) && allocated != null) {
+                responses.close(allocated.correlationId());
+            }
         }
     }
 
@@ -383,4 +443,6 @@ final class OpenApiRequestReplySource implements ManagedIngressSource {
     }
 
     private enum State { NEW, STARTED, ACTIVE, STOPPING, STOPPED }
+
+    private record ProjectedIdentity(UUID correlationId, long bindingGeneration) { }
 }

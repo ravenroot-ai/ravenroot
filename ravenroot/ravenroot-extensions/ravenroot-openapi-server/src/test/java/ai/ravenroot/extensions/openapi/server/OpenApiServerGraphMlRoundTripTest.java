@@ -10,6 +10,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,9 +21,11 @@ class OpenApiServerGraphMlRoundTripTest {
     @ParameterizedTest
     @ValueSource(strings = {OpenApiReceiveNodeBehavior.BEHAVIOR, OpenApiRequestReplyNodeBehavior.BEHAVIOR})
     void graphCarriesOnlyOpaqueProfileOperationSubsetAndLowerCeilings(String behavior) throws Exception {
-        Map<String, Object> properties = Map.of("apiProfile", "orders", "operations", "createOrder",
-                "deadlineMs", "750", "maxRequestBytes", "2048", "maxIdempotencyBytes", "64",
-                "maxResponseBytes", "512", "maxConcurrency", "1");
+        Map<String, Object> values = new LinkedHashMap<>(Map.of("apiProfile", "orders",
+                "operations", "createOrder", "deadlineMs", "750", "maxRequestBytes", "2048",
+                "maxIdempotencyBytes", "64", "maxConcurrency", "1"));
+        if (behavior.equals(OpenApiRequestReplyNodeBehavior.BEHAVIOR)) values.put("maxResponseBytes", "512");
+        Map<String, Object> properties = Map.copyOf(values);
         var definition = new GraphDefinition(List.of(GraphNode.start("start"),
                 new GraphNode("receive", NodeKind.BEHAVIOR, behavior, properties),
                 GraphNode.error("error"), GraphNode.end("end")), List.of());

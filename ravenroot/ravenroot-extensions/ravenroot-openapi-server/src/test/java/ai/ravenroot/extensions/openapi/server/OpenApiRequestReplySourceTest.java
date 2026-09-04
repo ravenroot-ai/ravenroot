@@ -29,12 +29,14 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OpenApiRequestReplySourceTest {
     @Test void declaredRespondCommandProducesTheOnlySuccessfulHttpResponse() throws Exception {
         Fixture fixture = new Fixture(2);
+        fixture.context.requestReply.bindingGeneration = 41;
         fixture.activate();
 
         CompletionStage<IngressResponse> waiting = fixture.invoke(new TestCancellation());
@@ -45,6 +47,7 @@ class OpenApiRequestReplySourceTest {
         assertEquals(exchange.processInstanceId().toString(), runtime.get("processInstanceId"));
         assertEquals(exchange.traversalId().toString(), runtime.get("traversalId"));
         assertEquals("openapi-node", runtime.get("sourceNodeId"));
+        assertEquals(41L, runtime.get("generation"));
 
         NodeResult response = fixture.respond(exchange, proposal(exchange, 200,
                 Map.of("result-id", "reply"), "application/json", Map.of("result", "accepted")));
@@ -140,6 +143,8 @@ class OpenApiRequestReplySourceTest {
         fixture.source.stop().toCompletableFuture().get(2, TimeUnit.SECONDS);
         assertEquals(503, stopped.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
         assertEquals(1, stoppedExchange.cancellations.get());
+        assertFalse(stoppedExchange.complete(proposal(stoppedExchange, 200, Map.of(),
+                "application/json", Map.of("result", "too-late"))));
         assertEquals(0, fixture.responses.size());
         assertEquals(0, ((OpenApiRequestReplySource) fixture.source).pendingCount());
 
@@ -157,6 +162,37 @@ class OpenApiRequestReplySourceTest {
 
         fixture.source.start(fixture.context).toCompletableFuture().join();
         fixture.source.activateManagedIngress(fixture.authority).toCompletableFuture().join();
+        CompletionStage<IngressResponse> reusable = fixture.invoke(new TestCancellation());
+        fixture.exchange().timeout();
+        assertEquals(504, reusable.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+    }
+
+    @Test void stopRollbackAndReplacementFenceCallsPausedAroundRuntimeProjection() throws Exception {
+        lifecycleRace(OpenApiServerTestSupport.ProjectionGate.Position.BEFORE, false);
+        lifecycleRace(OpenApiServerTestSupport.ProjectionGate.Position.AFTER, true);
+    }
+
+    @Test void completionAndDeadlineRaceHasExactlyOneTerminalWinnerAndReleasesThePermit() throws Exception {
+        Fixture fixture = new Fixture(1);
+        fixture.activate();
+
+        CompletionStage<IngressResponse> completed = fixture.invoke(new TestCancellation());
+        OpenApiServerTestSupport.FakeExchange completedExchange = fixture.exchange();
+        NodeResult declared = fixture.respond(completedExchange, proposal(completedExchange, 200, Map.of(),
+                "application/json", Map.of("result", "completed-first")));
+        assertTrue(completedExchange.complete(declared.payload()));
+        assertFalse(completedExchange.timeout());
+        assertEquals(200, completed.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+
+        CompletionStage<IngressResponse> timedOut = fixture.invoke(new TestCancellation());
+        OpenApiServerTestSupport.FakeExchange timedExchange = fixture.exchange();
+        assertTrue(timedExchange.timeout());
+        assertFalse(timedExchange.complete(proposal(timedExchange, 200, Map.of(),
+                "application/json", Map.of("result", "completed-late"))));
+        assertEquals(504, timedOut.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+        assertEquals(0, ((OpenApiRequestReplySource) fixture.source).pendingCount());
+        assertEquals(0, fixture.responses.size());
+
         CompletionStage<IngressResponse> reusable = fixture.invoke(new TestCancellation());
         fixture.exchange().timeout();
         assertEquals(504, reusable.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
@@ -220,6 +256,52 @@ class OpenApiRequestReplySourceTest {
         assertFalse(async.descriptor().properties().stream().anyMatch(property -> property.name().equals("mode")));
         assertTrue(new OpenApiRequestReplyNodeBehavior(OpenApiServerTestSupport::configuration)
                 .descriptor().commands().contains("respond"));
+    }
+
+    @Test void forbiddenResponseHeaderProfileFailsBeforePublishingTheRuntimeRoute() {
+        OpenApiServerProfile profile = OpenApiIngressPlanTest.profileWithResponseHeader("set-cookie");
+        OpenApiServerConfiguration base = OpenApiServerTestSupport.configuration();
+        OpenApiServerConfiguration configuration = new OpenApiServerConfiguration(
+                base.authority(), base.projection(), Map.of("orders", profile));
+        OpenApiRequestReplyNodeBehavior behavior = new OpenApiRequestReplyNodeBehavior(() -> configuration);
+        OpenApiServerTestSupport.FakeContext context = new OpenApiServerTestSupport.FakeContext(
+                new OpenApiServerTestSupport.FakeIngress());
+        OpenApiServerTestSupport.FakeAuthority authority = new OpenApiServerTestSupport.FakeAuthority();
+        ManagedIngressSource source = (ManagedIngressSource) behavior.createSource(new NodeConfiguration(
+                "openapi-node", OpenApiRequestReplyNodeBehavior.BEHAVIOR, Map.of("apiProfile", "orders")), context);
+
+        assertThrows(java.util.concurrent.CompletionException.class,
+                () -> source.start(context).toCompletableFuture().join());
+        assertNull(authority.handler);
+        assertThrows(java.util.concurrent.CompletionException.class,
+                () -> source.activateManagedIngress(authority).toCompletableFuture().join());
+        assertEquals(0, authority.acquisitions.get());
+    }
+
+    private static void lifecycleRace(OpenApiServerTestSupport.ProjectionGate.Position position,
+                                      boolean rollback) throws Exception {
+        Fixture fixture = new Fixture(1);
+        fixture.activate();
+        OpenApiServerTestSupport.ProjectionGate gate = fixture.context.requestReply.gateProjectionAt(position);
+        CompletableFuture<IngressResponse> oldRequest = CompletableFuture.supplyAsync(() ->
+                fixture.invoke(new TestCancellation()).toCompletableFuture().join());
+        CompletionStage<IngressResponse> replacement;
+        try {
+            gate.awaitEntered();
+            fixture.context.requestReply.clearProjectionGate();
+            CompletionStage<Void> retirement = rollback ? fixture.source.rollback() : fixture.source.stop();
+            retirement.toCompletableFuture().get(2, TimeUnit.SECONDS);
+            fixture.source.start(fixture.context).toCompletableFuture().get(2, TimeUnit.SECONDS);
+            fixture.source.activateManagedIngress(fixture.authority).toCompletableFuture().get(2, TimeUnit.SECONDS);
+            replacement = fixture.invoke(new TestCancellation());
+            fixture.exchange().timeout();
+            assertEquals(504, replacement.toCompletableFuture().get(2, TimeUnit.SECONDS).status());
+        } finally {
+            gate.release();
+        }
+        assertEquals(503, oldRequest.get(2, TimeUnit.SECONDS).status());
+        assertEquals(0, ((OpenApiRequestReplySource) fixture.source).pendingCount());
+        assertEquals(0, fixture.responses.size());
     }
 
     private static Map<String, Object> proposal(OpenApiServerTestSupport.FakeExchange exchange, int status,

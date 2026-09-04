@@ -40,6 +40,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -115,6 +117,8 @@ final class OpenApiServerTestSupport {
     static final class FakeRequestReply implements RequestReplyIngress {
         final AtomicReference<PayloadValue> payload = new AtomicReference<>();
         final AtomicReference<FakeExchange> exchange = new AtomicReference<>();
+        volatile long bindingGeneration = 1;
+        final AtomicReference<ProjectionGate> projectionGate = new AtomicReference<>();
 
         @Override public RequestReplyAdmission request(IngressTarget target, PayloadValue payload, Instant deadline) {
             return new RequestReplyAdmission.Refused(ai.ravenroot.api.deployment.RequestReplyRefusal.UNSUPPORTED);
@@ -123,16 +127,55 @@ final class OpenApiServerTestSupport {
         @Override public RequestReplyAdmission requestProjected(IngressTarget target,
                                                                  RequestReplyProjection projection,
                                                                  Instant deadline) {
+            ProjectionGate gate = projectionGate.getAndSet(null);
+            if (gate != null) gate.pause(ProjectionGate.Position.BEFORE);
             UUID process = UUID.randomUUID();
             UUID traversal = UUID.randomUUID();
             var context = new RequestReplyContext(new RequestReplyBinding(
-                    "tenant-a", "deployment-a", 1, Optional.of("openapi-node")), target,
+                    "tenant-a", "deployment-a", bindingGeneration, Optional.of("openapi-node")), target,
                     UUID.randomUUID(), process, traversal, deadline);
             PayloadValue projected = projection.project(context);
+            if (gate != null) gate.pause(ProjectionGate.Position.AFTER);
             payload.set(projected);
             FakeExchange created = new FakeExchange(context);
             exchange.set(created);
             return new RequestReplyAdmission.Accepted(created);
+        }
+
+        ProjectionGate gateProjectionAt(ProjectionGate.Position position) {
+            ProjectionGate created = new ProjectionGate(position);
+            projectionGate.set(created);
+            return created;
+        }
+
+        void clearProjectionGate() {
+            projectionGate.set(null);
+        }
+    }
+
+    static final class ProjectionGate {
+        enum Position { BEFORE, AFTER }
+        private final Position position;
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch released = new CountDownLatch(1);
+
+        ProjectionGate(Position position) { this.position = position; }
+
+        void awaitEntered() throws InterruptedException {
+            if (!entered.await(2, TimeUnit.SECONDS)) throw new AssertionError("projection gate was not entered");
+        }
+
+        void release() { released.countDown(); }
+
+        private void pause(Position location) {
+            if (position != location) return;
+            entered.countDown();
+            try {
+                if (!released.await(2, TimeUnit.SECONDS)) throw new AssertionError("projection gate was not released");
+            } catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException("projection gate interrupted");
+            }
         }
     }
 
@@ -154,15 +197,15 @@ final class OpenApiServerTestSupport {
             return won;
         }
 
-        void complete(Object result) {
-            completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
+        boolean complete(Object result) {
+            return completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
                     RequestReplyTerminalState.COMPLETED, Optional.of(new ExecutionOutcome(
                     processInstanceId(), traversalId(), ProcessInstanceStatus.COMPLETED, result,
                     Set.of("openapi-node"), Set.of()))));
         }
 
-        void timeout() {
-            completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
+        boolean timeout() {
+            return completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
                     RequestReplyTerminalState.TIMED_OUT, Optional.empty()));
         }
     }

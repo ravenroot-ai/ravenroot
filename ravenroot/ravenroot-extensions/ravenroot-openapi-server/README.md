@@ -27,6 +27,10 @@ and the profile deadline. Capacity refusal returns `429`, timeout returns `504`,
 failed traversal, malformed response, or unavailable admission returns a bounded empty `5xx`
 response without exposing graph or provider detail.
 
+The runtime's effective `RequestReplyLimits` remain authoritative and can be stricter than the
+profile, graph, or HTTP transport ceilings. Capacity, payload, or deadline refusal at that boundary
+returns a bounded safe HTTP error and never publishes a partially admitted exchange.
+
 The request payload is `openapi.request.v2`. In addition to the same validated request projection as
 v1, it carries a `requestReply` object containing runtime-issued correlation, process, traversal,
 absolute deadline, deployment, generation, and source-node values. These values are observations,

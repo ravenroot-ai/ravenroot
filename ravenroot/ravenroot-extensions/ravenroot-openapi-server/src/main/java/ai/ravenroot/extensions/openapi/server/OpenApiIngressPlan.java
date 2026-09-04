@@ -29,8 +29,9 @@ final class OpenApiIngressPlan {
     private static final Set<String> METHODS = Set.of("get", "put", "post", "delete", "options", "head", "patch");
     private static final Set<String> ROOT_KEYS = Set.of("openapi", "info", "paths", "components", "tags");
     private static final Set<String> FORBIDDEN_HEADERS = Set.of("authorization", "proxy-authorization", "cookie",
-            "host", "content-length", "connection", "proxy-connection", "keep-alive", "transfer-encoding",
-            "te", "trailer", "upgrade");
+            "set-cookie", "set-cookie2", "www-authenticate", "proxy-authenticate", "authentication-info",
+            "proxy-authentication-info", "host", "content-length", "connection", "proxy-connection",
+            "keep-alive", "transfer-encoding", "te", "trailer", "upgrade");
     private static final Set<String> IGNORED_OAS_HEADERS = Set.of("accept", "content-type", "authorization");
     private static final int MAX_RESPONSE_HEADERS = 32;
     private static final int MAX_RESPONSE_HEADER_VALUE_CHARS = 512;

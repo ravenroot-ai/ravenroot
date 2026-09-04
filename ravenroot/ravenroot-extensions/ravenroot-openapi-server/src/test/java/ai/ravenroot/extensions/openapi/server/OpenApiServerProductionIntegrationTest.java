@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -20,6 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -80,6 +85,47 @@ class OpenApiServerProductionIntegrationTest {
             assertEquals(200, response.statusCode());
             assertEquals("production", response.headers().firstValue("result-id").orElseThrow());
             assertEquals("{\"result\":\"accepted\"}", response.body());
+        }
+    }
+
+    @Test void retiringManagedIngressCancelsAPendingSynchronousExchangeAndReplacementRemainsUsable()
+            throws Exception {
+        OpenApiServerNodePackage nodePackage = new OpenApiServerNodePackage(
+                () -> Optional.of(OpenApiServerTestSupport.configuration()));
+        try (var harness = OpenApiServerProductionHarness.start(nodePackage, synchronousGraph(), OWNER,
+                temporaryDirectory.resolve("request-reply-retirement"))) {
+            harness.startGraph();
+            harness.holdResponse();
+            CompletableFuture<java.net.http.HttpResponse<String>> pending = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return harness.post("tenant-a:alice", "application/json", "retiring");
+                } catch (Exception failure) {
+                    throw new CompletionException(failure);
+                }
+            });
+            CompletableFuture<Void> retirement;
+            try {
+                harness.awaitHeldResponse();
+                retirement = CompletableFuture.runAsync(() -> {
+                    try {
+                        harness.stopGraph();
+                    } catch (Exception failure) {
+                        throw new CompletionException(failure);
+                    }
+                });
+                try {
+                    assertTrue(pending.get(5, TimeUnit.SECONDS).statusCode() >= 500);
+                } catch (ExecutionException disconnected) {
+                    assertTrue(disconnected.getCause() instanceof IOException,
+                            () -> disconnected.getCause().getClass().getName());
+                }
+            } finally {
+                harness.releaseResponse();
+            }
+            retirement.get(5, TimeUnit.SECONDS);
+
+            harness.restartGraph();
+            assertEquals(200, harness.post("tenant-a:alice", "application/json", "replacement").statusCode());
         }
     }
 

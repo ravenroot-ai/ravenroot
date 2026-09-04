@@ -45,6 +45,7 @@ import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphExecutionPin;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.pause.ExecutionPauseContinuation;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.persistence.InMemoryJoinStore;
@@ -362,6 +363,33 @@ public final class GraphRunner implements AutoCloseable {
      * whole point — and {@link #cancelTraversal} is what ends one.</p>
      */
     private final ConcurrentHashMap<UUID, PauseHold> pausedTraversals = new ConcurrentHashMap<>();
+
+    /**
+     * The actor recorded on a hold released by {@code resumeTraversal}.
+     *
+     * <p>A reserved runtime identity rather than a principal, because this runner is not given one:
+     * the authorization and the audit of a resume happen at
+     * {@code AuthorizedRavenrootApplication.resumeExecution}, which is where the principal is known
+     * and where it is already recorded. Inventing a principal here would put a fabricated one in the
+     * position an auditor reads as the real one.</p>
+     */
+    private static final String RESUME_ACTOR = "ravenroot:runtime:resume";
+
+    /**
+     * Set once, at the very top of {@link #close()}, and never cleared.
+     *
+     * <p>It answers one question that no gate-release reason can: whether a hold is being released
+     * because something was decided about its traversal, or because this process is stopping.
+     * {@code close()} reaches a held traversal through {@code cancelTraversal}, which is the right
+     * mechanism — a parked hop must unwind before the actors are stopped — and the wrong <em>reason</em>:
+     * a shutdown is not a cancellation, and settling a hold as one would make a restart find a
+     * traversal somebody had given up when nobody had. This is what separates the two at the point
+     * the durable settlement is decided.</p>
+     */
+    private volatile boolean shuttingDown;
+
+    /** The actor recorded on a hold given up because its traversal ended. */
+    private static final String RELEASE_ACTOR = "ravenroot:runtime:ended";
 
     /**
      * Per-traversal lock, publication identity and lifecycle mark: the three things a control call
@@ -1149,6 +1177,117 @@ public final class GraphRunner implements AutoCloseable {
                 });
     }
 
+    /**
+     * Continues a durably held traversal from the boundary its hold committed, in a process that
+     * need not be the one that took the hold.
+     *
+     * <h2>The fourth entry path, and the one that is not a re-entry</h2>
+     * <p>{@link #executeFrom} and {@link #executeAfterHumanTask} both re-enter <em>at</em> a node
+     * that already ran, and both therefore synthesise an invocation to record what the wait decided.
+     * This one does not. A hold is taken before its node starts, so the node named here has never
+     * run: it is dispatched exactly as any other hop is, mints its own invocation and attempt, and
+     * the traversal continues. There is nothing to avoid repeating, because nothing happened.</p>
+     *
+     * <p>The traversal is the held one rather than a fresh one, which is the whole difference
+     * between continuing a hold and re-entering after an external wait. Its invocations are already
+     * in the aggregate this state is built from, and {@code parentInvocationIds} names the real
+     * predecessor, so the continued branch keeps the lineage the held traversal had.</p>
+     *
+     * <p>The caller must have settled the hold first, in one batch with the traversal's return to
+     * {@code RUNNING} — see {@code ExecutionRecorder.settleExecutionPause}. This method does not do
+     * it, and could not do it atomically if it tried: the aggregate refuses to add an invocation to
+     * a traversal that is not {@code RUNNING}, so a settlement written separately from that
+     * transition would leave a crash window in which the hold is gone and nothing may ever run.</p>
+     *
+     * @param security the principal the held traversal was running as, never the one that resumed it
+     * @param processInstanceId the owning process instance
+     * @param traversalId the held traversal, which continues rather than being replaced
+     * @param nodeId the node the hold withheld, which has never run
+     * @param graphVersion the pinned graph version every event of this traversal is stamped with
+     * @param recorder holds the fence, already advanced past the settlement
+     * @param afterInvocationId the completed invocation the hold sat behind
+     * @param payload the withheld dispatch's payload
+     * @param attributes the withheld dispatch's attributes
+     * @param command the withheld dispatch's structural command
+     * @return a stage completing when this continuation's branches settle
+     */
+    public CompletionStage<Void> executeFromPause(SecurityContext security, UUID processInstanceId,
+                                                  UUID traversalId, String nodeId, String graphVersion,
+                                                  ExecutionRecorder recorder, UUID afterInvocationId,
+                                                  Object payload, Map<String, Object> attributes,
+                                                  NodeCommand command) {
+        java.util.Objects.requireNonNull(security, "security");
+        java.util.Objects.requireNonNull(recorder, "recorder");
+        java.util.Objects.requireNonNull(afterInvocationId, "afterInvocationId");
+        GraphNode node = graph.node(nodeId);
+        ProcessInstance stored = recorder.storedState();
+        Traversal held = stored.traversals().get(traversalId);
+        if (held == null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("held traversal " + traversalId + " is not in this instance"));
+        }
+        NodeInvocation after = held.invocations().get(afterInvocationId);
+        if (after == null) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException(
+                    "the invocation a hold sat behind is not in traversal " + traversalId));
+        }
+        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
+                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var state = new ExecutionState(processInstanceId, traversalId, held.ingressNodeId(),
+                new BranchLiveness(held.ingressNodeId()), recorder, identity, identitySource, clock, stored);
+        var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
+                joinSpecs, clock, timeoutRelinquishedObserver);
+        if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Traversal is already running on this runner"));
+        }
+        monitor.executionStarted(identity);
+        // The fourth entry path, wired exactly as the three above are, and for the same reason: a
+        // continued traversal is as pausable as any other, and a hold taken in the window between
+        // this method being called and the identity reaching the control record has to be announced
+        // after the start event rather than before it.
+        var pauseControl = controlFor(traversalId);
+        synchronized (pauseControl) {
+            pauseControl.identity = identity;
+            PauseHold pending = pausedTraversals.get(traversalId);
+            if (pending != null) {
+                announceLocked(pauseControl, pending);
+            }
+        }
+        return dispatch(node, after.nodeId(), payload, attributes, Set.of(afterInvocationId), command,
+                state.traversalAcceptedEventId(), state, identity, coordinator, IterationContext.EMPTY)
+                .handle((ignored, failure) -> {
+                    Throwable outcome = unwrap(failure);
+                    // Sealed before the cancellation and before release wakes a pause gate, exactly
+                    // as the other three paths seal: this path publishes its terminal event below,
+                    // so refusing a new hold from this line on is what keeps EXECUTION_PAUSED from
+                    // following this continuation's terminal event.
+                    state.beginClosing();
+                    beginClosing(traversalId);
+                    cancelBackoffs(traversalId);
+                    try {
+                        if (failure == null) {
+                            state.executionCompleted();
+                            monitor.executionCompleted(identity, state.handledFailureNodes());
+                        } else if (!(outcome instanceof VerifiedHumanTaskSuspension)
+                                && !(outcome instanceof VerifiedToolApprovalSuspension)) {
+                            state.executionFailed();
+                            monitor.executionFailed(identity, outcome);
+                        }
+                    } finally {
+                        release(traversalId, coordinator).toCompletableFuture().join();
+                    }
+                    if (outcome instanceof VerifiedHumanTaskSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
+                    if (outcome instanceof VerifiedToolApprovalSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
+                    if (failure != null) throw new CompletionException(outcome);
+                    return null;
+                });
+    }
+
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {
         coordinators.remove(traversalId, coordinator);
         cancelledTraversals.remove(traversalId);
@@ -1344,6 +1483,97 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /**
+     * Writes down what a hold is withholding, when the boundary it sits at can be written down.
+     *
+     * <h2>Where the boundary is, and why nothing after it can have happened</h2>
+     * <p>The gate this is called from sits before the invocation and attempt identities are minted
+     * and before {@code state.nodeStarted}, so the node named here has not started, has recorded
+     * nothing, and has issued no effect. Continuing from this boundary therefore starts that node
+     * for the first time. "Resume does not repeat a completed effect" is a property of where the
+     * gate is rather than a promise made about the continuation.</p>
+     *
+     * <h2>Which boundaries are safe, and what each clause excludes</h2>
+     * <p>A hold is written down only when the whole of what it withholds can be. Every clause below
+     * excludes a shape whose continuation would need state this system does not persist anywhere:</p>
+     * <ul>
+     *   <li><b>A store that stores holds, and a live fence.</b> Without either there is nothing to
+     *       write to, and #130's process-local hold is exactly the right behaviour.</li>
+     *   <li><b>Exactly one parent invocation.</b> This excludes the start node, which has no
+     *       predecessor to anchor a continuation to, and a fan-in merge, whose several parents are a
+     *       join's business and not a single dispatch's.</li>
+     *   <li><b>Not a join node.</b> A hop entering a join is one arrival of a correlation the join
+     *       store owns; continuing it alone would present that arrival twice.</li>
+     *   <li><b>No lap context.</b> An iteration lap is what keeps a retry and a second pass through
+     *       the same node distinguishable, and it lives only in this runner.</li>
+     *   <li><b>Never fanned out, and no unfinished invocation.</b> Together these are the whole of
+     *       "this traversal is one branch here". A continuation resumes one hop; committing one while
+     *       a sibling exists would silently drop the sibling on the restart this record exists to
+     *       survive. The first test is one-way and deliberately stricter than necessary — see
+     *       {@code ExecutionState#everFannedOut} for why a live count of hops is not the answer it
+     *       looks like.</li>
+     *   <li><b>An expressible payload.</b> {@link ExecutionPauseContinuation#of} answers empty for a
+     *       value the payload type model does not cover, which is the same position
+     *       {@link ai.ravenroot.api.persistence.JoinRecord} already takes: a node's in-flight payload
+     *       is not durable state, and persisting a lossy version of one would produce a resume that
+     *       silently continued with a different value than the hold withheld.</li>
+     * </ul>
+     *
+     * <p>A boundary that fails any clause keeps its process-local hold and says so through
+     * {@code PauseResult}, rather than being refused a hold or being given a durable record that
+     * would be wrong on resume.</p>
+     *
+     * <h2>Failure is not the traversal's problem</h2>
+     * <p>A store refusal here leaves the hop parked on the in-memory gate and the traversal running
+     * exactly as it was. Propagating it would let an operator's pause fail a traversal, which is the
+     * one thing a pause must never do.</p>
+     */
+    private void holdDurably(PauseHold hold, GraphNode node, Object payload,
+                             Map<String, Object> attributes, Set<UUID> parentInvocationIds,
+                             NodeCommand command, ExecutionState state,
+                             ExecutionMonitor.ExecutionIdentity identity, JoinCoordinator coordinator,
+                             IterationContext iteration) {
+        if (!state.canHoldDurably()
+                || parentInvocationIds.size() != 1
+                || coordinator.isJoin(node.id())
+                || !iteration.laps().isEmpty()
+                || !state.singleBranch()
+                || state.hasUnfinishedInvocation()) {
+            return;
+        }
+        java.util.Optional<ExecutionPauseContinuation> continuation =
+                ExecutionPauseContinuation.of(payload, attributes);
+        if (continuation.isEmpty()) {
+            return;
+        }
+        java.util.Optional<byte[]> encoded = continuation.get().encode();
+        if (encoded.isEmpty()) {
+            return;
+        }
+        TraversalControl control = controlFor(identity.traversalId());
+        synchronized (control) {
+            // Re-tested under the monitor, because a second hop reaching the gate between the checks
+            // above and this line would be a second branch and the first one's clauses would have
+            // been read of a traversal that is no longer single-branch.
+            if (hold.durable != null || !state.singleBranch()) {
+                return;
+            }
+            var pauseId = identitySource.nextNodeInvocationId();
+            try {
+                var registration = new ai.ravenroot.api.persistence.ExecutionPauseRegistration(
+                        pauseId, identity.traversalId(), parentInvocationIds.iterator().next(),
+                        node.id(), command.directive().name(), command.name(), identity.security(),
+                        state.graphVersionPin(), ExecutionPauseContinuation.VERSION, encoded.get(),
+                        ai.ravenroot.api.persistence.ExecutionPauseRegistration.digest(encoded.get()));
+                state.holdDurably(registration);
+                hold.durable = new DurableHold(pauseId, state);
+            } catch (RuntimeException notWritten) {
+                // Left process-local on purpose; see the class note above.
+                hold.durable = null;
+            }
+        }
+    }
+
+    /**
      * This traversal's control record, created on first use.
      *
      * <h2>Why it is created on demand rather than only by {@link #execute}</h2>
@@ -1529,11 +1759,23 @@ public final class GraphRunner implements AutoCloseable {
         /** An operator released the hold and the traversal is continuing. Published. */
         RESUMED,
         /**
-         * The hold was dropped because the traversal is ending — cancelled, finished, or carried off
-         * by this runner's shutdown. Never published: the traversal's own terminal event, or the
-         * cancellation the caller already has, is what says what happened.
+         * The hold was dropped because the traversal is ending — cancelled, or finished. Never
+         * published: the traversal's own terminal event, or the cancellation the caller already has,
+         * is what says what happened. A durable hold is <em>settled</em> here, because a traversal
+         * that will never run again must not be left recorded as held.
          */
-        ENDED
+        ENDED,
+        /**
+         * The hold was dropped because this runner is shutting down, and for no reason having to do
+         * with the traversal.
+         *
+         * <p>Distinct from {@link #ENDED} for exactly one reason, and it is the reason this whole
+         * mechanism exists: a durable hold survives a shutdown untouched. Settling it here would
+         * make a process stopping indistinguishable from an operator giving the hold up, and the
+         * next process to start would find a traversal nobody had decided anything about recorded
+         * as one somebody had.</p>
+         */
+        SHUTDOWN
     }
 
     /**
@@ -1557,6 +1799,27 @@ public final class GraphRunner implements AutoCloseable {
         private final CompletableFuture<Void> gate = new CompletableFuture<>();
         /** Whether {@code EXECUTION_PAUSED} has been published for this hold. */
         private boolean announced;
+        /**
+         * The durable half of this hold, or {@code null} while it is process-local.
+         *
+         * <p>Written at most once, under the traversal's {@link TraversalControl} monitor, by the
+         * first hop this hold actually withholds. It is not written when the hold is installed,
+         * because installing a hold withholds nothing: a traversal between two hops has no boundary
+         * to commit and a traversal that never reaches another hop never had one. Guarded by that
+         * monitor rather than by this object's own for the reason {@code announced} is — the upgrade
+         * and the release are two halves of one decision about the same hold.</p>
+         */
+        private DurableHold durable;
+    }
+
+    /**
+     * A hold that has been written down: its stored identity and the run that wrote it.
+     *
+     * @param pauseId the stored hold's identity
+     * @param state   the run that committed it, and the only thing holding the fence the settlement
+     *                has to be written under
+     */
+    private record DurableHold(UUID pauseId, ExecutionState state) {
     }
 
     /**
@@ -1670,6 +1933,20 @@ public final class GraphRunner implements AutoCloseable {
             if (hold == null) {
                 return false;
             }
+            // The durable half is settled before anything is handed a thread, and inside the same
+            // monitor the removal is decided under. A resume that released the gate first would let
+            // the woken hop reach ExecutionState.nodeStarted while the traversal is still recorded
+            // WAITING, where the aggregate refuses to add its invocation -- so the hop would fail the
+            // traversal instead of continuing it. Ordering it here is what makes the durable
+            // transition happen-before the hop it authorises.
+            if (!settleDurableHold(traversalId, hold, reason)) {
+                // The settlement did not commit. Put the hold back rather than releasing a gate whose
+                // traversal is still durably held: a resume that reported success here would leave a
+                // traversal running in this process that every other reader, and every restart, still
+                // sees as held.
+                pausedTraversals.put(traversalId, hold);
+                return false;
+            }
             // Only a resume publishes, and only over a hold this stream has already announced. An
             // unannounced hold never became visible to anyone, so releasing it is not a transition an
             // observer can be shown -- it would be the release of a pause they were never told about.
@@ -1688,6 +1965,54 @@ public final class GraphRunner implements AutoCloseable {
         // to, which is the attribution the test establishes.
         Thread.ofVirtual().name("ravenroot-gate-release-" + traversalId).start(() -> gate.complete(null));
         return true;
+    }
+
+    /**
+     * Settles the durable half of a hold that is being released, and reports whether it committed.
+     *
+     * <p>Called with the traversal's control monitor held, from inside the removal, so the durable
+     * settlement and the runtime release are one decision rather than two that can be observed
+     * apart.</p>
+     *
+     * <h2>What each release reason settles it as</h2>
+     * <ul>
+     *   <li><b>Resumed:</b> {@code RESUMED}, and the traversal goes back to {@code RUNNING} in the
+     *       same batch. The transition is not bookkeeping — the aggregate refuses to add an
+     *       invocation to a traversal that is not {@code RUNNING}, so this write is what permits the
+     *       next node to run at all.</li>
+     *   <li><b>Ended:</b> {@code CANCELLED}, with no traversal transition, because the caller's own
+     *       teardown is about to write this traversal's end and two terminal transitions would make
+     *       the second illegal.</li>
+     *   <li><b>Shutdown:</b> nothing. The hold is what survives the process.</li>
+     * </ul>
+     *
+     * @return {@code true} when the release may proceed: the settlement committed, there was no
+     *         durable half to settle, or the reason is one that deliberately settles nothing
+     */
+    private boolean settleDurableHold(UUID traversalId, PauseHold hold, GateReleaseReason reason) {
+        DurableHold durable = hold.durable;
+        if (durable == null || reason == GateReleaseReason.SHUTDOWN || shuttingDown) {
+            return true;
+        }
+        try {
+            if (reason == GateReleaseReason.RESUMED) {
+                durable.state().settleHold(
+                        new ai.ravenroot.api.persistence.ExecutionPauseTransition.Resumed(
+                                durable.pauseId(), RESUME_ACTOR),
+                        TraversalStatus.RUNNING, ProcessInstanceStatus.RUNNING);
+            } else {
+                durable.state().settleHold(
+                        new ai.ravenroot.api.persistence.ExecutionPauseTransition.Cancelled(
+                                durable.pauseId(), RELEASE_ACTOR), null, null);
+            }
+            hold.durable = null;
+            return true;
+        } catch (RuntimeException notSettled) {
+            // A resume that could not commit must not proceed; a traversal that is ending anyway is
+            // not made worse by a hold record its retention will remove, and refusing the release
+            // would strand the parked hop and with it the teardown that is waiting on it.
+            return reason != GateReleaseReason.RESUMED;
+        }
     }
 
     /**
@@ -1803,6 +2128,12 @@ public final class GraphRunner implements AutoCloseable {
         // and both are read by the checks at the top rather than by a second copy of them here.
         PauseHold hold = pausedTraversals.get(identity.traversalId());
         if (hold != null) {
+            // Written down before the hop parks, and only ever from here: this is the one place in
+            // the runtime that knows what the hold is actually withholding. A failure to write it is
+            // not a failure of the pause -- the hop parks either way, and the hold is then exactly
+            // the process-local one it has always been.
+            holdDurably(hold, node, payload, attributes, parentInvocationIds, command, state, identity,
+                    coordinator, iteration);
             return hold.gate.thenCompose(released -> run(node, payload, attributes, parentInvocationIds, command,
                     causedBy, state, identity, coordinator, iteration));
         }
@@ -2532,6 +2863,10 @@ public final class GraphRunner implements AutoCloseable {
         // `iteration` is read from this runner's scope and from `delivered`, never from `result`.
         // That is the whole of why the token cannot be forged: result is what the node returned.
         var dispatches = new ArrayList<>(state.liveness.reportUntaken(node.id(), taken, coordinator, iteration));
+        // Recorded before any of them is dispatched, so the first branch to reach a pause gate
+        // already knows it has a sibling. Recording it as each dispatch happened would let the first
+        // one read a traversal that had not fanned out yet and commit a hold that drops the second.
+        state.successorsDispatched(deliveries.size());
         for (TargetDelivery target : deliveries) {
             // Duplicate edges to one target are one route by ADR 0024. Their authored identities are
             // nevertheless ambiguous, so no traversal event is fabricated for that collapsed route.
@@ -3414,6 +3749,9 @@ public final class GraphRunner implements AutoCloseable {
         // held it: the whole core module passes with OFF_CALLER here too, so no test constrains this
         // line. Left conservative deliberately, and recorded so the next reader knows the suite will
         // not stop them from widening it.
+        // Set before the first traversal is touched. Everything below releases holds through paths
+        // whose reason is ENDED, and none of those is a decision about the traversal; see the field.
+        shuttingDown = true;
         coordinators.keySet().forEach(traversalId -> cancelTraversal(traversalId, GateRelease.ON_CALLER));
         // Refuse every queued admission before draining traversal continuations. Active leases are
         // released by their attempt handlers; queued hops fail immediately and cannot spawn actors.
@@ -3432,7 +3770,7 @@ public final class GraphRunner implements AutoCloseable {
         // ran, and every traversal execute() registered was handled above -- but "in the ordinary
         // case" is the whole of that claim, and completing a gate nobody waits on costs nothing.
         pausedTraversals.keySet().forEach(traversalId ->
-                releasePauseGate(traversalId, GateRelease.ON_CALLER, GateReleaseReason.ENDED));
+                releasePauseGate(traversalId, GateRelease.ON_CALLER, GateReleaseReason.SHUTDOWN));
         // Bounded by this runner exactly as the gates above are, and cleared in the same place for
         // the same reason: nothing outside this runner holds a reference to either map.
         traversalControls.clear();
@@ -4113,6 +4451,121 @@ public final class GraphRunner implements AutoCloseable {
             }
         }
 
+        /**
+         * Whether this traversal has ever dispatched more than one successor from one node.
+         *
+         * <h2>Why this, and not a count of what is in flight</h2>
+         * <p>A durable hold has to know that the hop it is withholding is the traversal's only
+         * branch, and the aggregate cannot say so: a hop parked at the pause gate has no invocation
+         * at all, because the gate sits before the identities are minted, so a sibling waiting there
+         * is invisible in the stored state while being exactly the branch a single-branch
+         * continuation would drop.</p>
+         *
+         * <p>A live count of dispatched-and-unsettled hops looks like the answer and is not one. A
+         * hop's stage settles when its whole downstream subtree settles, so such a count measures how
+         * deep the chain is, not how wide it is — on a plain linear graph it is already above one by
+         * the second node. Making it measure width instead would mean releasing a hop's own share of
+         * the count at the moment it hands off to its successors, which is a change to every path a
+         * branch can end on: a terminal, a dead end, a discarded join arrival, a failure absorbed
+         * into a join. That is a broader change than a hold is entitled to make to the dispatch
+         * loop.</p>
+         *
+         * <p>So this is a mark rather than a measurement, and it is deliberately one-way. Once a
+         * traversal has fanned out it is never again eligible for a durable hold, even after its
+         * branches reconverge at a join and only one is live. That is stricter than necessary and it
+         * is the safe direction: the cost is a hold that stays process-local on a graph that
+         * branched, and the alternative cost is a restart silently continuing one branch of a
+         * traversal that had two.</p>
+         */
+        private volatile boolean everFannedOut;
+
+        /** Records what a node's successor dispatch did, so a later hold can know whether to trust it. */
+        private void successorsDispatched(int count) {
+            if (count > 1) {
+                everFannedOut = true;
+            }
+        }
+
+        /** Whether this traversal has only ever had one branch, and therefore has one now. */
+        private boolean singleBranch() {
+            return !everFannedOut;
+        }
+
+        /**
+         * Whether this run committed a hold that is still unsettled.
+         *
+         * <h2>What it suppresses, and why the suppression is the point</h2>
+         * <p>A shutdown reaches a held traversal through the cancellation path — a parked hop has to
+         * unwind before the actors are stopped — and that path's teardown ends by writing the
+         * traversal's terminal transitions. Over a held traversal those writes are false twice over:
+         * the traversal was not cancelled, and the stored state would then say {@code FAILED} beside
+         * a hold that is still {@code HELD}, which no resume could ever act on because the aggregate
+         * refuses to transition a terminal traversal. The hold is the traversal's state while it is
+         * held, so nothing else may write one.</p>
+         *
+         * <p>Cleared by {@link #settleHold}, which is the only thing that ends a hold. A cancellation
+         * therefore settles first and writes the traversal's end second, in that order, and both
+         * happen; a shutdown settles nothing and writes nothing.</p>
+         */
+        private volatile boolean durablyHeld;
+
+        /**
+         * Whether any invocation of this traversal is still non-terminal in the folded aggregate.
+         *
+         * <p>Read together with {@link #soleHopInFlight()} and not instead of it: this catches a
+         * branch that is inside a node, that one catches a branch that has left its node and not yet
+         * reached one.</p>
+         */
+        private synchronized boolean hasUnfinishedInvocation() {
+            Traversal traversal = lifecycle.traversals().get(traversalId);
+            return traversal != null && traversal.invocations().values().stream()
+                    .anyMatch(invocation -> !invocation.status().terminal());
+        }
+
+        /** Whether a durable hold can be written at all: a fence, and a store that stores holds. */
+        private boolean canHoldDurably() {
+            return recorder != null && recorder.holdsFence() && recorder.supportsExecutionPauses();
+        }
+
+        /** The immutable graph bytes a resumed traversal must be routed against. */
+        private ai.ravenroot.api.persistence.GraphVersionPin graphVersionPin() {
+            return recorder.graphVersionPin();
+        }
+
+        /**
+         * Commits the hold and folds the two {@code WAITING} transitions the store just accepted, so
+         * the in-memory aggregate and the stored one continue to describe one history.
+         */
+        private synchronized void holdDurably(
+                ai.ravenroot.api.persistence.ExecutionPauseRegistration registration) {
+            recorder.commitExecutionPause(registration);
+            durablyHeld = true;
+            lifecycle = fold(lifecycle, List.of(
+                    new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING),
+                    new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING)));
+        }
+
+        /**
+         * Settles the hold, folding whichever traversal transitions went with it.
+         *
+         * @param traversalStatus the traversal's next state, or {@code null} to leave it to the
+         *                        caller's own teardown
+         */
+        private synchronized void settleHold(
+                ai.ravenroot.api.persistence.ExecutionPauseTransition transition,
+                TraversalStatus traversalStatus, ProcessInstanceStatus processStatus) {
+            recorder.settleExecutionPause(transition, traversalId, traversalStatus, processStatus);
+            durablyHeld = false;
+            var applied = new ArrayList<ExecutionTransition>();
+            if (traversalStatus != null) {
+                applied.add(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus));
+            }
+            if (processStatus != null) {
+                applied.add(new ExecutionTransition.ProcessTransitioned(processStatus));
+            }
+            lifecycle = fold(lifecycle, applied);
+        }
+
         private synchronized void reentryStarted() {
             var transition = new ExecutionTransition.TraversalTransitioned(
                     traversalId, TraversalStatus.RUNNING);
@@ -4570,6 +5023,9 @@ public final class GraphRunner implements AutoCloseable {
          * end remains observable in the aggregate, which commits in this same transaction.</p>
          */
         private synchronized void executionCompleted() {
+            if (durablyHeld) {
+                return;
+            }
             var transitions = List.<ExecutionTransition>of(
                     new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED),
                     new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED));
@@ -4589,6 +5045,10 @@ public final class GraphRunner implements AutoCloseable {
         }
 
         private synchronized void executionFailed() {
+            // A held traversal has not failed; it is waiting, and its hold says so. See #durablyHeld.
+            if (durablyHeld) {
+                return;
+            }
             var transitions = new ArrayList<ExecutionTransition>();
             Traversal traversal = lifecycle.traversals().get(traversalId);
             if (!traversal.status().terminal()) {

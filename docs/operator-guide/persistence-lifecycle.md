@@ -27,11 +27,35 @@ Only an operator may drain, copy or replace durable state, restore a deployment,
 
 Terminal-retention configuration cannot be set shorter than event-journal retention, so once retention removal is exposed, a terminal instance will never be pruned while its own events are still readable. The default terminal retention is seven days, chosen to span a weekend so a failure late on a Friday is still discoverable when someone looks on Monday — a bound that constrains configuration today but removes nothing until the operation above is reachable.
 
+## Paused traversals
+
+A traversal an operator pauses is held, and a hold now survives the process that took it. The hold is written down at the moment the traversal is actually stopped — between the node that has just finished and the node that has not yet started — together with the small amount of state needed to continue it: the node it was about to enter, the payload and attributes that dispatch was carrying, and the pinned graph version to run them against. It commits in the same transaction that moves the traversal to `WAITING`, so there is no instant at which a traversal is held and nothing records it, or is recorded as waiting with nothing able to release it.
+
+**Recovery leaves a held traversal held, and cannot do otherwise.** A hold produces no claimable work of any kind: no scheduled attempt, no timer, no trigger. A recovery sweep across a restarted process finds nothing belonging to a held traversal and therefore dispatches nothing for it. Nothing after the hold's boundary can run in any process either, because the aggregate refuses to record a node as started on a traversal that is `WAITING` — so a held traversal is stopped by the stored state itself, not only by the process that was running it.
+
+**Only an explicit, authorized resume continues one.** Resume and cancel are authorized and audited exactly as they were before, on the same `EXECUTION_CONTROL` decision, and both work after a restart. A resume rebuilds what it needs from the pinned graph and continues from the committed boundary: it starts the node the hold withheld, which has never run, so nothing already completed is repeated. A cancel settles the hold and ends the traversal. Whichever happens, the settled hold is retained beside the process instance as the record of who decided and what they decided, and is removed only when retention removes the instance itself.
+
+**Stopping a deployment or a process decides nothing.** A shutdown releases the runtime resources a held traversal was occupying and leaves the hold exactly as it was, with no actor recorded against it. The next process to start reports the traversal as held, and the same resume and cancel remain available.
+
+### What is held durably, and what is held only in the process
+
+Not every point a traversal can be paused at is one a hold can be written down for. A hold is written down when the traversal is a single branch at a single completed node and the withheld payload is expressible in the payload type model. It is **not** written down when the traversal has fanned out at any point, when the hold lands on the traversal's very first node, when a loop is in progress, when the hold lands on a fan-in, or when the withheld payload is a value the type model does not cover — a continuation carries one hop, and writing one for a traversal that has more than one would silently discard the others on restart.
+
+Those holds still work; they are simply the process-local holds that existed before this change, and a restart forgets them. The distinction is visible where it matters: after a restart, a traversal that was held durably is reported as paused and a traversal that was not is not reported at all, because the process running it is gone. If it matters to you that a specific execution can be paused across a restart, keep its held section linear.
+
+### Stores that predate this state
+
+Durable holds are a declared store capability, not an assumption. A store that does not declare it cannot be asked to write a hold, and pausing a traversal against one keeps the process-local behaviour described above, unchanged and without error.
+
+For the bundled SQLite store this is a schema addition and nothing else. A database file written by an earlier release upgrades in place by adding one table for holds; no existing table is altered, no row is rewritten, and no data is migrated. Existing traversals are unaffected — a traversal in flight across the upgrade has no hold, and holds are only ever created by a pause issued after it. The usual downgrade rule applies unchanged: a file upgraded by this release is refused by a build that predates it, so take a backup before upgrading if you may need to roll the binary back.
+
 ## Verification
 
 After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, and execute a bounded Test graph before reopening Run traffic. Also confirm that a process instance discoverable through the durable inventory before the restart is still discoverable afterward, and read each instance's reported disposition rather than only its lifecycle status: `PARKED` means an attempt's real-world effect outcome is still unresolved and awaits a human decision (see [Durable process inventory](../architecture/process-inventory.md)), and it can appear on an otherwise-finished instance, so do not treat a terminal status alone as "nothing left to do."
 
-Two limits to keep in mind when reading the inventory. First, there is no durable "paused" state today: an instance an operator paused through process-local runtime control is not reported as paused by the durable inventory, because pause and resume have not yet been made durable. Second, a traversal admitted through the live request/reply ingress contract is deliberately live and process-local and writes nothing to the execution store, so the inventory is not a complete log of every traversal a deployment has ever admitted — it is complete for the admission paths that do write to the store.
+One limit to keep in mind when reading the inventory: a traversal admitted through the live request/reply ingress contract is deliberately live and process-local and writes nothing to the execution store, so the inventory is not a complete log of every traversal a deployment has ever admitted — it is complete for the admission paths that do write to the store.
+
+A held traversal reads as `WAITING`, like any other durable wait. Which wait it is comes from the hold itself, described below.
 
 - [Contract](../architecture/durability-events.md)
 - [Durable process inventory](../architecture/process-inventory.md)

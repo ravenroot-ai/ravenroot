@@ -687,7 +687,7 @@ public final class AuthorizedRavenrootApplication {
         requireControl(context, traversalId);
         auditControl(context, "cancel", "execution", traversalId.toString());
         try {
-            CancelResult result = performCancel(traversalId);
+            CancelResult result = performCancel(context, traversalId);
             auditControlSucceeded(context, "cancel", "execution", traversalId.toString(), result.outcome().name());
             return result;
         } catch (RuntimeException failed) {
@@ -704,11 +704,15 @@ public final class AuthorizedRavenrootApplication {
  * once the traversal has left the delegate's own active-execution tracking -- see
  * {@link ExecutionOwnershipRegistry#markCancelled}'s own Javadoc.
  */
-    private CancelResult performCancel(UUID traversalId) {
+    private CancelResult performCancel(RequestContext context, UUID traversalId) {
         if (executionOwners.isCancelled(traversalId)) {
             return CancelResult.alreadyCancelled(traversalId);
         }
-        boolean stopped = delegate.cancelTraversal(traversalId);
+        // Tenant-scoped, so a traversal this process is not running but is durably holding is still
+        // cancellable. Without it a hold that outlived its process could never be given up, and the
+        // caller would be told the execution had already completed -- which is exactly the false
+        // report this method's own re-check exists to avoid.
+        boolean stopped = delegate.cancelTraversal(context.tenantId(), traversalId);
         if (stopped) {
             executionOwners.markCancelled(traversalId);
             return CancelResult.cancelled(traversalId);
@@ -771,7 +775,7 @@ public final class AuthorizedRavenrootApplication {
         try {
             PauseResult result = delegate.pauseTraversal(traversalId)
                     ? PauseResult.paused(traversalId)
-                    : delegate.executionPaused(traversalId)
+                    : delegate.executionPaused(context.tenantId(), traversalId)
                             ? PauseResult.alreadyPaused(traversalId)
                             : PauseResult.notActive(traversalId);
             auditControlSucceeded(context, "pause", "execution", traversalId.toString(),
@@ -809,7 +813,7 @@ public final class AuthorizedRavenrootApplication {
         requireControl(context, traversalId);
         auditControl(context, "resume", "execution", traversalId.toString());
         try {
-            ResumeResult result = delegate.resumeTraversal(traversalId)
+            ResumeResult result = delegate.resumeTraversal(context.tenantId(), traversalId)
                     ? ResumeResult.resumed(traversalId)
                     : stillLive(context, traversalId)
                             ? ResumeResult.notPaused(traversalId)
@@ -830,10 +834,44 @@ public final class AuthorizedRavenrootApplication {
  */
     private void requireControl(RequestContext context, UUID traversalId) {
         String owner = executionOwners.owner(traversalId);
+        if (owner == null) {
+            owner = durableHoldOwner(context, traversalId);
+        }
         ProtectedResource resource = owner == null
                 ? ProtectedResource.unknownOwnership("execution", traversalId.toString())
                 : ProtectedResource.owned("execution", traversalId.toString(), owner);
         require(context, AuthorizationAction.EXECUTION_CONTROL, resource);
+    }
+
+    /**
+     * Resolves ownership of a traversal this process never ran but is durably holding.
+     *
+     * <h4>Why this is needed at all</h4>
+     * <p>{@link ExecutionOwnershipRegistry} is process-local and bounded, so after a restart it
+     * knows nothing about a traversal held before the restart, and {@link #requireControl} fails
+     * closed. That is the right default for an unknown traversal and the wrong answer for the one
+     * case a durable hold exists to create: an operator who deliberately stopped a traversal, and
+     * who after a restart could then neither resume nor cancel it — the hold would have made the
+     * work permanently unreachable instead of recoverable.</p>
+     *
+     * <h4>Why it cannot widen anyone's authority</h4>
+     * <p>It resolves ownership to the caller's <em>own</em> tenant and to nothing else, and only when
+     * the store confirms that tenant is holding that traversal. The confirming read is tenant-scoped
+     * at the port, so a caller asking about another tenant's held traversal is told "not held", the
+     * owner stays unknown, and the request fails closed exactly as before. What the caller then
+     * receives is an ordinary {@link AuthorizationAction#EXECUTION_CONTROL} decision over a resource
+     * owned by its own tenant — the same decision it would have received before the restart.</p>
+     *
+     * @return the caller's tenant when it durably holds this traversal, otherwise {@code null}
+     */
+    private String durableHoldOwner(RequestContext context, UUID traversalId) {
+        try {
+            return delegate.executionPaused(context.tenantId(), traversalId) ? context.tenantId() : null;
+        } catch (RuntimeException unavailable) {
+            // An unreadable store is not evidence of ownership. Failing closed here keeps a store
+            // outage from becoming an authorization outcome.
+            return null;
+        }
     }
 
     /**

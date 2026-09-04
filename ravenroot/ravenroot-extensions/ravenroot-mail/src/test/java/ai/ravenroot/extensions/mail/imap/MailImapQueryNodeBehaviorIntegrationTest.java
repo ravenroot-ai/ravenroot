@@ -29,7 +29,9 @@ import java.util.ArrayList;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLSocketFactory;
@@ -506,7 +508,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
 
     @RepeatedTest(8)
     @Execution(ExecutionMode.CONCURRENT)
-    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    @Timeout(value = 60, unit = TimeUnit.SECONDS, threadMode = Timeout.ThreadMode.SEPARATE_THREAD)
     void actionAdmissionRejectsBeforeSecretsAndRecoversAfterTransportFailure(
             RepetitionInfo repetition) throws Exception {
         try (var server = new HoldingServer()) {
@@ -519,14 +521,14 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             NodeAction action = limitedAction(server.port(), profile, ref -> {
                 if (secrets.incrementAndGet() == 1) {
                     credentialEntered.complete(null);
-                    releaseCredential.join();
+                    awaitSignal(releaseCredential, "credential release");
                 }
                 return secret();
             });
             var first = action.handle(node(tenant, Map.of("version", "mail.imap.query.v1")))
                     .toCompletableFuture();
             try {
-                credentialEntered.join();
+                awaitEventOrStage("credential resolver entry", credentialEntered, first);
                 assertFalse(first.isDone(), "the admitted call must remain held before transport");
                 assertEquals(0, server.acceptedSockets(),
                         "the credential gate must hold the admitted call before its first socket");
@@ -540,7 +542,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
                 releaseCredential.complete(null);
             }
 
-            server.awaitFirstConnection();
+            server.awaitFirstConnection(first);
             assertEquals(1, server.acceptedSockets(),
                     "the first admitted call must open exactly one connection");
             server.stopTransport();
@@ -679,9 +681,58 @@ class MailImapQueryNodeBehaviorIntegrationTest {
     @SuppressWarnings("unchecked") private static List<Map<String, Object>> messages(Map<String, Object> output) { return (List<Map<String, Object>>) output.get("messages"); }
     private static NodeMessage node(Map<String, Object> payload) { return node("tenant", payload); }
     private static NodeMessage node(String tenant, Map<String, Object> payload) { UUID id = UUID.randomUUID(); return new NodeMessage(new SecurityContext("r", tenant, "s", PrincipalType.USER, "i"), id, id, id, id, Set.of(), "imap", payload, Map.of()); }
-    private static ImapQueryException failure(CompletableFuture<?> stage) {
-        CompletionException failure = assertThrows(CompletionException.class, stage::join);
-        return assertInstanceOf(ImapQueryException.class, failure.getCause());
+    private static void awaitSignal(CompletableFuture<Void> signal, String description) {
+        try {
+            signal.get(20, TimeUnit.SECONDS);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("Interrupted while waiting for " + description, interrupted);
+        } catch (ExecutionException failure) {
+            throw new AssertionError("Failed while waiting for " + description, failure.getCause());
+        } catch (TimeoutException timeout) {
+            throw new AssertionError("Timed out waiting for " + description, timeout);
+        }
+    }
+    private static void awaitEventOrStage(String description, CompletableFuture<Void> event,
+                                          CompletableFuture<?> stage) throws Exception {
+        try {
+            CompletableFuture.anyOf(event, stage).get(20, TimeUnit.SECONDS);
+        } catch (ExecutionException failure) {
+            if (!event.isDone()) throw new AssertionError(
+                    "The admitted stage failed before " + description + ": " + stageOutcome(failure.getCause()),
+                    failure.getCause());
+        } catch (TimeoutException timeout) {
+            throw new AssertionError("Timed out waiting for " + description
+                    + "; admitted stage=" + stageOutcome(stage), timeout);
+        }
+        if (!event.isDone()) throw new AssertionError(
+                "The admitted stage completed before " + description + ": " + stageOutcome(stage));
+    }
+    private static ImapQueryException failure(CompletableFuture<?> stage) throws Exception {
+        try {
+            stage.get(20, TimeUnit.SECONDS);
+            return fail("Expected an IMAP failure, but the stage completed normally");
+        } catch (ExecutionException failure) {
+            return assertInstanceOf(ImapQueryException.class, failure.getCause());
+        } catch (TimeoutException timeout) {
+            return fail("Timed out waiting for the IMAP failure; stage=" + stageOutcome(stage), timeout);
+        }
+    }
+    private static String stageOutcome(CompletableFuture<?> stage) {
+        if (!stage.isDone()) return "pending";
+        if (stage.isCancelled()) return "cancelled";
+        if (!stage.isCompletedExceptionally()) return "completed normally";
+        try {
+            stage.getNow(null);
+            return "completed normally";
+        } catch (CompletionException failure) {
+            return stageOutcome(failure.getCause());
+        }
+    }
+    private static String stageOutcome(Throwable failure) {
+        if (failure instanceof ImapQueryException imapFailure)
+            return "failed with " + imapFailure.code();
+        return "failed with " + failure.getClass().getSimpleName();
     }
     private static MimeMessage message(String subject, String body, Instant sentAt, boolean seen) throws Exception { MimeMessage message = new MimeMessage(Session.getInstance(new Properties())); message.setFrom(new InternetAddress("from@example.test")); message.setRecipient(Message.RecipientType.TO, new InternetAddress("reader@example.test")); message.setSubject(subject); message.setText(body); message.setSentDate(java.util.Date.from(sentAt)); if (seen) message.setFlag(Flags.Flag.SEEN, true); message.saveChanges(); return message; }
     private static MimeMessage multipartMessage() throws Exception { MimeMessage message = message("attachment", "preview more than budget", Instant.parse("2025-06-01T12:00:00Z"), false); MimeMultipart multipart = new MimeMultipart(); MimeBodyPart text = new MimeBodyPart(); text.setText("preview more than budget"); multipart.addBodyPart(text); MimeBodyPart attachment = new MimeBodyPart(); attachment.setFileName("a.txt"); attachment.setText("contents"); multipart.addBodyPart(attachment); message.setContent(multipart); message.saveChanges(); return message; }
@@ -730,7 +781,9 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         }
         int port() { return listener.getLocalPort(); }
         int acceptedSockets() { return acceptedSockets.get(); }
-        void awaitFirstConnection() { firstConnection.join(); }
+        void awaitFirstConnection(CompletableFuture<?> stage) throws Exception {
+            awaitEventOrStage("the first transport connection", firstConnection, stage);
+        }
         void stopTransport() throws Exception {
             listener.close();
             synchronized (connections) {

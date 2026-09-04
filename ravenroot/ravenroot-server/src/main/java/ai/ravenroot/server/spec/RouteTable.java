@@ -494,6 +494,21 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/human-tasks",
+                    "Lists a bounded page of the authenticated tenant's outstanding durable human "
+                            + "tasks. Terminal tasks are omitted unless includeTerminal=true; responses "
+                            + "contain bounded display and schema metadata, never execution or response payloads.",
+                    true, true, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-tasks/{taskId}/{decision}",
+                    "Resolves, denies, or cancels one tenant-scoped human task under its required "
+                            + "generation fence. Resolve accepts the task's bounded PayloadEnvelope; "
+                            + "unknown and cross-tenant task IDs are indistinguishable.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "

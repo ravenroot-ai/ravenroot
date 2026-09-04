@@ -5338,6 +5338,8 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
+    const title = property.displayName || property.name;
+    const accessibleName = ` aria-label="${escapeAttribute(title)}"`;
     // `adapterBinding` (always paired with `required` — see
     // NodePropertyDescriptor#adapterBinding) names a property whose EMPTY value does not make the
     // graph invalid, it makes the node UNCONFIGURED: the server admits it and the node refuses only
@@ -5494,7 +5496,7 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // a GENUINELY absent value (nothing declared, or a declared empty string -- see `present`'s own
       // comment) still renders "Not declared" FIRST with `value=""` and selected, so it is still the
       // HTML placeholder label option and `required` still stops the save until the author decides.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
         `<option value="${escapeAttribute(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
     } else if (property.type === 'SECRET_REFERENCE') {
       // CHOOSE, NEVER TYPE.
@@ -5515,9 +5517,9 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // omission: a control that degrades to an input when the list is empty degrades exactly when
       // an author is most likely to reach for the secret instead. What the two degraded states do
       // instead is PRESERVE, never invent — see the two options below.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
     } else if (property.type === 'TEXT' || property.type === 'CEL_EXPRESSION') {
-      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
+      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
     } else if (property.type === 'BOOLEAN') {
       // Same defect as the closed-choice branch above, muter -- `String(value) !== 'true'` is
       // true for ANY value that is not the exact string "true", so a stored value that merely FAILED
@@ -5539,11 +5541,11 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${describedBy}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibleName}${describedBy}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
-      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${describedBy} ${nativeRequired ? 'required' : ''}>`;
+      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>`;
     }
     // The sentence follows the control. It used to end "never paste a secret" because the
     // control was a text box that would have taken one; the control now cannot, so the hint says
@@ -5600,7 +5602,6 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // accessibility tree and Tab order, and out of native constraint validation — see
     // `.catalog-property[hidden]` in styles.css for why the CSS side of this needs its own rule
     // rather than relying on the attribute alone.
-    const title = property.displayName || property.name;
     const state = stateText ? `<small id="${stateId}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
     return `<div class="${fieldClass}" ${visible ? '' : 'hidden'}>
       <div class="editor-label-row"><label>${escapeHtml(title)}${requiredNow ? ' *' : ''}</label>

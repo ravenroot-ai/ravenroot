@@ -458,6 +458,47 @@ public interface ExecutionStore extends AutoCloseable {
         return refused;
     }
 
+    // ---------------------------------------------------------------- durable human tasks
+
+    /**
+     * Largest page the tenant-scoped human-task inbox will return.
+     *
+     * @return positive implementation limit.
+     */
+    default int maxHumanTaskPageSize() {
+        return 100;
+    }
+
+    /**
+     * Reads a task by opaque identity without exposing another tenant's task.
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param taskId opaque task identity.
+     * @return stage yielding the tenant-owned task, or empty when absent.
+     */
+    default CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return humanTasksUnsupported();
+    }
+
+    /**
+     * Lists one deterministic, bounded page from a tenant's human-task inbox.
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param query bounded inbox query.
+     * @return stage yielding one deterministic page.
+     */
+    default CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return humanTasksUnsupported();
+    }
+
+    /** Additive fail-closed default for adapters that do not implement human tasks. */
+    private static <T> CompletionStage<T> humanTasksUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.HUMAN_TASKS)));
+        return refused;
+    }
+
     // ---------------------------------------------------------------- event journal and outbox
 
     /**

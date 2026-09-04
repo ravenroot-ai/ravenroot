@@ -1763,7 +1763,12 @@ public final class GraphRunner implements AutoCloseable {
                     var admissionKey = new TraversalAdmissionRegistry.Key(identity.security().tenantId(),
                             identity.deploymentId(), identity.graphVersion(), identity.traversalId(),
                             node.id());
-                    return traversalAdmission.acquire(admissionKey, definition.maxConcurrency())
+                    // reacquire, not acquire: a retry re-enters a node this traversal already
+                    // admitted, so its gate must already exist -- and if it does not, this
+                    // traversal's admission has been released and the retry must not proceed.
+                    // Creating one here would leak it, because the traversal that would have removed
+                    // it has already ended. See TraversalAdmissionRegistry.reacquire.
+                    return traversalAdmission.reacquire(admissionKey, definition.maxConcurrency())
                             .thenCompose(lease -> {
                                 // The RUNNING commit is the gate, and its refusal is read rather than
                                 // anticipated. Asking `terminated()` first and then committing was two
@@ -3026,6 +3031,19 @@ public final class GraphRunner implements AutoCloseable {
      * @param traversalId the traversal to inspect
      * @return how many of its branches are asleep in a backoff, zero when none are
      */
+    /**
+     * Admission gate entries this runner is holding, across every traversal. Diagnostics.
+     *
+     * <p>Exposed so a test can assert that a traversal which has ended left none behind. The count
+     * an operator would notice is memory, and memory is not observable from a behaviour assertion —
+     * so the leak has to be measured where it lives.</p>
+     *
+     * @return the number of live admission gates
+     */
+    int admissionGateCount() {
+        return traversalAdmission.gateCount();
+    }
+
     int pendingBackoffCount(UUID traversalId) {
         Set<BackoffWait> waits = backoffWaits.get(traversalId);
         return waits == null ? 0 : waits.size();
@@ -3545,10 +3563,24 @@ public final class GraphRunner implements AutoCloseable {
          *
          * <p>So the two flags answer two different questions and both are needed. {@code terminal}
          * is "this traversal's end is written"; this is "this traversal has stopped accepting new
-         * work". Only the retry paths read it, because they are the only ones that can start
-         * something new after the outcome is decided — every ordinary hop is a successor of a node
-         * that has not settled yet, and a traversal whose outcome is decided has none of those left.
-         * </p>
+         * work".</p>
+         *
+         * <h4>Only the retry paths read it, and the reason is not that nothing else is in flight</h4>
+         * <p>An earlier version of this note claimed that a traversal whose outcome is decided has no
+         * unsettled work left. That is false, and this class is built around its being false:
+         * {@code allOrFirstFailure} completes on the <em>first</em> branch failure and abandons its
+         * siblings, {@code coordinator.abandonedBranchFailure()} exists precisely to report a branch
+         * left parked at a join, and {@code aTraversalTimeoutDuringTheBackoffStopsTheRetry} exercises
+         * exactly that shape. Branches very much are in flight here.</p>
+         *
+         * <p>The real reason is narrower and is about <em>who starts work</em>. An in-flight branch
+         * continues along a chain the traversal already began; it needs no new permission, and the
+         * aggregate's own terminal guard is what stops it recording anything — the residue that
+         * leaves is declared on {@link #terminal} and is unchanged here. A retry is the one thing the
+         * <em>orchestrator itself</em> chooses to start after the outcome is known, and it starts an
+         * external effect. That is what this flag refuses, and widening it to every hop would be a
+         * different change with a different argument — it would begin cancelling work in flight,
+         * which ADR 0012 governs and this flag does not.</p>
          */
         private boolean closing;
 

@@ -537,6 +537,13 @@ class OrchestrationRetryTest {
                                 + "effect runs while the attempt stays SCHEDULED, and a recovery "
                                 + "sweep reads SCHEDULED as 'provably never started' and runs it "
                                 + "a second time");
+                assertEquals(0, runner.admissionGateCount(),
+                        "the refused retry left an admission gate behind. release() drops this "
+                                + "traversal's gates and then releases the pause gate ON_CALLER, so "
+                                + "the parked retry runs on that same thread and asks for admission "
+                                + "after its gates are gone -- creating a fresh one that nothing "
+                                + "removes until the runner closes. One entry per retrying node per "
+                                + "traversal, on a server whose runners outlive their traversals");
             }
         }
     }

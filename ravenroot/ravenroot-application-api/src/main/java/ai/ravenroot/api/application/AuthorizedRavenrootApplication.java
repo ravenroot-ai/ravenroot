@@ -706,6 +706,14 @@ public final class AuthorizedRavenrootApplication {
  */
     private CancelResult performCancel(RequestContext context, UUID traversalId) {
         if (executionOwners.isCancelled(traversalId)) {
+            // Answered from this process's own memory, before the delegate is asked anything. So a
+            // second cancellation of a traversal this process already cancelled does not reach the
+            // durable path, and a hold row left behind by a settlement the store refused is
+            // typically cleared only after a restart, when this registry no longer remembers the
+            // cancellation. That is harmless -- the row is inert, reports nothing because a terminal
+            // traversal is never held, and is settled by the next cancellation that does reach the
+            // store -- and it is worth knowing before reading "a later cancellation settles it" as a
+            // promise about the very next call.
             return CancelResult.alreadyCancelled(traversalId);
         }
         // Tenant-scoped, so a traversal this process is not running but is durably holding is still

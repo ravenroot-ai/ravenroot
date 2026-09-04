@@ -310,9 +310,12 @@ public interface CliBackend {
      * whatever the wire sent on the remote one) rather than parsed back into an {@code Instant} --
      * this interface has no reason to commit to that type, and every caller so far only prints it.
      * @param paused whether a pause is currently held on this traversal, so that it will not begin
-     *               another node until it is resumed. Process-local and never durable -- a restart
-     *               forgets it. {@code false} for an ordinary running traversal and for one that has
-     *               never been paused.
+     *               another node until it is resumed. This listing is process-local, so a traversal
+     *               held before a restart is not in it at all -- not because the hold was lost, but
+     *               because no traversal of a process that is gone is live here. A hold taken at a
+     *               boundary the runtime can write down outlives its process and stays resumable and
+     *               cancellable. {@code false} for an ordinary running traversal and for one that
+     *               has never been paused.
      */
     record LiveView(String processInstanceId, String traversalId, String executionId, String graphVersion,
                      String startedAt, boolean paused) {

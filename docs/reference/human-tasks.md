@@ -53,8 +53,13 @@ not replacement execution authority.
 
 ## What this is not
 
-- **Pause** is a live dispatch gate. It retains the active traversal and resumes that same in-memory
-  traversal; it is not a human inbox and does not survive as a task.
+- **Pause** is an operator hold on one traversal, taken between two nodes. It is not a human inbox
+  and creates no task: nobody is asked for anything, and nothing arrives. A hold taken at a boundary
+  the runtime can write down outlives the process that took it and is continued by an authorized
+  resume, which rebuilds the runtime from the pinned graph rather than reviving the traversal that
+  was running; a hold taken anywhere else is process-local and is lost with its process. Either way
+  the traversal keeps its own identity and its own requester, where a human task's re-entry is a
+  fresh traversal of the same process instance.
 - **Cancel** terminates a live traversal. Human-task cancellation is instead a declared graph
   disposition that starts the configured fresh re-entry route.
 - **Drain** stops the server from accepting work while existing work settles.

@@ -112,28 +112,31 @@ public final class DurableExecutionPauseService {
      * @return the current hold, or empty when the traversal is not held or holds are unsupported.
      */
     public Optional<DurableExecutionPause> held(String tenantId, UUID traversalId) {
-        if (!available()) return Optional.empty();
-        // Deliberately not wrapped in a catch. An unreadable store is not "this traversal is not
-        // held": answering that would tell an operator during an outage that a hold they took is
-        // gone, which is the one wrong answer this whole mechanism exists to stop the system giving.
-        // Every caller either surfaces the failure or fails closed on it.
-        Optional<DurableExecutionPause> found =
-                executions.findHeldExecutionPause(tenantId, traversalId).toCompletableFuture().join();
         // A terminal traversal is never held, the same invariant ExecutionOutcome enforces on the
         // live side. A hold row can outlive its traversal by one narrow path -- a settlement the
         // store refused while the traversal was ending, which GraphRunner deliberately lets go of so
         // the end can still be written -- and reporting that row would tell an operator that
         // finished work is waiting for them.
-        return found.filter(pause -> !terminalTraversal(pause));
+        return heldIncludingStale(tenantId, traversalId).filter(pause -> !terminalTraversal(pause));
     }
 
     /**
      * The stored hold on a traversal, terminal traversal included.
      *
-     * <p>{@link #held} hides a hold whose traversal has ended, because reporting one would tell an
-     * operator that finished work is waiting for them. Settling one is the opposite: a stale row is
-     * exactly what a cancellation should be able to clear, and filtering it out of the settlement
-     * path as well would make it permanent.</p>
+     * <p>{@link #held} is this filtered, and the two are one lookup rather than two spellings of it:
+     * they differ by exactly the filter, and writing the store call out twice is where they would
+     * start to differ by more.</p>
+     *
+     * <p>What the filter is for: {@link #held} hides a hold whose traversal has ended, because
+     * reporting one would tell an operator that finished work is waiting for them. Settling one is
+     * the opposite — a stale row is exactly what a cancellation should be able to clear — so the
+     * settlement path reads this instead, and filtering there as well would make the row
+     * permanent.</p>
+     *
+     * <p>Deliberately not wrapped in a catch. An unreadable store is not "this traversal is not
+     * held": answering that would tell an operator during an outage that a hold they took is gone,
+     * which is the one wrong answer this whole mechanism exists to stop the system giving. Every
+     * caller either surfaces the failure or fails closed on it.</p>
      */
     private Optional<DurableExecutionPause> heldIncludingStale(String tenantId, UUID traversalId) {
         if (!available()) return Optional.empty();

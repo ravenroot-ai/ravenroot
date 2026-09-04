@@ -118,7 +118,7 @@ class StandardBehaviorFactoriesTest {
         // ANTI-VACUITY: the two assertions above are absences, and an absence over an empty catalog
         // is not an assertion. This pins what the catalog does contain, so an accidental emptying
         // fails here instead of turning the three lines above green for the wrong reason.
-        assertEquals(new java.util.TreeSet<>(java.util.Set.of("cel-decision", "cel-transform", "delay",
+        assertEquals(new java.util.TreeSet<>(java.util.Set.of("boundary-guard", "cel-decision", "cel-transform", "delay",
                 "http-request", "json-parse", "json-path", "log", "program", "template")), behaviors,
                 "the core catalog changed shape; update this roster deliberately");
     }

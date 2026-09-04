@@ -10,6 +10,7 @@ The catalog returned by `GET /v1/node-types` is authoritative for the running de
 | `template` | Interpolate payload and attributes into text | None |
 | `cel-transform` | Compute a payload with CEL | CEL evaluator |
 | `cel-decision` | Select an outcome with CEL | CEL evaluator |
+| `boundary-guard` | Validate a publication candidate | Operator policy profile and audit sink |
 | `http-request` | Perform an outbound HTTP call | Egress and credentials |
 | `delay` | Resume after a bounded asynchronous delay | Scheduler |
 | `json-parse` | Parse JSON text into a structured value | None |
@@ -19,6 +20,8 @@ The catalog returned by `GET /v1/node-types` is authoritative for the running de
 | `program` | Execute an approved artifact | Sandbox supervisor |
 
 An unavailable privileged dependency does not become available because its identifier appears in a graph.
+
+`boundary-guard` declares the fixed outcomes `continue` and `violation`. It requires `policyId`, `policyVersion`, and `policyDigest`; the digest pins all effective immutable profile data. The default catalog includes the node but resolves no profiles, so it fails closed until an application supplies an operator-owned resolver. See [Publication boundary policies](../security/publication-boundaries.md) for candidate authoring, rule composition, provider re-evaluation, and limitations.
 
 ## Exact core properties
 

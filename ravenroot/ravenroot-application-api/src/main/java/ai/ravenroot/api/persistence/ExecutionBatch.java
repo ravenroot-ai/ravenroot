@@ -25,6 +25,7 @@ public final class ExecutionBatch {
     private final List<UUID> timersToCancel;
     private final IdempotencyWrite idempotency;
     private final List<EventEnvelope> events;
+    private final ExecutionOrigin origin;
     private final List<HandlerRegistration> handlersToRegister;
     private final List<HandlerTransition> handlerTransitions;
 
@@ -37,11 +38,18 @@ public final class ExecutionBatch {
         this.timersToCancel = List.copyOf(builder.timersToCancel);
         this.idempotency = builder.idempotency;
         this.events = List.copyOf(builder.events);
+        this.origin = builder.origin == null ? ExecutionOrigin.none() : builder.origin;
         this.handlersToRegister = List.copyOf(builder.handlersToRegister);
         this.handlerTransitions = List.copyOf(builder.handlerTransitions);
+        // Every operation category is named here, and the guard has to grow with each one. An origin
+        // counts as an operation: recording a deployment, workload or correlation identity changes
+        // stored state and is a legitimate write on its own, which is what lets a caller that learns
+        // the relationship after creation annotate the row without inventing a no-op transition to
+        // carry it. A handler registration or transition counts for the same reason. A category
+        // omitted from this condition would make its own batch look empty and be rejected.
         if (transitions.isEmpty() && timersToSchedule.isEmpty() && timersToCancel.isEmpty()
-                && idempotency == null && events.isEmpty() && handlersToRegister.isEmpty()
-                && handlerTransitions.isEmpty()) {
+                && idempotency == null && events.isEmpty() && origin.isEmpty()
+                && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -153,8 +161,27 @@ public final class ExecutionBatch {
     }
 
     /**
-     * Handlers created inside this batch's transaction, in the order the caller added them
-     * (PERS-05).
+     * The deployment, workload and correlation identities this batch records on the instance's
+     * inventory row.
+     *
+     * <p>These are descriptive relationships rather than lifecycle state, so they are annotation
+     * semantics and not a transition: every component present here is written, and every component
+     * absent leaves the stored value exactly as it was. A recovery or re-entry write that does not know
+     * the deployment therefore cannot erase what creation recorded, and there is no ordering of
+     * partially-informed callers that destroys information.</p>
+     *
+     * <p>Deliberately not the write-once rule {@link GraphVersionPin} follows: the pin is write-once
+     * because replay correctness depends on replaying against the same definition, whereas a
+     * redeployment genuinely can move hosting, so a later origin value is an update rather than a
+     * contradiction.</p>
+ * @return the origin components this batch records; {@link ExecutionOrigin#none()} when it records none.
+     */
+    public ExecutionOrigin origin() {
+        return origin;
+    }
+
+    /**
+     * Handlers created inside this batch's transaction, in the order the caller added them.
      *
      * <p>The second operation category ADR 0010 section 3 reserved the builder for, and the reason
      * this type never had a canonical constructor. A registration here commits with the
@@ -193,7 +220,7 @@ public final class ExecutionBatch {
 
     /**
      * Handler state changes applied inside this batch's transaction, in the order the caller added
-     * them (PERS-05).
+     * them.
      *
      * <p>An outcome-bearing transition — {@link HandlerTransition.Expired},
      * {@link HandlerTransition.Denied}, {@link HandlerTransition.Resolved} — must name a
@@ -226,6 +253,7 @@ public final class ExecutionBatch {
         private final List<UUID> timersToCancel = new ArrayList<>();
         private IdempotencyWrite idempotency;
         private final List<EventEnvelope> events = new ArrayList<>();
+        private ExecutionOrigin origin;
         private final List<HandlerRegistration> handlersToRegister = new ArrayList<>();
         private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
 
@@ -323,6 +351,20 @@ public final class ExecutionBatch {
         public Builder publish(EventEnvelope envelope) {
             if (envelope == null) throw new IllegalArgumentException("envelope cannot be null");
             events.add(envelope);
+            return this;
+        }
+
+        /**
+         * Records the deployment, workload and correlation identities of this execution.
+         *
+         * <p>Repeatable: a later call merges over an earlier one component by component, so a caller
+         * assembling the origin from several sources never has to know which source runs last.</p>
+ * @param value origin components to record; absent components leave stored values untouched.
+ * @return this builder.
+         */
+        public Builder recordOrigin(ExecutionOrigin value) {
+            if (value == null) throw new IllegalArgumentException("origin cannot be null");
+            this.origin = origin == null ? value : origin.mergedWith(value);
             return this;
         }
 

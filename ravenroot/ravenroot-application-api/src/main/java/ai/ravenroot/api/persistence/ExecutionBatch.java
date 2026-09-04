@@ -28,6 +28,8 @@ public final class ExecutionBatch {
     private final ExecutionOrigin origin;
     private final List<HandlerRegistration> handlersToRegister;
     private final List<HandlerTransition> handlerTransitions;
+    private final List<ToolApprovalRegistration> toolApprovalsToRegister;
+    private final List<ToolApprovalTransition> toolApprovalTransitions;
 
     private ExecutionBatch(Builder builder) {
         this.key = builder.key;
@@ -41,6 +43,8 @@ public final class ExecutionBatch {
         this.origin = builder.origin == null ? ExecutionOrigin.none() : builder.origin;
         this.handlersToRegister = List.copyOf(builder.handlersToRegister);
         this.handlerTransitions = List.copyOf(builder.handlerTransitions);
+        this.toolApprovalsToRegister = List.copyOf(builder.toolApprovalsToRegister);
+        this.toolApprovalTransitions = List.copyOf(builder.toolApprovalTransitions);
         // Every operation category is named here, and the guard has to grow with each one. An origin
         // counts as an operation: recording a deployment, workload or correlation identity changes
         // stored state and is a legitimate write on its own, which is what lets a caller that learns
@@ -49,7 +53,9 @@ public final class ExecutionBatch {
         // omitted from this condition would make its own batch look empty and be rejected.
         if (transitions.isEmpty() && timersToSchedule.isEmpty() && timersToCancel.isEmpty()
                 && idempotency == null && events.isEmpty() && origin.isEmpty()
-                && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()) {
+                && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()
+                && toolApprovalsToRegister.isEmpty()
+                && toolApprovalTransitions.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -241,6 +247,16 @@ public final class ExecutionBatch {
         return handlerTransitions;
     }
 
+    /** Tool approvals registered atomically with this batch's execution changes. */
+    public List<ToolApprovalRegistration> toolApprovalsToRegister() {
+        return toolApprovalsToRegister;
+    }
+
+    /** Tool-approval lifecycle changes applied atomically with this batch. */
+    public List<ToolApprovalTransition> toolApprovalTransitions() {
+        return toolApprovalTransitions;
+    }
+
 /**
  * Defines the builder contract exposed to Ravenroot integrators.
  */
@@ -256,6 +272,8 @@ public final class ExecutionBatch {
         private ExecutionOrigin origin;
         private final List<HandlerRegistration> handlersToRegister = new ArrayList<>();
         private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
+        private final List<ToolApprovalRegistration> toolApprovalsToRegister = new ArrayList<>();
+        private final List<ToolApprovalTransition> toolApprovalTransitions = new ArrayList<>();
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -387,6 +405,20 @@ public final class ExecutionBatch {
         public Builder applyHandler(HandlerTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             handlerTransitions.add(transition);
+            return this;
+        }
+
+        /** Registers one exact tool-approval request in this transaction. */
+        public Builder registerToolApproval(ToolApprovalRegistration registration) {
+            if (registration == null) throw new IllegalArgumentException("registration cannot be null");
+            toolApprovalsToRegister.add(registration);
+            return this;
+        }
+
+        /** Applies one tool-approval lifecycle transition in this transaction. */
+        public Builder applyToolApproval(ToolApprovalTransition transition) {
+            if (transition == null) throw new IllegalArgumentException("transition cannot be null");
+            toolApprovalTransitions.add(transition);
             return this;
         }
 

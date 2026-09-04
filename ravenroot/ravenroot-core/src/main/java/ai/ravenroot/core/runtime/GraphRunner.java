@@ -30,6 +30,9 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeRef;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.execution.RavenNode;
+import ai.ravenroot.api.node.ToolCallContinuationAction;
+import ai.ravenroot.api.node.ToolCallContinuationInput;
+import ai.ravenroot.api.node.ToolCallContinuationResult;
 import ai.ravenroot.api.persistence.JoinStore;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.graph.GraphCanonicalForm;
@@ -41,6 +44,7 @@ import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.persistence.InMemoryJoinStore;
+import ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -768,6 +772,9 @@ public final class GraphRunner implements AutoCloseable {
                                 : cleanupError != null ? cleanupError : coordinator.abandonedBranchFailure()))
                 .thenCompose(error -> {
                     Throwable outcome = error;
+                    if (unwrap(outcome) instanceof VerifiedToolApprovalSuspension verified) {
+                        return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
+                    }
                     if (outcome == null) {
                         try {
                             state.executionCompleted();
@@ -797,6 +804,90 @@ public final class GraphRunner implements AutoCloseable {
                     state.executionFailed();
                     monitor.executionFailed(identity, outcome);
                     return CompletableFuture.<GraphExecutionResult>failedFuture(outcome);
+                });
+    }
+
+    /**
+     * Continues from the exact node named by a stored approval on its already-created re-entry
+     * traversal. The package action receives a fresh invocation identity and core owns all routing.
+     */
+    public CompletionStage<Boolean> executeFrom(SecurityContext security, UUID processInstanceId,
+                                                UUID traversalId, String nodeId, String graphVersion,
+                                                ExecutionRecorder recorder,
+                                                java.util.function.Function<NodeMessage,
+                                                        ToolCallContinuationInput> inputFactory,
+                                                java.util.function.Consumer<Boolean> effectCompletion,
+                                                ToolCallContinuationAction action) {
+        java.util.Objects.requireNonNull(action, "action");
+        java.util.Objects.requireNonNull(effectCompletion, "effectCompletion");
+        GraphNode node = graph.node(nodeId);
+        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
+                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        var state = new ExecutionState(processInstanceId, traversalId, node.id(),
+                new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
+                recorder.storedState());
+        var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
+                joinSpecs, clock, timeoutRelinquishedObserver);
+        if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Traversal is already running on this runner"));
+        }
+        state.reentryStarted();
+        monitor.executionStarted(identity);
+        UUID invocationId = identitySource.nextNodeInvocationId();
+        UUID attemptId = identitySource.nextNodeAttemptId();
+        UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
+                NodeCommand.PROCESS, state.traversalAcceptedEventId());
+        NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
+                invocationId, attemptId, Set.of(), node.id(), null, Map.of(), NodeCommand.PROCESS);
+        CompletionStage<ToolCallContinuationResult> resumed;
+        try {
+            resumed = java.util.Objects.requireNonNull(action.resume(inputFactory.apply(delivered)),
+                    "continuation result stage");
+        } catch (RuntimeException failure) {
+            resumed = CompletableFuture.failedFuture(failure);
+        }
+        return resumed.handle((continued, failure) -> {
+                    if (failure != null) {
+                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        throw new CompletionException(unwrap(failure));
+                    }
+                    effectCompletion.accept(continued.effectSucceeded());
+                    return continued;
+                })
+                .thenCompose(continued -> continued.nodeResult().handle((rawResult, failure) -> {
+                    if (failure != null) {
+                        Throwable cause = unwrap(failure);
+                        if (cause instanceof DurableToolApprovalSuspension suspension
+                                && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
+                            throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
+                        }
+                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        throw new CompletionException(cause);
+                    }
+                    UUID completedEventId = state.nodeCompleted(
+                            invocationId, attemptId, startedEventId, false, false);
+                    NodeResult result = markSyntheticProvenance(node, delivered, rawResult);
+                    List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
+                    if (next.isEmpty() && !"continue".equals(result.outcome())) {
+                        next = graph.nextEdges(node.id(), "continue");
+                    }
+                    return dispatchSuccessors(next, node, result, delivered, completedEventId,
+                            state, identity, coordinator, IterationContext.EMPTY);
+                }).thenCompose(next -> next.thenApply(ignored -> continued.effectSucceeded())))
+                .handle((succeeded, failure) -> {
+                    Throwable outcome = unwrap(failure);
+                    try {
+                        if (failure == null) state.executionCompleted();
+                        else if (!(outcome instanceof VerifiedToolApprovalSuspension)) state.executionFailed();
+                    } finally {
+                        release(traversalId, coordinator).toCompletableFuture().join();
+                    }
+                    if (outcome instanceof VerifiedToolApprovalSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
+                    if (failure != null) throw new CompletionException(outcome);
+                    return succeeded;
                 });
     }
 
@@ -1313,6 +1404,11 @@ public final class GraphRunner implements AutoCloseable {
                         workers.release(instance);
                     }
                     if (error != null) {
+                        Throwable failure = unwrap(error);
+                        if (failure instanceof DurableToolApprovalSuspension suspension
+                                && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
+                            throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
+                        }
                         // Recording stays unconditional: the attempt and invocation are FAILED
                         // whether or not the author wired anything to route from here. Only
                         // what happens *after* this point is new.
@@ -1756,6 +1852,21 @@ public final class GraphRunner implements AutoCloseable {
 
     private static Throwable unwrap(Throwable error) {
         return error instanceof CompletionException && error.getCause() != null ? error.getCause() : error;
+    }
+
+    /** Marker created only after the recorder confirms the core-minted signal's durable wait. */
+    private static final class VerifiedToolApprovalSuspension extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private final DurableToolApprovalSuspension signal;
+
+        private VerifiedToolApprovalSuspension(DurableToolApprovalSuspension signal) {
+            super(null, null, false, false);
+            this.signal = signal;
+        }
+
+        private DurableToolApprovalSuspension signal() {
+            return signal;
+        }
     }
 
     /**
@@ -3014,8 +3125,40 @@ public final class GraphRunner implements AutoCloseable {
                     .transitionTraversal(traversalId, TraversalStatus.RUNNING);
         }
 
+        private ExecutionState(UUID processInstanceId, UUID traversalId, String ingressNodeId,
+                               BranchLiveness liveness, ExecutionRecorder recorder,
+                               ExecutionMonitor.ExecutionIdentity identity,
+                               ExecutionIdentitySource identitySource, Clock clock,
+                               ProcessInstance storedLifecycle) {
+            this.traversalId = traversalId;
+            this.recorder = recorder;
+            this.liveness = liveness;
+            this.identity = identity;
+            this.identitySource = identitySource;
+            this.clock = clock;
+            this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
+            this.lifecycle = java.util.Objects.requireNonNull(storedLifecycle, "storedLifecycle");
+            if (!lifecycle.processInstanceId().equals(processInstanceId)
+                    || !lifecycle.traversals().containsKey(traversalId)
+                    || !lifecycle.traversals().get(traversalId).ingressNodeId().equals(ingressNodeId)) {
+                throw new IllegalArgumentException("stored re-entry traversal scope mismatch");
+            }
+        }
+
+        private synchronized void reentryStarted() {
+            var transition = new ExecutionTransition.TraversalTransitioned(
+                    traversalId, TraversalStatus.RUNNING);
+            record(List.of(transition), List.of());
+            lifecycle = fold(lifecycle, List.of(transition));
+        }
+
         private UUID traversalAcceptedEventId() {
             return traversalAcceptedEventId;
+        }
+
+        /** Accepts a suspension only when this exact delivered invocation is durably waiting. */
+        private boolean acceptsApprovalSuspension(UUID approvalId, NodeMessage delivered) {
+            return recorder != null && recorder.confirmsToolApproval(approvalId, delivered);
         }
 
         /**

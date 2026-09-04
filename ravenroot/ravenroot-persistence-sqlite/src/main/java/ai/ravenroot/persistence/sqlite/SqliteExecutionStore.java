@@ -4,6 +4,7 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -36,6 +37,9 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -151,13 +155,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // construction rather than by a projection that has to be kept in step. There is no
             // offset to repair and no rebuild that could invent work.
             StoreCapability.PROCESS_INVENTORY,
-            StoreCapability.INVENTORY_RETENTION);
+            StoreCapability.INVENTORY_RETENTION,
+            StoreCapability.TOOL_APPROVALS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
      * bind an unqualified column to its own table instead of to this one.
      */
     private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
+    private static final String TOOL_APPROVAL_COLUMNS = "SELECT a.* FROM tool_approval a";
 
     /**
      * {@code ('WAITING', 'ESCALATED')} and {@code ('RESOLVED', 'DENIED', 'EXPIRED')}, derived from
@@ -293,6 +299,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
             });
             batch.handlerTransitions().forEach(transition ->
                     requireWithinPayloadLimit(transition.outcomePayload()));
+            batch.toolApprovalsToRegister().forEach(registration -> {
+                requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(),
+                        "application/json"));
+                requireWithinPayloadLimit(OpaquePayload.of(registration.continuation(),
+                        "application/vnd.ravenroot.tool-continuation"));
+            });
             requireEnvelopesMatchBatch(batch);
             return inWriteTransaction(batch.key(), () -> applyLocked(batch));
         });
@@ -371,6 +383,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // post-fold aggregate. A rejection rolls the enclosing transaction back, which is what makes
         // a wait -- and a re-entry -- atomic with the transitions beside it.
         writeHandlers(key, batch, folded, revision);
+        writeToolApprovals(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of the shared
         // transactional boundary the event journal promises. There is no publish step to crash
@@ -2432,6 +2445,213 @@ public final class SqliteExecutionStore implements ExecutionStore {
             return java.util.Set.of();
         }
         return new java.util.LinkedHashSet<>(List.of(stored.split("\n", -1)));
+    }
+
+    // ---------------------------------------------------------------- durable tool approvals
+
+    @Override
+    public CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                           UUID approvalId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(approvalId, "approvalId");
+            return inReadTransaction(key, () -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        TOOL_APPROVAL_COLUMNS + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                                + "AND a.approval_id = ?")) {
+                    bindItem(statement, key, approvalId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readToolApproval(rows)) : Optional.empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                var approvals = new ArrayList<DurableToolApproval>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        TOOL_APPROVAL_COLUMNS + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                                + "ORDER BY a.position")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) approvals.add(readToolApproval(rows));
+                    }
+                }
+                return List.copyOf(approvals);
+            });
+        });
+    }
+
+    private void writeToolApprovals(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                    GraphVersionPin pin,
+                                    long revision, Instant now) throws SQLException {
+        for (ToolApprovalRegistration registration : batch.toolApprovalsToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "tool approval " + registration.approvalId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval identity or graph pin does not match its execution"));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("tool approval expiry must be after store time"));
+            }
+            DurableToolApproval existing = readToolApproval(key, registration.approvalId());
+            if (existing != null) {
+                if (!existing.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("tool approval " + registration.approvalId()
+                            + " is already registered with a different request"));
+                }
+                continue;
+            }
+            insertToolApproval(DurableToolApproval.pending(key, registration, revision),
+                    nextToolApprovalPosition(key));
+        }
+        for (ToolApprovalTransition transition : batch.toolApprovalTransitions()) {
+            DurableToolApproval current = readToolApproval(key, transition.approvalId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown tool approval "
+                        + transition.approvalId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), transition.next()));
+            }
+            if (transition.next() == ToolApprovalStatus.EXPIRED
+                    && now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            if ((transition.next() == ToolApprovalStatus.APPROVED
+                    || transition.next() == ToolApprovalStatus.DENIED
+                    || transition.next() == ToolApprovalStatus.CONSUMED)
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            updateToolApproval(current.apply(transition, revision));
+        }
+    }
+
+    private void insertToolApproval(DurableToolApproval approval, int position) throws SQLException {
+        ToolApprovalRegistration request = approval.request();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO tool_approval (tenant_id, process_instance_id, approval_id, position, "
+                        + "traversal_id, invocation_id, attempt_id, call_id, node_id, tool, "
+                        + "canonical_arguments, arguments_digest, requester_request_id, requester_subject, "
+                        + "requester_principal_type, requester_issuer, graph_version_pin, policy_version, "
+                        + "expires_at_epoch_second, expires_at_nano, required_roles, required_scopes, "
+                        + "requester_may_approve, continuation_version, continuation, continuation_digest, "
+                        + "status, actor, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        + "?, ?, ?, ?, ?)")) {
+            statement.setString(1, approval.key().tenantId());
+            statement.setString(2, approval.key().processInstanceId().toString());
+            statement.setString(3, request.approvalId().toString());
+            statement.setInt(4, position);
+            statement.setString(5, request.traversalId().toString());
+            statement.setString(6, request.invocationId().toString());
+            statement.setString(7, request.attemptId().toString());
+            statement.setString(8, request.callId().toString());
+            statement.setString(9, request.nodeId());
+            statement.setString(10, request.tool());
+            statement.setBytes(11, request.canonicalArguments());
+            statement.setString(12, request.argumentsDigest());
+            statement.setString(13, request.requester().requestId());
+            statement.setString(14, request.requester().subject());
+            statement.setString(15, request.requester().principalType().name());
+            statement.setString(16, request.requester().issuer());
+            statement.setString(17, request.graphVersionPin().reference());
+            statement.setString(18, request.policyVersion());
+            StoredInstant.bindValue(statement, 19, request.expiresAt());
+            statement.setString(21, joinTokens(request.approverRequirements().requiredRoles()));
+            statement.setString(22, joinTokens(request.approverRequirements().requiredScopes()));
+            statement.setInt(23, request.requesterMayApprove() ? 1 : 0);
+            statement.setInt(24, request.continuationVersion());
+            statement.setBytes(25, request.continuation());
+            statement.setString(26, request.continuationDigest());
+            statement.setString(27, approval.status().name());
+            statement.setString(28, approval.actor());
+            statement.setLong(29, approval.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateToolApproval(DurableToolApproval approval) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE tool_approval SET status = ?, actor = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND approval_id = ?")) {
+            statement.setString(1, approval.status().name());
+            statement.setString(2, approval.actor());
+            statement.setLong(3, approval.revision());
+            statement.setString(4, approval.key().tenantId());
+            statement.setString(5, approval.key().processInstanceId().toString());
+            statement.setString(6, approval.request().approvalId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private int nextToolApprovalPosition(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM tool_approval "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableToolApproval readToolApproval(ExecutionKey key, UUID approvalId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                TOOL_APPROVAL_COLUMNS + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                        + "AND a.approval_id = ?")) {
+            bindItem(statement, key, approvalId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readToolApproval(rows) : null;
+            }
+        }
+    }
+
+    private DurableToolApproval readToolApproval(ResultSet rows) throws SQLException {
+        var key = new ExecutionKey(rows.getString("tenant_id"),
+                UUID.fromString(rows.getString("process_instance_id")));
+        try {
+            var request = new ToolApprovalRegistration(
+                    UUID.fromString(rows.getString("approval_id")),
+                    UUID.fromString(rows.getString("traversal_id")),
+                    UUID.fromString(rows.getString("invocation_id")),
+                    UUID.fromString(rows.getString("attempt_id")),
+                    UUID.fromString(rows.getString("call_id")), rows.getString("node_id"),
+                    rows.getString("tool"), rows.getBytes("canonical_arguments"),
+                    rows.getString("arguments_digest"),
+                    new ai.ravenroot.api.security.SecurityContext(
+                            rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            ai.ravenroot.api.security.PrincipalType.valueOf(
+                                    rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    rows.getString("policy_version"), StoredInstant.read(rows, "expires_at"),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    rows.getInt("requester_may_approve") == 1,
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"));
+            return new DurableToolApproval(key, request,
+                    ToolApprovalStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
     }
 
     private void requireTraversalExists(ProcessInstance folded, UUID traversalId, String what) {

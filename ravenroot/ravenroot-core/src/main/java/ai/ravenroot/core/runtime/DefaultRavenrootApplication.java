@@ -118,6 +118,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * identifier whose bytes nothing retains.
      */
     private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
+    /** Optional durable managed-tool suspension coordinator, absent for compatibility embedders. */
+    private final ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
 
     /** Identifies this process to the store, so an operator reading leases() can tell who holds one. */
     private final String workerId = "ravenroot-" + java.util.UUID.randomUUID();
@@ -310,8 +312,20 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ExecutionIdentitySource identitySource, ExecutionStore executionStore,
                                        int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
                                        ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, null);
+    }
+
+    /** Terminal composition including the optional durable tool-approval coordinator. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.graphDefinitionStore = graphDefinitionStore;
+        this.toolApprovals = toolApprovals;
         this.engine = engine;
         this.monitor = monitor;
         this.behaviors = behaviors;
@@ -1060,6 +1074,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var resultKey = new ExecutionResultRegistry.Key(security.tenantId(), traversalId);
         executionResults.started(resultKey, processInstanceId);
         java.util.concurrent.CompletionStage<GraphExecutionResult> execution;
+        AutoCloseable approvalBinding = null;
         try {
             // The definition is made durable BEFORE the acceptance that pins it. The ordering is not
             // interchangeable: a definition committed for an acceptance that then fails is an
@@ -1076,17 +1091,25 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // exists, so there is no window in which a recovery sweep could see claimable work on an
             // instance this engine is about to execute.
             ExecutionRecorder recorder = openRecorder(security, processInstanceId, revision);
+            approvalBinding = toolApprovals == null || recorder == null ? null
+                    : toolApprovals.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
+                            security.tenantId(), processInstanceId), recorder);
             execution = java.util.Objects.requireNonNull(
                     runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
                             null, null, recorder),
                     "execution result");
+            AutoCloseable binding = approvalBinding;
             execution.whenComplete((result, error) -> {
                 // This is the seam where the result used to be dropped. `result` was already
                 // in scope and simply unused -- the engine had computed the payload, the visited
                 // nodes and the defaulted nodes, and the lambda ignored all three. Capturing it
                 // first, before any teardown, so a cleanup failure below cannot cost the caller the
                 // answer it is about to ask for.
-                if (error != null || result == null) {
+                if (unwrapFailure(error) instanceof
+                        ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension) {
+                    // The durable aggregate is WAITING. It is neither a failed result nor live
+                    // in-memory work; the handler-trigger path creates the fresh traversal.
+                } else if (error != null || result == null) {
                     executionResults.failed(resultKey, processInstanceId);
                 } else {
                     executionResults.completed(resultKey, result);
@@ -1097,12 +1120,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     // does neither and must reach the same state by expiry (ADR 0010 section 13.1).
                     recorder.close();
                 }
+                closeApprovalBinding(binding);
                 activeExecutions.remove(traversalId, active);
                 // Completion normally runs on the actor dispatcher. Node teardown waits for actor
                 // acknowledgements and must therefore never block that dispatcher.
                 Thread.startVirtualThread(active::close);
             });
         } catch (RuntimeException | Error startupFailure) {
+            closeApprovalBinding(approvalBinding);
             activeExecutions.remove(traversalId, active);
             // A submission that never started is recorded FAILED rather than erased. The caller
             // is told the start failed by this throw, but a second caller holding the same id -- a
@@ -1116,6 +1141,25 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             throw startupFailure;
         }
         return new ExecutionSubmission(processInstanceId, traversalId, graphVersion);
+    }
+
+    private static void closeApprovalBinding(AutoCloseable binding) {
+        if (binding == null) return;
+        try {
+            binding.close();
+        } catch (Exception ignored) {
+            // Removing an in-memory lookup entry is best effort and holds no durable authority.
+        }
+    }
+
+    private static Throwable unwrapFailure(Throwable failure) {
+        Throwable current = failure;
+        while (current != null && current.getCause() != null
+                && (current instanceof java.util.concurrent.CompletionException
+                    || current instanceof java.util.concurrent.ExecutionException)) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /**

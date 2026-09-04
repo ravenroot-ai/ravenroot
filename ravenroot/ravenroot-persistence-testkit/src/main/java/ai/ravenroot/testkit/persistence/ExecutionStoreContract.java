@@ -10,6 +10,7 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionOrigin;
@@ -42,17 +43,25 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -2010,6 +2019,167 @@ public abstract class ExecutionStoreContract {
                                                            UUID traversalId) {
         return traversals.stream().filter(entry -> entry.traversalId().equals(traversalId)).findFirst()
                 .orElseThrow(() -> new AssertionError("no traversal row for " + traversalId));
+    }
+
+    // ============================================== SEC-15: durable tool approvals
+
+    @Test
+    final void toolApprovalRoundTripsEveryScopeAndDefensivelyCopiesSensitiveBytes() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+
+        DurableToolApproval stored = await(store().loadToolApproval(fixture.key(), fixture.approvalId()))
+                .orElseThrow();
+        assertEquals(ToolApprovalStatus.PENDING, stored.status());
+        assertEquals(fixture.registration().traversalId(), stored.request().traversalId());
+        assertEquals(fixture.registration().invocationId(), stored.request().invocationId());
+        assertEquals(fixture.registration().attemptId(), stored.request().attemptId());
+        assertEquals(fixture.registration().callId(), stored.request().callId());
+        assertEquals(fixture.registration().nodeId(), stored.request().nodeId());
+        assertEquals(fixture.registration().tool(), stored.request().tool());
+        assertEquals(fixture.registration().argumentsDigest(), stored.request().argumentsDigest());
+        assertEquals(fixture.registration().requester(), stored.request().requester());
+        assertEquals(fixture.registration().graphVersionPin(), stored.request().graphVersionPin());
+        assertEquals(fixture.registration().policyVersion(), stored.request().policyVersion());
+        assertEquals(fixture.registration().expiresAt(), stored.request().expiresAt());
+        assertEquals(fixture.registration().approverRequirements(), stored.request().approverRequirements());
+        assertEquals(fixture.registration().requesterMayApprove(), stored.request().requesterMayApprove());
+        assertEquals(fixture.registration().continuationVersion(), stored.request().continuationVersion());
+        byte[] arguments = stored.request().canonicalArguments();
+        arguments[0] = '!';
+        assertEquals('{', stored.request().canonicalArguments()[0]);
+        byte[] continuation = stored.request().continuation();
+        continuation[0] = '!';
+        assertEquals('c', stored.request().continuation()[0]);
+    }
+
+    @Test
+    final void toolApprovalRegistrationIsExactlyOnceAndDifferentContentUnderTheIdIsRefused() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerToolApproval(fixture.registration())
+                .build()));
+        assertEquals(1, await(store().toolApprovals(fixture.key())).size());
+
+        byte[] altered = "{\"amount\":2}".getBytes(StandardCharsets.UTF_8);
+        ToolApprovalRegistration changed = copyApproval(fixture.registration(), altered, digest(altered));
+        StoredProcessInstance after = await(store().load(fixture.key()));
+        ExecutionStoreFailure failure = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(after.revision()))
+                .registerToolApproval(changed)
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void toolApprovalTransitionsAreFirstWriterWinsIdempotentAndSingleUse() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        transitionApproval(fixture, new ToolApprovalTransition.Approved(fixture.approvalId(),
+                "issuer|USER|approver"));
+        transitionApproval(fixture, new ToolApprovalTransition.Approved(fixture.approvalId(),
+                "issuer|USER|approver"));
+        transitionApproval(fixture, new ToolApprovalTransition.Consumed(fixture.approvalId()));
+
+        StoredProcessInstance beforeReplay = await(store().load(fixture.key()));
+        ExecutionStoreFailure replay = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(beforeReplay.revision()))
+                .applyToolApproval(new ToolApprovalTransition.Consumed(fixture.approvalId()))
+                .build())));
+        var refused = assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class, replay);
+        assertEquals(ToolApprovalStatus.CONSUMED, refused.current());
+
+        transitionApproval(fixture, new ToolApprovalTransition.Indeterminate(fixture.approvalId()));
+        assertEquals(ToolApprovalStatus.INDETERMINATE,
+                await(store().loadToolApproval(fixture.key(), fixture.approvalId())).orElseThrow().status());
+    }
+
+    @Test
+    final void storeClockRejectsLateApprovalAndIsTheOnlyAuthorityThatMayExpire() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        StoredProcessInstance beforeDue = await(store().load(fixture.key()));
+        ExecutionStoreFailure earlyExpiry = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(beforeDue.revision()))
+                        .applyToolApproval(new ToolApprovalTransition.Expired(fixture.approvalId()))
+                        .build())));
+        assertEquals(ToolApprovalStatus.PENDING,
+                assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class, earlyExpiry).current());
+
+        clock().advance(Duration.ofMinutes(5));
+        StoredProcessInstance afterDue = await(store().load(fixture.key()));
+        ExecutionStoreFailure lateApproval = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(afterDue.revision()))
+                        .applyToolApproval(new ToolApprovalTransition.Approved(fixture.approvalId(),
+                                "issuer|USER|approver"))
+                        .build())));
+        assertEquals(ToolApprovalStatus.EXPIRED,
+                assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class,
+                        lateApproval).requested());
+        transitionApproval(fixture, new ToolApprovalTransition.Expired(fixture.approvalId()));
+        assertEquals(ToolApprovalStatus.EXPIRED,
+                await(store().loadToolApproval(fixture.key(), fixture.approvalId())).orElseThrow().status());
+    }
+
+    private ToolApprovalFixture pendingToolApproval(ExecutionKey key) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        byte[] arguments = "{\"amount\":1}".getBytes(StandardCharsets.UTF_8);
+        UUID approvalId = UUID.randomUUID();
+        byte[] checkpoint = "checkpoint".getBytes(StandardCharsets.UTF_8);
+        var registration = new ToolApprovalRegistration(approvalId, traversalId, invocationId, attemptId,
+                UUID.randomUUID(), "work", "payments.charge", arguments, digest(arguments),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                new GraphVersionPin("graph-v1"), "policy-v1", clock().instant().plus(Duration.ofMinutes(5)),
+                HandlerAuthorization.ofRoles("APPROVER"), false, 1,
+                checkpoint, digest(checkpoint));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .registerToolApproval(registration)
+                .build()));
+        return new ToolApprovalFixture(key, approvalId, registration);
+    }
+
+    private void transitionApproval(ToolApprovalFixture fixture, ToolApprovalTransition transition) {
+        StoredProcessInstance stored = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(stored.revision()))
+                .applyToolApproval(transition)
+                .build()));
+    }
+
+    private static ToolApprovalRegistration copyApproval(ToolApprovalRegistration source,
+                                                         byte[] arguments, String digest) {
+        return new ToolApprovalRegistration(source.approvalId(), source.traversalId(), source.invocationId(),
+                source.attemptId(), source.callId(), source.nodeId(), source.tool(), arguments, digest,
+                source.requester(), source.graphVersionPin(), source.policyVersion(), source.expiresAt(),
+                source.approverRequirements(), source.requesterMayApprove(), source.continuationVersion(),
+                source.continuation(), source.continuationDigest());
+    }
+
+    private static String digest(byte[] bytes) {
+        try {
+            return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private record ToolApprovalFixture(ExecutionKey key, UUID approvalId,
+                                       ToolApprovalRegistration registration) {
     }
 
     // ============================================== PERS-05: durable handlers, wait and re-entry

@@ -437,6 +437,27 @@ public interface ExecutionStore extends AutoCloseable {
         return refused;
     }
 
+    // ---------------------------------------------------------------- durable tool approvals
+
+    /** Reads one tool approval without exposing another tenant's existence. */
+    default CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                            UUID approvalId) {
+        return toolApprovalsUnsupported();
+    }
+
+    /** Lists tool approvals retained for one process in registration order. */
+    default CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return toolApprovalsUnsupported();
+    }
+
+    /** Additive fail-closed default for adapters that have not implemented tool approvals. */
+    private static <T> CompletionStage<T> toolApprovalsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.TOOL_APPROVALS)));
+        return refused;
+    }
+
     // ---------------------------------------------------------------- event journal and outbox
 
     /**

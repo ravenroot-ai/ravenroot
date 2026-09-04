@@ -4,6 +4,9 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.service.ToolCallAuthorization;
 import ai.ravenroot.api.node.service.ToolCallAuthorizationService;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.ToolCallContinuationInput;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -15,10 +18,12 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Direct and indirect prompt-injection fixtures for the agent authority boundary. */
@@ -119,7 +124,7 @@ class PromptInjectionBoundaryTest {
     }
 
     @Test
-    void approvalRequiredIsASanitizedNoEffectRefusal() throws Exception {
+    void approvalRequiredSuspendsFailClosedWithoutASecondTurnOrEffect() {
         var alpha = new McpDouble("alpha", "search").returning("must not be reached");
         var http = new AiTestSupport.RoutedHttp(CHAT)
                 .authorizing((message, tool, arguments) -> decision(
@@ -131,15 +136,79 @@ class PromptInjectionBoundaryTest {
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
 
-        NodeResult result = behavior.create(AiTestSupport.agentConfiguration(Map.of(
+        var result = behavior.create(AiTestSupport.agentConfiguration(Map.of(
                         "provider", "local", "instructions", "be terse", "objective", "search",
                         "mcpServers", "alpha")), http)
-                .handle(AiTestSupport.message("tenant-a", "payload", Map.of()))
-                .toCompletableFuture().get();
+                .handle(AiTestSupport.message("tenant-a", "payload", Map.of())).toCompletableFuture();
 
-        assertEquals("continued without it", result.payload());
+        var suspended = assertThrows(java.util.concurrent.CompletionException.class, result::join);
+        var unavailable = org.junit.jupiter.api.Assertions.assertInstanceOf(
+                NodePackageServiceException.class, suspended.getCause());
+        assertEquals(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE, unavailable.reason());
         assertEquals(List.of(), alpha.calledTools());
-        assertTrue(text(messagesOf(http.chatBodies().get(1)).get(4)).contains("requires approval"));
+        assertEquals(1, http.chatBodies().size(),
+                "a required approval must tear down the run instead of becoming model-visible text");
+    }
+
+    @Test
+    void approvedBuiltInCallResumesFromStrictCompleteCheckpoint() throws Exception {
+        var checkpoint = new AtomicReference<byte[]>();
+        ToolCallAuthorizationService approvals = (message, tool, arguments) -> {
+            byte[] canonical = PayloadJson.write(PayloadJson.read(arguments, PayloadLimits.DEFAULTS))
+                    .getBytes(StandardCharsets.UTF_8);
+            return new ToolCallAuthorization() {
+                private final UUID id = UUID.randomUUID();
+                @Override public UUID callId() { return id; }
+                @Override public Disposition disposition() { return Disposition.REQUIRE_APPROVAL; }
+                @Override public String argumentsDigest() {
+                    return ToolApprovalRegistration.digest(canonical);
+                }
+                @Override public byte[] canonicalArguments() { return canonical.clone(); }
+                @Override public RuntimeException suspend(int version, byte[] value) {
+                    checkpoint.set(value.clone());
+                    return ToolCallAuthorization.super.suspend(version, value);
+                }
+                @Override public void complete(Outcome outcome) { }
+            };
+        };
+        var http = new AiTestSupport.RoutedHttp(CHAT).authorizing(approvals).chatting(
+                AiTestSupport.asksFor("call-1", LoadSkillTool.NAME, "{\"name\":\"search\"}"),
+                AiTestSupport.answers("resumed"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
+                AiTestSupport.resolvingMcp());
+        var configuration = AiTestSupport.agentConfiguration(Map.of(
+                "provider", "local", "instructions", "use skills", "objective", "work",
+                "skills.1.name", "search", "skills.1.description", "safe",
+                "skills.1.instructions", "body"));
+        NodeMessage original = AiTestSupport.message("tenant-a", "private payload",
+                Map.of("trace", "kept"));
+        assertThrows(java.util.concurrent.CompletionException.class,
+                () -> behavior.create(configuration, http).handle(original).toCompletableFuture().join());
+
+        byte[] stored = checkpoint.get();
+        byte[] canonical = "{\"name\":\"search\"}".getBytes(StandardCharsets.UTF_8);
+        var action = behavior.createToolCallContinuation(configuration, http).orElseThrow();
+        NodeMessage reentry = new NodeMessage(original.security(), original.processInstanceId(),
+                UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "ask", null, Map.of());
+        var input = new ToolCallContinuationInput(reentry, UUID.randomUUID(), original.traversalId(),
+                original.invocationId(), original.attemptId(), LoadSkillTool.NAME, canonical,
+                ToolApprovalRegistration.digest(canonical), ToolCallContinuationInput.Decision.APPROVED,
+                1, stored, ToolApprovalRegistration.digest(stored));
+        action.validate(input);
+        var resumed = action.resume(input).toCompletableFuture()
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+        NodeResult resumedNode = resumed.nodeResult().toCompletableFuture()
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertEquals("resumed", resumedNode.payload());
+        assertTrue(resumed.effectSucceeded());
+        assertEquals("kept", resumedNode.attributes().get("trace"));
+        assertEquals(2, http.chatBodies().size());
+        var unknownVersion = new ToolCallContinuationInput(reentry, input.approvalId(),
+                input.originalTraversalId(), input.originalInvocationId(), input.originalAttemptId(),
+                input.tool(), input.canonicalArguments(), input.argumentsDigest(), input.decision(), 2,
+                stored, input.checkpointDigest());
+        assertThrows(IllegalArgumentException.class, () -> action.validate(unknownVersion));
     }
 
     private static final class AuthorizationMonitor implements ToolCallAuthorizationService {

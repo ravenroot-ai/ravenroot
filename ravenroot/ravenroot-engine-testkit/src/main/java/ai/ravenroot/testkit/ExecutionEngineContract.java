@@ -1364,14 +1364,35 @@ public abstract class ExecutionEngineContract {
      * the barrier would never trip and this test would time out. No clock is involved, so no machine
      * speed can make it pass or fail for the wrong reason.
      *
-     * <p><b>UNPROVEN, and recorded as such.</b> A mutation that makes {@code close()} block
-     * until settled — which is what "domains close in series" looks like from a caller's side —
-     * survived this test. The mutation was verified to apply at the intended point, so the survival is
-     * real rather than a harness artifact, and the reason was not established before this increment
-     * landed. Treat this test as expressing an intent that is not yet demonstrated to be enforceable:
-     * it may be passing for a reason unrelated to what it asserts. Establishing that, or replacing it
-     * with a gate that provably fails, is outstanding work on the M-independence the deployment-admission contract's cap
-     * formula depends on.
+     * <p><b>Why the barrier version above also survived, and what it was missing.</b> A mutation that
+     * makes {@code close()} block its own caller until the domain has fully settled — indistinguishable
+     * from "domains close in series" when observed from outside — survived the barrier version too, and
+     * for one sentence's worth of reason: <em>the eight {@code close()} calls were all issued from the
+     * same calling thread, evaluated one at a time inside a single stream expression, so a caller-blocking
+     * mutation quietly turned that expression into a serial loop, and each blocked node's own private
+     * 30-second timeout on {@code release} — meant only as a safety net — let every domain unblock
+     * itself regardless of whether its seven peers had arrived, so eight serial 30-second timeouts
+     * eventually drove {@code arrived} to zero anyway.</em> The test never failed; it took roughly four
+     * minutes to pass for a reason unrelated to what it asserts, which is worse than failing because
+     * nothing about the run said so.
+     *
+     * <p>Two changes close both holes, and both are necessary — either alone still admits the same
+     * false pass:
+     * <ul>
+     * <li><b>Independent callers.</b> Each domain's {@code close()} is now invoked from its own thread
+     * (a fixed pool sized to the domain count, released together off a {@link CyclicBarrier} so they are
+     * issued together), so a mutation that makes {@code close()} block its caller can only block that
+     * one thread — there is no shared calling thread left for it to serialise the other seven onto.</li>
+     * <li><b>No private escape.</b> {@link #blockingOnStop} no longer bounds its own wait on
+     * {@code release}. It can be released only by this test, once every peer is confirmed arrived —
+     * never by its own clock — so a domain that is genuinely closing in series has no way to unblock
+     * itself and limp to a false pass: it deadlocks, and the bounded {@code arrived.await} below reports
+     * exactly how many of the eight domains ever began closing before failing the assertion.</li>
+     * </ul>
+     *
+     * <p>Still no clock is compared: {@code arrived.await(30, SECONDS)} is a single bounded wait for a
+     * condition, not a comparison of elapsed time between a fast and a slow close, so it stays valid on
+     * a machine under arbitrary load — it can only ever be slow to fail, never wrong to pass.
      */
     @Test
     final void closesDomainsConcurrentlyRatherThanInSeries() throws Exception {
@@ -1385,20 +1406,54 @@ public abstract class ExecutionEngineContract {
             domains.add(domain);
         }
 
-        var closes = domains.stream().map(ExecutionDomain::close)
-                .map(java.util.concurrent.CompletionStage::toCompletableFuture)
-                .toArray(java.util.concurrent.CompletableFuture[]::new);
+        // Every close() is issued from its own thread, released together off a barrier, so a mutation
+        // that makes close() block its caller cannot serialise issuance -- there is no single calling
+        // thread left for it to serialise onto.
+        var ready = new CyclicBarrier(width);
+        var pool = Executors.newFixedThreadPool(width);
+        try {
+            List<CompletableFuture<Void>> closes = new ArrayList<>();
+            for (ExecutionDomain domain : domains) {
+                closes.add(CompletableFuture.supplyAsync(() -> {
+                    try {
+                        ready.await(30, TimeUnit.SECONDS);
+                    } catch (Exception barrierFailure) {
+                        throw new RuntimeException("domain " + domain.name()
+                                + " never reached the issuance barrier", barrierFailure);
+                    }
+                    return domain.close();
+                }, pool).thenCompose(java.util.function.Function.identity()).toCompletableFuture());
+            }
 
-        assertTrue(arrived.await(30, TimeUnit.SECONDS),
-                "only " + (width - arrived.getCount()) + " of " + width + " domains began closing. "
-                        + "Domains are closing in series, so a pod's shutdown budget grows with the "
-                        + "number of active deployments and ADR 0021 D7's cap formula is not "
-                        + "M-independent");
-        release.countDown();
-        java.util.concurrent.CompletableFuture.allOf(closes).get(60, TimeUnit.SECONDS);
+            try {
+                assertTrue(arrived.await(30, TimeUnit.SECONDS),
+                        "only " + (width - arrived.getCount()) + " of " + width + " domains began "
+                                + "closing within 30 seconds. Domains are closing in series, so a pod's "
+                                + "shutdown budget grows with the number of active deployments and the "
+                                + "deployment-admission contract's cap formula is not M-independent");
+            } finally {
+                // Always release, pass or fail: onStop below has no timeout of its own, so a domain
+                // that did arrive must be let go here or its thread -- and this test's engine -- hangs.
+                release.countDown();
+            }
+
+            CompletableFuture.allOf(closes.toArray(CompletableFuture[]::new)).get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdown();
+        }
     }
 
-    /** A node whose stop blocks until every peer has also begun stopping. */
+    /**
+     * A node whose stop blocks until every peer has also begun stopping.
+     *
+     * <p>Deliberately has no timeout of its own on {@code release}: it can be unblocked only by this
+     * test's own {@code release.countDown()}, once {@code arrived} confirms every peer got here too.
+     * An earlier version bounded this wait privately (as a safety net against leaking a hung thread),
+     * and that bound was itself the reason a fully serialised close could still pass — see
+     * {@link #closesDomainsConcurrentlyRatherThanInSeries()}'s Javadoc. The safety net this test needs
+     * instead lives in the caller: {@code release.countDown()} runs in a {@code finally} block so a
+     * domain that did arrive is always let go, whether the assertion above it passed or failed.
+     */
     private static RavenNode blockingOnStop(java.util.concurrent.CountDownLatch arrived,
                                             java.util.concurrent.CountDownLatch release) {
         return new RavenNode() {
@@ -1412,7 +1467,7 @@ public abstract class ExecutionEngineContract {
             public void onStop(NodeContext context) {
                 arrived.countDown();
                 try {
-                    release.await(30, TimeUnit.SECONDS);
+                    release.await();
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
                 }

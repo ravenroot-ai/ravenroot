@@ -31,7 +31,18 @@ import java.util.concurrent.CompletionStage;
  * <p>{@link #close()} is bounded in time by the adapter, like {@link ExecutionEngine#close()}, and
  * closing one domain must not be delayed by another closing concurrently. That independence is what
  * lets the operational cap be defined per pod without the shutdown budget growing with the number of
- * active deployments, and the conformance suite asserts it rather than assuming it.
+ * active deployments, and the conformance suite asserts it deterministically -- via a barrier every
+ * concurrently-closing domain must pass together, never by comparing elapsed time -- rather than
+ * assuming it: see {@code ExecutionEngineContract.closesDomainsConcurrentlyRatherThanInSeries()} in
+ * {@code ravenroot-engine-testkit}.
+ *
+ * <p>Both shipped adapters bound one domain's own close at 20 seconds -- two sequential
+ * {@code TERMINATION_BOUND_SECONDS = 10}-bounded phases, settle every member via {@code stop()} and
+ * escalate to {@code cancel()} only if that timed out, inside each adapter's own
+ * {@code SubtreeDomain.close()}. Because domains close concurrently rather than one after another, this
+ * per-domain bound (the deployment-admission contract's {@code D} term, see
+ * {@code ai.ravenroot.server.deployment.DeploymentCapConfiguration}) contributes to a pod's worst-case
+ * shutdown time exactly once, regardless of how many deployments are active.
  */
 public interface ExecutionDomain {
 /**

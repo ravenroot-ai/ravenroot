@@ -36,20 +36,46 @@ import java.util.Map;
  * this is necessarily a static per-pod operator setting carrying the same definition. This class
  * supplies the definition and configuration surface, not the autoscaling derivation.</p>
  *
- * <h2>The default is a provisional placeholder, not a computed derivation -- said explicitly so it is
- * not mistaken for one</h2>
- * <p>Of the Shape 2 formula's four terms, three are implemented, cited and independently verifiable:
- * the 6s drain grace period, the 30s Pekko {@code ActorSystem}-level close bound (three sequential
- * 10s-bounded phases -- drain, cancel stragglers, await termination -- inside
+ * <h2>{@code D} is now cited, and the formula is fixed -- 66s -- independent of the active-deployment
+ * count {@code M}</h2>
+ * <p>All four terms of the Shape 2 formula are now implemented, cited and independently verifiable.
+ * The three already known: the 6s drain grace period, the 30s Pekko {@code ActorSystem}-level close
+ * bound (three sequential 10s-bounded phases -- drain, cancel stragglers, await termination -- inside
  * {@code PekkoExecutionEngine.close()}, `ravenroot-pekko/src/main/java/ai/ravenroot/pekko/PekkoExecutionEngine.java:55,242,252,262`),
- * and the 10s HTTP stop delay. The fourth term, {@code D} -- the bound on closing the deployment
- * domains themselves -- belongs to the deployment-scoped spawn/close boundary in ADR 0021 and
- * carries no citation anywhere in this tree. Deriving a cap value that is actually sized from the formula requires {@code D};
- * inventing a number here and presenting it as formula-derived would make an unsupported claim
- * about code that does not yet exist. So {@link
- * #DEFAULT_MAX_ACTIVE_DEPLOYMENTS} is a conservative, explicitly-labelled placeholder chosen to be
- * small enough not to be a de facto unlimited cap while {@code D} is undefined, not a value computed
- * from {@code 6 + D + 30 + 10}. <strong>Recompute it when {@code D} has a citation.</strong></p>
+ * and the 10s HTTP stop delay. The fourth, {@code D} -- the bound on closing one deployment's domain --
+ * is <strong>20s</strong>: two sequential {@code TERMINATION_BOUND_SECONDS = 10}-bounded phases (settle
+ * every member via {@code stop()}, escalate to {@code cancel()} only if that timed out) inside
+ * {@code SubtreeDomain.close()} in both adapters --
+ * `ravenroot-pekko/src/main/java/ai/ravenroot/pekko/PekkoExecutionEngine.java:56,581-608` and
+ * `ravenroot-akka/src/main/java/ai/ravenroot/akka/AkkaExecutionEngine.java:92,620-647` -- the same
+ * two-phase, ten-second-bounded shape the already-cited 30s {@code ActorSystem} bound uses, one level
+ * down. That gives a fixed worst-case Shape 2 total of {@code 6 + 20 + 30 + 10 = 66} seconds.</p>
+ *
+ * <p><b>Fixed, not merely bounded: {@code D} does not multiply by {@code M}.</b> {@code D} is the cost
+ * of closing <em>one</em> deployment's domain, and {@link ai.ravenroot.api.execution.ExecutionDomain}
+ * requires that closing one domain "must not be delayed by another closing concurrently" -- multiple
+ * domains on a pod settle together, not end to end. That is no longer an assumed property: {@code
+ * ExecutionEngineContract.closesDomainsConcurrentlyRatherThanInSeries()}
+ * (`ravenroot-engine-testkit/src/main/java/ai/ravenroot/testkit/ExecutionEngineContract.java`) proves it
+ * deterministically -- via a barrier every domain's close must pass through together, not by comparing
+ * elapsed time -- for both supported engines. Without that guarantee the 66s figure above would need a
+ * {@code + (M-1) * D} term and would not be a constant; with it, {@code D} contributes exactly once
+ * regardless of how many deployments are active.</p>
+ *
+ * <h2>The cap is deliberately decoupled from the shutdown-budget formula</h2>
+ * <p>Precisely because the formula above has no {@code M} term, there is nothing in it to solve for
+ * {@link #DEFAULT_MAX_ACTIVE_DEPLOYMENTS}: any cap value leaves the pod's worst-case graceful-shutdown
+ * time at the same fixed 66 seconds, so long as {@code terminationGracePeriodSeconds} is configured no
+ * lower than that. That is the payoff of M-independence, not a gap still waiting on {@code D} -- {@code
+ * D} was the missing citation, and citing it does not turn the formula into one that bounds {@code M}.
+ * {@link #DEFAULT_MAX_ACTIVE_DEPLOYMENTS} therefore stays {@code 8}: not computed from {@code 6 + D + 30
+ * + 10} (it cannot be, that expression has no {@code M} in it to invert), but a separate, explicitly
+ * conservative per-pod ceiling justified on its own terms -- bounding per-pod resource footprint
+ * (actor/thread and heap cost per active deployment) rather than shutdown time, small enough not to be a
+ * de facto unlimited cap, and large enough to be operationally usable. An operator with a larger or
+ * smaller resource budget overrides it via {@link #MAX_ACTIVE_DEPLOYMENTS_VARIABLE}; nothing about that
+ * override interacts with {@code terminationGracePeriodSeconds}, which only needs to clear the fixed 66s
+ * figure above.</p>
  *
  * <h2>Fail-closed rejection is a type, not a message</h2>
  * <p>Core activation admission rejects over-cap activation by throwing {@code
@@ -62,10 +88,10 @@ import java.util.Map;
 public record DeploymentCapConfiguration(int maxActiveDeployments) {
 
     /**
-     * Provisional. See the class Javadoc's "default is a provisional placeholder" section -- this is
-     * not derived from the Shape 2 formula, because the formula's {@code D} term is undefined.
-     * Chosen only to be a real, finite, operationally-plausible ceiling rather than an accidental
-     * unlimited default.
+     * See the class Javadoc's "The cap is deliberately decoupled from the shutdown-budget formula"
+     * section -- not derived from the Shape 2 formula, because that formula has no {@code M} term to
+     * invert (that is the point of domains closing concurrently). A real, finite, operationally-plausible
+     * per-pod ceiling on resource footprint rather than a value computed from {@code 6 + D + 30 + 10}.
      */
     static final int DEFAULT_MAX_ACTIVE_DEPLOYMENTS = 8;
 

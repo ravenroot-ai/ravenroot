@@ -916,6 +916,18 @@ public abstract class ExecutionEngineContract {
                                 "one branch satisfied the quorum, so its payload is not wrapped")));
     }
 
+    /** A refused model branch is observable without preventing an independent quorum-one success. */
+    @Test
+    final void absorbsAnUnconfiguredModelBranchWhenQuorumIsStillMet() throws Exception {
+        RefusedModelQuorumFixture.assertQuorumOneCompletes(engine());
+    }
+
+    /** The same refusal fails the traversal when the remaining branch cannot meet quorum. */
+    @Test
+    final void failsWhenAnUnconfiguredModelBranchMakesQuorumUnreachable() throws Exception {
+        RefusedModelQuorumFixture.assertUnmetQuorumFails(engine());
+    }
+
     private DynamicTest faultCase(String name, int branches, Map<String, Object> joinProperties,
                                   Set<String> failing, boolean oneBranchBlocks,
                                   java.util.function.Consumer<FanInOutcome> expectation) {

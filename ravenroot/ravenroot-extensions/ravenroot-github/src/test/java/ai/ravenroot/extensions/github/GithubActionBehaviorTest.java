@@ -960,7 +960,7 @@ class GithubActionBehaviorTest {
     }
 
     @Test void draftUncertaintyPreservesDiscoveredIdentityAcrossHeadFailuresAndOmission() {
-        for (String variant : List.of("transport", "malformed", "rate")) {
+        for (String variant : List.of("transport", "http-500", "malformed", "rate")) {
             Path path = directory.resolve("review-draft-discovered-id-" + variant + ".db");
             MutableClock clock = new MutableClock();
             GithubConfiguration configuration = GithubTestSupport.configuration(path);
@@ -973,6 +973,8 @@ class GithubActionBehaviorTest {
             if (variant.equals("transport")) {
                 interrupted.pending = OutboundCall.failed(new IllegalStateException("head transport unavailable"));
                 interrupted.pendingAtRequest = 6;
+            } else if (variant.equals("http-500")) {
+                interrupted.reply(500, Map.of("message", "head unavailable"));
             } else if (variant.equals("malformed")) {
                 interrupted.reply(200, Map.of());
             } else {

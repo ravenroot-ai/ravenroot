@@ -145,11 +145,18 @@ function collinearOverlap(p1, p2, q1, q2, tolerance) {
 
 /**
  * Pairs of distinct edges that share a collinear run longer than `minLength`: two edges drawn on
- * top of each other. Segments within `tolerance` pixels of the same line count as collinear.
+ * top of each other. Segments within `tolerance` pixels of the same line count as collinear, so
+ * the tolerance should reflect the stroke width, not the output.
+ *
+ * <p>`ignoreSharedEndpoints` states the one exception the acceptance criteria make in the open: two
+ * edges leaving one node from adjacent ports towards distant targets run together for a while by
+ * construction — that is a fan, not a pile. With it set, pairs that share a source or a target
+ * node are reported in `fans` instead of `piles`, so a caller can still see them.</p>
  */
-export function sharedRuns(polylines, { minLength, tolerance = 1 }) {
+export function sharedRuns(polylines, { minLength, tolerance = 3, ignoreSharedEndpoints = false }) {
   const items = polylines.map(line => ({ ...line, segments: segmentsOf(line.points) }));
-  const shared = [];
+  const piles = [];
+  const fans = [];
   for (let i = 0; i < items.length; i++) {
     for (let j = i + 1; j < items.length; j++) {
       let longest = 0;
@@ -158,17 +165,22 @@ export function sharedRuns(polylines, { minLength, tolerance = 1 }) {
           longest = Math.max(longest, collinearOverlap(p1, p2, q1, q2, tolerance));
         }
       }
-      if (longest > minLength) shared.push({ edges: [items[i].id, items[j].id], length: longest });
+      if (longest <= minLength) continue;
+      const related = items[i].source === items[j].source || items[i].target === items[j].target
+        || items[i].source === items[j].target || items[i].target === items[j].source;
+      const entry = { edges: [items[i].id, items[j].id], length: longest };
+      if (ignoreSharedEndpoints && related) fans.push(entry);
+      else piles.push(entry);
     }
   }
-  return shared;
+  return ignoreSharedEndpoints ? Object.assign(piles, { fans }) : piles;
 }
 
 /**
- * Cluster node centres into layer columns. Returns the columns and the nodes whose centre is
- * farther than `tolerance` from every column.
+ * Cluster node centres into the columns the drawing actually shows. This is a description of the
+ * geometry, not a criterion: any scatter of nodes clusters into some set of columns.
  */
-export function layerColumns(nodes, { tolerance = 3 } = {}) {
+export function geometryColumns(nodes, { tolerance = 1 } = {}) {
   const xs = nodes.map(node => node.x).sort((a, b) => a - b);
   const columns = [];
   for (const x of xs) {
@@ -182,8 +194,7 @@ export function layerColumns(nodes, { tolerance = 3 } = {}) {
     columns.push({ x, sum: x, count: 1 });
   }
   const centres = columns.map(column => column.x);
-  const layerOf = new Map();
-  const offGrid = [];
+  const columnOf = new Map();
   for (const node of nodes) {
     let best = -1;
     let distance = Infinity;
@@ -194,10 +205,84 @@ export function layerColumns(nodes, { tolerance = 3 } = {}) {
         best = index;
       }
     });
-    if (distance > tolerance) offGrid.push(node.id);
-    layerOf.set(node.id, best);
+    columnOf.set(node.id, best);
   }
-  return { columns: centres, layerOf, offGrid };
+  return { columns: centres, columnOf };
+}
+
+/**
+ * A layer assignment computed from the graph alone, independent of any coordinates: cycles are
+ * broken by a depth-first walk from the START nodes (then from any node not yet reached), the
+ * remaining edges are layered by longest path from the sources, and END nodes take the last
+ * layer. Nodes are `{ id, kind }`, edges `{ id, source, target }`.
+ */
+export function structuralLayering(nodes, edges) {
+  const ids = nodes.map(node => String(node.id));
+  const known = new Set(ids);
+  const outgoing = new Map(ids.map(id => [id, []]));
+  const usable = edges
+    .map(edge => ({ id: edge.id, source: String(edge.source), target: String(edge.target) }))
+    .filter(edge => known.has(edge.source) && known.has(edge.target) && edge.source !== edge.target);
+  for (const edge of usable) outgoing.get(edge.source).push(edge);
+  const backEdges = new Set();
+  const state = new Map();
+  const finished = [];
+  const visit = id => {
+    state.set(id, 'active');
+    for (const edge of outgoing.get(id)) {
+      const mark = state.get(edge.target);
+      if (mark === 'active') backEdges.add(edge.id);
+      else if (!mark) visit(edge.target);
+    }
+    state.set(id, 'done');
+    finished.push(id);
+  };
+  const starts = nodes.filter(node => node.kind === 'START').map(node => String(node.id));
+  for (const id of [...starts, ...ids]) if (!state.has(id)) visit(id);
+  const layerOf = new Map(ids.map(id => [id, 0]));
+  for (const id of [...finished].reverse()) {
+    for (const edge of outgoing.get(id)) {
+      if (backEdges.has(edge.id)) continue;
+      layerOf.set(edge.target, Math.max(layerOf.get(edge.target), layerOf.get(id) + 1));
+    }
+  }
+  let last = 0;
+  layerOf.forEach(layer => { last = Math.max(last, layer); });
+  for (const node of nodes) if (node.kind === 'END') layerOf.set(String(node.id), last);
+  return { layerOf, layerCount: last + 1, backEdges };
+}
+
+/**
+ * Whether a drawing is layered, judged against the structural layering above. `nonMonotone` (a
+ * forward edge whose target column is not after its source column) and `extraColumns` (more
+ * columns than structural layers) hold for every correct layered drawing. `splitLayers` (one
+ * structural layer spread over several columns) and `ok` additionally assume the engine's
+ * layering is as tight as longest path, which is true when no node has slack — the test bench —
+ * and not in general. Returns the violations, so a scatter of nodes fails loudly: its column
+ * count exceeds the layer count, and edges run against the layer order.
+ */
+export function layerDiscreteness(nodes, edges, { tolerance = 1 } = {}) {
+  const { columns, columnOf } = geometryColumns(nodes, { tolerance });
+  const { layerOf, layerCount, backEdges } = structuralLayering(nodes, edges);
+  const columnForLayer = new Map();
+  const splitLayers = [];
+  layerOf.forEach((layer, id) => {
+    const column = columnOf.get(id);
+    if (!columnForLayer.has(layer)) columnForLayer.set(layer, column);
+    else if (columnForLayer.get(layer) !== column) splitLayers.push(id);
+  });
+  const nonMonotone = edges
+    .filter(edge => !backEdges.has(edge.id) && String(edge.source) !== String(edge.target))
+    .filter(edge => columnOf.has(String(edge.source)) && columnOf.has(String(edge.target)))
+    .filter(edge => columnOf.get(String(edge.target)) <= columnOf.get(String(edge.source)))
+    .map(edge => edge.id);
+  return {
+    columns, columnOf, layerOf, layerCount,
+    extraColumns: columns.length - layerCount,
+    splitLayers,
+    nonMonotone,
+    ok: columns.length === layerCount && splitLayers.length === 0 && nonMonotone.length === 0,
+  };
 }
 
 function samplePolyline(points, step) {

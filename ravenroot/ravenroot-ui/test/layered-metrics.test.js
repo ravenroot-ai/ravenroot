@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, extentOf, labelBoxOf, labelOverlaps, layerColumns,
-  segmentIntersectsBox, segmentsCross, sharedRuns,
+  backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, extentOf, geometryColumns, labelBoxOf,
+  labelOverlaps, layerDiscreteness, segmentIntersectsBox, segmentsCross, sharedRuns, structuralLayering,
 } from '../src/layered-metrics.js';
 
 const line = (id, source, target, ...points) => ({ id, source, target, points });
@@ -51,22 +51,77 @@ describe('layered metrics', () => {
       line('a', 's', 't', { x: 0, y: 0 }, { x: 200, y: 0 }),
       line('b', 'u', 'v', { x: 50, y: 0.5 }, { x: 150, y: 0.5 }),
       line('c', 'w', 'z', { x: 0, y: 40 }, { x: 200, y: 40 }),
-    ], { minLength: 80 });
+    ], { minLength: 80, tolerance: 1 });
     expect(shared).toEqual([{ edges: ['a', 'b'], length: 100 }]);
     expect(sharedRuns([
       line('a', 's', 't', { x: 0, y: 0 }, { x: 200, y: 0 }),
       line('b', 'u', 'v', { x: 50, y: 0.5 }, { x: 100, y: 0.5 }),
     ], { minLength: 80 })).toEqual([]);
+    // The tolerance is the stroke width: 2.5px apart is still on top of each other at 3px.
+    expect(sharedRuns([
+      line('a', 's', 't', { x: 0, y: 0 }, { x: 200, y: 0 }),
+      line('b', 'u', 'v', { x: 0, y: 2.5 }, { x: 200, y: 2.5 }),
+    ], { minLength: 80, tolerance: 3 })).toHaveLength(1);
   });
 
-  it('clusters centres into columns and names the nodes off every column', () => {
-    const result = layerColumns([
+  it('keeps a fan from one node apart from a pile of unrelated edges, and says so', () => {
+    const lines = [
+      line('a', 'hub', 't', { x: 0, y: 0 }, { x: 400, y: 4 }),
+      line('b', 'hub', 'u', { x: 0, y: 2 }, { x: 400, y: 6 }),
+      line('c', 'w', 'z', { x: 0, y: 3 }, { x: 400, y: 3 }),
+    ];
+    const judged = sharedRuns(lines, { minLength: 80, tolerance: 3, ignoreSharedEndpoints: true });
+    expect(judged.fans.map(entry => entry.edges)).toEqual([['a', 'b']]);
+    expect(judged.map(entry => entry.edges)).toEqual([['a', 'c'], ['b', 'c']]);
+    expect(sharedRuns(lines, { minLength: 80, tolerance: 3 })).toHaveLength(3);
+  });
+
+  it('clusters centres into the columns the geometry shows', () => {
+    const result = geometryColumns([
       { id: 'a', x: 100 }, { id: 'b', x: 101 }, { id: 'c', x: 300 }, { id: 'd', x: 330 },
     ], { tolerance: 3 });
     expect(result.columns).toEqual([100.5, 300, 330]);
-    expect(result.offGrid).toEqual([]);
-    expect(result.layerOf.get('b')).toBe(0);
-    expect(result.layerOf.get('d')).toBe(2);
+    expect(result.columnOf.get('b')).toBe(0);
+    expect(result.columnOf.get('d')).toBe(2);
+  });
+
+  const workflow = {
+    nodes: [
+      { id: 'start', kind: 'START' }, { id: 'a', kind: 'PASSTHROUGH' }, { id: 'b', kind: 'PASSTHROUGH' },
+      { id: 'c', kind: 'PASSTHROUGH' }, { id: 'join', kind: 'PASSTHROUGH' }, { id: 'end', kind: 'END' },
+    ],
+    edges: [
+      { id: 'sa', source: 'start', target: 'a' }, { id: 'ab', source: 'a', target: 'b' },
+      { id: 'ac', source: 'a', target: 'c' }, { id: 'bj', source: 'b', target: 'join' },
+      { id: 'cj', source: 'c', target: 'join' }, { id: 'je', source: 'join', target: 'end' },
+      { id: 'retry', source: 'join', target: 'a' }, { id: 'loop', source: 'c', target: 'c' },
+    ],
+  };
+
+  it('layers a graph from its structure alone, breaking cycles from START and pinning END last', () => {
+    const { layerOf, layerCount, backEdges } = structuralLayering(workflow.nodes, workflow.edges);
+    expect([...backEdges]).toEqual(['retry']);
+    expect(layerCount).toBe(5);
+    expect([...layerOf]).toEqual([['start', 0], ['a', 1], ['b', 2], ['c', 2], ['join', 3], ['end', 4]]);
+  });
+
+  it('accepts a layered placement and rejects a scatter of the same nodes', () => {
+    const layered = [
+      { id: 'start', x: 0 }, { id: 'a', x: 200 }, { id: 'b', x: 400 }, { id: 'c', x: 400.5 },
+      { id: 'join', x: 600 }, { id: 'end', x: 800 },
+    ].map(node => ({ ...node, kind: workflow.nodes.find(entry => entry.id === node.id).kind }));
+    const good = layerDiscreteness(layered, workflow.edges);
+    expect(good.ok).toBe(true);
+    expect(good.columns).toHaveLength(5);
+    expect(good.extraColumns).toBe(0);
+    const scattered = layered.map((node, index) => ({ ...node, x: [300, 50, 700, 90, 10, 400][index] }));
+    const bad = layerDiscreteness(scattered, workflow.edges);
+    expect(bad.ok).toBe(false);
+    expect(bad.extraColumns).toBe(1);
+    expect(bad.splitLayers).toEqual(['c']);
+    // start(300) -> a(50), b(700) -> join(10) and c(90) -> join(10) run backwards; a -> b, a -> c
+    // and join -> end happen to run forwards in this scatter and are correctly not reported.
+    expect(bad.nonMonotone).toEqual(['sa', 'bj', 'cj']);
   });
 
   it('flags a back edge that runs through an intermediate column band', () => {

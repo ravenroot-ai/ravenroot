@@ -28,11 +28,11 @@ const COLUMN_TOLERANCE = 2;
 
 export const LAYERED_MODES = Object.freeze({
   'hierarchical-new': Object.freeze({
-    routing: 'ORTHOGONAL', family: 'round-segments', radius: 12, placement: 'BRANDES_KOEPF',
+    routing: 'ORTHOGONAL', family: 'round-segments', radius: 12,
     nodeNode: 44, betweenLayers: 96, edgeEdge: 14, edgeNode: 26,
   }),
   'flow-new': Object.freeze({
-    routing: 'POLYLINE', family: 'round-segments', radius: 22, placement: 'NETWORK_SIMPLEX',
+    routing: 'POLYLINE', family: 'round-segments', radius: 22,
     nodeNode: 30, betweenLayers: 72, edgeEdge: 10, edgeNode: 22,
   }),
 });
@@ -57,7 +57,9 @@ export function layeredElkOptions(mode) {
     'elk.layered.layering.strategy': 'NETWORK_SIMPLEX',
     'elk.layered.crossingMinimization.strategy': 'LAYER_SWEEP',
     'elk.layered.thoroughness': '30',
-    'elk.layered.nodePlacement.strategy': spec.placement,
+    // Brandes-Koepf for both modes: network-simplex placement drew the same crossings on the
+    // test bench and cost six times the engine time on a 200-node, 400-edge graph.
+    'elk.layered.nodePlacement.strategy': 'BRANDES_KOEPF',
     'elk.layered.nodePlacement.bk.fixedAlignment': 'BALANCED',
     'elk.layered.unnecessaryBendpoints': 'true',
     // Backward edges are routed by this module, outside the band; ELK only has to layer them.
@@ -190,7 +192,10 @@ function freePort(box, usedYs, taken) {
   return y;
 }
 
-function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, forwardRoutes) {
+function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, forwardRoutes, betweenLayers) {
+  // The stubs of one node must all fit inside its own half of the channel; with many back edges
+  // on one node they close up rather than reach into the neighbouring layer's label extent.
+  const maxStub = Math.max(BACK_STUB_BASE, Math.floor(betweenLayers / 2) - 6);
   const eastPorts = new Map();
   const westPorts = new Map();
   for (const route of forwardRoutes) {
@@ -215,7 +220,8 @@ function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, for
   const stubFor = (list, id, reversed) => {
     const rank = list.indexOf(id);
     const position = reversed ? list.length - 1 - rank : rank;
-    return BACK_STUB_BASE + position * BACK_STUB_STEP;
+    const step = Math.min(BACK_STUB_STEP, (maxStub - BACK_STUB_BASE) / Math.max(1, list.length - 1));
+    return BACK_STUB_BASE + position * step;
   };
   return ordered.map(edge => {
     const trackY = bandBottom + BACK_TRACK_OFFSET + track.get(edge.id) * BACK_TRACK_GAP;
@@ -303,7 +309,7 @@ export function layeredDrawingFromResult(result, inputs, mode) {
     routes.set(edge.id, makeRoute(edge.id, source, target, polyline, boxes, spec.family, spec.radius, 'forward'));
   }
   const forwardRoutes = [...routes.values()];
-  for (const route of routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, forwardRoutes)) {
+  for (const route of routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, forwardRoutes, spec.betweenLayers)) {
     routes.set(route.id, route);
   }
 

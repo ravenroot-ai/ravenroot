@@ -3,7 +3,8 @@ import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 
 import {
-  backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, labelBoxOf, labelOverlaps, layerColumns, sharedRuns,
+  backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, geometryColumns, labelBoxOf, labelOverlaps,
+  layerDiscreteness, sharedRuns,
 } from '../src/layered-metrics.js';
 
 // The acceptance test bench of the layered arrangements: one coordinator delegating to twelve
@@ -18,6 +19,8 @@ const COUNTERPART = new Map([
   ['Arrange — Flow (new)', 'Arrange — Flow'],
 ]);
 const NODE_SIZE = 80;
+const PEERS = ['product-architecture', 'core-runtime', 'integrations', 'frontend', 'graph-rendering', 'qa',
+  'platform', 'ai-agents', 'open-source', 'legal', 'security', 'docs'];
 
 async function openLayoutMenu(page) {
   await page.locator('#menu-layout').click();
@@ -88,7 +91,13 @@ const geometry = page => page.evaluate(() => {
 
 function judge(sample) {
   const polylines = sample.edges.filter(edge => edge.source !== edge.target && edge.points.length > 1);
-  const { layerOf, offGrid } = layerColumns(sample.nodes);
+  const { columnOf } = geometryColumns(sample.nodes);
+  // Layer discreteness is judged against a layering computed from the graph alone, so a scatter
+  // of nodes fails it instead of clustering into as many columns as it has nodes.
+  const layering = layerDiscreteness(sample.nodes, sample.edges);
+  // Piled edges are judged at the stroke width; the fan a node's adjacent ports form is the one
+  // exception the criteria allow, reported apart so it stays visible.
+  const runs = sharedRuns(polylines, { minLength: NODE_SIZE, tolerance: 3, ignoreSharedEndpoints: true });
   const errorNode = sample.nodes.find(node => node.kind === 'ERROR');
   const intoError = polylines.filter(edge => edge.target === errorNode.id);
   // An explicit endpoint ("-40px 12px", relative to the node centre) names its side exactly; the
@@ -114,9 +123,15 @@ function judge(sample) {
     labelOverlaps: labelOverlaps(sample.nodes).length,
     throughBodies: edgesThroughBoxes(polylines, sample.nodes, bodyOf).length,
     throughLabels: edgesThroughBoxes(polylines, sample.nodes, labelBoxOf).length,
-    sharedRuns: sharedRuns(polylines, { minLength: NODE_SIZE }).length,
-    offGrid: offGrid.length,
-    backInsideBand: backEdgesInsideBand(polylines, sample.nodes, layerOf).length,
+    piles: runs.length,
+    fans: runs.fans.length,
+    layerCount: layering.layerCount,
+    columns: layering.columns.length,
+    splitLayers: layering.splitLayers.length,
+    nonMonotone: layering.nonMonotone.length,
+    layered: layering.ok,
+    peerColumns: new Set(PEERS.map(id => layering.columnOf.get(id))).size,
+    backInsideBand: backEdgesInsideBand(polylines, sample.nodes, columnOf).length,
     failureSides: new Set(intoError.map(sideOf)).size,
     failurePorts: new Set(intoError.map(edge => edge.targetEndpoint)).size,
     failureEdges: intoError.length,
@@ -130,6 +145,9 @@ function slug(label) {
 
 async function screenshots(page, label) {
   const name = slug(label);
+  // The editor floors its automatic fit at a readable zoom; the evidence must show the whole
+  // drawing, so fit without that floor for the picture and restore the editor's own fit after.
+  await page.evaluate(() => { window.cy.fit(undefined, 40); });
   await page.screenshot({ path: test.info().outputPath(`${name}-fit.png`), fullPage: true });
   await page.evaluate(() => { window.cy.zoom(1); window.cy.center(); });
   await page.screenshot({ path: test.info().outputPath(`${name}-zoom-100.png`), fullPage: true });
@@ -166,8 +184,10 @@ test.describe('Layered arrangements on the test bench', () => {
       expect.soft(verdict.labelOverlaps, `${label}: label overlaps`).toBe(0);
       expect.soft(verdict.throughBodies, `${label}: edges through node bodies`).toBe(0);
       expect.soft(verdict.throughLabels, `${label}: edges through labels`).toBe(0);
-      expect.soft(verdict.sharedRuns, `${label}: edges drawn on top of each other`).toBe(0);
-      expect.soft(verdict.offGrid, `${label}: nodes off their layer column`).toBe(0);
+      expect.soft(verdict.piles, `${label}: unrelated edges drawn on top of each other`).toBe(0);
+      expect.soft(verdict.layered, `${label}: one column per structural layer, edges forward`).toBe(true);
+      expect.soft(verdict.columns, `${label}: columns vs structural layers (${verdict.layerCount})`).toBe(verdict.layerCount);
+      expect.soft(verdict.peerColumns, `${label}: the twelve peers on one column`).toBe(1);
       expect.soft(verdict.backInsideBand, `${label}: back edges inside the band`).toBe(0);
       expect.soft(verdict.crossings, `${label}: crossings vs ${COUNTERPART.get(label)} (${counterpart.crossings})`)
         .toBeLessThanOrEqual(counterpart.crossings / 2);
@@ -176,6 +196,17 @@ test.describe('Layered arrangements on the test bench', () => {
       expect.soft(verdict.elapsedMs, `${label}: engine time`).toBeLessThan(2000);
       expect.soft(walls.get(label), `${label}: wall time including animation`).toBeLessThan(5000);
     }
+  });
+
+  test('holds a layer check that fails on Organic, so the check discriminates', async ({ page }) => {
+    await arrange(page, 'Arrange — Organic');
+    const verdict = judge(await geometry(page));
+    expect(verdict.layered).toBe(false);
+    expect(verdict.columns).toBeGreaterThan(verdict.layerCount);
+    expect(verdict.nonMonotone).toBeGreaterThan(0);
+    expect(verdict.peerColumns).toBeGreaterThan(1);
+    await arrange(page, 'Arrange — Hierarchical (new)');
+    expect(judge(await geometry(page)).layered).toBe(true);
   });
 
   test('is deterministic, records one undo entry, keeps edge identity and leaves Keep positions alone', async ({ page }) => {

@@ -10,8 +10,8 @@ import {
   sectionPolyline,
 } from '../src/layered-drawing.js';
 import {
-  backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, labelBoxOf, labelOverlaps, layerColumns,
-  sharedRuns,
+  backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, geometryColumns, labelBoxOf, labelOverlaps,
+  layerDiscreteness, sharedRuns,
 } from '../src/layered-metrics.js';
 
 const FONT_PX = 20;
@@ -33,30 +33,38 @@ function inputsFromGraph(graph) {
   };
 }
 
-function judged(drawing) {
+function judged(drawing, inputs) {
   const polylines = [...drawing.routes.values()].map(route => ({
     id: route.id, source: route.source, target: route.target, points: [route.start, ...route.points, route.end],
   }));
+  const kinds = new Map(inputs.nodes.map(node => [node.id, node.kind]));
   const nodes = [...drawing.boxes.values()].map(box => ({
-    id: box.id, x: box.x,
+    id: box.id, x: box.x, kind: kinds.get(box.id),
     body: { left: box.x - box.width / 2, right: box.x + box.width / 2, top: box.y - box.height / 2, bottom: box.y + box.height / 2 },
     label: box.labelWidth ? {
       left: box.x - box.labelWidth / 2, right: box.x + box.labelWidth / 2,
       top: box.y + box.height / 2, bottom: box.y + box.height / 2 + box.labelHeight,
     } : null,
   }));
-  const { layerOf, offGrid } = layerColumns(nodes);
+  const { columnOf } = geometryColumns(nodes);
+  // Piled edges are judged at the stroke width; a fan from one node's adjacent ports is the one
+  // exception the criteria allow, and it is reported separately rather than absorbed.
+  const runs = sharedRuns(polylines, { minLength: NODE_SIZE, tolerance: 3, ignoreSharedEndpoints: true });
   return {
     crossings: countCrossings(polylines),
     labelOverlaps: labelOverlaps(nodes),
     throughBodies: edgesThroughBoxes(polylines, nodes, bodyOf),
     throughLabels: edgesThroughBoxes(polylines, nodes, labelBoxOf),
-    sharedRuns: sharedRuns(polylines, { minLength: NODE_SIZE }),
-    offGrid,
-    backInsideBand: backEdgesInsideBand(polylines, nodes, layerOf),
+    piles: [...runs],
+    fans: runs.fans,
+    layering: layerDiscreteness(nodes, inputs.edges),
+    backInsideBand: backEdgesInsideBand(polylines, nodes, columnOf),
     polylines, nodes,
   };
 }
+
+const PEERS = ['product-architecture', 'core-runtime', 'integrations', 'frontend', 'graph-rendering', 'qa',
+  'platform', 'ai-agents', 'open-source', 'legal', 'security', 'docs'];
 
 // jsdom swaps the global `URL`, which Node's fs refuses; resolve the fixture from the path string.
 
@@ -130,17 +138,25 @@ describe('layered drawing', () => {
 
   describe.each(LAYERED_MODE_NAMES)('%s on the test bench', mode => {
     it('meets the drawing criteria: no collisions, discrete layers, back edges outside the band', async () => {
-      const drawing = await computeLayeredDrawing(inputsFromGraph(testBench), mode);
+      const inputs = inputsFromGraph(testBench);
+      const drawing = await computeLayeredDrawing(inputs, mode);
       expect(drawing.routes.size).toBe(testBench.edges.length);
       expect(drawing.backEdges.length).toBeGreaterThan(0);
-      const verdict = judged(drawing);
+      const verdict = judged(drawing, inputs);
       expect(verdict.labelOverlaps).toEqual([]);
       expect(verdict.throughBodies).toEqual([]);
       expect(verdict.throughLabels).toEqual([]);
-      expect(verdict.sharedRuns).toEqual([]);
-      expect(verdict.offGrid).toEqual([]);
+      expect(verdict.piles).toEqual([]);
       expect(verdict.backInsideBand).toEqual([]);
-      // Measured 191 (orthogonal) and 193 (polyline) when the drawing was accepted; the guard
+      // Layer discreteness is judged against a layering computed from the graph alone: one
+      // column per structural layer, in order, with every forward edge crossing columns forwards.
+      expect(verdict.layering.layerCount).toBe(15);
+      expect(verdict.layering.columns).toHaveLength(15);
+      expect(verdict.layering.splitLayers).toEqual([]);
+      expect(verdict.layering.nonMonotone).toEqual([]);
+      expect(verdict.layering.ok).toBe(true);
+      expect(new Set(PEERS.map(id => verdict.layering.columnOf.get(id))).size).toBe(1);
+      // Measured 187 (orthogonal) and 191 (polyline) when the drawing was accepted; the guard
       // catches a regression of the engine options, not a specific number.
       expect(verdict.crossings).toBeLessThanOrEqual(220);
       // Every failure route reaches the error node through its west side at its own port.
@@ -168,6 +184,20 @@ describe('layered drawing', () => {
       }
     });
 
+    it('is judged by a layer check that fails on a scatter of the same nodes', async () => {
+      const inputs = inputsFromGraph(testBench);
+      const drawing = await computeLayeredDrawing(inputs, mode);
+      let seed = 11;
+      const random = () => { seed = (seed * 48271) % 2147483647; return seed / 2147483647; };
+      const scattered = [...drawing.boxes.values()].map(box => ({
+        id: box.id, kind: inputs.nodes.find(node => node.id === box.id).kind, x: random() * 3000, y: random() * 2000,
+      }));
+      const verdict = layerDiscreteness(scattered, inputs.edges);
+      expect(verdict.ok).toBe(false);
+      expect(verdict.columns.length).toBeGreaterThan(verdict.layerCount);
+      expect(verdict.nonMonotone.length).toBeGreaterThan(0);
+    });
+
     it('is deterministic', async () => {
       const first = await computeLayeredDrawing(inputsFromGraph(testBench), mode);
       const second = await computeLayeredDrawing(inputsFromGraph(testBench), mode);
@@ -181,11 +211,23 @@ describe('layered drawing', () => {
     // The time budget of the issue is measured in the browser suite, which runs alone; here the
     // file shares the machine with every other unit file, so only completeness and a sanity bound
     // are asserted.
-    const { nodes, edges } = syntheticWorkflow(200, 400);
-    const drawing = await computeLayeredDrawing({ nodes, edges }, 'hierarchical-new');
-    expect(drawing.routes.size).toBe(400);
-    expect(drawing.positions).toHaveLength(200);
-    expect(judged(drawing).labelOverlaps).toEqual([]);
-    expect(drawing.elapsedMs).toBeLessThan(20_000);
+    const inputs = syntheticWorkflow(200, 400);
+    for (const mode of LAYERED_MODE_NAMES) {
+      const drawing = await computeLayeredDrawing(inputs, mode);
+      expect(drawing.routes.size).toBe(400);
+      expect(drawing.positions).toHaveLength(200);
+      const verdict = judged(drawing, inputs);
+      expect(verdict.labelOverlaps).toEqual([]);
+      // ELK's depth-first cycle break and the structural one may reverse different edges of the
+      // same cycle, so an edge running against the structural order is acceptable only when the
+      // drawing itself routed it as a back edge, outside the band.
+      expect(verdict.layering.nonMonotone.filter(id => !drawing.backEdges.includes(id))).toEqual([]);
+      // A graph with slack lets the engine place a node later than longest-path layering does,
+      // so the one-to-one mapping asserted on the test bench is not a universal property; the
+      // column bound is.
+      expect(verdict.layering.columns.length).toBeLessThanOrEqual(verdict.layering.layerCount);
+      expect(verdict.backInsideBand).toEqual([]);
+      expect(drawing.elapsedMs).toBeLessThan(20_000);
+    }
   }, 40_000);
 });

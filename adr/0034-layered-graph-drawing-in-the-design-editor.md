@@ -53,7 +53,10 @@ one centre column. `START` nodes are pinned to the first layer and `END` nodes t
 cycle breaking is depth-first from the sources so the edges reversed are the ones that actually run
 backwards in a workflow. `Hierarchical (new)` routes orthogonally with small rounded corners, the
 form yEd and Graphviz readers expect; `Flow (new)` places layers more tightly with polyline routing
-and larger rounded corners, so the drawing keeps its curves without letting them pile up.
+and larger rounded corners, so the drawing keeps its curves without letting them pile up. One
+exception is stated rather than hidden: two edges leaving one node from adjacent ports towards
+distant targets run together for a stretch by construction — a fan, which the acceptance criteria
+allow — and the check for piled edges reports such pairs separately from unrelated ones.
 
 **Backward edges are routed by the editor, outside the band.** An edge whose target sits on the
 same or an earlier layer than its source leaves the source's east side from a port of its own,
@@ -69,25 +72,31 @@ vouch for — authored since, or with an endpoint moved by hand — takes the ed
 route, and every other edge stays exactly as drawn. Self-loops keep the editor's loop rendering.
 
 **The acceptance criteria are code.** A pure metrics module counts proper crossings, edges through
-bodies or labels, colliding labels, collinear runs, nodes off their column and back edges inside the
-band, on plain geometry. The same functions judge the drawing computed in a unit test and the one
+bodies or labels, colliding labels, collinear runs and back edges inside the band, on plain
+geometry, and judges layer discreteness against a layering computed from the graph alone — a
+depth-first cycle break from the START nodes and longest-path layers — so that a scatter of nodes
+fails the check rather than clustering into as many columns as it has nodes. The same functions judge the drawing computed in a unit test and the one
 sampled from the rendered canvas, and the browser suite holds the new arrangements to them on the
 committed test-bench graph while reporting the same numbers for the established ones.
 
 **The engine runs on the main thread, as the existing `Hierarchical` already does.** Engine time on
-the test bench is 0.16 s (orthogonal) and 0.29 s (polyline); a 200-node, 400-edge graph stays
-under the five-second budget. The busy state and the cancellation contract of the existing
+the test bench is about 0.17 s (orthogonal) and 0.12 s (polyline); a 200-node, 400-edge workflow
+takes about 0.5–0.7 s in either mode. Node placement is Brandes–Köpf in both modes: network-simplex
+placement drew the same crossings and cost six times the engine time on the large graph. The busy state and the cancellation contract of the existing
 asynchronous layouts apply unchanged: one engine run per document at a time, cancelled before it
 starts, otherwise allowed to settle, and a superseded run moves nothing. Moving the run to a Web
-Worker is a separate decision: it changes the content-security policy of the served page and adds
-a failure mode of its own.
+Worker is a separate decision. The served page's policy admits a same-origin worker as it stands
+(`worker-src` falls back to `script-src 'self'`); what the hand-off adds is a failure mode of its
+own — a worker that does not load must not leave an arrangement pending — and a build-time worker
+import that the editor's unit tests, which import the editor module directly, would have to
+support.
 
 ## Consequences
 
 On the test bench, measured on the rendered canvas: `Hierarchical (new)` draws 187 crossings
 against 425 for `Hierarchical`, `Flow (new)` 191 against 402 for `Flow`, and both have no label
-collision, no edge through a body or a label, no two edges on the same line, every node on a layer
-column, every back edge outside the band, and every failure edge reaching the error node at a port
+collision, no edge through a body or a label, no two unrelated edges on the same line, one column per
+structural layer with every edge running forward across them, every back edge outside the band, and every failure edge reaching the error node at a port
 of its own through at most two sides.
 
 The existing arrangements, their command ids, labels, relative order and tests are unchanged; the

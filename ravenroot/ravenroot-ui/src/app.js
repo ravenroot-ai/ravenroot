@@ -4,7 +4,7 @@ import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
 import { isLayeredMode } from './layered-drawing.js';
 import {
-  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, layeredDrawingOf, registerLayeredLayout,
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
 } from './layered-layout.js';
 import * as d3 from 'd3';
 import {
@@ -4324,6 +4324,9 @@ function setLayout(name, options = {}) {
   // Retire only stale dynamic route publications from the previous mode. The layout completion RAF
   // remains independently owned so rapid requests can still cancel/settle their session correctly.
   clearDynamicEdgeGeometry(owner);
+  // A layered drawing describes one arrangement; leaving the layered modes discards it so no
+  // later repaint can attach an old drawing to positions another layout produced.
+  if (!isLayeredMode(name)) clearLayeredDrawing(target);
   layoutMode = name;
   if (owner) {
     owner.layoutMode = name;

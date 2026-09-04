@@ -38,6 +38,19 @@ class DiscordConfigurationTest {
                 .profile("tenant-b", DiscordTestSupport.PROFILE).isEmpty());
     }
 
+    @Test void rejectsManagedIngressAuthorityBeyondDiscordAcknowledgementWindow() {
+        Map<String, Object> oversized = new LinkedHashMap<>(authority());
+        oversized.put("requestTimeoutMs", 2_801L);
+        Map<String, Object> root = Map.of("authority", oversized, "projection", projection(),
+                "store", Map.of("path", directory.resolve("late.db").toString(),
+                        "maxDeliveries", 100L, "retentionHours", 24L),
+                "profiles", Map.of(DiscordTestSupport.PROFILE, profile(directory)));
+        String encoded = Base64.getEncoder().encodeToString(DiscordValues.jsonBytes(root));
+
+        assertThrows(DiscordException.class,
+                () -> DiscordConfiguration.fromEnvironment(Map.of(DiscordConfiguration.ENVIRONMENT, encoded)));
+    }
+
     private void assertInvalid(Map<String, Object> profile) {
         Map<String, Object> root = Map.of("authority", authority(), "projection", projection(),
                 "store", Map.of("path", directory.resolve("bad.db").toString(), "maxDeliveries", 100L, "retentionHours", 24L),

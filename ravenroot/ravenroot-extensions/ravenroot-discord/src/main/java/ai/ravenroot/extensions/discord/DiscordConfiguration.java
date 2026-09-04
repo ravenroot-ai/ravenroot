@@ -17,9 +17,11 @@ record DiscordConfiguration(IngressAuthorityDeclaration authority,
                             StorePolicy store, Map<String, DiscordProfile> profiles) {
     static final String PACKAGE_ID = "ai.ravenroot.extensions.discord";
     static final String ENVIRONMENT = "RAVENROOT_DISCORD_CONFIG";
+    static final Duration MAX_ACKNOWLEDGEMENT_WINDOW = Duration.ofMillis(2_800);
 
     DiscordConfiguration {
-        if (!PACKAGE_ID.equals(authority.packageId()) || !PACKAGE_ID.equals(projection.packageId())) throw invalid();
+        if (!PACKAGE_ID.equals(authority.packageId()) || !PACKAGE_ID.equals(projection.packageId())
+                || authority.requestTimeout().compareTo(MAX_ACKNOWLEDGEMENT_WINDOW) > 0) throw invalid();
         store = java.util.Objects.requireNonNull(store); profiles = Map.copyOf(profiles);
         if (profiles.isEmpty() || profiles.size() > authority.maxRoutes()) throw invalid();
         if (!projection.allowedHeaders().containsAll(Set.of("x-signature-ed25519", "x-signature-timestamp"))) throw invalid();
@@ -64,7 +66,8 @@ record DiscordConfiguration(IngressAuthorityDeclaration authority,
                 (int) DiscordValues.number(value.get("maxConcurrentRequests"), 1, 1_024),
                 DiscordValues.number(value.get("maxRequestBytes"), 1, 16L * 1024 * 1024),
                 DiscordValues.number(value.get("maxResponseBytes"), 1, 16L * 1024 * 1024),
-                Duration.ofMillis(DiscordValues.number(value.get("requestTimeoutMs"), 100, 300_000)));
+                Duration.ofMillis(DiscordValues.number(value.get("requestTimeoutMs"), 100,
+                        MAX_ACKNOWLEDGEMENT_WINDOW.toMillis())));
     }
 
     private static IngressRequestProjectionPolicy projection(Map<String, Object> value) {

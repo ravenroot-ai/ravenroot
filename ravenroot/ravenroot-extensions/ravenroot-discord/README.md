@@ -111,6 +111,9 @@ document as standard padded Base64:
 }
 ```
 
+`authority.requestTimeoutMs` must not exceed 2,800 milliseconds so Ravenroot can acknowledge an
+interaction before Discord's three-second response deadline.
+
 The store records only tenant/profile/application/interaction structural identity, a SHA-256 body
 digest, and update time. It never stores the request, signature, token, command options, message
 content, attachment bytes, or provider error body. An exact replay may reach Ravenroot's durable

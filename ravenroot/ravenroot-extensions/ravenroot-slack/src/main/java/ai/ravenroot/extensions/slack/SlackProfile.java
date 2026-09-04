@@ -13,6 +13,8 @@ record SlackProfile(String tenantId, String name, URI apiOrigin, String teamId, 
                     int maxResponseBytes, int maxTextChars, int maxConcurrency, int maxPerSecond,
                     int retries, int signatureMaxAgeSeconds) {
     static final URI PRODUCTION_ORIGIN = URI.create("https://slack.com");
+    private static final Set<String> CHANNEL_EVENTS = Set.of("app_mention", "message");
+    private static final Set<String> NON_CHANNEL_EVENTS = Set.of("team_join", "user_change");
 
     SlackProfile {
         tenantId = token(tenantId, 160); name = token(name, 64);
@@ -25,6 +27,7 @@ record SlackProfile(String tenantId, String name, URI apiOrigin, String teamId, 
         if (eventsRoute.equals(commandsRoute)) throw configuration();
         channelIds = boundedTokens(channelIds, 256, SlackProfile::slackId);
         eventTypes = boundedTokens(eventTypes, 128, value -> providerToken(value, 80));
+        if (!supportedEventTypes().containsAll(eventTypes)) throw configuration();
         commands = boundedTokens(commands, 100, value -> {
             if (!value.matches("/[a-z0-9_-]{1,32}")) throw configuration();
         });
@@ -38,6 +41,12 @@ record SlackProfile(String tenantId, String name, URI apiOrigin, String teamId, 
     }
 
     boolean permitsChannel(String channel) { return channelIds.contains(channel); }
+    boolean channelScopedEvent(String eventType) { return CHANNEL_EVENTS.contains(eventType); }
+    boolean nonChannelEvent(String eventType) { return NON_CHANNEL_EVENTS.contains(eventType); }
+    static Set<String> supportedEventTypes() {
+        java.util.HashSet<String> supported = new java.util.HashSet<>(CHANNEL_EVENTS);
+        supported.addAll(NON_CHANNEL_EVENTS); return Set.copyOf(supported);
+    }
     OutboundCredentialBinding credential() {
         return new OutboundCredentialBinding(credentialBindingId, credentialReference);
     }

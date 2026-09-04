@@ -28,7 +28,10 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.sql.Connection;
+import java.sql.DriverManager;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -36,6 +39,8 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -88,10 +93,82 @@ class SlackIngressSourceTest {
 
     @Test void signedUrlVerificationDoesNotEnterGraph() {
         DurableIngress ingress = new DurableIngress(); CaptureRoute route = source(SlackBehaviorDescriptors.EVENTS, ingress);
-        byte[] body = SlackValues.jsonBytes(Map.of("type", "url_verification", "team_id", SlackTestSupport.TEAM,
-                "api_app_id", SlackTestSupport.APPLICATION, "challenge", "bounded-challenge", "token", "ignored"));
+        byte[] body = SlackValues.jsonBytes(Map.of("type", "url_verification",
+                "challenge", "bounded-challenge", "token", "deprecated-token"));
         IngressResponse response = signed(route, body, false);
-        assertEquals(200, response.status()); assertTrue(new String(response.body(), StandardCharsets.UTF_8).contains("bounded-challenge"));
+        assertEquals(200, response.status());
+        assertEquals(Map.of("challenge", "bounded-challenge"), SlackValues.json(response.body()));
+        assertFalse(new String(response.body(), StandardCharsets.UTF_8).contains("deprecated-token"));
+        assertEquals(0, ingress.offers.get());
+    }
+
+    @Test void eventChannelAuthorityIsTypeAwareAndNonChannelEventsAreExplicit() {
+        DurableIngress ingress = new DurableIngress(); CaptureRoute route = source(SlackBehaviorDescriptors.EVENTS, ingress);
+        assertEquals(403, signed(route, event("EvUnauthorized", "message", "C99999999", "blocked"), false).status());
+        assertEquals(400, signed(route, event("EvMissing", "message", null, "missing"), false).status());
+        assertEquals(403, signed(route, event("EvForgedScope", "team_join", SlackTestSupport.CHANNEL, "blocked"), false).status());
+        byte[] teamJoin = SlackValues.jsonBytes(Map.of("type", "event_callback", "team_id", SlackTestSupport.TEAM,
+                "api_app_id", SlackTestSupport.APPLICATION, "event_id", "EvTeamJoin",
+                "event", Map.of("type", "team_join", "user", Map.of("id", SlackTestSupport.USER))));
+        assertEquals(200, signed(route, teamJoin, false).status());
+        assertEquals(1, ingress.offers.get());
+        assertFalse(ingress.payloads.getFirst().toString().contains("channelId"));
+    }
+
+    @Test void signedSslCheckIsAcknowledgedWithoutDeprecatedTokenAuthority() {
+        DurableIngress ingress = new DurableIngress(); CaptureRoute route = source(SlackBehaviorDescriptors.COMMANDS, ingress);
+        byte[] body = form(Map.of("ssl_check", "1", "token", "deprecated-token"));
+        IngressResponse response = signed(route, body, true);
+        assertEquals(200, response.status()); assertEquals(0, response.body().length);
+        assertEquals(0, ingress.offers.get());
+    }
+
+    @Test void lazyStoreInitializationOccursDuringSourceCreationNotFirstRequest() {
+        Path database = directory.resolve("source-initialized.db");
+        SlackConfiguration configuration = SlackTestSupport.configuration(database);
+        SlackRuntime runtime = new SlackRuntime(() -> configuration);
+        assertFalse(Files.exists(database));
+        DurableIngress ingress = new DurableIngress(); Context context = new Context(ingress);
+        new SlackEventsSourceBehavior(runtime).createSource(SlackTestSupport.node(SlackBehaviorDescriptors.EVENTS),
+                context, credentials(new AtomicReference<>()));
+        assertTrue(Files.exists(database)); assertEquals(0, ingress.offers.get());
+    }
+
+    @Test void sqliteContentionCompletesWithinAckWindowWithoutLateSuccess() throws Exception {
+        Path database = directory.resolve("contended.db"); DurableIngress ingress = new DurableIngress();
+        CaptureRoute route = source(SlackBehaviorDescriptors.EVENTS, ingress, new AtomicReference<>(),
+                SlackTestSupport.nodePackage(database));
+        try (Connection blocker = lock(database)) {
+            byte[] body = event("EvContended", "blocked"); String timestamp = SlackTestSupport.timestamp();
+            long started = System.nanoTime();
+            IngressResponse response = route.handler.handle(
+                    request(body, timestamp, SlackTestSupport.signature(timestamp, body), false),
+                    new IngressRequestContext(Instant.now().plusMillis(200), new NeverCancelled()))
+                    .toCompletableFuture().get(1, TimeUnit.SECONDS);
+            assertEquals(503, response.status());
+            assertTrue(System.nanoTime() - started < TimeUnit.MILLISECONDS.toNanos(800));
+            assertEquals(0, ingress.offers.get());
+        }
+        Thread.sleep(25);
+        assertEquals(0, ingress.offers.get());
+    }
+
+    @Test void cancellationInterruptsSqliteContentionWithoutLateSuccess() throws Exception {
+        Path database = directory.resolve("cancelled.db"); DurableIngress ingress = new DurableIngress();
+        CaptureRoute route = source(SlackBehaviorDescriptors.EVENTS, ingress, new AtomicReference<>(),
+                SlackTestSupport.nodePackage(database));
+        try (Connection blocker = lock(database)) {
+            byte[] body = event("EvCancelled", "blocked"); String timestamp = SlackTestSupport.timestamp();
+            TestCancellation cancellation = new TestCancellation();
+            var future = route.handler.handle(request(body, timestamp, SlackTestSupport.signature(timestamp, body), false),
+                    new IngressRequestContext(Instant.now().plusSeconds(5), cancellation)).toCompletableFuture();
+            Thread.sleep(50); assertFalse(future.isDone());
+            long cancelled = System.nanoTime(); cancellation.cancel();
+            assertEquals(503, future.get(1, TimeUnit.SECONDS).status());
+            assertTrue(System.nanoTime() - cancelled < TimeUnit.MILLISECONDS.toNanos(800));
+            assertEquals(0, ingress.offers.get());
+        }
+        Thread.sleep(25);
         assertEquals(0, ingress.offers.get());
     }
 
@@ -154,15 +231,24 @@ class SlackIngressSourceTest {
                 "x-slack-retry-num", "1", "x-slack-retry-reason", "http_timeout"), body);
     }
     private static byte[] event(String id, String text) {
+        return event(id, "message", SlackTestSupport.CHANNEL, text);
+    }
+    private static byte[] event(String id, String type, String channel, String text) {
+        Map<String, Object> inner = new java.util.LinkedHashMap<>(); inner.put("type", type); inner.put("text", text);
+        if (channel != null) inner.put("channel", channel);
         return SlackValues.jsonBytes(Map.of("type", "event_callback", "team_id", SlackTestSupport.TEAM,
                 "api_app_id", SlackTestSupport.APPLICATION, "event_id", id,
-                "event", Map.of("type", "message", "channel", SlackTestSupport.CHANNEL, "text", text)));
+                "event", inner));
     }
     private static byte[] form(Map<String, String> values) {
         return values.entrySet().stream().sorted(Map.Entry.comparingByKey()).map(entry ->
                 URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8) + "="
                         + URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8))
                 .collect(java.util.stream.Collectors.joining("&")).getBytes(StandardCharsets.UTF_8);
+    }
+    private static Connection lock(Path database) throws Exception {
+        Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database);
+        connection.createStatement().execute("BEGIN IMMEDIATE"); return connection;
     }
     private static final class CaptureRoute implements ai.ravenroot.api.ingress.IngressRouteAuthority {
         final ManagedIngressSource source; final String expectedPath; IngressRouteHandler handler;
@@ -208,5 +294,11 @@ class SlackIngressSourceTest {
     private static final class NeverCancelled implements CancellationSignal {
         @Override public boolean cancelled() { return false; }
         @Override public void onCancel(Runnable listener) { }
+    }
+    private static final class TestCancellation implements CancellationSignal {
+        private final List<Runnable> listeners = new CopyOnWriteArrayList<>(); private volatile boolean cancelled;
+        @Override public boolean cancelled() { return cancelled; }
+        @Override public void onCancel(Runnable listener) { if (cancelled) listener.run(); else listeners.add(listener); }
+        void cancel() { cancelled = true; listeners.forEach(Runnable::run); }
     }
 }

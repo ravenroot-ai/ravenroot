@@ -47,7 +47,7 @@ final class SlackTestSupport {
                         "x-slack-retry-num", "x-slack-retry-reason"), null, 256, 1, 256, 5, 1024, 512);
         var profile = new SlackProfile(TENANT, PROFILE, SlackProfile.PRODUCTION_ORIGIN, TEAM, APPLICATION,
                 "slack-bot", "slack-bot-token", "slack-signing-secret", "/events", "/commands",
-                Set.of(CHANNEL), Set.of("message", "app_mention"), Set.of("/deploy"),
+                Set.of(CHANNEL), Set.of("message", "app_mention", "team_join", "user_change"), Set.of("/deploy"),
                 Set.of("chat:write", "commands"), 2_500, profileRequestBytes, 65_536,
                 4_000, 2, 20, 2, 300);
         return new SlackConfiguration(authority, projection,

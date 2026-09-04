@@ -59,15 +59,17 @@ abstract class SlackIngressSourceBehavior implements NodeBehavior, InboundSource
     @Override public InboundSource createSource(NodeConfiguration configuration, InboundSourceContext context,
                                                 NodePackageServices services) {
         SlackProfile profile = runtime.profile(context.identity().tenantId(), SlackBehaviorDescriptors.profile(configuration));
-        return new Source(profile, services, runtime, kind);
+        return new Source(profile, services, runtime.store(), runtime, kind);
     }
 
     private static final class Source implements ManagedIngressSource {
         private final SlackProfile profile; private final NodePackageServices services;
-        private final SlackRuntime runtime; private final Kind kind;
+        private final SlackDeliveryStore store; private final SlackRuntime runtime; private final Kind kind;
         private InboundSourceContext context; private IngressRouteLease lease; private long generation; private boolean started;
-        Source(SlackProfile profile, NodePackageServices services, SlackRuntime runtime, Kind kind) {
-            this.profile = profile; this.services = services; this.runtime = runtime; this.kind = kind;
+        Source(SlackProfile profile, NodePackageServices services, SlackDeliveryStore store,
+               SlackRuntime runtime, Kind kind) {
+            this.profile = profile; this.services = services; this.store = store;
+            this.runtime = runtime; this.kind = kind;
         }
         @Override public synchronized CompletionStage<Void> start(InboundSourceContext context) {
             if (started) return CompletableFuture.completedFuture(null);
@@ -134,7 +136,8 @@ abstract class SlackIngressSourceBehavior implements NodeBehavior, InboundSource
                         : command(request, timestamp, context, window, deadlineNanos);
             } catch (SlackException failure) {
                 return empty(switch (failure.code()) {
-                    case FORBIDDEN -> 409; case CAPACITY -> 429; case DURABILITY_UNAVAILABLE -> 503; default -> 400;
+                    case FORBIDDEN -> 409; case CAPACITY -> 429;
+                    case DURABILITY_UNAVAILABLE, CANCELLED -> 503; default -> 400;
                 });
             } catch (RuntimeException failure) { return empty(503); }
         }
@@ -143,22 +146,29 @@ abstract class SlackIngressSourceBehavior implements NodeBehavior, InboundSource
                                       IngressRequestContext window, long deadlineNanos) {
             Map<String, Object> root = SlackValues.json(body);
             String type = SlackValues.string(root.get("type"), 64);
-            String team = SlackProfile.slackId(SlackValues.string(root.get("team_id"), 32));
-            String app = SlackProfile.slackId(SlackValues.string(root.get("api_app_id"), 32));
-            if (!source.profile.teamId().equals(team) || !source.profile.applicationId().equals(app)) return empty(403);
             if ("url_verification".equals(type)) {
+                SlackValues.exact(root, Set.of("type", "challenge", "token"));
                 String challenge = SlackValues.string(root.get("challenge"), 512);
                 return live(window, deadlineNanos) ? json(200, Map.of("challenge", challenge)) : empty(503);
             }
+            String team = SlackProfile.slackId(SlackValues.string(root.get("team_id"), 32));
+            String app = SlackProfile.slackId(SlackValues.string(root.get("api_app_id"), 32));
+            if (!source.profile.teamId().equals(team) || !source.profile.applicationId().equals(app)) return empty(403);
             if (!"event_callback".equals(type)) return empty(403);
             String eventId = SlackValues.string(root.get("event_id"), 128);
             if (!eventId.matches("[A-Za-z0-9._:-]{1,128}")) return empty(400);
             Map<String, Object> event = SlackValues.object(root.get("event"));
             String eventType = SlackValues.string(event.get("type"), 80);
             if (!source.profile.eventTypes().contains(eventType)) return empty(403);
+            String channel = "";
+            if (source.profile.channelScopedEvent(eventType)) {
+                channel = SlackProfile.slackId(SlackValues.string(event.get("channel"), 32));
+                if (!source.profile.permitsChannel(channel)) return empty(403);
+            } else if (!source.profile.nonChannelEvent(eventType) || event.containsKey("channel")) return empty(403);
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("version", "slack.event.v1"); payload.put("eventId", eventId);
             payload.put("teamId", team); payload.put("applicationId", app); payload.put("eventType", eventType);
+            if (!channel.isEmpty()) payload.put("channelId", channel);
             payload.put("event", event);
             return deliver(context, window, deadlineNanos, "event", eventId, body, payload);
         }
@@ -168,6 +178,11 @@ abstract class SlackIngressSourceBehavior implements NodeBehavior, InboundSource
             String contentType = request.headers().getOrDefault("content-type", "").toLowerCase(java.util.Locale.ROOT);
             if (!contentType.startsWith("application/x-www-form-urlencoded")) return empty(400);
             Map<String, String> form = form(request.body());
+            if (form.containsKey("ssl_check")) {
+                if (!"1".equals(form.get("ssl_check")) || !Set.of("ssl_check", "token").containsAll(form.keySet()))
+                    return empty(400);
+                return live(window, deadlineNanos) ? empty(200) : empty(503);
+            }
             String team = SlackProfile.slackId(required(form, "team_id", 32));
             String app = SlackProfile.slackId(required(form, "api_app_id", 32));
             String channel = SlackProfile.slackId(required(form, "channel_id", 32));
@@ -191,8 +206,8 @@ abstract class SlackIngressSourceBehavior implements NodeBehavior, InboundSource
 
         private IngressResponse deliver(InboundSourceContext context, IngressRequestContext window, long deadlineNanos,
                                         String kind, String delivery, byte[] body, Map<String, Object> payload) {
-            source.runtime.store().bind(context.identity().tenantId(), source.profile.name(), kind,
-                    delivery, SlackValues.sha256(body));
+            source.store.bind(context.identity().tenantId(), source.profile.name(), kind,
+                    delivery, SlackValues.sha256(body), deadlineNanos, window.cancellation());
             if (!live(window, deadlineNanos) || source.active(generation) == null) return empty(503);
             IngressReceipt receipt = context.ingress().offerDurably(context.identity(), IngressTarget.start(),
                     Map.copyOf(payload), context.nodeId(), source.profile.name() + ":" + kind + ":" + delivery);

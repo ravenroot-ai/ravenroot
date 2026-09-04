@@ -60,4 +60,30 @@ class SlackConfigurationTest {
                 () -> SlackTestSupport.configuration(directory.resolve("oversized.db"), 1024, 512));
         assertEquals(SlackException.Code.CONFIGURATION, failure.code());
     }
+    @Test void rejectsRoutesDuplicatedAcrossProfiles() {
+        SlackConfiguration original = SlackTestSupport.configuration(directory.resolve("duplicate.db"));
+        SlackProfile first = original.profile(SlackTestSupport.TENANT, SlackTestSupport.PROFILE).orElseThrow();
+        SlackProfile second = copy(first, "secondary", first.eventsRoute(), "/secondary-commands");
+        assertThrows(SlackException.class, () -> new SlackConfiguration(original.authority(), original.projection(),
+                original.store(), Map.of(SlackTestSupport.TENANT + "\u0000" + SlackTestSupport.PROFILE, first,
+                        SlackTestSupport.TENANT + "\u0000secondary", second)));
+    }
+    @Test void rejectsEventTypesWithoutAnExplicitAuthoritySchema() {
+        SlackConfiguration original = SlackTestSupport.configuration(directory.resolve("event-schema.db"));
+        SlackProfile profile = original.profile(SlackTestSupport.TENANT, SlackTestSupport.PROFILE).orElseThrow();
+        assertThrows(SlackException.class, () -> new SlackProfile(profile.tenantId(), profile.name(),
+                profile.apiOrigin(), profile.teamId(), profile.applicationId(), profile.credentialBindingId(),
+                profile.credentialReference(), profile.signingSecretReference(), profile.eventsRoute(),
+                profile.commandsRoute(), profile.channelIds(), Set.of("reaction_added"), profile.commands(),
+                profile.scopes(), profile.requestTimeoutMs(), profile.maxRequestBytes(), profile.maxResponseBytes(),
+                profile.maxTextChars(), profile.maxConcurrency(), profile.maxPerSecond(), profile.retries(),
+                profile.signatureMaxAgeSeconds()));
+    }
+    private static SlackProfile copy(SlackProfile profile, String name, String eventsRoute, String commandsRoute) {
+        return new SlackProfile(profile.tenantId(), name, profile.apiOrigin(), profile.teamId(), profile.applicationId(),
+                profile.credentialBindingId(), profile.credentialReference(), profile.signingSecretReference(),
+                eventsRoute, commandsRoute, profile.channelIds(), profile.eventTypes(), profile.commands(), profile.scopes(),
+                profile.requestTimeoutMs(), profile.maxRequestBytes(), profile.maxResponseBytes(), profile.maxTextChars(),
+                profile.maxConcurrency(), profile.maxPerSecond(), profile.retries(), profile.signatureMaxAgeSeconds());
+    }
 }

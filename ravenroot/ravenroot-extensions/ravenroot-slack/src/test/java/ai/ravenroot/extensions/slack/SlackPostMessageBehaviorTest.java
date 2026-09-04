@@ -67,6 +67,18 @@ class SlackPostMessageBehaviorTest {
         assertEquals(1, failed.requests.size());
     }
 
+    @Test void httpSuccessWithSlackFailureIsAContentFreeRejection() {
+        var http = new SlackTestSupport.HttpHarness().reply(200,
+                Map.of("ok", false, "error", "private-provider-detail"));
+        var result = action(http, Map.of()).handle(SlackTestSupport.message(message("private-message")))
+                .toCompletableFuture().join();
+        assertEquals("rejected", ((Map<?, ?>) result.payload()).get("status"));
+        assertEquals(200L, ((Map<?, ?>) result.payload()).get("code"));
+        assertFalse(result.payload().toString().contains("private-provider-detail"));
+        assertFalse(result.payload().toString().contains("private-message"));
+        assertEquals(1, http.requests.size());
+    }
+
     @Test void cancellationDuring429BackoffPreventsAnotherDispatch() {
         var http = new SlackTestSupport.HttpHarness().reply(429,
                 Map.of("retry-after", List.of("2"), "content-type", List.of("application/json")),

@@ -17,6 +17,8 @@ Create a Slack app, install it into the intended workspace, and give its bot onl
 the configured features. Posting requires `chat:write`; posting to public channels without joining them
 also requires `chat:write.public`. Slash commands require `commands`. Events require the event-specific
 bot or user scopes documented by Slack. Subscribe only to event types named in the operator profile.
+This version supports channel-scoped `message` and `app_mention` events plus explicitly non-channel
+`team_join` and `user_change` events.
 
 Configure these request URLs on the Slack app, using the public HTTPS endpoints exposed by the trusted
 relay and the profile routes below:
@@ -120,7 +122,9 @@ The result is `slack.message.result.v1` with a content-free status, channel, att
 correlation ID, and structural evidence. It never repeats the message or a Slack error body.
 
 `slack.events` emits `slack.event.v1` with the verified `eventId`, `teamId`, `applicationId`, `eventType`,
-and Slack `event` object. `slack.commands` emits `slack.command.v1` with structural team, application,
+the authorized `channelId` for channel-scoped events, and Slack `event` object. A configured
+`team_join` or `user_change` event is explicitly workspace-scoped and has no channel authority.
+`slack.commands` emits `slack.command.v1` with structural team, application,
 channel, user and command IDs plus command text. It deliberately drops Slack's deprecated verification
 token, `response_url`, `trigger_id`, and human-readable workspace/channel/user names.
 
@@ -135,8 +139,11 @@ survive restart and reject the same delivery identity with different content.
 Ravenroot returns HTTP 200 only after durable commit or a durable duplicate receipt. Capacity returns
 429; unavailable, volatile, ambiguous, expired, or cancelled custody returns a retryable 503. The
 handler always narrows even a wider runtime request window to at most 2800 ms from request arrival, so
-Slack's three-second acknowledgement contract remains fail-closed. URL-verification challenges are
-signed, authority-checked control requests and do not enter the graph.
+Slack's three-second acknowledgement contract remains fail-closed. SQLite lock admission uses the
+same monotonic deadline with a completion margin and observes cancellation. Store initialization and
+migration happen while creating the source, never on the callback request path. URL-verification
+challenges and slash-command `ssl_check=1` probes are signature-verified control requests that do not
+enter the graph; deprecated verification tokens are ignored and never returned or persisted.
 
 Outbound requests use the fixed `https://slack.com/api/chat.postMessage` destination and an
 operator-owned credential binding. The fully encoded JSON body is checked before dispatch. Managed

@@ -6,6 +6,7 @@ import ai.ravenroot.api.ingress.IngressRequestProjectionPolicy;
 import java.net.URI;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
@@ -24,11 +25,13 @@ record SlackConfiguration(IngressAuthorityDeclaration authority,
         if (profiles.isEmpty() || profiles.size() * 2 > authority.maxRoutes()) throw invalid();
         if (!projection.allowedHeaders().containsAll(Set.of("content-type", "x-slack-signature",
                 "x-slack-request-timestamp", "x-slack-retry-num", "x-slack-retry-reason"))) throw invalid();
+        Set<String> routes = new HashSet<>();
         profiles.forEach((key, profile) -> {
             if (!key.equals(profile.tenantId() + "\u0000" + profile.name())
                     || profile.maxRequestBytes() > authority.maxRequestBytes()
                     || profile.maxResponseBytes() > authority.maxResponseBytes()
-                    || profile.requestTimeoutMs() > authority.requestTimeout().toMillis()) throw invalid();
+                    || profile.requestTimeoutMs() > authority.requestTimeout().toMillis()
+                    || !routes.add(profile.eventsRoute()) || !routes.add(profile.commandsRoute())) throw invalid();
         });
     }
 

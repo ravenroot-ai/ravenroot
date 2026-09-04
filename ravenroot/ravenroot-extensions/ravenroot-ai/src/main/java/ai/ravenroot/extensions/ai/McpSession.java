@@ -43,6 +43,8 @@ import java.util.function.LongSupplier;
  */
 final class McpSession {
 
+    private record ExchangeResult(PayloadValue.MapValue value, long maximumOutputBytes) { }
+
     private final McpProfile profile;
     private final NodePackageServices services;
     private final NodeMessage message;
@@ -63,6 +65,8 @@ final class McpSession {
      * read on whichever thread the loop is running on afterwards.</p>
      */
     private volatile List<McpProtocol.Announced> announced = List.of();
+    /** Effective managed ceiling attached to the catalogue response that produced {@link #announced}. */
+    private volatile long announcedMaximumOutputBytes = Long.MAX_VALUE;
     /**
      * The server's session handle, when it issued one.
      *
@@ -99,10 +103,12 @@ final class McpSession {
                 .thenCompose(ignored -> session.exchange(McpProtocol.initialized(), false))
                 .thenCompose(ignored -> session.exchange(
                         McpProtocol.listTools(session.nextId.getAndIncrement()), true))
-                .thenApply(result -> {
+                .thenApply(exchange -> {
                     // The SAME object all the way through, deliberately: it is carrying the session
                     // handle and the id counter, and a second object would start both from scratch.
-                    session.announced = McpProtocol.readTools(result);
+                    session.announced = McpProtocol.readTools(
+                            exchange.value(), exchange.maximumOutputBytes());
+                    session.announcedMaximumOutputBytes = exchange.maximumOutputBytes();
                     return session;
                 });
     }
@@ -114,6 +120,11 @@ final class McpSession {
     /** What the server said it has. Filtering it against the operator's list is not this class's job. */
     List<McpProtocol.Announced> announced() {
         return announced;
+    }
+
+    /** Ceiling that must still hold after server names are added to the model-facing catalogue. */
+    long announcedMaximumOutputBytes() {
+        return announcedMaximumOutputBytes;
     }
 
     /**
@@ -132,8 +143,9 @@ final class McpSession {
             return CompletableFuture.failedFuture(refused);
         }
         return exchange(McpProtocol.callTool(nextId.getAndIncrement(), toolName, arguments), true)
-                .thenApply(result -> new AgentTool.Result(McpProtocol.readToolContent(result),
-                        McpProtocol.isToolError(result)
+                .thenApply(exchange -> new AgentTool.Result(McpProtocol.readToolContent(
+                                exchange.value(), exchange.maximumOutputBytes()),
+                        McpProtocol.isToolError(exchange.value())
                                 ? AgentTool.Outcome.FAILED : AgentTool.Outcome.SUCCEEDED));
     }
 
@@ -144,7 +156,7 @@ final class McpSession {
      *     answers with 202 and an empty body — parsing that as a JSON-RPC response would refuse a
      *     correct server
      */
-    private CompletionStage<PayloadValue.MapValue> exchange(byte[] body, boolean expectsResult) {
+    private CompletionStage<ExchangeResult> exchange(byte[] body, boolean expectsResult) {
         long remaining = Math.min(profile.timeoutMs(), remainingRunMillis.getAsLong());
         if (remaining <= 0) {
             return CompletableFuture.failedFuture(new McpRefusal(McpRefusal.Reason.SERVER_TIMED_OUT));
@@ -177,12 +189,13 @@ final class McpSession {
                 sessionId = issued;
             }
             if (!expectsResult) {
-                return new PayloadValue.MapValue(Map.of());
+                return new ExchangeResult(new PayloadValue.MapValue(Map.of()),
+                        response.effectiveMaximumOutputBytes());
             }
             int outputLimit = Math.toIntExact(Math.min(profile.maxResponseBytes(),
                     response.effectiveMaximumOutputBytes()));
-            return McpProtocol.readResult(response.body(),
-                    header(response.headers(), "content-type"), outputLimit);
+            return new ExchangeResult(McpProtocol.readResult(response.body(),
+                    header(response.headers(), "content-type"), outputLimit), outputLimit);
         });
     }
 

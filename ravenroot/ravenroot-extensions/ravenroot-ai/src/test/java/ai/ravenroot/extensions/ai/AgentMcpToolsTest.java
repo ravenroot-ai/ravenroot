@@ -71,6 +71,39 @@ class AgentMcpToolsTest {
     }
 
     @Test
+    @DisplayName("a narrower managed output ceiling rejects tools expanded by safe schema synthesis")
+    void managedOutputCeilingSurvivesMcpToolsProjection() {
+        var emptySchema = Map.of("type", "object", "properties", Map.of());
+        var remoteProjection = List.of("one", "two", "three", "four").stream()
+                .map(name -> Map.of("name", name, "description", "tool " + name,
+                        "inputSchema", emptySchema))
+                .toList();
+        long operatorCeiling = PayloadLimits.DEFAULTS.enforceAndMeasure(remoteProjection);
+        var exposedProjection = List.of("one", "two", "three", "four").stream()
+                .map(name -> Map.of("name", "alpha__" + name, "description", "tool " + name,
+                        "parameters", emptySchema))
+                .toList();
+        assertTrue(PayloadLimits.DEFAULTS.enforceAndMeasure(exposedProjection) > operatorCeiling,
+                "server-name prefixing must be the expansion that crosses the operator ceiling");
+        var alpha = new McpDouble("alpha", "one", "two", "three", "four").omittingSchemas();
+        var probe = new McpDouble("alpha", "one", "two", "three", "four").omittingSchemas();
+        assertTrue(probe.respond(McpProtocol.listTools(3)).body().length <= operatorCeiling,
+                "the wire envelope itself must fit so this exercises post-parse projection");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .mcpOutputLimit(operatorCeiling)
+                .chatting(AiTestSupport.answers("must not be called"))
+                .serving(ALPHA, alpha);
+
+        AgentException refusal = failureOf(agent(http, "alpha",
+                AiTestSupport.mcpProfile("alpha", ALPHA, "one", "two", "three", "four")));
+
+        assertEquals(AgentException.Code.MCP_RESPONSE_TOO_LARGE, refusal.code());
+        assertEquals(List.of("initialize", "notifications/initialized", "tools/list"),
+                alpha.receivedMethods());
+        assertEquals(0, http.chatCalls(), "an over-authority catalogue never reaches model state");
+    }
+
+    @Test
     @DisplayName("a tool call reaches the server that owns it, and its result re-enters the loop")
     void aToolCallReachesTheRightServerAndItsResultReEntersTheLoop() throws Exception {
         // BOTH servers expose a tool called "search". This is the case the exposed-name scheme exists

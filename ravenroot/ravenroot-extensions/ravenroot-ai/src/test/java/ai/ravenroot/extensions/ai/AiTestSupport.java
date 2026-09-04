@@ -430,6 +430,7 @@ final class AiTestSupport {
         private volatile boolean cancellationThrows;
         private volatile ToolCallAuthorizationService toolAuthorization = allowingTools();
         private volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
+        private volatile long mcpMaximumOutputBytes = Long.MAX_VALUE;
         private final java.util.List<CompletableFuture<OutboundHttpResponse>> stalled =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final java.util.List<Boolean> cancelled =
@@ -495,6 +496,11 @@ final class AiTestSupport {
 
         RoutedHttp serving(String endpoint, McpDouble server) {
             servers.put(endpoint, server);
+            return this;
+        }
+
+        RoutedHttp mcpOutputLimit(long maximumOutputBytes) {
+            mcpMaximumOutputBytes = maximumOutputBytes;
             return this;
         }
 
@@ -612,7 +618,7 @@ final class AiTestSupport {
                 responseHeaders.put("content-type", java.util.List.of(answer.contentType()));
                 responseHeaders.putAll(answer.headers());
                 return OutboundCall.completed(new OutboundHttpResponse(answer.status(),
-                        responseHeaders, answer.body()));
+                        responseHeaders, answer.body(), mcpMaximumOutputBytes));
             };
         }
     }

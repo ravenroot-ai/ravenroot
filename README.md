@@ -46,7 +46,9 @@ handoffs, verification, recovery, and audit paths explicit.*
 
 Node packages keep protocol-specific capabilities separate from the runtime core. A deployment can
 install the integrations it needs while preserving consistent graph, payload, execution, and
-security contracts. See [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md).
+security contracts. See [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md),
+or use the [first-party extension dependency pack](docs/integrator-guide/extension-pack.md) when an
+embedded application deliberately wants every maintained package on its classpath.
 
 ## Run Ravenroot your way
 

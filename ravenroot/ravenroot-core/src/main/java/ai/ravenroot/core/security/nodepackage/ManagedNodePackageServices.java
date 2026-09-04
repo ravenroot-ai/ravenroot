@@ -560,7 +560,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<byte[]> response;
             try {
-                response = client().send(builder.build(), BoundedBodyHandlers.withLimits(limits));
+                response = client().send(builder.build(),
+                        BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
             } catch (Throwable failure) {
                 throw mapFailure(failure);
             }

@@ -464,6 +464,8 @@ class StorageBehaviorTest {
         assertTrue(http.request.get().credential().isEmpty());
         assertFalse(http.request.get().headers().containsKey("authorization"));
         assertEquals(1024, http.request.get().limits().maximumEncodedResponseBytes());
+        assertTrue(http.request.get().limits().maximumOutputBytes()
+                > http.request.get().limits().maximumDecodedResponseBytes());
         assertEquals(Set.of("text/plain", "application/octet-stream"),
                 http.request.get().limits().acceptedMediaTypes());
         assertEquals(Set.of("identity"), http.request.get().limits().acceptedContentEncodings());
@@ -475,6 +477,26 @@ class StorageBehaviorTest {
         assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", output.get("sha256"));
         assertEquals("\"etag-1\"", output.get("etag"));
         assertEquals("version-1", output.get("versionId"));
+    }
+
+    @Test void getBase64ProjectionEnforcesTheExactCanonicalLimitBeforeExpansion() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 1, 10);
+        StorageSettings settings = new StorageSettings(profile, StorageProfile.Operation.GET,
+                java.net.URI.create("https://s3.example.test/bucket-a/object"), "base64", 1024, 1000, 1);
+        byte[] body = new byte[257];
+        OutboundHttpResponse response = StorageTestSupport.response(200, body);
+
+        NodeResult projected = StorageRuntime.project(settings, new byte[0], response,
+                StorageRuntime.projectedOutputLimit(body.length));
+        int exact = new ai.ravenroot.api.payload.PayloadLimits(64 * 1024 * 1024, 32, 1_000_000,
+                5_000_000, 64 * 1024 * 1024, 4_096).enforceAndMeasure(projected.payload());
+
+        assertDoesNotThrow(() -> StorageRuntime.project(settings, new byte[0], response, exact));
+        StorageException oversized = assertThrows(StorageException.class,
+                () -> StorageRuntime.project(settings, new byte[0], response, exact - 1L));
+        assertEquals(StorageException.Code.RESPONSE_TOO_LARGE, oversized.code());
+        assertEquals(StorageRuntime.base64Length(body.length),
+                ((String) ((Map<?, ?>) projected.payload()).get("base64")).length());
     }
 
     @Test void putSendsOneBodyAndOnlyProfileAuthorizedConditionals() {

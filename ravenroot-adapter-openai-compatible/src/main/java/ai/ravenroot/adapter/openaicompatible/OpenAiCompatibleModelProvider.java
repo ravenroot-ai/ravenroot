@@ -316,13 +316,12 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
         // streaming breach, accepts JSON only, and permits at most one bounded gzip member. Wire,
         // decoded, and parser-input ceilings remain separate even though this profile sets them to
         // the same conservative value.
-        return client.sendAsync(httpRequest,
-                        BoundedBodyHandlers.withLimits(ExternalIoLimits.compressedHttp(
+        ExternalIoLimits limits = ExternalIoLimits.compressedHttp(
                                 Math.max(1, httpRequest.bodyPublisher().orElseThrow().contentLength()),
                                 RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
-                                RESPONSE_LIMITS.maxEncodedBytes(), 100, timeout,
-                                Set.of("application/json"))))
-                .handle((response, failure) -> translate(response, failure, model));
+                                projectedOutputLimit(), 100, timeout, Set.of("application/json"));
+        return client.sendAsync(httpRequest, BoundedBodyHandlers.withLimitsForSuccess(limits))
+                .handle((response, failure) -> translate(response, failure, model, limits));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -472,7 +471,8 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
     // Response
     // ---------------------------------------------------------------------------------------------
 
-    private ModelResponse translate(HttpResponse<byte[]> response, Throwable failure, String model) {
+    private ModelResponse translate(HttpResponse<byte[]> response, Throwable failure, String model,
+                                    ExternalIoLimits limits) {
         if (failure != null) {
             throw transportFailure(failure);
         }
@@ -503,7 +503,24 @@ public final class OpenAiCompatibleModelProvider implements ModelProvider {
         }
         // The body of every branch above is read and dropped unexamined. It is remote text this
         // adapter cannot audit, and an error body may quote the request back -- including the key.
-        return readCompletion(response.body(), model);
+        return requireProjectedOutput(readCompletion(response.body(), model), limits);
+    }
+
+    private static long projectedOutputLimit() {
+        return Math.min(Integer.MAX_VALUE, (long) RESPONSE_LIMITS.maxEncodedBytes() + 64L * 1024);
+    }
+
+    private static ModelResponse requireProjectedOutput(ModelResponse response, ExternalIoLimits limits) {
+        try {
+            int ceiling = Math.toIntExact(limits.maximumOutputBytes());
+            int bytes = new PayloadLimits(ceiling, 32, 10_000, 50_000, ceiling, 4_096)
+                    .enforceAndMeasure(Map.of("payload", response.payload(), "providerId", response.providerId(),
+                            "model", response.model(), "metadata", response.metadata()));
+            limits.requireOutputBytes(bytes);
+            return response;
+        } catch (RuntimeException oversized) {
+            throw ModelInvocationException.of(ModelInvocationException.Reason.RESPONSE_UNREADABLE);
+        }
     }
 
     private static ModelInvocationException transportFailure(Throwable failure) {

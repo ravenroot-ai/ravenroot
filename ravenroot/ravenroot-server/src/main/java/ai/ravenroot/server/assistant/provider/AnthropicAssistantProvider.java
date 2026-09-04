@@ -222,12 +222,12 @@ public final class AnthropicAssistantProvider implements AssistantProvider {
             }
 
             HttpResponse<byte[]> response;
+            ExternalIoLimits limits = ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                    RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
+                    AssistantOutputLimit.ceiling(RESPONSE_LIMITS.maxEncodedBytes()), 100, timeout,
+                    java.util.Set.of("application/json"));
             try {
-                response = httpClient.send(httpRequest, BoundedBodyHandlers.withLimits(
-                        ExternalIoLimits.compressedHttp(Math.max(1, body.length),
-                                RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
-                                RESPONSE_LIMITS.maxEncodedBytes(), 100, timeout,
-                                java.util.Set.of("application/json"))));
+                response = httpClient.send(httpRequest, BoundedBodyHandlers.withLimitsForSuccess(limits));
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
@@ -265,7 +265,7 @@ public final class AnthropicAssistantProvider implements AssistantProvider {
                             "the provider answered with status " + status, null);
             }
             responseBody = response.body();
-            return readTurn(responseBody);
+            return AssistantOutputLimit.requireWithin(readTurn(responseBody), limits);
         } catch (RuntimeException unexpected) {
             // The outer boundary. Reached only by a RuntimeException none of the catches above was
             // written for -- see this method's own Javadoc for the three concrete sources.

@@ -60,7 +60,8 @@ final class GithubApi {
                     ExternalIoLimits.compressedHttp(Math.max(1, body.length), profile.maxResponseBytes(),
                             profile.maxResponseBytes(), profile.maxResponseBytes(), 100,
                             Duration.ofMillis(profile.timeoutMs()), Set.of("application/json",
-                                    "application/vnd.github+json"))));
+                                    "application/vnd.github+json")),
+                    ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             control.attach(call);
         } catch (RuntimeException failure) { throw sanitize(failure); }
         try {

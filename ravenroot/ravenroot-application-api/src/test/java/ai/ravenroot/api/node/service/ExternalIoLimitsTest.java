@@ -6,6 +6,8 @@ import java.time.Duration;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ExternalIoLimitsTest {
@@ -50,5 +52,16 @@ class ExternalIoLimitsTest {
                 Duration.ofSeconds(1), Duration.ofSeconds(1), Set.of(), Set.of("identity")));
         assertThrows(IllegalArgumentException.class, () -> ExternalIoLimits.MANAGED_HTTP_DEFAULTS
                 .requireOutputBytes(ExternalIoLimits.MANAGED_HTTP_DEFAULTS.maximumOutputBytes() + 1));
+    }
+
+    @Test
+    void responseRepresentationPolicyIsFiniteAndAlwaysValidatesSuccess() {
+        var selected = new OutboundHttpRepresentationPolicy(false, Set.of(401, 429));
+        assertTrue(selected.validates(200));
+        assertTrue(selected.validates(429));
+        assertFalse(selected.validates(500));
+        assertTrue(OutboundHttpRepresentationPolicy.ALL_STATUSES.validates(500));
+        assertThrows(IllegalArgumentException.class,
+                () -> new OutboundHttpRepresentationPolicy(false, Set.of(99)));
     }
 }

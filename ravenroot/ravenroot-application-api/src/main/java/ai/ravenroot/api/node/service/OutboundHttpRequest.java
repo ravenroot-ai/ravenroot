@@ -18,6 +18,7 @@ public final class OutboundHttpRequest {
     private final OutboundCredentialBinding credential;
     private final OutboundHttpSigning signing;
     private final ExternalIoLimits limits;
+    private final OutboundHttpRepresentationPolicy representationPolicy;
 
     /**
      * Creates a request without a dynamic signing grant.
@@ -32,7 +33,7 @@ public final class OutboundHttpRequest {
     public OutboundHttpRequest(URI destination, String method, Map<String, List<String>> headers,
                                byte[] body, Duration deadline, OutboundCredentialBinding credential) {
         this(destination, method, headers, body, deadline, credential, null,
-                ExternalIoLimits.MANAGED_HTTP_DEFAULTS);
+                ExternalIoLimits.MANAGED_HTTP_DEFAULTS, OutboundHttpRepresentationPolicy.SUCCESS_ONLY);
     }
 
     /**
@@ -50,7 +51,7 @@ public final class OutboundHttpRequest {
                                byte[] body, Duration deadline, OutboundCredentialBinding credential,
                                OutboundHttpSigning signing) {
         this(destination, method, headers, body, deadline, credential, signing,
-                ExternalIoLimits.MANAGED_HTTP_DEFAULTS);
+                ExternalIoLimits.MANAGED_HTTP_DEFAULTS, OutboundHttpRepresentationPolicy.SUCCESS_ONLY);
     }
 
     /**
@@ -68,6 +69,27 @@ public final class OutboundHttpRequest {
     public OutboundHttpRequest(URI destination, String method, Map<String, List<String>> headers,
                                byte[] body, Duration deadline, OutboundCredentialBinding credential,
                                OutboundHttpSigning signing, ExternalIoLimits limits) {
+        this(destination, method, headers, body, deadline, credential, signing, limits,
+                OutboundHttpRepresentationPolicy.ALL_STATUSES);
+    }
+
+    /**
+     * Creates a request with explicit finite I/O limits and response representation statuses.
+     *
+     * @param destination absolute destination to be admitted against operator policy
+     * @param method HTTP method, trimmed; an absent value becomes the empty string
+     * @param headers multi-value request headers copied into an immutable map
+     * @param body request bytes copied defensively; {@code null} becomes empty
+     * @param deadline non-null caller deadline, subject to service policy and {@code limits}
+     * @param credential optional operator-owned credential binding selector
+     * @param signing optional operator-owned signing grant selector, never key material
+     * @param limits finite caller limits, intersected with trusted service policy
+     * @param representationPolicy immutable statuses whose media representations are interpreted
+     */
+    public OutboundHttpRequest(URI destination, String method, Map<String, List<String>> headers,
+                               byte[] body, Duration deadline, OutboundCredentialBinding credential,
+                               OutboundHttpSigning signing, ExternalIoLimits limits,
+                               OutboundHttpRepresentationPolicy representationPolicy) {
         this.destination = Objects.requireNonNull(destination, "destination");
         this.method = method == null ? "" : method.strip();
         this.headers = immutableHeaders(headers);
@@ -76,6 +98,7 @@ public final class OutboundHttpRequest {
         this.credential = credential;
         this.signing = signing;
         this.limits = Objects.requireNonNull(limits, "limits");
+        this.representationPolicy = Objects.requireNonNull(representationPolicy, "representationPolicy");
     }
 
     /**
@@ -126,6 +149,12 @@ public final class OutboundHttpRequest {
      * @return limits that the managed service further intersects with operator authority
      */
     public ExternalIoLimits limits() { return limits; }
+    /**
+     * Obtains the immutable status selection for response media-type validation.
+     *
+     * @return response representation policy applied before body parsing
+     */
+    public OutboundHttpRepresentationPolicy representationPolicy() { return representationPolicy; }
 
     static Map<String, List<String>> immutableHeaders(Map<String, List<String>> source) {
         if (source == null || source.isEmpty()) {

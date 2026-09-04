@@ -270,7 +270,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                     ExternalIoLimits.compressedHttp(Math.max(1, body.length),
                             settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
                             settings.profile().maxResponseBytes(), 100,
-                            Duration.ofMillis(settings.timeoutMs()), Set.of("application/json"))));
+                            Duration.ofMillis(settings.timeoutMs()), Set.of("application/json")),
+                    ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {
             lease.close();
             return CompletableFuture.failedFuture(sanitize(failure));
@@ -320,6 +321,14 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         attributes.put(ModelInputProvenance.PROMPT_ATTRIBUTE, provenance.snapshot());
         completion.promptTokens().ifPresent(count -> attributes.put("llm.promptTokens", count));
         completion.completionTokens().ifPresent(count -> attributes.put("llm.completionTokens", count));
+        try {
+            ExternalIoLimits.compressedHttp(1, settings.profile().maxResponseBytes(),
+                    settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(), 100,
+                    Duration.ofMillis(settings.timeoutMs()), Set.of("application/json"))
+                    .requireOutputBytes(completion.text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+        } catch (RuntimeException oversized) {
+            throw new LlmPromptException(LlmPromptException.Code.RESPONSE_TOO_LARGE);
+        }
         return new NodeResult("continue", completion.text(), Map.copyOf(attributes));
     }
 

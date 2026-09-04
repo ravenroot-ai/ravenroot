@@ -103,8 +103,10 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
                     settings.operation.method(), prepared.headers, prepared.body, remaining,
                     settings.operation.authenticated() ? settings.profile.credential().orElse(null) : null,
                     null, ExternalIoLimits.compressedHttp(Math.max(1, prepared.body.length),
-                            settings.maxResponseBytes, settings.maxResponseBytes, settings.maxResponseBytes,
-                            100, remaining, Set.of("application/json"))));
+                            settings.maxResponseBytes, settings.maxResponseBytes,
+                            projectedOutputLimit(settings.maxResponseBytes),
+                            100, remaining, Set.of("application/json")),
+                    settings.operation.representationPolicy()));
         } catch (RuntimeException failure) {
             lease.close();
             return CompletableFuture.failedFuture(sanitize(failure, false));
@@ -173,7 +175,23 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("version", "openapi.call.result.v1"); output.put("operationId", settings.operation.id());
         output.put("status", (long) status); output.put("headers", Map.copyOf(projected)); output.put("body", body);
+        try {
+            new PayloadLimits(Math.toIntExact(projectedOutputLimit(settings.maxResponseBytes)),
+                    32, 50_000, 100_000, settings.maxResponseBytes, 2_048)
+                    .enforceAndMeasure(output);
+        } catch (RuntimeException oversized) {
+            throw new OpenApiClientException(OpenApiClientException.Code.RESPONSE_TOO_LARGE);
+        }
         return NodeResult.continueWith(java.util.Collections.unmodifiableMap(output));
+    }
+
+    private static long projectedOutputLimit(int responseBytes) {
+        try {
+            return Math.min(64L * 1024 * 1024,
+                    Math.addExact(Math.multiplyExact((long) responseBytes, 6L), 64L * 1024));
+        } catch (ArithmeticException overflow) {
+            return 64L * 1024 * 1024;
+        }
     }
 
     private static RuntimeException sanitize(Throwable raw, boolean ambiguous) {

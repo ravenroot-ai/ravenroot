@@ -19,8 +19,18 @@ Every external operation needs finite limits before transport or process handoff
 requests carry `ExternalIoLimits`; the runtime intersects them with operator policy, so an adapter can
 only tighten request wire bytes, encoded response bytes, decoded bytes, projected output, media type,
 content encoding, expansion ratio, deadline, and cooperative cancellation. Missing media type is
-valid only for an empty response. The shared decoder supports identity and, only when requested, one
-complete gzip member; unknown, stacked, malformed, trailing, or concatenated encodings fail closed.
+valid only for an empty response whose status is declared to carry an interpreted representation.
+Encoding and byte bounds apply to every status, while media-type validation applies only to success
+and the bounded additional statuses that the caller's immutable protocol schema says it will parse;
+opaque error bodies can therefore reach status classification without becoming parser input. The
+shared decoder supports identity and, only when requested, one complete gzip member; unknown,
+stacked, malformed, trailing, or concatenated encodings fail closed.
+
+Decoded transport bytes and final projected bytes are separate limits. An adapter that wraps,
+escapes, base64-encodes, or otherwise expands a response must derive a finite projection ceiling and
+enforce it at the final `NodeResult` or provider-response boundary. Object storage, for example,
+checks the exact base64-and-metadata size before allocating the encoded value and then checks every
+canonical result payload; a raw-object ceiling is not incorrectly reused as the larger base64 ceiling.
 
 The managed JDK HTTP bridge cancels the subscription on a streaming breach, signals cancellation to
 the transport, and retains admission until its worker exits. It does not claim forced socket teardown

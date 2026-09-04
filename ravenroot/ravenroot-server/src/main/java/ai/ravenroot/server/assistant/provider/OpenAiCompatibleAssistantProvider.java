@@ -111,12 +111,12 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
         }
 
         HttpResponse<byte[]> response;
+        ExternalIoLimits limits = ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
+                AssistantOutputLimit.ceiling(RESPONSE_LIMITS.maxEncodedBytes()), 100, timeout,
+                java.util.Set.of("application/json"));
         try {
-            response = httpClient.send(outbound, BoundedBodyHandlers.withLimits(
-                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
-                            RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
-                            RESPONSE_LIMITS.maxEncodedBytes(), 100, timeout,
-                            java.util.Set.of("application/json"))));
+            response = httpClient.send(outbound, BoundedBodyHandlers.withLimitsForSuccess(limits));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
@@ -147,7 +147,7 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
                 throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
                         "the provider returned an unavailable status", null);
             }
-            return readTurn(response.body(), request.model());
+            return AssistantOutputLimit.requireWithin(readTurn(response.body(), request.model()), limits);
         } catch (AssistantProviderException classified) {
             throw classified;
         } catch (RuntimeException defect) {

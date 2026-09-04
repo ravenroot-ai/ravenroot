@@ -75,7 +75,9 @@ stable across process restart; it is not a cryptographic integrity or authentici
 cursor contents still cannot replace the fixed bucket or effective prefix. Results contain only
 relative keys and the requested safe fields. XML parsing is
 streaming, rejects DTDs/entities and foreign namespaces, and is bounded by profile response bytes,
-page count, nesting depth and field length.
+page count, nesting depth and field length. The raw-object limit remains distinct from the derived
+canonical-result limit: GET checks exact base64 plus fixed metadata before allocating the base64
+string, and all four behaviors validate the completed result payload against that finite ceiling.
 
 `object.delete.v1` has `version` and an optional bounded `versionId`. A version identifier is accepted
 only when the profile also grants `delete_version`. The extension issues exactly one DELETE (never a

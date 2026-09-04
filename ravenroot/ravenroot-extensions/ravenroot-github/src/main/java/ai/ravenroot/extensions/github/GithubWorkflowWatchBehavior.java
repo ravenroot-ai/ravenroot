@@ -269,7 +269,7 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         output.put("workflows", runs.stream().map(Run::output).toList()); output.put("generation", 0L);
         output.put("attempts", (long) polls); output.put("remoteId", input.commit);
         if (!reason.isEmpty()) output.put("reason", reason); if (retryAt > 0) output.put("retryAtEpochMs", retryAt);
-        return new NodeResult(outcome, Map.copyOf(output), Map.of());
+        return GithubValues.result(outcome, Map.copyOf(output), Map.of());
     }
     private static GithubException sanitize(RuntimeException failure) {
         return failure instanceof GithubException safe ? safe : new GithubException(GithubException.Code.INVALID_INPUT);

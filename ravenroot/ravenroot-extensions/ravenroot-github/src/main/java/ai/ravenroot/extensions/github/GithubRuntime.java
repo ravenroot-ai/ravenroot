@@ -127,7 +127,8 @@ final class GithubRuntime {
                     return CompletableFuture.failedFuture(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
                 }
             }
-            return CompletableFuture.completedFuture(new NodeResult(outcome(operation.record().state()), value, Map.of()));
+            return CompletableFuture.completedFuture(
+                    GithubValues.result(outcome(operation.record().state()), value, Map.of()));
         }
         final NodeResult delayed;
         try { delayed = honorRetryDeadline ? delayedRetry(operation) : null; }
@@ -261,11 +262,11 @@ final class GithubRuntime {
                 operation.record().resultJson().getBytes(StandardCharsets.UTF_8), GithubValues.LIMITS).toJava());
         Object raw = value.get("retryAtEpochMs");
         if (!(raw instanceof Long retryAt) || retryAt <= clock.millis()) return null;
-        return new NodeResult("continue", value, Map.of());
+        return GithubValues.result("continue", value, Map.of());
     }
 
     private static NodeResult retry(GithubOperationStore.Lease operation, long retryAt) {
-        return new NodeResult("continue", Map.of("version", "github.operation.retry.v1", "status", "waiting",
+        return GithubValues.result("continue", Map.of("version", "github.operation.retry.v1", "status", "waiting",
                 "reason", "RATE_LIMITED", "retryAtEpochMs", retryAt,
                 "generation", operation.record().generation(), "attempts", operation.record().attempts(),
                 "remoteId", operation.record().remoteId()), Map.of());

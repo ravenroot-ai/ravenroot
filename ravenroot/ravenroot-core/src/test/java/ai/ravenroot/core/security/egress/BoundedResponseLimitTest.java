@@ -1,6 +1,7 @@
 package ai.ravenroot.core.security.egress;
 
 import ai.ravenroot.api.node.service.ExternalIoLimits;
+import ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -134,6 +135,12 @@ class BoundedResponseLimitTest {
             exchange.sendResponseHeaders(200, payload.length);
             try (OutputStream out = exchange.getResponseBody()) { out.write(payload); }
         });
+        server.createContext("/error-text", exchange -> {
+            byte[] payload = "bounded remote error".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
+            exchange.sendResponseHeaders(429, payload.length);
+            try (OutputStream out = exchange.getResponseBody()) { out.write(payload); }
+        });
         server.start();
         base = URI.create("http://127.0.0.1:" + server.getAddress().getPort());
     }
@@ -216,6 +223,42 @@ class BoundedResponseLimitTest {
                         HttpRequest.newBuilder(base.resolve("/empty-br")).build(),
                         BoundedBodyHandlers.withLimits(limits)).thenApply(HttpResponse::body).get());
         assertInstanceOf(BoundedBodyHandlers.ResponseEncodingException.class, encoding.getCause());
+    }
+
+    @Test
+    void statusAwareHandlerBoundsButDoesNotInterpretErrorRepresentations() throws Exception {
+        ExternalIoLimits limits = ExternalIoLimits.compressedHttp(1, 64, 64, 8, 10,
+                Duration.ofSeconds(2), Set.of("application/json"));
+        HttpResponse<byte[]> response = HttpClient.newHttpClient().sendAsync(
+                HttpRequest.newBuilder(base.resolve("/error-text")).build(),
+                BoundedBodyHandlers.withLimitsForSuccess(limits)).get();
+        assertEquals(429, response.statusCode());
+        assertEquals("bounded remote error", new String(response.body(), StandardCharsets.UTF_8));
+
+        ExternalIoLimits tooSmall = ExternalIoLimits.compressedHttp(1, 4, 64, 64, 10,
+                Duration.ofSeconds(2), Set.of("application/json"));
+        ExecutionException oversized = assertThrows(ExecutionException.class, () -> HttpClient.newHttpClient()
+                .sendAsync(HttpRequest.newBuilder(base.resolve("/error-text")).build(),
+                        BoundedBodyHandlers.withLimitsForSuccess(tooSmall)).get());
+        assertInstanceOf(BoundedBodyHandlers.ResponseTooLargeException.class, oversized.getCause());
+
+        ExecutionException selected = assertThrows(ExecutionException.class,
+                () -> HttpClient.newHttpClient().sendAsync(
+                        HttpRequest.newBuilder(base.resolve("/error-text")).build(),
+                        BoundedBodyHandlers.withLimits(limits,
+                                new OutboundHttpRepresentationPolicy(false, Set.of(429)))).get());
+        assertInstanceOf(BoundedBodyHandlers.ResponseMediaTypeException.class, selected.getCause());
+    }
+
+    @Test
+    void projectedOutputLimitIsNotMisappliedToDecodedTransportBytes() throws Exception {
+        ExternalIoLimits limits = new ExternalIoLimits(1, 16, 16, 1, 1,
+                Duration.ofSeconds(2), Duration.ofSeconds(1), Set.of(), Set.of("identity"));
+        byte[] body = HttpClient.newHttpClient().sendAsync(
+                HttpRequest.newBuilder(base.resolve("/sized?2")).build(),
+                BoundedBodyHandlers.withLimits(limits)).thenApply(HttpResponse::body).get();
+        assertEquals(2, body.length);
+        assertThrows(IllegalArgumentException.class, () -> limits.requireOutputBytes(body.length));
     }
 
     @Test

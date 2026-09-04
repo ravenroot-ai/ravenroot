@@ -1140,7 +1140,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         ExternalIoLimits.compressedHttp(Math.max(1, body.length),
                                 settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
                                 settings.profile().maxResponseBytes(), 100,
-                                Duration.ofMillis(effectiveTimeout), Set.of("application/json"))));
+                                Duration.ofMillis(effectiveTimeout), Set.of("application/json")),
+                        ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             } catch (RuntimeException failure) {
                 turnBudget.indeterminate();
                 result.completeExceptionally(sanitize(failure));
@@ -1409,6 +1410,14 @@ public final class AgentNodeBehavior implements NodeBehavior {
             attributes.put(ModelInputProvenance.AGENT_ATTRIBUTE, provenance.snapshot());
             if (tokens > 0) {
                 attributes.put("agent.totalTokens", tokens);
+            }
+            try {
+                ExternalIoLimits.compressedHttp(1, settings.profile().maxResponseBytes(),
+                        settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(), 100,
+                        Duration.ofMillis(settings.deadlineMs()), Set.of("application/json"))
+                        .requireOutputBytes(turn.answer().getBytes(StandardCharsets.UTF_8).length);
+            } catch (RuntimeException oversized) {
+                throw new AgentException(AgentException.Code.RESPONSE_TOO_LARGE);
             }
             return new NodeResult("continue", turn.answer(), Map.copyOf(attributes));
         }

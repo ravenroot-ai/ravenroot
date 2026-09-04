@@ -157,7 +157,8 @@ final class McpSession {
                     ExternalIoLimits.compressedHttp(Math.max(1, body.length),
                             profile.maxResponseBytes(), profile.maxResponseBytes(),
                             profile.maxResponseBytes(), 100, Duration.ofMillis(remaining),
-                            expectsResult ? Set.of("application/json", "text/event-stream") : Set.of())));
+                            expectsResult ? Set.of("application/json", "text/event-stream") : Set.of()),
+                    ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(refusalFor(failure));
         }

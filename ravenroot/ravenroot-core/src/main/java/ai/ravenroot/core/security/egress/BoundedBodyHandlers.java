@@ -1,6 +1,7 @@
 package ai.ravenroot.core.security.egress;
 
 import ai.ravenroot.api.node.service.ExternalIoLimits;
+import ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -50,7 +51,7 @@ public final class BoundedBodyHandlers {
     /** Returns a bounded string handler for an opaque, identity-encoded response. */
     public static HttpResponse.BodyHandler<String> ofString(long maxBytes, Charset charset) {
         ExternalIoLimits limits = identityLimits(maxBytes);
-        return info -> HttpResponse.BodySubscribers.mapping(subscriber(info.headers(), limits),
+        return info -> HttpResponse.BodySubscribers.mapping(subscriber(info.headers(), limits, true),
                 bytes -> new String(bytes, charset));
     }
 
@@ -65,7 +66,27 @@ public final class BoundedBodyHandlers {
      */
     public static HttpResponse.BodyHandler<byte[]> withLimits(ExternalIoLimits limits) {
         java.util.Objects.requireNonNull(limits, "limits");
-        return info -> subscriber(info.headers(), limits);
+        return info -> subscriber(info.headers(), limits, true);
+    }
+
+    /**
+     * Returns a bounded handler that applies the media-type allowlist only to successful responses.
+     * Error bodies remain subject to encoding and byte ceilings so callers can classify their status
+     * without parsing or trusting the remote representation.
+     */
+    public static HttpResponse.BodyHandler<byte[]> withLimitsForSuccess(ExternalIoLimits limits) {
+        return withLimits(limits, OutboundHttpRepresentationPolicy.SUCCESS_ONLY);
+    }
+
+    /**
+     * Returns a bounded handler that validates media types for the statuses selected by a finite
+     * immutable protocol policy. Encoding and byte bounds apply to every status.
+     */
+    public static HttpResponse.BodyHandler<byte[]> withLimits(ExternalIoLimits limits,
+                                                               OutboundHttpRepresentationPolicy policy) {
+        java.util.Objects.requireNonNull(limits, "limits");
+        java.util.Objects.requireNonNull(policy, "policy");
+        return info -> subscriber(info.headers(), limits, policy.validates(info.statusCode()));
     }
 
     private static ExternalIoLimits identityLimits(long maxBytes) {
@@ -74,14 +95,16 @@ public final class BoundedBodyHandlers {
                 java.util.Set.of(), java.util.Set.of("identity"));
     }
 
-    private static HttpResponse.BodySubscriber<byte[]> subscriber(HttpHeaders headers, ExternalIoLimits limits) {
-        IOException headerFailure = validateHeaders(headers, limits);
-        boolean missingMediaType = !limits.acceptedMediaTypes().isEmpty()
+    private static HttpResponse.BodySubscriber<byte[]> subscriber(HttpHeaders headers, ExternalIoLimits limits,
+                                                                   boolean validateRepresentation) {
+        IOException headerFailure = validateHeaders(headers, limits, validateRepresentation);
+        boolean missingMediaType = validateRepresentation && !limits.acceptedMediaTypes().isEmpty()
                 && headers.allValues("Content-Type").isEmpty();
         return new LimitedSubscriber(limits, encoding(headers), headerFailure, missingMediaType);
     }
 
-    private static IOException validateHeaders(HttpHeaders headers, ExternalIoLimits limits) {
+    private static IOException validateHeaders(HttpHeaders headers, ExternalIoLimits limits,
+                                                boolean validateRepresentation) {
         String encoding = encoding(headers);
         if (encoding == null || !limits.acceptedContentEncodings().contains(encoding)) {
             return new ResponseEncodingException();
@@ -100,7 +123,7 @@ public final class BoundedBodyHandlers {
                 return new ResponseTooLargeException("transport", declaredCeiling);
             }
         }
-        if (!limits.acceptedMediaTypes().isEmpty()) {
+        if (validateRepresentation && !limits.acceptedMediaTypes().isEmpty()) {
             List<String> values = headers.allValues("Content-Type");
             if (!values.isEmpty()) {
                 if (values.size() != 1) return new ResponseMediaTypeException();
@@ -183,7 +206,7 @@ public final class BoundedBodyHandlers {
                 byte[] output = "gzip".equals(encoding) ? inflate(raw, limits) : raw;
                 if (output.length > limits.maximumDecodedResponseBytes()) {
                     throw new ResponseTooLargeException("decoded output",
-                            Math.min(limits.maximumDecodedResponseBytes(), limits.maximumOutputBytes()));
+                            limits.maximumDecodedResponseBytes());
                 }
                 body.complete(output);
             } catch (IOException failure) {
@@ -209,8 +232,7 @@ public final class BoundedBodyHandlers {
         } catch (ArithmeticException overflow) {
             ratioCeiling = Long.MAX_VALUE;
         }
-        long ceiling = Math.min(Math.min(limits.maximumDecodedResponseBytes(),
-                limits.maximumOutputBytes()), ratioCeiling);
+        long ceiling = Math.min(limits.maximumDecodedResponseBytes(), ratioCeiling);
         Inflater inflater = new Inflater(true);
         inflater.setInput(raw, offset, raw.length - offset);
         try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
@@ -276,7 +298,6 @@ public final class BoundedBodyHandlers {
     }
 
     private static long identityCeiling(ExternalIoLimits limits) {
-        return Math.min(limits.maximumEncodedResponseBytes(),
-                Math.min(limits.maximumDecodedResponseBytes(), limits.maximumOutputBytes()));
+        return Math.min(limits.maximumEncodedResponseBytes(), limits.maximumDecodedResponseBytes());
     }
 }

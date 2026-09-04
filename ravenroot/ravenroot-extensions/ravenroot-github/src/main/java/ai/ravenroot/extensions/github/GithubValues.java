@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.github;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.execution.NodeResult;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -92,6 +93,16 @@ final class GithubValues {
 
     static byte[] jsonBytes(Map<String, ?> value) {
         return PayloadJson.write(PayloadValue.fromJava(value, LIMITS)).getBytes(StandardCharsets.UTF_8);
+    }
+
+    static NodeResult result(String outcome, Object payload, Map<String, Object> attributes) {
+        try {
+            LIMITS.enforceAndMeasure(payload);
+            LIMITS.enforceAndMeasure(attributes);
+            return new NodeResult(outcome, payload, attributes);
+        } catch (RuntimeException oversized) {
+            throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        }
     }
 
     static String sha256(byte[] bytes) {

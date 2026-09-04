@@ -454,8 +454,9 @@ public sealed interface ExecutionStoreFailure {
      * A tool-approval lifecycle transition is illegal for the committed state or ineligible at the
      * store clock's current time.
      *
-     * <p>This includes conflicts with a durable lifecycle winner, expiry requested before the
-     * absolute deadline, and approval, denial, or consumption attempted after that deadline.</p>
+     * <p>This includes conflicts with a durable lifecycle winner, expiry attempted before the
+     * absolute deadline, and approval, denial, or consumption attempted at or after that
+     * deadline.</p>
      *
      * @param approvalId target approval identity
      * @param current currently committed status

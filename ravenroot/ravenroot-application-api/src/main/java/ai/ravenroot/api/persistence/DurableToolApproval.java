@@ -6,10 +6,10 @@ package ai.ravenroot.api.persistence;
  * @param key owning execution identity
  * @param request immutable approval request
  * @param status current durable approval state
- * @param actor bounded identity supplied by the latest actor-bearing decision or system
- *              cancellation, retained through later actorless effect transitions, or empty before
- *              any actor-bearing transition
- * @param revision enclosing process and execution-store revision containing this approval snapshot
+ * @param actor bounded identity from the latest actor-bearing decision; it is retained through
+ *              actorless consumption and effect-outcome transitions, may identify a system
+ *              cancellation, and is empty before any actor-bearing transition
+ * @param revision revision of the enclosing process snapshot in the execution store
  */
 public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration request,
                                   ToolApprovalStatus status, String actor, long revision) {
@@ -30,7 +30,7 @@ public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration req
      *
      * @param key owning execution identity
      * @param request immutable request
-     * @param revision enclosing process and execution-store revision for the pending snapshot
+     * @param revision revision of the enclosing process snapshot in the execution store
      * @return pending approval snapshot
      */
     public static DurableToolApproval pending(ExecutionKey key, ToolApprovalRegistration request,
@@ -42,7 +42,7 @@ public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration req
      * Applies one legal state transition.
      *
      * @param transition requested transition
-     * @param nextRevision enclosing process and execution-store revision assigned to the result
+     * @param nextRevision revision of the enclosing process snapshot that contains the result
      * @return transitioned approval snapshot
      */
     public DurableToolApproval apply(ToolApprovalTransition transition, long nextRevision) {

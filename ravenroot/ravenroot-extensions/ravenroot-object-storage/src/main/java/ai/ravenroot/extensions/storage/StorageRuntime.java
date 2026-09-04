@@ -27,8 +27,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 final class StorageRuntime {
     private static final Set<NodePackageServiceException.Reason> UNCERTAIN = Set.of(
@@ -124,10 +122,16 @@ final class StorageRuntime {
         }
 
         void start(int number) {
-            if (outcome.isDone()) return;
+            synchronized (outcome) {
+                startLocked(number);
+            }
+        }
+
+        private void startLocked(int number) {
+            if (outcome.terminal) return;
             long remaining = deadline - System.nanoTime();
             if (remaining <= 0) {
-                outcome.completeExceptionally(StorageException.of(request.semantics().ambiguous
+                outcome.failLocked(StorageException.of(request.semantics().ambiguous
                         ? StorageException.Code.AMBIGUOUS : StorageException.Code.DEADLINE_EXCEEDED));
                 return;
             }
@@ -137,38 +141,43 @@ final class StorageRuntime {
                         request.method(), request.headers(), request.body(), Duration.ofNanos(remaining), null,
                         new OutboundHttpSigning(profile.signingBindingId())));
             } catch (RuntimeException failure) {
-                failed(number, failure);
+                failedLocked(number, failure);
                 return;
             }
-            if (!outcome.install(call)) return;
+            outcome.call = call;
             call.completion().whenComplete((response, failure) -> {
-                outcome.clear(call);
-                if (outcome.isDone()) return;
-                if (failure != null) {
-                    failed(number, failure);
-                    return;
-                }
-                try {
-                    if (response.body().length > request.maxResponseBytes()) {
-                        throw StorageException.of(StorageException.Code.RESPONSE_TOO_LARGE);
-                    }
-                    if (canRetry(number) && retryableStatus(response.statusCode())) {
-                        retry(number);
+                synchronized (outcome) {
+                    if (outcome.terminal || outcome.call != call) return;
+                    outcome.call = null;
+                    if (failure != null) {
+                        failedLocked(number, failure);
                         return;
                     }
-                    outcome.complete(request.projector().project(response));
-                } catch (RuntimeException invalid) {
-                    outcome.completeExceptionally(invalid instanceof StorageException ? invalid
-                            : StorageException.of(StorageException.Code.RESPONSE_INVALID));
+                    try {
+                        if (request.semantics().ambiguous && retryableStatus(response.statusCode())) {
+                            throw StorageException.of(StorageException.Code.AMBIGUOUS);
+                        }
+                        if (response.body().length > request.maxResponseBytes()) {
+                            throw StorageException.of(StorageException.Code.RESPONSE_TOO_LARGE);
+                        }
+                        if (canRetry(number) && retryableStatus(response.statusCode())) {
+                            retryLocked(number);
+                            return;
+                        }
+                        outcome.succeedLocked(request.projector().project(response));
+                    } catch (RuntimeException invalid) {
+                        outcome.failLocked(invalid instanceof StorageException ? invalid
+                                : StorageException.of(StorageException.Code.RESPONSE_INVALID));
+                    }
                 }
             });
         }
 
-        private void failed(int number, Throwable failure) {
+        private void failedLocked(int number, Throwable failure) {
             if (canRetry(number) && retryable(failure) && deadline - System.nanoTime() > 0) {
-                retry(number);
+                retryLocked(number);
             } else {
-                outcome.completeExceptionally(map(failure, request.semantics().ambiguous));
+                outcome.failLocked(map(failure, request.semantics().ambiguous));
             }
         }
 
@@ -176,11 +185,11 @@ final class StorageRuntime {
             return request.semantics().retryable && request.retries() > number;
         }
 
-        private void retry(int number) {
+        private void retryLocked(int number) {
             if (!admission.retry(System.nanoTime())) {
-                outcome.completeExceptionally(StorageException.of(StorageException.Code.RATE_LIMITED));
+                outcome.failLocked(StorageException.of(StorageException.Code.RATE_LIMITED));
             } else {
-                start(number + 1);
+                startLocked(number + 1);
             }
         }
 
@@ -302,30 +311,38 @@ final class StorageRuntime {
     }
 
     private static final class OutcomeFuture extends CompletableFuture<NodeResult> {
-        private final AtomicReference<OutboundCall<?>> call = new AtomicReference<>();
         private final boolean ambiguous;
-        private final AtomicBoolean cancellation = new AtomicBoolean();
+        private OutboundCall<?> call;
+        private boolean terminal;
         OutcomeFuture(boolean ambiguous) { this.ambiguous = ambiguous; }
-        boolean install(OutboundCall<?> current) {
-            if (isDone() || cancellation.get()) {
-                current.cancel();
-                return false;
-            }
-            call.set(current);
-            if ((isDone() || cancellation.get()) && call.compareAndSet(current, null)) {
-                current.cancel();
-                return false;
-            }
-            return true;
+
+        private void succeedLocked(NodeResult result) {
+            terminal = true;
+            super.complete(result);
         }
-        void clear(OutboundCall<?> current) { call.compareAndSet(current, null); }
+
+        private void failLocked(RuntimeException failure) {
+            terminal = true;
+            super.completeExceptionally(failure);
+        }
+
         @Override public boolean cancel(boolean mayInterruptIfRunning) {
-            if (isDone() || !cancellation.compareAndSet(false, true)) return false;
-            OutboundCall<?> active = call.getAndSet(null);
-            if (active != null) active.cancel();
-            completeExceptionally(StorageException.of(ambiguous ? StorageException.Code.AMBIGUOUS
+            OutboundCall<?> active;
+            synchronized (this) {
+                if (terminal || super.isDone()) return false;
+                terminal = true;
+                active = call;
+                call = null;
+            }
+            if (active != null) {
+                try {
+                    active.cancel();
+                } catch (RuntimeException ignored) {
+                    // The accepted local cancellation remains authoritative over a vendor cancellation failure.
+                }
+            }
+            return super.completeExceptionally(StorageException.of(ambiguous ? StorageException.Code.AMBIGUOUS
                     : StorageException.Code.DEADLINE_EXCEEDED));
-            return true;
         }
     }
 }

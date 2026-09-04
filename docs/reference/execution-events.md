@@ -21,6 +21,7 @@ The result contains unique node sets rather than an ordered trace:
 
 | Field | Interpretation |
 |---|---|
+| `paused` | Whether a pause is currently held on this execution; always `false` once the execution is terminal |
 | `visitedNodes` | Nodes entered during traversal |
 | `defaultedNodes` | Nodes resolved through default behavior |
 | `bypassedNodes` | Nodes traversed without executing behavior |
@@ -28,6 +29,12 @@ The result contains unique node sets rather than an ordered trace:
 | `untakenEdges` | Edge identifiers or descriptions not selected |
 
 A handled failure can coexist with an overall successful terminal path. Consumers use events for ordering and result fields for set membership.
+
+## Pause and resume events
+
+`EXECUTION_PAUSED` and `EXECUTION_RESUMED` report the same hold `POST .../pause` and `POST .../resume` establish and release. A paused execution has not stopped: it keeps its state, it is still listed by `GET /v1/executions/live`, and it is still cancellable — the events and the `paused` field above both describe a hold, not a terminal outcome.
+
+**A pause is process-local and does not survive a restart.** It is held in the process that owns the traversal and is written to no store. A restart forgets the hold outright; the traversal is not resumed by recovery, because recovery has no durable record that it was ever paused to begin with.
 
 ## Event delivery
 

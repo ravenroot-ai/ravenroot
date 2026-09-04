@@ -58,13 +58,25 @@ import java.util.UUID;
  *                          otherwise fully executing run as readily as by a test submission. Not a
  *                          subset of {@code visitedNodes}: it names edges, not nodes. See
  *                          {@link #untakenEdges()}.
+ * @param paused            whether a pause is currently held on this traversal. See
+ *                          {@link #paused()} for why this qualifies {@code status} instead of
+ *                          becoming a value of it, and why a terminal outcome never carries it.
  */
 public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, ProcessInstanceStatus status,
                                Object payload, Set<String> visitedNodes, Set<String> defaultedNodes,
                                Set<String> bypassedNodes, Set<String> handledFailureNodes,
-                               Set<String> untakenEdges) {
+                               Set<String> untakenEdges, boolean paused) {
 /**
- * Freezes all node collections so callers cannot rewrite the reported execution history.
+ * Freezes all node collections so callers cannot rewrite the reported execution history, and
+ * forces the one combination that has no meaning: a terminal execution that is also holding.
+ *
+ * <p>An execution that has completed or failed has nothing left to hold, so {@code paused} is
+ * forced to {@code false} rather than rejected. Rejection would turn a read into a failure at the
+ * moment a reader most needs an answer -- a pause and a completion racing each other is exactly
+ * the interleaving this component exists to describe -- and the side that loses that race has not
+ * produced a malformed outcome, only an out-of-date one. Forcing it keeps "terminal implies not
+ * paused" true at the type, so no adapter, projection or consumer can be shown the impossible
+ * combination even if one tries to construct it.</p>
  */
     public ExecutionOutcome {
         Objects.requireNonNull(processInstanceId, "processInstanceId");
@@ -75,6 +87,33 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
         bypassedNodes = Set.copyOf(bypassedNodes == null ? Set.of() : bypassedNodes);
         handledFailureNodes = Set.copyOf(handledFailureNodes == null ? Set.of() : handledFailureNodes);
         untakenEdges = Set.copyOf(untakenEdges == null ? Set.of() : untakenEdges);
+        paused = paused && !status.terminal();
+    }
+
+/**
+ * Compatibility constructor preserving the canonical shape before pauses were observable.
+ *
+ * <p>Reports {@code paused == false}, and every producer of a stored outcome uses this shape on
+ * purpose. A pause is live, process-local state that changes after an outcome has been recorded, so
+ * a copy of it stored beside the outcome would be a second source of truth that goes stale the
+ * moment it is written. The live value is applied on the way out, with
+ * {@link #withPaused(boolean)}.</p>
+ * @param processInstanceId durable process that contains this traversal
+ * @param traversalId caller-facing traversal identity
+ * @param status lifecycle state at the time the outcome was observed
+ * @param payload terminal payload, or {@code null} while unavailable
+ * @param visitedNodes graph nodes entered during this traversal
+ * @param defaultedNodes entered nodes that ran with their unresolved default behavior
+ * @param bypassedNodes entered nodes deliberately bypassed
+ * @param handledFailureNodes entered nodes whose failures were handled by graph semantics
+ * @param untakenEdges labels for bypassed-node edges that could not be selected
+ */
+    public ExecutionOutcome(UUID processInstanceId, UUID traversalId, ProcessInstanceStatus status,
+                            Object payload, Set<String> visitedNodes, Set<String> defaultedNodes,
+                            Set<String> bypassedNodes, Set<String> handledFailureNodes,
+                            Set<String> untakenEdges) {
+        this(processInstanceId, traversalId, status, payload, visitedNodes, defaultedNodes, bypassedNodes,
+                handledFailureNodes, untakenEdges, false);
     }
 
 /**
@@ -186,5 +225,59 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
      */
     public Set<String> untakenEdges() {
         return untakenEdges;
+    }
+
+    /**
+     * Whether this traversal is holding on a pause and will not begin another node until it is
+     * resumed.
+     *
+     * <p>Exactly the {@link #degraded()} and {@link #handledFailure()} shape, and for the same
+     * reason: {@link #status()} alone reports {@code RUNNING}, and a reader cannot tell a traversal
+     * that is progressing from one that is deliberately held. Before this, only the caller that
+     * issued the pause knew. A second operator, a reconnecting client, or the same operator on a
+     * different session read a held execution as a running one -- or, because a held traversal also
+     * stops publishing events, as a stalled one, which is the opposite conclusion and the one that
+     * gets acted on.</p>
+     *
+     * <h4>Why this is not a {@link ProcessInstanceStatus} value</h4>
+     * <p>{@code ProcessInstanceStatus} is the durable lifecycle vocabulary: it is persisted, the
+     * durable process inventory queries it, and its {@code canTransitionTo} rules are a state machine
+     * other components rely on. A pause is none of those things. It is held in the process that owns
+     * the traversal, it is written to no store, and a restart forgets it. A durable status that a
+     * restart silently drops would be a claim this system cannot keep, so the pause qualifies the
+     * status instead of becoming one. A consumer switching over {@code status} therefore keeps
+     * working unchanged, and one that cares about holds reads this as well.</p>
+     *
+     * <p><strong>Always {@code false} on a terminal outcome</strong>, enforced by this record's own
+     * constructor rather than by whichever caller builds one.</p>
+ * @return whether a pause is currently held on this traversal; never {@code true} for a terminal
+ *         {@link #status()}
+     */
+    public boolean paused() {
+        return paused;
+    }
+
+    /**
+     * The same outcome with live pause state applied.
+     *
+     * <p>The one supported way to put a pause onto an outcome, because a pause is read at the moment
+     * of the read and never stored beside the outcome it qualifies. A stored outcome is an immutable
+     * record of what a traversal has done; whether it is holding right now is a fact about the
+     * runtime rather than about that history, and the two have different lifetimes. Keeping them
+     * apart is what stops a retained outcome from reporting a hold that was released long ago.</p>
+     *
+     * <p>A terminal outcome returns itself unchanged, so this method cannot construct the
+     * combination the constructor refuses.</p>
+ * @param paused whether a pause is currently held on this traversal
+ * @return this outcome when the value is already correct or the status is terminal, and otherwise a
+ *         copy carrying the given pause state
+     */
+    public ExecutionOutcome withPaused(boolean paused) {
+        boolean effective = paused && !status.terminal();
+        if (effective == this.paused) {
+            return this;
+        }
+        return new ExecutionOutcome(processInstanceId, traversalId, status, payload, visitedNodes,
+                defaultedNodes, bypassedNodes, handledFailureNodes, untakenEdges, effective);
     }
 }

@@ -3,7 +3,9 @@ package ai.ravenroot.server.persistence;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
+import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
 import ai.ravenroot.persistence.sqlite.SqliteStoreMaintenanceLock;
 
 import java.time.Clock;
@@ -40,10 +42,30 @@ public final class ExecutionStoreBootstrap {
             try {
                 SqliteStoreMaintenanceLock.requireNoPendingRecovery(configuration.location());
                 if (!configuration.enabled()) {
-                    return new Opened(null, () -> { }, maintenanceLock::close);
+                    return new Opened(null, null, () -> { }, maintenanceLock::close);
                 }
                 var store = new SqliteExecutionStore(configuration.location(), clock);
-                return new Opened(store, store::close, maintenanceLock::close);
+                // Same database file as the executions that pin these definitions, which is what puts
+                // both into one backup snapshot and lets retention decide reachability from the
+                // execution rows in the transaction that removes a definition. The store's own
+                // reachability query is the authority here, so no additional reference source is
+                // composed; see GraphDefinitionReferences for the reference classes that are not yet
+                // durable and therefore cannot contribute one.
+                GraphDefinitionStore definitions;
+                try {
+                    definitions = new SqliteGraphDefinitionStore(configuration.location(), clock,
+                            ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE);
+                } catch (RuntimeException failed) {
+                    store.close();
+                    throw failed;
+                }
+                return new Opened(store, definitions, () -> {
+                    try {
+                        definitions.close();
+                    } finally {
+                        store.close();
+                    }
+                }, maintenanceLock::close);
             } catch (RuntimeException failed) {
                 maintenanceLock.close();
                 throw failed;
@@ -85,23 +107,37 @@ public final class ExecutionStoreBootstrap {
     /** Exactly-once owner for the store first and its maintenance lease second. */
     public static final class Opened implements AutoCloseable {
         private final ExecutionStore store;
+        private final GraphDefinitionStore graphDefinitionStore;
         private final Runnable closeStore;
         private final Runnable releaseMaintenanceLock;
         private final AtomicBoolean closed = new AtomicBoolean();
 
-        private Opened(ExecutionStore store, Runnable closeStore, Runnable releaseMaintenanceLock) {
+        private Opened(ExecutionStore store, GraphDefinitionStore graphDefinitionStore,
+                       Runnable closeStore, Runnable releaseMaintenanceLock) {
             this.store = store;
+            this.graphDefinitionStore = graphDefinitionStore;
             this.closeStore = Objects.requireNonNull(closeStore, "closeStore");
             this.releaseMaintenanceLock = Objects.requireNonNull(
                     releaseMaintenanceLock, "releaseMaintenanceLock");
         }
 
         static Opened forTest(Runnable closeStore, Runnable releaseMaintenanceLock) {
-            return new Opened(null, closeStore, releaseMaintenanceLock);
+            return new Opened(null, null, closeStore, releaseMaintenanceLock);
         }
 
         public ExecutionStore store() {
             return store;
+        }
+
+        /**
+         * The durable graph definitions held in the same database, or {@code null} when the store is
+         * configured off. Closed with the execution store, definitions first, so nothing can observe
+         * a definition store whose database file has already been released.
+         *
+         * @return the composed graph definition store, or {@code null}.
+         */
+        public GraphDefinitionStore graphDefinitionStore() {
+            return graphDefinitionStore;
         }
 
         /**

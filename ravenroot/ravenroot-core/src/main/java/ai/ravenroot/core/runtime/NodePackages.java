@@ -14,6 +14,9 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
+import ai.ravenroot.api.execution.CancellationSignal;
+import ai.ravenroot.api.execution.NodeMessage;
+import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.ReservedGraphProperties;
 
@@ -23,6 +26,8 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 /**
  * Registers a third-party {@link NodePackage} into the trusted catalog (CORE-06).
@@ -237,17 +242,37 @@ public final class NodePackages {
                 throw new IllegalStateException("Behavior '" + node.behavior() + "' returned no action for node '"
                         + node.id() + "'");
             }
-            return message -> {
-                var stage = action.handle(message);
-                if (stage == null) {
-                    // A null stage would surface as a NullPointerException inside the runner's
-                    // dispatch, attributed to the engine rather than to the node that produced it.
-                    return java.util.concurrent.CompletableFuture.failedFuture(new IllegalStateException(
-                            "Behavior '" + node.behavior() + "' returned no result stage for node '"
-                                    + node.id() + "'"));
+            return new NodeHandler() {
+                @Override
+                public CompletionStage<NodeResult> handle(NodeMessage message) {
+                    return checked(action.handle(message));
                 }
-                return stage;
+
+                @Override
+                public CompletionStage<NodeResult> handle(NodeMessage message, CancellationSignal cancellation) {
+                    return checked(action.handle(message, cancellation));
+                }
+
+                private CompletionStage<NodeResult> checked(CompletionStage<NodeResult> stage) {
+                    if (stage == null) {
+                        // A null stage would surface as a NullPointerException inside the runner's
+                        // dispatch, attributed to the engine rather than to the node that produced it.
+                        return CompletableFuture.failedFuture(new IllegalStateException(
+                                "Behavior '" + node.behavior() + "' returned no result stage for node '"
+                                        + node.id() + "'"));
+                    }
+                    return stage;
+                }
             };
+        }
+
+        @Override
+        public java.util.Optional<ai.ravenroot.api.node.ToolCallContinuationAction>
+                createToolCallContinuation(GraphNode node) {
+            if (!serviceAware) return java.util.Optional.empty();
+            NodeConfiguration configuration = new NodeConfiguration(
+                    node.id(), node.behavior(), node.properties());
+            return behavior.createToolCallContinuation(configuration, services);
         }
 
         InboundSource createSource(GraphNode node, InboundSourceContext context) {

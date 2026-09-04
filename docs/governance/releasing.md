@@ -133,7 +133,10 @@ exact-commit CI run before automation creates an annotated tag. Because events c
 repository `GITHUB_TOKEN` do not recursively start ordinary tag-push workflows, the authorization
 workflow explicitly dispatches the publication workflow on that newly created tag ref. A manual
 dispatch is only a recovery entry point: it is rejected unless the workflow itself is running on the
-same existing tag ref.
+same existing tag ref and names that exact tag. Push and recovery entry points both repeat the full
+SemVer, annotated-tag, protected-`main`, reviewed-merge, release-note, and version-surface checks
+before the protected publication job can start. Pull-request, branch, scheduled, and mismatched-ref
+events fail before release credentials are available.
 
 ## Release automation and operator runbook
 
@@ -148,7 +151,8 @@ Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central bo
 - the reusable `ravenroot-api-testkit`, `ravenroot-engine-testkit`, and
   `ravenroot-persistence-testkit` conformance artifacts;
 - the `ravenroot-extensions` parent and the `ravenroot-ai`, `ravenroot-amqp091`,
-  `ravenroot-filesystem`, `ravenroot-jdbc`, `ravenroot-kafka`, `ravenroot-mail`,
+  `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-github`, `ravenroot-jdbc`,
+  `ravenroot-kafka`, `ravenroot-mail`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
   `ravenroot-openapi-server`, `ravenroot-spel`, `ravenroot-telegram`, and
   `ravenroot-websocket` extensions.
@@ -208,6 +212,31 @@ gpg --verify artifact.jar.asc artifact.jar
    commit.
 8. Fast-forward `dev` to the released `main` merge commit before accepting more integration work.
 
+The protected job performs a second, fail-closed transaction after approval. It builds and signs all
+Central payloads, assembles their Portal bundle, builds the OCI layout with its SBOM and SLSA
+provenance predicates, stages GitHub Release assets, and validates every byte, checksum, signature,
+label, predicate subject, and digest locally. Only after all of those checks succeed may it make the
+first external write. The same validated Central bundle is uploaded through the Central Publisher
+Portal API; publication never rebuilds or substitutes its contents.
+
+The GHCR tag is the SemVer value without `v`. The runtime image-manifest digest commits its config,
+layers, labels, version, and revision and is the content identity used for retry comparison. BuildKit
+predicate envelopes contain run-specific evidence, so their bytes may differ on a deterministic
+rebuild; a retry therefore also requires one subject-bound attestation manifest containing both the
+SPDX SBOM and SLSA provenance predicates. The retry downloads those predicate blobs by the published
+attestation-manifest digest, checks every descriptor digest and byte size, parses each in-toto
+statement, and requires the exact image version and runtime image digest as its only subject. After
+publication, the workflow records and signs the
+registry's immutable top-level index digest. Digest references always use
+`ghcr.io/ravenroot-ai/ravenroot@sha256:<digest>`; a combined `name:tag@digest` reference is invalid and
+is never constructed. The protected workflow adds GitHub's keyless signed provenance for the
+published index. No release in this policy creates or moves `latest`, including a stable release.
+
+GitHub Releases are created as drafts. The workflow verifies the reviewed notes and exact asset set,
+uploads only missing draft assets, verifies every asset digest, and publishes the draft only when it
+is complete. A published release is read-only to the workflow: missing, extra, or different content
+causes a refusal instead of an edit.
+
 ### Retry and partial-publication recovery
 
 Never delete, replace, or reuse a released version. Re-run **Publish immutable release** from the
@@ -216,20 +245,49 @@ from the tag, then follows these rules:
 
 - if no Central component exists, it uploads and automatically publishes one complete signed bundle;
 - if every Central component exists, it rebuilds locally without uploading and compares every immutable
-  payload byte-for-byte with Central;
+  payload byte-for-byte with Central, verifies all four published checksums, and verifies every
+  detached signature against the reviewed Ravenroot release key;
 - if only part of the Central coordinate set is visible, or any payload differs, it stops for human
   investigation;
-- if the GHCR version tag exists, its Linux AMD64 image-manifest digest must match the normalized
-  rebuilt image and its SBOM and provenance attestation manifests must be present, or the retry stops;
-  a matching image is retained without moving `latest`;
-- existing GitHub Release assets are downloaded and hashed; matching assets are retained, missing
-  assets are added, and mismatches stop the run.
+- if the GHCR version tag exists, its Linux AMD64 image-manifest digest must match the rebuilt
+  runtime image exactly; its SBOM and provenance predicate blobs, descriptors, in-toto types, and
+  exact version-and-digest subjects must also validate, or the retry stops; a matching image is
+  retained without moving `latest`;
+- a draft GitHub Release may receive a missing asset after all existing assets match; a published
+  release must already contain exactly the complete matching set.
 
 If Central reports `PUBLISHING` or `VALIDATING`, wait for the portal deployment to reach a terminal
 state before retrying. If one registry succeeded and another failed, preserve the successful
 immutable publication and resume from the same tag. Open a focused public issue for a reproducible
 pipeline defect; do not relax ancestry, version, review, signature, content-identity, or provenance
 checks.
+
+The workflow never drops a Central deployment, deletes a package version, retags an image, replaces
+an asset, or moves a release tag. If a Central upload was accepted but the run lost its deployment ID,
+wait for the deterministic version to become visible and rerun. Central will either reconcile as the
+same complete release or reject the duplicate; the workflow never asks it to overwrite coordinates.
+Likewise, only the registry's explicit `manifest unknown` response means that the version tag is
+absent. A credential-helper, local configuration, transport, DNS, TLS, authorization, or generic
+`not found` failure is fatal and is never treated as permission to push.
+
+Verify a completed image and its keyless provenance with:
+
+```sh
+docker pull ghcr.io/ravenroot-ai/ravenroot:<version>
+docker pull ghcr.io/ravenroot-ai/ravenroot@sha256:<digest>
+gh attestation verify \
+  oci://ghcr.io/ravenroot-ai/ravenroot@sha256:<digest> \
+  --repo ravenroot-ai/ravenroot
+```
+
+The version and digest pulls must resolve to the same OCI index. After the protected publication job,
+a fresh job with no protected Environment, package permission, release secret, or inherited registry
+login downloads the complete image twice using Skopeo's explicit anonymous mode: once by SemVer tag
+and once by immutable digest. Both copies must preserve and validate the emitted index digest,
+runtime content, metadata, SBOM, and provenance before the workflow can succeed. Package visibility
+is an owner-controlled GHCR setting; the release workflow does not grant itself package
+administration authority or mutate visibility. The gate therefore fails closed until a future
+release is publicly readable; it does not repair the historical alpha publication.
 
 ### First-release checklist
 

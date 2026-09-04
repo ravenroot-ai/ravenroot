@@ -9,6 +9,7 @@ import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.provenance.SyntheticProvenance;
+import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
@@ -145,11 +146,11 @@ class AiBundleEndToEndTest {
         // The first request declared the tool; the second carried its result back. Both statements
         // are about what left the process, not about what the node believes it sent.
         var first = messagesOf(endpoint.observedBodies().get(0));
-        assertEquals(2, first.size());
+        assertEquals(3, first.size());
         assertEquals(PayloadValue.of("system"), roleOf(first.get(0)));
         var second = messagesOf(endpoint.observedBodies().get(1));
-        assertEquals(4, second.size());
-        assertEquals(PayloadValue.of("tool"), roleOf(second.get(3)));
+        assertEquals(5, second.size());
+        assertEquals(PayloadValue.of("tool"), roleOf(second.get(4)));
 
         // Nothing was placed on either request: an unauthenticated local endpoint gets no credential,
         // and a loop does not become a way to acquire one on a later turn.
@@ -224,9 +225,9 @@ class AiBundleEndToEndTest {
 
         // And what the server returned came back into the conversation as a tool message.
         var second = messagesOf(endpoint.observedBodies().get(1));
-        assertEquals(PayloadValue.of("tool"), roleOf(second.get(3)));
+        assertEquals(PayloadValue.of("tool"), roleOf(second.get(4)));
         assertEquals(PayloadValue.of("42 graphs"),
-                assertInstanceOf(PayloadValue.MapValue.class, second.get(3)).entries().get("content"));
+                assertInstanceOf(PayloadValue.MapValue.class, second.get(4)).entries().get("content"));
 
         // Nothing was placed on any request: neither far end is authenticated here, and reaching a
         // second one does not become a way to acquire a credential.
@@ -277,6 +278,9 @@ class AiBundleEndToEndTest {
         return ManagedNodePackageServices.builder(AiNodePackage.ID, policy.build(),
                         (packageId, tenant, reference) -> Optional.empty())
                 .grant(NodePackageCapability.OUTBOUND_HTTP)
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> new ToolDecision(
+                        ToolDecision.Disposition.ALLOW, "test", ""), event -> { })
                 .build();
     }
 
@@ -353,6 +357,9 @@ class AiBundleEndToEndTest {
                         // never asks. The local test case is deliberately unauthenticated.
                         (packageId, tenant, reference) -> Optional.empty())
                 .grant(NodePackageCapability.OUTBOUND_HTTP)
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .toolAuthorization(invocation -> new ToolDecision(
+                        ToolDecision.Disposition.ALLOW, "test", ""), event -> { })
                 .build();
     }
 

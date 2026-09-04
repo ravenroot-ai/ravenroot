@@ -1,6 +1,6 @@
 # Public ADR curation manifest
 
-- Status: Complete for the published collection at 2026-08-30
+- Status: Complete for the published collection at 2026-09-03
 - Ordering: Chronological, then numerical
 - Publication scope: Accepted decisions and historically material superseded decisions
 
@@ -36,6 +36,8 @@ without presenting the same choice as two independent contracts.
 | 2026-08-29 | [0028](0028-iteration-correlated-fan-in.md) | Accepted | Defines fan-in correlation across graph iterations. |
 | 2026-08-29 | [0029](0029-model-provider-spi-after-externalization.md) | Accepted | Defines the model-provider extension boundary after AI-node externalization. |
 | 2026-08-30 | [0030](0030-zero-or-more-node-emissions.md) | Accepted contract | Defines a future emission contract and states its implementation status explicitly. |
+| 2026-09-03 | [0031](0031-durable-canonical-graph-definitions.md) | Accepted | Defines durable, content-addressed graph definitions and their relationship to ADR 0008 identity and ADR 0023 deployment versions. |
+| 2026-09-03 | [0032](0032-durable-process-inventory-is-authoritative-rows.md) | Accepted | Defines the durable, tenant-scoped process inventory as authoritative rows with a derived, unstored recovery classification. |
 
 ## Publication rules
 

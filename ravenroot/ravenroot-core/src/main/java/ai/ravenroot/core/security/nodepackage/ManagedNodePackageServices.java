@@ -17,8 +17,21 @@ import ai.ravenroot.api.node.service.OutboundWebSocketListener;
 import ai.ravenroot.api.node.service.OutboundWebSocketRequest;
 import ai.ravenroot.api.node.service.OutboundWebSocketService;
 import ai.ravenroot.api.node.service.OutboundWebSocketSession;
+import ai.ravenroot.api.node.service.ToolCallAuthorization;
+import ai.ravenroot.api.node.service.ToolCallAuthorizationService;
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
+import ai.ravenroot.api.security.ToolCallAuditSink;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.api.security.ToolInvocation;
+import ai.ravenroot.api.security.ToolPolicy;
+import ai.ravenroot.core.approval.ToolApprovalService;
+import ai.ravenroot.core.approval.ToolApprovalSettings;
+import ai.ravenroot.core.approval.ToolApprovalResult;
 import ai.ravenroot.core.security.egress.BoundedBodyHandlers;
 import ai.ravenroot.core.security.egress.EgressAddressGuard;
 import ai.ravenroot.core.security.egress.EgressHttpClients;
@@ -37,6 +50,8 @@ import java.net.http.HttpTimeoutException;
 import java.net.http.WebSocket;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -49,6 +64,7 @@ import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.OptionalLong;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
@@ -73,6 +89,8 @@ import java.util.concurrent.atomic.AtomicReference;
  * failures to stable sanitized reasons.</p>
  */
 public final class ManagedNodePackageServices implements NodePackageServices {
+    private static final PayloadLimits TOOL_ARGUMENT_LIMITS =
+            new PayloadLimits(64 * 1024, 32, 1024, 4096, 16 * 1024, 256);
     private static final int MAX_HEADER_NAMES = 64;
     private static final int MAX_HEADER_VALUES = 256;
     private static final int MAX_HEADER_CHARACTERS = 16 * 1024;
@@ -98,6 +116,10 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private final Set<NodePackageCapability> capabilities;
     private final java.util.function.Supplier<HttpClient> clientFactory;
     private final Clock clock;
+    private final ToolPolicy toolPolicy;
+    private final ToolCallAuditSink toolAuditSink;
+    private final ToolApprovalService toolApprovalService;
+    private final ToolApprovalSettings toolApprovalSettings;
     private volatile HttpClient client;
     private final AdmissionController admission;
     private final NodePackageServices unavailable = NodePackageServices.unavailable();
@@ -109,6 +131,10 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         capabilities = Set.copyOf(builder.capabilities);
         clientFactory = Objects.requireNonNull(builder.clientFactory, "clientFactory");
         clock = Objects.requireNonNull(builder.clock, "clock");
+        toolPolicy = Objects.requireNonNull(builder.toolPolicy, "toolPolicy");
+        toolAuditSink = Objects.requireNonNull(builder.toolAuditSink, "toolAuditSink");
+        toolApprovalService = builder.toolApprovalService;
+        toolApprovalSettings = builder.toolApprovalSettings;
         admission = new AdmissionController(policy.maximumConcurrentOperations(),
                 policy.maximumConcurrentPerTenant());
     }
@@ -181,6 +207,177 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                         request, listener);
             }
         };
+    }
+
+    @Override
+    public ToolCallAuthorizationService toolAuthorization() {
+        if (!capabilities.contains(NodePackageCapability.TOOL_AUTHORIZATION)) {
+            return unavailable.toolAuthorization();
+        }
+        return this::authorizeToolCall;
+    }
+
+    /**
+     * Parses, canonicalizes, decides and audits one model-requested call before its effect can run.
+     * The package receives the canonical bytes, not the unchecked bytes the model emitted.
+     */
+    private ToolCallAuthorization authorizeToolCall(NodeMessage message, String rawTool,
+                                                     byte[] rawArguments) {
+        NodeMessage delivered = Objects.requireNonNull(message, "deliveredMessage");
+        String tool = safeToolName(rawTool);
+        UUID callId = UUID.randomUUID();
+        if ("invalid-tool".equals(tool)) {
+            recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
+                    "TOOL_INVALID");
+            return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
+                    delivered, tool, false);
+        }
+        PayloadValue.MapValue arguments;
+        byte[] canonical;
+        try {
+            byte[] supplied = rawArguments == null ? new byte[0] : rawArguments;
+            if (blankJson(supplied)) {
+                supplied = "{}".getBytes(StandardCharsets.UTF_8);
+            }
+            PayloadValue parsed = PayloadJson.read(supplied, TOOL_ARGUMENT_LIMITS);
+            if (!(parsed instanceof PayloadValue.MapValue object)) {
+                throw new IllegalArgumentException("tool arguments are not an object");
+            }
+            arguments = object;
+            canonical = PayloadJson.write(arguments).getBytes(StandardCharsets.UTF_8);
+        } catch (RuntimeException invalid) {
+            recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
+                    "ARGUMENTS_INVALID");
+            return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
+                    delivered, tool, false);
+        }
+
+        String digest = digest(canonical);
+        ToolDecision decision;
+        try {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> policyArguments = (Map<String, Object>) arguments.toJava();
+            decision = Objects.requireNonNull(toolPolicy.evaluate(new ToolInvocation(delivered.security(),
+                    delivered.processInstanceId(), delivered.nodeId(), tool, policyArguments)),
+                    "toolPolicy decision");
+        } catch (RuntimeException policyFailure) {
+            recordTool(delivered, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED,
+                    "POLICY_UNAVAILABLE");
+            return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, digest, canonical,
+                    delivered, tool, false);
+        }
+
+        ToolCallAuthorization.Disposition disposition = switch (decision.disposition()) {
+            case ALLOW -> ToolCallAuthorization.Disposition.ALLOW;
+            case DENY -> ToolCallAuthorization.Disposition.DENY;
+            case REQUIRE_APPROVAL -> ToolCallAuthorization.Disposition.REQUIRE_APPROVAL;
+        };
+        ToolCallAuditEvent.Disposition auditDisposition = switch (disposition) {
+            case ALLOW -> ToolCallAuditEvent.Disposition.ATTEMPT;
+            case DENY -> ToolCallAuditEvent.Disposition.DENIED;
+            case REQUIRE_APPROVAL -> ToolCallAuditEvent.Disposition.APPROVAL_REQUIRED;
+        };
+        String reason = switch (disposition) {
+            case ALLOW -> "POLICY_ALLOWED";
+            case DENY -> "POLICY_DENIED";
+            case REQUIRE_APPROVAL -> "APPROVAL_REQUIRED";
+        };
+        recordTool(delivered, callId, tool, digest, auditDisposition, reason);
+        return new ManagedToolCall(callId, disposition, digest, canonical, delivered, tool,
+                disposition == ToolCallAuthorization.Disposition.ALLOW);
+    }
+
+    private void recordTool(NodeMessage message, UUID callId, String tool, String digest,
+                            ToolCallAuditEvent.Disposition disposition, String reason) {
+        SecurityContext identity = message.security();
+        toolAuditSink.record(new ToolCallAuditEvent(clock.instant(), identity.requestId(), identity.tenantId(),
+                identity.qualifiedIdentity(), message.processInstanceId(), message.traversalId(),
+                message.invocationId(), message.attemptId(), callId, tool, digest, disposition, reason));
+    }
+
+    private static String safeToolName(String raw) {
+        String tool = raw == null ? "" : raw.strip();
+        if (!tool.matches("[A-Za-z0-9][A-Za-z0-9._:-]{0,255}")) {
+            return "invalid-tool";
+        }
+        return tool;
+    }
+
+    private static boolean blankJson(byte[] document) {
+        for (byte value : document) {
+            if (value != ' ' && value != '\t' && value != '\n' && value != '\r') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static String digest(byte[] canonical) {
+        try {
+            byte[] bytes = MessageDigest.getInstance("SHA-256").digest(canonical);
+            return "sha256:" + java.util.HexFormat.of().formatHex(bytes);
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException("SHA-256 is required for tool authorization", impossible);
+        }
+    }
+
+    private final class ManagedToolCall implements ToolCallAuthorization {
+        private final UUID callId;
+        private final Disposition disposition;
+        private final String argumentsDigest;
+        private final byte[] canonicalArguments;
+        private final NodeMessage message;
+        private final String tool;
+        private final boolean terminalExpected;
+        private final AtomicBoolean completed = new AtomicBoolean();
+        private final UUID approvalId = UUID.randomUUID();
+
+        private ManagedToolCall(UUID callId, Disposition disposition, String argumentsDigest,
+                                byte[] canonicalArguments, NodeMessage message, String tool,
+                                boolean terminalExpected) {
+            this.callId = callId;
+            this.disposition = disposition;
+            this.argumentsDigest = argumentsDigest;
+            this.canonicalArguments = canonicalArguments.clone();
+            this.message = message;
+            this.tool = tool;
+            this.terminalExpected = terminalExpected;
+        }
+
+        @Override public UUID callId() { return callId; }
+        @Override public Disposition disposition() { return disposition; }
+        @Override public String argumentsDigest() { return argumentsDigest; }
+        @Override public byte[] canonicalArguments() { return canonicalArguments.clone(); }
+
+        @Override
+        public RuntimeException suspend(int continuationVersion, byte[] continuation) {
+            if (continuationVersion < 1) {
+                throw new IllegalArgumentException("continuationVersion must be positive");
+            }
+            byte[] checkpoint = Objects.requireNonNull(continuation, "continuation").clone();
+            if (disposition != Disposition.REQUIRE_APPROVAL
+                    || toolApprovalService == null || toolApprovalSettings == null) {
+                return ToolCallAuthorization.super.suspend(continuationVersion, checkpoint);
+            }
+            ToolApprovalResult result = toolApprovalService.suspend(message, approvalId, callId, tool,
+                    canonicalArguments,
+                    argumentsDigest, toolApprovalSettings, continuationVersion, checkpoint);
+            if (result.code() != ToolApprovalResult.Code.CREATED
+                    && result.code() != ToolApprovalResult.Code.ALREADY_APPLIED) {
+                return new NodePackageServiceException(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+            }
+            return new DurableToolApprovalSuspension(approvalId);
+        }
+
+        @Override
+        public void complete(Outcome outcome) {
+            Objects.requireNonNull(outcome, "outcome");
+            if (!terminalExpected || !completed.compareAndSet(false, true)) return;
+            recordTool(message, callId, tool, argumentsDigest,
+                    outcome == Outcome.SUCCEEDED ? ToolCallAuditEvent.Disposition.SUCCEEDED
+                            : ToolCallAuditEvent.Disposition.FAILED,
+                    outcome == Outcome.SUCCEEDED ? "EFFECT_SUCCEEDED" : "EFFECT_FAILED");
+        }
     }
 
     private OutboundCall<CredentialLease> resolveCredential(IdentitySource identity, String reference,
@@ -644,6 +841,10 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private final Set<NodePackageCapability> capabilities = java.util.EnumSet.noneOf(NodePackageCapability.class);
         private java.util.function.Supplier<HttpClient> clientFactory = EgressHttpClients::create;
         private Clock clock = Clock.systemUTC();
+        private ToolPolicy toolPolicy = ToolPolicy.denyAll();
+        private ToolCallAuditSink toolAuditSink = ToolCallAuditSink.discarding();
+        private ToolApprovalService toolApprovalService;
+        private ToolApprovalSettings toolApprovalSettings;
 
         private Builder(String packageId, NodePackageEgressPolicy policy, TenantCredentialResolver credentials) {
             this.packageId = packageId;
@@ -653,6 +854,20 @@ public final class ManagedNodePackageServices implements NodePackageServices {
 
         public Builder grant(NodePackageCapability capability) {
             capabilities.add(Objects.requireNonNull(capability, "capability"));
+            return this;
+        }
+
+        /** Installs the inseparable decision-and-audit pair used by tool authorization. */
+        public Builder toolAuthorization(ToolPolicy policy, ToolCallAuditSink auditSink) {
+            this.toolPolicy = Objects.requireNonNull(policy, "policy");
+            this.toolAuditSink = Objects.requireNonNull(auditSink, "auditSink");
+            return this;
+        }
+
+        /** Enables durable suspension for {@code REQUIRE_APPROVAL} decisions. */
+        public Builder durableToolApprovals(ToolApprovalService service, ToolApprovalSettings settings) {
+            this.toolApprovalService = Objects.requireNonNull(service, "service");
+            this.toolApprovalSettings = Objects.requireNonNull(settings, "settings");
             return this;
         }
 

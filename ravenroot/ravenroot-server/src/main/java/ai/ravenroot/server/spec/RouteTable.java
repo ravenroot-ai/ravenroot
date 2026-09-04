@@ -357,7 +357,14 @@ public final class RouteTable {
                             + "a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, "
                             + "NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, "
                             + "bypassedNodes, defaultedNodes and handledFailureNodes respectively -- "
-                            + "under both of that stream's sources, with two silent-undercount "
+                            + "except on a node with an orchestration retry policy, where a visit is "
+                            + "one NODE_STARTED per attempt, each intermediate attempt settles as "
+                            + "NODE_RETRY_SCHEDULED rather than NODE_FAILED, and only the last "
+                            + "settles as one of the four. So a client counting visits by counting "
+                            + "NODE_STARTED overcounts a retried node, and the attempt ordinal that "
+                            + "would separate them is not on this projection -- the four node lists "
+                            + "in this response are sets and remain exact. "
+                            + "Under both of that stream's sources, with two silent-undercount "
                             + "caveats of the same shape where the source is a durable journal. "
                             + "First, NODE_DEFAULTED rows exist only in a journal written by a build "
                             + "that emits them, and nothing in the data says which: envelopeVersion "
@@ -397,6 +404,62 @@ public final class RouteTable {
                             + "structurally, the same way GET /v1/executions/{id} is: never reveals "
                             + "whether another tenant has executions running.", true, false, 200,
                     STANDARD_ERRORS, READ, true),
+            // Issue 154 (acceptance criterion 7): the durable, authoritative inventory API, CLI, UI,
+            // audit and recovery callers share, distinct from GET /v1/executions/live's process-local
+            // runtime bookkeeping -- see AuthorizedRavenrootApplication#processInventory's own Javadoc
+            // for the full distinction. "inventory" is reserved the same way "live" is: never a valid
+            // traversal id (ids are UUIDs), so no legitimate GET /v1/executions/{id} read is shadowed.
+            // 501 when this deployment composed no inventory-capable store at all -- a fact about the
+            // deployment rather than the request. Query parameter names match the response's own
+            // field names (ownerWorkerId, deploymentId) exactly, and an unrecognised parameter is
+            // refused rather than silently dropped -- see RavenrootServer#listProcessInventory's own
+            // Javadoc for the failure that closes.
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/inventory",
+                    "Lists one page of this tenant's durable process inventory: what this "
+                            + "deployment's own persisted record says exists, surviving a restart, as "
+                            + "opposed to GET /v1/executions/live's process-local runtime view. "
+                            + "Three optional query parameters are named exactly like the field each "
+                            + "response row carries: status (comma-separated ProcessInstanceStatus "
+                            + "names), ownerWorkerId (lease-holder worker id) and deploymentId "
+                            + "(hosting deployment id). Three are not, because they describe the "
+                            + "page rather than a row: includeTerminal (true to include "
+                            + "COMPLETED/FAILED rows, excluded by default) has no response "
+                            + "counterpart, limit is bounded by the response's maxPageSize, and "
+                            + "cursor takes a previous page's nextCursor. Any other parameter name "
+                            + "is refused as 400, and so is a recognised name carrying a blank "
+                            + "value, rather than either being silently ignored. The response "
+                            + "always carries retainedFrom, this tenant's "
+                            + "inventory retention floor, so a caller can tell an instance that never "
+                            + "existed from one purged by policy without a second request, and "
+                            + "maxPageSize, this deployment's declared page-size bound, so a caller "
+                            + "paginating its own loop can read it instead of discovering it by "
+                            + "bisection. Tenant-scoped structurally, the same way GET "
+                            + "/v1/executions/live is. 501 when this deployment has no "
+                            + "inventory-capable execution store composed.", true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            // A distinct path and entry from GET /v1/executions/{id}, for the same reason
+            // /v1/executions/live has its own: this table is keyed per path, and {id} here names a
+            // process instance rather than a traversal/execution id -- see
+            // RavenrootServer#readProcessInstanceTraversals's own Javadoc for why that id space is
+            // deliberately different from every other /v1/executions sub-route's.
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/traversals",
+                    "Lists one durable process instance's traversals from the inventory (#154), "
+                            + "alongside this tenant's inventory retention floor as retainedFrom -- the "
+                            + "same field GET /v1/executions/inventory carries, present here too so an "
+                            + "operator diagnosing an absence has it on whichever of the two listings "
+                            + "they are holding. Unlike every other /v1/executions sub-route, {id} here "
+                            + "is a processInstanceId, not the executionId/traversalId GET "
+                            + "/v1/executions/{id} and the cancel/pause/resume trio use -- a process "
+                            + "instance can contain more than one traversal, so a traversal id could "
+                            + "not address this route's question. 404 when the instance is absent, "
+                            + "belongs to another tenant, or was purged past its terminal retention "
+                            + "window -- all three indistinguishable by design, exactly like GET "
+                            + "/v1/executions/{id}'s own 404. 501 when this deployment has no "
+                            + "inventory-capable execution store composed.", true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/cancel",
                     "Cancels a traversal (#37). 200 with a CancelResult body distinguishing CANCELLED, "
                             + "ALREADY_CANCELLED and ALREADY_COMPLETED; unknown ownership fails closed as "
@@ -422,6 +485,15 @@ public final class RouteTable {
                             + "silently successful.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
+                    "Approves, denies, or cancels one exact durable tool call. The authenticated "
+                            + "tenant and qualified approver identity are authoritative; unknown and "
+                            + "cross-tenant approvals are indistinguishable, and the response never "
+                            + "contains arguments or continuation state.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "
@@ -437,7 +509,10 @@ public final class RouteTable {
                             + "NODE_COMPLETED. edgeId is accepted unchanged up to 8192 strict UTF-8 bytes; "
                             + "all auxiliary traversal strings share a 12287-byte escaped budget, keeping "
                             + "the complete frame below 65536 bytes. Oversize values are rejected, never "
-                            + "truncated. Ring-served views (also "
+                            + "truncated. Durable frames carry handlerId beside processInstanceId, "
+                            + "traversalId and invocationId, so a handler-lifecycle event is told apart "
+                            + "from a node event that shares all three; it is null on every other type. "
+                            + "Ring-served views (also "
                             + "the default where no journal exists) "
                             + "carry author-safe failure messages and built-in log output; these are "
                             + "bounded, carry explicit redacted/truncated flags, are lost on restart or "
@@ -463,7 +538,8 @@ public final class RouteTable {
                             + "route produce no fabricated attribution. edgeId is accepted unchanged up to "
                             + "8192 strict UTF-8 bytes; auxiliary traversal strings share a 12287-byte escaped "
                             + "budget, keeping each frame below 65536 bytes. Oversize values are rejected, "
-                            + "never truncated. "
+                            + "never truncated. Durable rows carry handlerId, so a handler-lifecycle event "
+                            + "names the handler it is about; it is null on every other type. "
                             + "'include=diagnostics' selects in-process "
                             + "instrumentation (activeInstances, inFlightArrivals, fallback, "
                             + "processingDuration), bounded author-safe failure messages and built-in "

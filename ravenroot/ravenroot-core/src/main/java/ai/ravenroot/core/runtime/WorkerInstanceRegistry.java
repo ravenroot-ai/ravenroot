@@ -112,17 +112,32 @@ final class WorkerInstanceRegistry implements AutoCloseable {
      *
      * @throws RuntimeException whatever the engine raised, if the spawn itself failed
      */
-    WorkerInstance acquire(WorkerInstanceIdentity identity, RavenNode runtime) {
+    WorkerInstance acquire(WorkerInstanceIdentity identity, RavenNode runtime,
+                           ExecutionBudget.Actor actorReservation) {
         Objects.requireNonNull(identity, "identity");
         Objects.requireNonNull(runtime, "runtime");
-        NodeRef ref = spawner.apply(identity.actorName(), runtime);
-        var instance = new WorkerInstance(identity, ref);
+        Objects.requireNonNull(actorReservation, "actorReservation");
+        NodeRef ref;
+        try {
+            ref = spawner.apply(identity.actorName(), runtime);
+        } catch (RuntimeException failure) {
+            actorReservation.close();
+            throw failure;
+        }
+        var instance = new WorkerInstance(identity, ref, actorReservation);
         WorkerInstance clash = live.putIfAbsent(identity.invocationId(), instance);
         if (clash != null) {
             // An invocation identifier is minted per dispatch and must be unique. If it is not, the
             // identity source is broken, and quietly serving two invocations from one entry would
             // make the leak untraceable. Unwind fully instead.
-            terminator.apply(ref);
+            try {
+                CompletionStage<Void> stopped = terminator.apply(ref);
+                stopped.whenComplete((ignored, failure) -> actorReservation.close());
+            } catch (RuntimeException stopFailure) {
+                // The engine did not accept termination, so this actor may still exist. Keep its
+                // capacity charged; closing it here would allow a replacement actor to be created
+                // while the rejected duplicate remains live outside the registry.
+            }
             throw new IllegalStateException("Invocation " + identity.invocationId()
                     + " is already live on this runner for node '" + clash.identity().nodeId() + "'");
         }
@@ -171,6 +186,11 @@ final class WorkerInstanceRegistry implements AutoCloseable {
         return instance;
     }
 
+    WorkerInstance acquire(WorkerInstanceIdentity identity, RavenNode runtime) {
+        return acquire(identity, runtime,
+                new ExecutionBudget(GraphExecutionLimits.DEFAULTS).reserveActor());
+    }
+
     /**
      * Releases one instance: deregisters it and stops its actor.
      *
@@ -207,6 +227,7 @@ final class WorkerInstanceRegistry implements AutoCloseable {
             // badly -- so both outcomes retire it; only a stop that never settles keeps it here, which
             // is precisely the case close() must escalate.
             retiring.remove(instance);
+            instance.actorReservation.close();
             if (error != null) {
                 instance.released.completeExceptionally(error);
             } else {
@@ -307,6 +328,7 @@ final class WorkerInstanceRegistry implements AutoCloseable {
             if (instance.releasing.compareAndSet(false, true)) {
                 live.remove(instance.identity().invocationId(), instance);
                 decrementLiveByNode(instance.identity().nodeId());
+                instance.actorReservation.close();
                 instance.released.complete(null);
             }
         });
@@ -331,13 +353,16 @@ final class WorkerInstanceRegistry implements AutoCloseable {
     static final class WorkerInstance {
         private final WorkerInstanceIdentity identity;
         private final NodeRef ref;
+        private final ExecutionBudget.Actor actorReservation;
         private final java.util.concurrent.atomic.AtomicBoolean releasing =
                 new java.util.concurrent.atomic.AtomicBoolean();
         private final CompletableFuture<Void> released = new CompletableFuture<>();
 
-        private WorkerInstance(WorkerInstanceIdentity identity, NodeRef ref) {
+        private WorkerInstance(WorkerInstanceIdentity identity, NodeRef ref,
+                               ExecutionBudget.Actor actorReservation) {
             this.identity = identity;
             this.ref = ref;
+            this.actorReservation = actorReservation;
         }
 
         WorkerInstanceIdentity identity() {

@@ -273,6 +273,58 @@ public final class RemoteBackend implements CliBackend {
         }).toList();
     }
 
+    /** Reads {@code GET /v1/executions/inventory?includeTerminal=true}, following {@code nextCursor}
+     * to completion: the server resolves the tenant from the bearer token, exactly as {@link #live}
+     * does -- see {@link CliBackend#inventory}'s own Javadoc for why {@code includeTerminal=true} is
+     * this verb's own default and why this loops rather than answering with one page. */
+    @Override
+    public InventoryListing inventory() throws IOException {
+        var items = new java.util.ArrayList<InventoryView>();
+        String cursor = null;
+        String retainedFrom;
+        while (true) {
+            String path = "/v1/executions/inventory?includeTerminal=true"
+                    + (cursor == null ? "" : "&cursor=" + java.net.URLEncoder.encode(cursor, StandardCharsets.UTF_8));
+            var body = MinimalJson.asObject(MinimalJson.parse(get(path)));
+            for (Object entry : MinimalJson.asArray(body.get("items"))) {
+                var item = MinimalJson.asObject(entry);
+                items.add(new InventoryView(MinimalJson.asString(item.get("processInstanceId")),
+                        MinimalJson.asString(item.get("status")), MinimalJson.asString(item.get("disposition")),
+                        MinimalJson.asString(item.get("graphVersion")),
+                        MinimalJson.asStringOrNull(item.get("deploymentId")),
+                        MinimalJson.asStringOrNull(item.get("workloadId")),
+                        MinimalJson.asStringOrNull(item.get("correlationId")),
+                        (int) MinimalJson.asLong(item.get("traversalCount")),
+                        MinimalJson.asString(item.get("createdAt")), MinimalJson.asString(item.get("updatedAt"))));
+            }
+            retainedFrom = MinimalJson.asString(body.get("retainedFrom"));
+            Object nextCursor = body.get("nextCursor");
+            if (nextCursor == null) {
+                return new InventoryListing(items, retainedFrom);
+            }
+            cursor = MinimalJson.asString(nextCursor);
+        }
+    }
+
+    /** Reads {@code GET /v1/executions/{id}/traversals} -- see {@link CliBackend#traversals}'s own
+     * Javadoc for why {@code processInstanceId} is not the same id space {@link #cancel} takes. */
+    @Override
+    public TraversalListing traversals(String processInstanceId) throws IOException {
+        var body = MinimalJson.asObject(MinimalJson.parse(
+                get("/v1/executions/" + java.net.URLEncoder.encode(processInstanceId, StandardCharsets.UTF_8)
+                        + "/traversals")));
+        var traversals = MinimalJson.asArray(body.get("traversals")).stream().map(entry -> {
+            var item = MinimalJson.asObject(entry);
+            return new TraversalInventoryView(MinimalJson.asString(item.get("traversalId")),
+                    (int) MinimalJson.asLong(item.get("position")),
+                    MinimalJson.asString(item.get("ingressNodeId")), MinimalJson.asString(item.get("status")),
+                    MinimalJson.asString(item.get("disposition")),
+                    (int) MinimalJson.asLong(item.get("invocationCount")),
+                    (int) MinimalJson.asLong(item.get("parkedAttemptCount")));
+        }).toList();
+        return new TraversalListing(traversals, MinimalJson.asString(body.get("retainedFrom")));
+    }
+
     @Override
     public CancelView cancel(String traversalId) throws IOException {
         var body = MinimalJson.asObject(MinimalJson.parse(

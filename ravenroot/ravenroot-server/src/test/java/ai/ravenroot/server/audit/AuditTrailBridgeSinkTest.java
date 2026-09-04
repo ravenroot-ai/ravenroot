@@ -10,6 +10,7 @@ import ai.ravenroot.api.programming.ArtifactLifecycleAuditEvent;
 import ai.ravenroot.api.programming.ArtifactState;
 import ai.ravenroot.api.security.AuthorizationAction;
 import ai.ravenroot.api.security.AuthorizationAuditEvent;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
 import ai.ravenroot.core.audit.InMemoryAuditTrail;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphMlParseException;
@@ -24,9 +25,11 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -40,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class AuditTrailBridgeSinkTest {
 
     private static final Instant EPOCH = Instant.parse("2026-01-01T00:00:00Z");
+    private static final String ARGUMENT_DIGEST = "sha256:" + "a".repeat(64);
 
     private InMemoryAuditTrail trail() {
         return new InMemoryAuditTrail(Clock.fixed(EPOCH, ZoneOffset.UTC), Duration.ofHours(24));
@@ -52,6 +56,66 @@ class AuditTrailBridgeSinkTest {
     }
 
     // ---- authorization ----------------------------------------------------------------------------
+
+    @Test
+    void toolAttemptsAndEffectsAreSanitizedAndCorrelatedInTheDurableTrail() {
+        try (var trail = trail()) {
+            var sink = new AuditTrailToolCallSink(trail);
+            UUID process = UUID.randomUUID();
+            UUID traversal = UUID.randomUUID();
+            UUID invocation = UUID.randomUUID();
+            UUID attempt = UUID.randomUUID();
+            UUID call = UUID.randomUUID();
+            sink.record(new ToolCallAuditEvent(EPOCH, "req-tool", "acme", "issuer|USER|alice",
+                    process, traversal, invocation, attempt, call, "alpha__search",
+                    ARGUMENT_DIGEST, ToolCallAuditEvent.Disposition.ATTEMPT, "POLICY_ALLOWED"));
+            sink.record(new ToolCallAuditEvent(EPOCH, "req-tool", "acme", "issuer|USER|alice",
+                    process, traversal, invocation, attempt, call, "alpha__search",
+                    ARGUMENT_DIGEST, ToolCallAuditEvent.Disposition.SUCCEEDED, "EFFECT_SUCCEEDED"));
+
+            List<AuditRecord> records = trail.read("acme", 0, 10);
+            assertEquals(List.of(AuditOutcome.ATTEMPTED, AuditOutcome.ALLOWED),
+                    records.stream().map(record -> record.envelope().outcome()).toList());
+            assertTrue(records.stream().allMatch(record -> record.envelope().category() == AuditCategory.TOOL));
+            assertTrue(records.stream().allMatch(record -> "req-tool".equals(
+                    record.envelope().correlationId())));
+            assertTrue(records.stream().allMatch(record -> call.toString().equals(
+                    record.envelope().resourceId())));
+            String detail = new String(records.get(0).envelope().detail().bytes(), StandardCharsets.UTF_8);
+            assertTrue(detail.contains("tool=alpha__search"));
+            assertTrue(detail.contains("arguments=" + ARGUMENT_DIGEST));
+            assertFalse(detail.contains("secret"));
+        }
+    }
+
+    @Test
+    void toolRefusalsAreRecordedAsNoEffectDenials() {
+        try (var trail = trail()) {
+            UUID id = UUID.randomUUID();
+            new AuditTrailToolCallSink(trail).record(new ToolCallAuditEvent(EPOCH, "req-denied",
+                    "acme", "issuer|USER|mallory", id, id, id, id, UUID.randomUUID(),
+                    "exfiltrate", ARGUMENT_DIGEST, ToolCallAuditEvent.Disposition.DENIED,
+                    "POLICY_DENIED"));
+
+            AuditRecord record = only(trail, "acme");
+            assertEquals(AuditCategory.TOOL, record.envelope().category());
+            assertEquals(AuditOutcome.DENIED, record.envelope().outcome());
+            assertEquals("POLICY_DENIED", record.envelope().reason());
+        }
+    }
+
+    @Test
+    void toolAuditShapeCannotCarryArgumentsInDigestOrReasonFields() {
+        UUID id = UUID.randomUUID();
+        assertThrows(IllegalArgumentException.class, () -> new ToolCallAuditEvent(EPOCH, "req-denied",
+                "acme", "issuer|USER|mallory", id, id, id, id, UUID.randomUUID(),
+                "exfiltrate", "secret argument text", ToolCallAuditEvent.Disposition.DENIED,
+                "POLICY_DENIED"));
+        assertThrows(IllegalArgumentException.class, () -> new ToolCallAuditEvent(EPOCH, "req-denied",
+                "acme", "issuer|USER|mallory", id, id, id, id, UUID.randomUUID(),
+                "exfiltrate", ARGUMENT_DIGEST, ToolCallAuditEvent.Disposition.DENIED,
+                "denied because secret argument text"));
+    }
 
     @Test
     void anAllowedAuthorizationDecisionReachesTheTrailWithItsIdentityAndCorrelation() {

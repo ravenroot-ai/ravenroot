@@ -17,6 +17,41 @@ final class ExecutionBudget {
         this.limits = java.util.Objects.requireNonNull(limits, "limits");
     }
 
+    static ExecutionBudget restore(GraphExecutionLimits limits, GraphExecutionBudgetSnapshot snapshot) {
+        java.util.Objects.requireNonNull(snapshot, "snapshot");
+        var restored = new ExecutionBudget(limits);
+        require(GraphExecutionLimitException.Reason.TRAVERSAL_STEPS, snapshot.traversalSteps(),
+                limits.maxTraversalSteps());
+        require(GraphExecutionLimitException.Reason.AMPLIFIED_DELIVERIES, snapshot.amplifiedDeliveries(),
+                limits.maxAmplifiedDeliveries());
+        require(GraphExecutionLimitException.Reason.PAYLOAD_BYTES, snapshot.payloadBytes(),
+                limits.maxCumulativePayloadBytes());
+        require(GraphExecutionLimitException.Reason.IN_FLIGHT_HOPS, snapshot.inFlightHops(),
+                limits.maxInFlightHopsPerTraversal());
+        require(GraphExecutionLimitException.Reason.LIVE_ACTORS, snapshot.liveActors(),
+                limits.maxLiveActorsPerTraversal());
+        restored.traversalSteps = snapshot.traversalSteps();
+        restored.amplifiedDeliveries = snapshot.amplifiedDeliveries();
+        restored.payloadBytes = snapshot.payloadBytes();
+        restored.inFlightHops = snapshot.inFlightHops();
+        // Actors from the pre-suspension runtime must terminate before its runner closes. They are
+        // encoded and validated above, but are not live in the new execution domain after restart.
+        restored.liveActors = 0;
+        return restored;
+    }
+
+    synchronized GraphExecutionBudgetSnapshot snapshot() {
+        return new GraphExecutionBudgetSnapshot(traversalSteps, amplifiedDeliveries, payloadBytes,
+                inFlightHops, liveActors);
+    }
+
+    synchronized Hop resumeReservedHop() {
+        if (inFlightHops != 1) {
+            throw new IllegalStateException("approval re-entry requires exactly one reserved graph hop");
+        }
+        return new Hop(this);
+    }
+
     synchronized Hop reserveRoot(long bytes) {
         reserve(1, 0, bytes, 1);
         return new Hop(this);

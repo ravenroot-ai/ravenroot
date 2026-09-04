@@ -256,6 +256,52 @@ class ExecutionRecoveryServiceTest {
         assertEquals(NodeAttemptStatus.PARKED, currentAttempt(fixture).status());
     }
 
+    /**
+     * Issue 154's discovery path: before {@link ExecutionRecoveryService#discoverInterrupted()}
+     * existed, the only way to know an instance was stuck after a restart was to already hold its
+     * id (this test's own {@code fixture.key}), or to infer it indirectly from
+     * {@code claimPendingWork}'s side effects via {@link #sweepOnce}. This test deliberately never
+     * hands the discovery method {@code fixture.key} at all -- it asks the durable inventory "what
+     * is interrupted for this tenant" and the instance {@link #driveToRunning} abandoned mid-dispatch
+     * (claimed, written {@code RUNNING} under the fence, then the lease left to expire -- a crash
+     * mid-dispatch) is the answer, found through the store's own derived
+     * {@link ai.ravenroot.api.persistence.InventoryDisposition#INTERRUPTED} rather than through any
+     * hardcoded list of instance ids this test constructed.
+     */
+    @Test
+    void interruptedInstanceIsFoundThroughTheDurableInventoryRatherThanAHardcodedInstanceList() {
+        Fixture fixture = scheduleAttempt();
+        driveToRunning(fixture);
+
+        var service = serviceWith(RepeatabilityDeclarations.NONE_DECLARED, RecoveryDispatcher.NONE);
+
+        var forThisTenant = service.discoverInterrupted(TENANT);
+        assertEquals(1, forThisTenant.size());
+        assertEquals(fixture.key(), forThisTenant.get(0).key());
+        assertEquals(ai.ravenroot.api.persistence.InventoryDisposition.INTERRUPTED,
+                forThisTenant.get(0).disposition());
+
+        var acrossConfiguredTenants = service.discoverInterrupted();
+        assertEquals(1, acrossConfiguredTenants.size());
+        assertEquals(fixture.key(), acrossConfiguredTenants.get(0).key());
+    }
+
+    /**
+     * A non-terminal instance whose lease has not expired is {@code ACTIVE}, not
+     * {@code INTERRUPTED} -- the discovery path must not report healthy, still-leased work as
+     * needing recovery.
+     */
+    @Test
+    void aFreshlyLeasedInstanceIsNotReportedAsInterrupted() {
+        Fixture fixture = scheduleAttempt();
+        await(store.claimPendingWork(TENANT, "live-worker", 10, TTL));
+
+        var service = serviceWith(RepeatabilityDeclarations.NONE_DECLARED, RecoveryDispatcher.NONE);
+
+        assertTrue(service.discoverInterrupted(TENANT).isEmpty(),
+                "a live, unexpired lease means this instance is being worked, not abandoned");
+    }
+
     @Test
     void onlyTheConfiguredTenantsAreSweptAndThePortGainsNoTenantEnumeration() {
         scheduleAttemptFor(new ExecutionKey("other-tenant", UUID.randomUUID()));

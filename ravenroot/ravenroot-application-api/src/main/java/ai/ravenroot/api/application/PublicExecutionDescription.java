@@ -77,6 +77,9 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case NODE_COMPLETED -> "Node completed.";
             case EDGE_TRAVERSED -> "Edge was traversed.";
             case NODE_FAILED -> "Node failed. Protected diagnostics may contain more detail.";
+            // No count and no delay: this is the classifier-less branch, so it knows neither. The
+            // ordinal and the wait are on the event's own components for a reader entitled to them.
+            case NODE_RETRY_SCHEDULED -> "Node attempt failed and another attempt was scheduled.";
             case JOIN_SATISFIED -> "Join conditions were satisfied.";
             case JOIN_ITERATION_BACKLOG -> "A join is holding state for several iterations.";
             case JOIN_ARRIVAL_DISCARDED -> "A duplicate or late join arrival was ignored.";
@@ -118,6 +121,12 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case EXECUTION_FAILED -> "Execution failed with " + reason
                     + ". Protected diagnostics may contain more detail.";
             case JOIN_FAILED -> "Join conditions could not be satisfied: " + reason + ".";
+            // The classifier here is the failure's retry classification, a fixed vocabulary token
+            // from Retryability rather than a Java type name, so it is named rather than
+            // characterised for the same reason a routed outcome is: this class cannot know whether
+            // an author reads "retry-after-reread" as good news.
+            case NODE_RETRY_SCHEDULED -> "Node attempt failed as \"" + reason
+                    + "\" and another attempt was scheduled.";
             // Two different facts now share NODE_BYPASSED, and the difference matters to
             // whoever is reading the activity view: one says the run itself is not executing
             // anything, the other says one node is switched off in the saved graph while the rest of
@@ -180,11 +189,50 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
         if (eventType == null) {
             return UNKNOWN_EVENT;
         }
+        String handler = handlerSentence(eventType);
+        if (handler != null) {
+            return normalizeAuthoredText(handler);
+        }
         try {
             return forType(ExecutionEventType.valueOf(eventType));
         } catch (IllegalArgumentException unknown) {
             return UNKNOWN_EVENT;
         }
+    }
+
+    /**
+ * Returns the source-authored sentence for a durable handler-lifecycle event type, or {@code null}
+ * when the type is not one.
+ *
+ * <p>These types live only in the durable journal, so they are matched by name here rather than
+ * added to {@link ExecutionEventType}. That enum is the <em>live, in-process</em> runtime
+ * vocabulary and is switched over exhaustively by the monitor, the telemetry bridge, the audit sink
+ * and the rate-limit registry; a handler event is produced by whichever process is alive when a
+ * trigger arrives, which may be one that was not running when the wait began, so it is not an
+ * in-process runtime transition and would be a false member of that set. Matching by name here
+ * keeps the addition to a single method.</p>
+ *
+ * <p>The sentences say <em>which level</em> the event is about, because that is what a reader
+ * scanning an activity log has to be able to tell apart: a handler event and a node event share a
+ * process and a traversal, and only the wording and the identifiers beside it distinguish them.
+ * None of them interpolates caller text, for the reason this class exists.</p>
+* @param eventType domain event type recorded in the durable journal
+* @return authored sentence, or {@code null} when this is not a handler event type
+ */
+    private static String handlerSentence(String eventType) {
+        return switch (eventType) {
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_REGISTERED ->
+                    "A handler was registered and the process is waiting for it.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_ESCALATED ->
+                    "A waiting handler was escalated and can still be resolved.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_EXPIRED ->
+                    "A handler's wait ended without a trigger.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_DENIED ->
+                    "A handler was denied and the process continued.";
+            case ai.ravenroot.api.persistence.HandlerEventData.HANDLER_RESOLVED ->
+                    "A handler was resolved and the process re-entered.";
+            default -> null;
+        };
     }
 
     /** Package-visible so the contract's Unicode/control/bound behavior can be tested directly. */

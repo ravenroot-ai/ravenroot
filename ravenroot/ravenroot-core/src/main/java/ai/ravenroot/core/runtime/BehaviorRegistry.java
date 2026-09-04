@@ -6,6 +6,8 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptorValidator;
 import ai.ravenroot.api.catalog.NodeCatalogSource;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.publication.PublicationAuditSink;
+import ai.ravenroot.api.publication.PublicationPolicyResolver;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.runtime.builtin.StandardBehaviorFactories;
 
@@ -31,8 +33,20 @@ public final class BehaviorRegistry {
     }
 
     public static BehaviorRegistry standard(BehaviorEnvironment environment) {
+        return standard(environment, PublicationPolicyResolver.none(), PublicationAuditSink.noop());
+    }
+
+    /**
+     * Builds the core catalog with operator-owned publication profiles and payload-free audit.
+     * Existing overloads deliberately resolve no profiles, so {@code boundary-guard} remains visible
+     * but fails closed until an application explicitly supplies this authority.
+     */
+    public static BehaviorRegistry standard(BehaviorEnvironment environment,
+                                            PublicationPolicyResolver publicationPolicies,
+                                            PublicationAuditSink publicationAudit) {
         var registry = new BehaviorRegistry();
-        StandardBehaviorFactories.all(environment).forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
+        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit)
+                .forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
         return registry;
     }
 
@@ -171,6 +185,13 @@ public final class BehaviorRegistry {
         if (node == null || node.behavior() == null) return Optional.empty();
         var factory = factories.get(node.behavior());
         return factory == null ? Optional.empty() : Optional.of(factory.create(node));
+    }
+
+    /** Resolves durable re-entry only through the already registered trusted behavior factory. */
+    public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
+        if (node == null || node.behavior() == null) return Optional.empty();
+        var factory = factories.get(node.behavior());
+        return factory == null ? Optional.empty() : factory.createToolCallContinuation(node);
     }
 
     /**

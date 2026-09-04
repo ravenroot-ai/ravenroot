@@ -44,4 +44,30 @@ describe('public execution descriptions', () => {
   it('turns controls-only content into the fixed fallback', () => {
     expect(normalizePublicDescription('\u0000\n\t\u2066')).toBe(UNKNOWN_EXECUTION_DESCRIPTION);
   });
+
+  // Durable handler-lifecycle types. This table is the fallback for a peer that sent no
+  // `description`; the server composes the same sentences from its own source-authored copy. Falling
+  // through to UNKNOWN would render a handler event as generic activity in the one view an operator
+  // uses to find out why a process has not moved — indistinguishable, there, from a node event.
+  describe('durable handler lifecycle types', () => {
+    const handlerTypes = [
+      ['HANDLER_REGISTERED', 'waiting'],
+      ['HANDLER_ESCALATED', 'escalated'],
+      ['HANDLER_EXPIRED', 'ended without a trigger'],
+      ['HANDLER_DENIED', 'denied'],
+      ['HANDLER_RESOLVED', 're-entered'],
+    ];
+
+    it.each(handlerTypes)('%s renders authored copy naming what happened, not the unknown fallback', (type, phrase) => {
+      const description = publicExecutionDescription(undefined, type);
+      expect(description).not.toBe(UNKNOWN_EXECUTION_DESCRIPTION);
+      expect(description.toLowerCase()).toContain('handler');
+      expect(description).toContain(phrase);
+    });
+
+    it('still prefers a description the server composed over this local table', () => {
+      expect(publicExecutionDescription('A handler was resolved by finance.', 'HANDLER_RESOLVED'))
+        .toBe('A handler was resolved by finance.');
+    });
+  });
 });

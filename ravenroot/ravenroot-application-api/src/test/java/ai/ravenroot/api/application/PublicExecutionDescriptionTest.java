@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -27,6 +28,27 @@ class PublicExecutionDescriptionTest {
         for (ExecutionEventType type : ExecutionEventType.values()) {
             assertEquals(PublicExecutionDescription.forType(type),
                     PublicExecutionDescription.forEventType(type.name()));
+        }
+    }
+
+    /**
+     * Handler-lifecycle types live only in the durable journal, so they are not
+     * {@link ExecutionEventType} members. They still need authored copy: a handler event rendered as
+     * generic activity would be indistinguishable from a node event in the one view an operator uses
+     * to find out why a process has not moved.
+     */
+    @Test
+    void durableHandlerTypesHaveTheirOwnCopyRatherThanTheUnknownFallback() {
+        for (String eventType : java.util.List.of(
+                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_REGISTERED,
+                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_ESCALATED,
+                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_EXPIRED,
+                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_DENIED,
+                ai.ravenroot.api.persistence.HandlerEventData.HANDLER_RESOLVED)) {
+            String description = PublicExecutionDescription.forEventType(eventType);
+            assertNotEquals(PublicExecutionDescription.UNKNOWN_EVENT, description, eventType);
+            assertTrue(description.endsWith("."), eventType);
+            assertTrue(description.toLowerCase(java.util.Locale.ROOT).contains("handler"), eventType);
         }
     }
 

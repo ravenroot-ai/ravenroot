@@ -28,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.net.InetAddress;
@@ -55,6 +56,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RavenrootServerTest {
@@ -348,10 +350,13 @@ class RavenrootServerTest {
                         HttpResponse.BodyHandlers.ofString());
 
                 assertEquals(413, response.statusCode());
-                assertTrue(response.body().contains("\"code\":\"GRAPH_LIMIT_FAN_OUT_EXCEEDED\""),
-                        response.body());
-                assertFalse(response.body().contains("99"), response.body());
-                assertFalse(response.body().contains("64"), response.body());
+                Object decoded = ai.ravenroot.api.payload.PayloadJson.read(
+                        response.body().getBytes(StandardCharsets.UTF_8),
+                        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+                Map<?, ?> fields = assertInstanceOf(Map.class, decoded);
+                assertEquals("GRAPH_LIMIT_FAN_OUT_EXCEEDED", fields.get("code"), response.body());
+                assertFalse(fields.containsKey("observed"), response.body());
+                assertFalse(fields.containsKey("limit"), response.body());
             }
         }
     }
@@ -1135,14 +1140,27 @@ class RavenrootServerTest {
     private static HttpResponse<String> readSettledResponse(
             HttpClient client, RavenrootServer server, String executionId) throws Exception {
         HttpResponse<String> response = null;
+        IOException lastTransportFailure = null;
         for (int attempt = 0; attempt < 12; attempt++) {
-            response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.port()
-                    + "/v1/executions/" + executionId)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            try {
+                response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.port()
+                        + "/v1/executions/" + executionId)).GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                lastTransportFailure = null;
+            } catch (IOException transientConnectionClosure) {
+                // The JDK client may reuse a keep-alive socket just as the lightweight test server
+                // closes it. Retry this idempotent GET within the same fixed polling bound; an
+                // unhealthy server still fails deterministically once the bound is exhausted.
+                lastTransportFailure = transientConnectionClosure;
+                Thread.sleep(250);
+                continue;
+            }
             if (response.statusCode() != 200 || !response.body().contains("\"status\":\"RUNNING\"")) {
                 return response;
             }
             Thread.sleep(250);
         }
+        if (response == null && lastTransportFailure != null) throw lastTransportFailure;
         throw new AssertionError("the execution never produced a terminal response: " + response.body());
     }
 

@@ -9,42 +9,66 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionOrigin;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.EventEnvelope;
+import ai.ravenroot.api.persistence.InventoryCursor;
+import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.persistence.JournalRecord;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
+import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.LeaseHandle;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryPage;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.Retryability;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1175,6 +1199,115 @@ public abstract class ExecutionStoreContract {
                 .build()));
     }
 
+    /**
+     * The orchestration retry's write, held to the same standard as the park resolution above.
+     *
+     * <p>An orchestration retry is not a distinct transition type: it is
+     * {@code AttemptTransitioned(FAILED)} followed by {@code AttemptAdded(next)} in one batch, and it
+     * relies on three properties of the port that were true before this test existed and were never
+     * asserted together for this shape. All three are asserted here, in both adapters, because the
+     * runtime's crash-safety argument is built on them.</p>
+     * <ol>
+     *   <li><b>The pair is atomic.</b> The batch does not partially apply, so there is no instant at
+     *       which the invocation has a failed attempt and no successor.</li>
+     *   <li><b>The invocation stays {@code RUNNING}.</b> Unlike a terminal failure, a retried
+     *       invocation is a visit still in progress, and an aggregate that marked it {@code FAILED}
+     *       would refuse the very attempt this batch appends.</li>
+     *   <li><b>The successor is immediately claimable, and it is the only claimable item.</b> That is
+     *       what makes a crash during the backoff recoverable: the retry is durably {@code SCHEDULED},
+     *       which recovery reads as provably effect-free.</li>
+     * </ol>
+     */
+    @Test
+    final void anOrchestrationRetryFailsAndAppendsInOneStepAndLeavesTheInvocationRunning() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID secondAttempt = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, firstAttempt);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, firstAttempt,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+
+        await(store().apply(retryBatch(key, traversalId, invocationId, firstAttempt, secondAttempt,
+                running.revision())));
+
+        StoredProcessInstance afterRetry = await(store().load(key));
+        List<NodeAttempt> attempts = attemptsOf(afterRetry, traversalId, invocationId);
+        assertEquals(2, attempts.size(), "fail-and-append is one commit, so neither half can be lost");
+        assertEquals(NodeAttemptStatus.FAILED, attempts.get(0).status());
+        assertEquals(1, attempts.get(0).ordinal());
+        assertEquals(NodeAttemptStatus.SCHEDULED, attempts.get(1).status());
+        assertEquals(2, attempts.get(1).ordinal(), "a retry is the next ordinal, never a counter");
+        assertEquals(NodeInvocationStatus.RUNNING,
+                afterRetry.state().traversals().get(traversalId).invocations().get(invocationId).status(),
+                "an invocation with a scheduled retry is a visit still in progress");
+
+        List<PendingWork> claimed = await(store().claimPendingWork(key.tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size(), "the failed attempt has left the claim loop, the retry has entered it");
+        var dispatch = assertInstanceOf(PendingWork.AttemptDispatch.class, claimed.get(0));
+        assertEquals(secondAttempt, dispatch.attemptId());
+        assertEquals(2, dispatch.attemptOrdinal(),
+                "the ordinal reaches a recovering worker on the claim, not only in the aggregate");
+    }
+
+    /**
+     * Replaying the identical retry commit is refused, so a crash between the write and its
+     * acknowledgement cannot produce a third attempt.
+     *
+     * <p>This is the exactly-once property the runtime depends on, and it is asserted through the
+     * revision expectation rather than through an idempotency key on purpose: the retry decision is
+     * made by a worker that already holds the instance's revision, so the cheapest correct guard is
+     * the one it is already carrying. The second assertion is the independent domain guard behind it —
+     * even with a revision that matched, the aggregate refuses an ordinal that is not exactly one past
+     * its history — so the property does not rest on a single mechanism.</p>
+     */
+    @Test
+    final void replayingARetryCommitCannotProduceASecondAppendedAttempt() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID secondAttempt = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, firstAttempt);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, firstAttempt,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        StoredProcessInstance retried = await(store().apply(retryBatch(key, traversalId, invocationId,
+                firstAttempt, secondAttempt, running.revision())));
+
+        ExecutionStoreFailure staleReplay = failureOf(() -> await(store().apply(retryBatch(key, traversalId,
+                invocationId, firstAttempt, UUID.randomUUID(), running.revision()))));
+        assertInstanceOf(ExecutionStoreFailure.ConcurrencyConflict.class, staleReplay,
+                "the revision the retry was decided at is gone, so the replay cannot land");
+
+        ExecutionStoreFailure freshReplay = failureOf(() -> await(store().apply(retryBatch(key, traversalId,
+                invocationId, firstAttempt, UUID.randomUUID(), retried.revision()))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, freshReplay,
+                "even at the current revision, the aggregate refuses to fail an attempt that already "
+                        + "failed and to append an ordinal that already exists");
+
+        assertEquals(2, attemptsOf(await(store().load(key)), traversalId, invocationId).size(),
+                "neither refusal may leave a third attempt behind");
+    }
+
+    /** The retry commit both adapters must apply identically: fail the attempt, append the next. */
+    private static ExecutionBatch retryBatch(ExecutionKey key, UUID traversalId, UUID invocationId,
+                                             UUID failedAttemptId, UUID nextAttemptId, long revision) {
+        return ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
+                        NodeAttemptStatus.FAILED))
+                .apply(new ExecutionTransition.AttemptAdded(traversalId, invocationId,
+                        new NodeAttempt(nextAttemptId, 2, NodeAttemptStatus.SCHEDULED)))
+                .build();
+    }
+
     private static NodeAttempt onlyAttempt(StoredProcessInstance stored) {
         return stored.state().traversals().values().iterator().next()
                 .invocations().values().iterator().next().attempts().getLast();
@@ -1336,6 +1469,20 @@ public abstract class ExecutionStoreContract {
         // forgottenBefore watermark this test does not need to inspect directly.
     }
 
+    /**
+     * PROVISIONAL, in the same sense the class Javadoc uses for {@link StoreCapability#DURABLE} and
+     * {@link StoreCapability#CROSS_PROCESS_LEASE} before {@code SqliteExecutionStore} existed: both
+     * in-tree adapters unconditionally declare {@link StoreCapability#IDEMPOTENCY_PURGE}, so
+     * {@link Assumptions#assumeFalse} below skips this body on both of them today, and the negative
+     * branch it asserts is currently unverified for internal consistency. It is kept rather than
+     * deleted for the same reason the two capabilities above were kept while provisional: the moment a
+     * conforming adapter exists that genuinely does not offer purge -- a read-only or a remote adapter
+     * are the plausible candidates -- this assertion starts running against it for free, with no
+     * change to this file, and it is exactly the assertion that catches an adapter which forgot the
+     * {@link ExecutionStoreFailure.CapabilityNotSupported} guard on that path. Writing it now, while it
+     * costs one skip, is cheaper than reconstructing it later once such an adapter's absence is already
+     * a gap nobody notices.
+     */
     @Test
     final void purgeFailsWithCapabilityNotSupportedWhenNotDeclared() {
         Assumptions.assumeFalse(store().supports(StoreCapability.IDEMPOTENCY_PURGE),
@@ -1949,6 +2096,725 @@ public abstract class ExecutionStoreContract {
                 .build()));
     }
 
+    /**
+     * Creates an instance, runs it, and drives it and its one traversal all the way to
+     * {@code COMPLETED}. The aggregate rejects completing a process instance while any traversal is
+     * not itself {@code COMPLETED} (see {@code ProcessInstance.transitionTo}), so the traversal must
+     * be finished first -- this is the fixture that makes that reachable.
+     */
+    private StoredProcessInstance completeInstanceAndItsTraversal(ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED))
+                .build()));
+    }
+
+    /** Creates an instance and drives it straight to {@code FAILED}, with no traversal completion needed. */
+    private StoredProcessInstance failInstance(ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()));
+    }
+
+    /** Finds the one traversal row named by {@code traversalId}, failing loudly if it is not there. */
+    private static TraversalInventoryEntry traversalNamed(List<TraversalInventoryEntry> traversals,
+                                                           UUID traversalId) {
+        return traversals.stream().filter(entry -> entry.traversalId().equals(traversalId)).findFirst()
+                .orElseThrow(() -> new AssertionError("no traversal row for " + traversalId));
+    }
+
+    // ============================================== SEC-15: durable tool approvals
+
+    @Test
+    final void toolApprovalRoundTripsEveryScopeAndDefensivelyCopiesSensitiveBytes() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+
+        DurableToolApproval stored = await(store().loadToolApproval(fixture.key(), fixture.approvalId()))
+                .orElseThrow();
+        assertEquals(ToolApprovalStatus.PENDING, stored.status());
+        assertEquals(fixture.registration().traversalId(), stored.request().traversalId());
+        assertEquals(fixture.registration().invocationId(), stored.request().invocationId());
+        assertEquals(fixture.registration().attemptId(), stored.request().attemptId());
+        assertEquals(fixture.registration().callId(), stored.request().callId());
+        assertEquals(fixture.registration().nodeId(), stored.request().nodeId());
+        assertEquals(fixture.registration().tool(), stored.request().tool());
+        assertEquals(fixture.registration().argumentsDigest(), stored.request().argumentsDigest());
+        assertEquals(fixture.registration().requester(), stored.request().requester());
+        assertEquals(fixture.registration().graphVersionPin(), stored.request().graphVersionPin());
+        assertEquals(fixture.registration().policyVersion(), stored.request().policyVersion());
+        assertEquals(fixture.registration().expiresAt(), stored.request().expiresAt());
+        assertEquals(fixture.registration().approverRequirements(), stored.request().approverRequirements());
+        assertEquals(fixture.registration().requesterMayApprove(), stored.request().requesterMayApprove());
+        assertEquals(fixture.registration().continuationVersion(), stored.request().continuationVersion());
+        byte[] arguments = stored.request().canonicalArguments();
+        arguments[0] = '!';
+        assertEquals('{', stored.request().canonicalArguments()[0]);
+        byte[] continuation = stored.request().continuation();
+        continuation[0] = '!';
+        assertEquals('c', stored.request().continuation()[0]);
+    }
+
+    @Test
+    final void toolApprovalRegistrationIsExactlyOnceAndDifferentContentUnderTheIdIsRefused() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerToolApproval(fixture.registration())
+                .build()));
+        assertEquals(1, await(store().toolApprovals(fixture.key())).size());
+
+        byte[] altered = "{\"amount\":2}".getBytes(StandardCharsets.UTF_8);
+        ToolApprovalRegistration changed = copyApproval(fixture.registration(), altered, digest(altered));
+        StoredProcessInstance after = await(store().load(fixture.key()));
+        ExecutionStoreFailure failure = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(after.revision()))
+                .registerToolApproval(changed)
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void toolApprovalTransitionsAreFirstWriterWinsIdempotentAndSingleUse() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        transitionApproval(fixture, new ToolApprovalTransition.Approved(fixture.approvalId(),
+                "issuer|USER|approver"));
+        transitionApproval(fixture, new ToolApprovalTransition.Approved(fixture.approvalId(),
+                "issuer|USER|approver"));
+        transitionApproval(fixture, new ToolApprovalTransition.Consumed(fixture.approvalId()));
+
+        StoredProcessInstance beforeReplay = await(store().load(fixture.key()));
+        ExecutionStoreFailure replay = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(beforeReplay.revision()))
+                .applyToolApproval(new ToolApprovalTransition.Consumed(fixture.approvalId()))
+                .build())));
+        var refused = assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class, replay);
+        assertEquals(ToolApprovalStatus.CONSUMED, refused.current());
+
+        transitionApproval(fixture, new ToolApprovalTransition.Indeterminate(fixture.approvalId()));
+        assertEquals(ToolApprovalStatus.INDETERMINATE,
+                await(store().loadToolApproval(fixture.key(), fixture.approvalId())).orElseThrow().status());
+    }
+
+    @Test
+    final void storeClockRejectsLateApprovalAndIsTheOnlyAuthorityThatMayExpire() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        StoredProcessInstance beforeDue = await(store().load(fixture.key()));
+        ExecutionStoreFailure earlyExpiry = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(beforeDue.revision()))
+                        .applyToolApproval(new ToolApprovalTransition.Expired(fixture.approvalId()))
+                        .build())));
+        assertEquals(ToolApprovalStatus.PENDING,
+                assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class, earlyExpiry).current());
+
+        clock().advance(Duration.ofMinutes(5));
+        StoredProcessInstance afterDue = await(store().load(fixture.key()));
+        ExecutionStoreFailure lateApproval = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(afterDue.revision()))
+                        .applyToolApproval(new ToolApprovalTransition.Approved(fixture.approvalId(),
+                                "issuer|USER|approver"))
+                        .build())));
+        assertEquals(ToolApprovalStatus.EXPIRED,
+                assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class,
+                        lateApproval).requested());
+        transitionApproval(fixture, new ToolApprovalTransition.Expired(fixture.approvalId()));
+        assertEquals(ToolApprovalStatus.EXPIRED,
+                await(store().loadToolApproval(fixture.key(), fixture.approvalId())).orElseThrow().status());
+    }
+
+    private ToolApprovalFixture pendingToolApproval(ExecutionKey key) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        byte[] arguments = "{\"amount\":1}".getBytes(StandardCharsets.UTF_8);
+        UUID approvalId = UUID.randomUUID();
+        byte[] checkpoint = "checkpoint".getBytes(StandardCharsets.UTF_8);
+        var registration = new ToolApprovalRegistration(approvalId, traversalId, invocationId, attemptId,
+                UUID.randomUUID(), "work", "payments.charge", arguments, digest(arguments),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                new GraphVersionPin("graph-v1"), "policy-v1", clock().instant().plus(Duration.ofMinutes(5)),
+                HandlerAuthorization.ofRoles("APPROVER"), false, 1,
+                checkpoint, digest(checkpoint));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .registerToolApproval(registration)
+                .build()));
+        return new ToolApprovalFixture(key, approvalId, registration);
+    }
+
+    private void transitionApproval(ToolApprovalFixture fixture, ToolApprovalTransition transition) {
+        StoredProcessInstance stored = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(stored.revision()))
+                .applyToolApproval(transition)
+                .build()));
+    }
+
+    private static ToolApprovalRegistration copyApproval(ToolApprovalRegistration source,
+                                                         byte[] arguments, String digest) {
+        return new ToolApprovalRegistration(source.approvalId(), source.traversalId(), source.invocationId(),
+                source.attemptId(), source.callId(), source.nodeId(), source.tool(), arguments, digest,
+                source.requester(), source.graphVersionPin(), source.policyVersion(), source.expiresAt(),
+                source.approverRequirements(), source.requesterMayApprove(), source.continuationVersion(),
+                source.continuation(), source.continuationDigest());
+    }
+
+    private static String digest(byte[] bytes) {
+        try {
+            return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private record ToolApprovalFixture(ExecutionKey key, UUID approvalId,
+                                       ToolApprovalRegistration registration) {
+    }
+
+    // ============================================== PERS-05: durable handlers, wait and re-entry
+
+    /**
+     * The registration and the waiting transition share one commit, and a trigger resolves the
+     * handler by the business identity it presents rather than by an identity it could not know.
+     */
+    @Test
+    final void aRegistrationCommitsWithItsWaitingTransitionAndIsFoundByCorrelationKey() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        DurableHandler found = await(store()
+                .findHandler(fixture.key().tenantId(), "approval", "invoice-42")).orElseThrow();
+        assertEquals(fixture.handlerId(), found.handlerId());
+        assertEquals(HandlerStatus.WAITING, found.status());
+        assertNull(found.resumeTraversalId(), "a waiting handler has authorized no re-entry");
+        assertEquals(TraversalStatus.WAITING,
+                await(store().load(fixture.key())).state().traversals().get(fixture.traversalId()).status(),
+                "the wait and the handler that records what it is waiting for commit together");
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "a waiting handler is state, not work: nothing is claimable until it settles");
+    }
+
+    /**
+     * Registration is exactly-once, which is what makes a crash between the waiting transition and
+     * the registration recoverable by re-sending the identical batch.
+     */
+    @Test
+    final void aRepeatedRegistrationUnderTheSameDeduplicationKeyIsANoOpNotASecondHandler() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerHandler(fixture.registration())
+                .build()));
+
+        assertEquals(1, await(store().handlers(fixture.key())).size(),
+                "a retried wait must not leave a second handler that no trigger will ever resolve");
+    }
+
+    /** Two live handlers under one correlation key would make a trigger's target arbitrary. */
+    @Test
+    final void aLiveCorrelationKeyCannotBeTakenTwiceButBecomesReusableOnceTheWaitIsOver() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var first = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        ExecutionKey secondKey = newKey();
+
+        ExecutionStoreFailure taken = failureOf(() ->
+                waitingHandler(secondKey, "approval", "invoice-42", "dedup-2"));
+        var conflict = assertInstanceOf(ExecutionStoreFailure.HandlerCorrelationTaken.class, taken);
+        assertEquals("invoice-42", conflict.correlationKey());
+        assertEquals(Retryability.DETERMINISTIC_REJECT, conflict.retryability(),
+                "re-reading cannot make a taken correlation key free");
+
+        resolve(first, "approved");
+        assertDoesNotThrow(() -> waitingHandler(newKey(), "approval", "invoice-42", "dedup-3"),
+                "a key whose wait is over is reusable; terminal handlers are retained, not live");
+    }
+
+    /**
+     * The resolution, the re-entry traversal and the journal event are one commit, and the trigger
+     * the store then offers names the <em>new</em> traversal.
+     */
+    @Test
+    final void anAuthorizedResolutionCommitsAReEntryTraversalAndOffersExactlyOneTrigger() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        UUID resumeTraversalId = resolve(fixture, "approved");
+
+        DurableHandler resolved = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(HandlerStatus.RESOLVED, resolved.status());
+        assertEquals(resumeTraversalId, resolved.resumeTraversalId());
+        assertEquals("issuer|USER|approver", resolved.actor());
+        assertTrue(await(store().load(fixture.key())).state().traversals().containsKey(resumeTraversalId),
+                "the traversal that resumes the process is durable state, not a live continuation");
+        assertTrue(await(store().findHandler(fixture.key().tenantId(), "approval", "invoice-42")).isEmpty(),
+                "a settled handler is no longer live and no longer answers a trigger");
+
+        List<PendingWork> claimed =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size());
+        var trigger = assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst());
+        assertEquals(fixture.handlerId(), trigger.workItemId());
+        assertEquals(resumeTraversalId, trigger.traversalId(),
+                "the claimant runs the traversal the resolution authorized, not the one that waited");
+        assertEquals("approval", trigger.handlerName());
+        assertEquals("approved", new String(trigger.payload().bytes(), StandardCharsets.UTF_8));
+
+        await(store().ack(trigger));
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "one handler produces one trigger, and an acknowledged trigger stays acknowledged");
+    }
+
+    /**
+     * Duplicate and late are the same fact, and both are decided from stored state alone — no clock,
+     * no retention window, therefore the same answer on every retry.
+     */
+    @Test
+    final void aSecondResolutionIsRefusedDeterministicallyAndCommitsNothing() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        UUID firstResume = resolve(fixture, "approved");
+
+        StoredProcessInstance settled = await(store().load(fixture.key()));
+        UUID secondResume = UUID.randomUUID();
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(settled.revision()))
+                        .apply(new ExecutionTransition.TraversalAdded(new Traversal(secondResume, "work",
+                                TraversalStatus.ACCEPTED, Map.of())))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(), "issuer|USER|other",
+                                secondResume, OpaquePayload.of("approved".getBytes(StandardCharsets.UTF_8),
+                                        "text/plain")))
+                        .build())));
+        var notResolvable = assertInstanceOf(ExecutionStoreFailure.HandlerNotResolvable.class, refused);
+        assertEquals(HandlerStatus.RESOLVED, notResolvable.current());
+        assertEquals(Retryability.DETERMINISTIC_REJECT, notResolvable.retryability(),
+                "a caller that re-read and retried this would loop forever");
+
+        StoredProcessInstance after = await(store().load(fixture.key()));
+        assertEquals(settled.revision(), after.revision(), "a refused batch writes nothing at all");
+        assertFalse(after.state().traversals().containsKey(secondResume),
+                "the re-entry traversal must not survive the handler transition that was refused");
+        DurableHandler unchanged = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(firstResume, unchanged.resumeTraversalId());
+        assertEquals("issuer|USER|approver", unchanged.actor(),
+                "the second principal must not overwrite the one that actually resolved it");
+    }
+
+    /**
+     * The store cannot be used as a cross-tenant existence oracle: another tenant's handler is
+     * indistinguishable from one that was never registered.
+     */
+    @Test
+    final void anotherTenantsHandlerIsIndistinguishableFromOneThatNeverExisted() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        assertEquals(Optional.empty(), await(store().findHandler("intruder", "approval", "invoice-42")),
+                "an empty answer, never a denial, or the refusal itself would confirm the key exists");
+        assertEquals(Optional.empty(), await(store().loadHandler(
+                new ExecutionKey("intruder", fixture.key().processInstanceId()), fixture.handlerId())));
+        assertTrue(await(store().handlers(
+                new ExecutionKey("intruder", fixture.key().processInstanceId()))).isEmpty());
+    }
+
+    /** Escalation raises visibility, leaves the handler resolvable, and tolerates redelivery. */
+    @Test
+    final void escalationIsRepeatableAndLeavesTheHandlerResolvable() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        escalate(fixture, "no decision within the declared window");
+        DurableHandler escalated = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(HandlerStatus.ESCALATED, escalated.status());
+        assertNull(escalated.resumeTraversalId(), "an escalation resumes nothing and produces no trigger");
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty());
+
+        // At-least-once timer delivery must not be able to turn a retry into an incident.
+        assertDoesNotThrow(() -> escalate(fixture, "no decision within the declared window"));
+        assertEquals(1, await(store().handlers(fixture.key())).size());
+        assertTrue(await(store().findHandler(fixture.key().tenantId(), "approval", "invoice-42")).isPresent(),
+                "an escalated handler is still live: escalation unsticks work, it does not close it");
+
+        assertDoesNotThrow(() -> resolve(fixture, "approved"));
+    }
+
+    /** Expiry is terminal, resumes the process on its timeout route, and refuses a late trigger. */
+    @Test
+    final void anExpiredHandlerResumesTheProcessAndRefusesALaterResolution() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+        UUID timeoutTraversal = UUID.randomUUID();
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(waiting.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(timeoutTraversal, "work",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .applyHandler(new HandlerTransition.Expired(fixture.handlerId(), timeoutTraversal))
+                .build()));
+
+        DurableHandler expired = await(store()
+                .loadHandler(fixture.key(), fixture.handlerId())).orElseThrow();
+        assertEquals(HandlerStatus.EXPIRED, expired.status());
+        assertEquals("", expired.actor(), "a deadline is not an actor and must not be recorded as one");
+        assertEquals(timeoutTraversal, expired.resumeTraversalId());
+
+        List<PendingWork> claimed =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size());
+        assertEquals(timeoutTraversal,
+                assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst()).traversalId());
+
+        assertInstanceOf(ExecutionStoreFailure.HandlerNotResolvable.class,
+                failureOf(() -> resolve(fixture, "approved")));
+    }
+
+    /** The payload schema is enforced by the store, so it holds for any caller building its own batch. */
+    @Test
+    final void aResolutionPayloadThatDoesNotMatchTheDeclaredSchemaIsRefusedAndCommitsNothing() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+        UUID resume = UUID.randomUUID();
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(waiting.revision()))
+                        .apply(new ExecutionTransition.TraversalAdded(new Traversal(resume, "work",
+                                TraversalStatus.ACCEPTED, Map.of())))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(),
+                                "issuer|USER|approver", resume,
+                                OpaquePayload.of(new byte[] {1, 2, 3}, "application/octet-stream")))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(HandlerStatus.WAITING,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status());
+        assertEquals(waiting.revision(), await(store().load(fixture.key())).revision());
+    }
+
+    /** A handler that closed a process while naming a re-entry point nobody created would strand it. */
+    @Test
+    final void aTerminalTransitionNamingATraversalTheBatchDidNotCreateIsRefused() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(waiting.revision()))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(),
+                                "issuer|USER|approver", UUID.randomUUID(),
+                                OpaquePayload.of("approved".getBytes(StandardCharsets.UTF_8), "text/plain")))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(HandlerStatus.WAITING,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status());
+    }
+
+    /**
+     * The human-task case the whole mechanism exists for: created before a complete shutdown,
+     * authorized and resolved after the restart, by a process that did not exist when the wait began.
+     */
+    @Test
+    final void aHumanTaskRegisteredBeforeAShutdownIsResolvableAfterTheRestart() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        assumeCapability(StoreCapability.DURABLE);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+
+        reopen();
+
+        DurableHandler survived = await(store()
+                .findHandler(fixture.key().tenantId(), "approval", "invoice-42")).orElseThrow();
+        assertEquals(fixture.handlerId(), survived.handlerId());
+        assertEquals(HandlerStatus.WAITING, survived.status());
+        assertEquals(Set.of("APPROVER"), survived.authorization().requiredRoles(),
+                "the authorization requirement is what makes the task resolvable by the right person, "
+                        + "so it has to survive with it");
+        assertEquals("application/vnd.ravenroot.test-approval", survived.payloadSchema().contentType());
+
+        UUID resumeTraversalId = resolve(fixture, "approved");
+
+        reopen();
+
+        assertEquals(HandlerStatus.RESOLVED,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status());
+        List<PendingWork> claimed =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-after-restart", 10, TTL));
+        assertEquals(1, claimed.size());
+        assertEquals(resumeTraversalId,
+                assertInstanceOf(PendingWork.HandlerTrigger.class, claimed.getFirst()).traversalId());
+
+        // And the refusal is just as durable as the resolution: a trigger redelivered by a client
+        // that never saw the first answer is refused identically after the restart.
+        assertInstanceOf(ExecutionStoreFailure.HandlerNotResolvable.class,
+                failureOf(() -> resolve(fixture, "approved")));
+    }
+
+    /** One handler, one trigger, and the acknowledgement is not lost to a later unrelated write. */
+    @Test
+    final void anAcknowledgedTriggerIsNotRedeliveredByALaterWriteToTheSameInstance() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        resolve(fixture, "approved");
+
+        PendingWork trigger =
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).getFirst();
+        await(store().ack(trigger));
+
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(UUID.randomUUID(), "work",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .build()));
+
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "a retained terminal handler must keep its acknowledgement, or its trigger replays forever");
+    }
+
+    /**
+     * Both uniqueness rules must see the batch's <em>own</em> registrations, not only committed ones.
+     *
+     * <p>This is the assertion whose absence let the two adapters disagree. A store whose lookups
+     * query inside its write transaction sees rows the same transaction inserted and refuses both
+     * cases for free; a store that consults committed state instead accepts them, and then holds two
+     * live handlers under one correlation key — the state
+     * {@link ExecutionStoreFailure.HandlerCorrelationTaken} exists to make impossible — or two
+     * handlers under one deduplication key, which is the exactly-once registration guarantee the
+     * crash-recovery story rests on. Neither adapter can be trusted to have got it right by
+     * construction, so it is asserted for both.</p>
+     */
+    @Test
+    final void bothUniquenessRulesSeeRegistrationsMadeEarlierInTheSameBatch() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+
+        ExecutionKey correlationKey = newKey();
+        var correlationFixture = twoWaitingInvocations(correlationKey);
+        ExecutionStoreFailure correlationTaken = failureOf(() -> await(store().apply(
+                correlationFixture.batch()
+                        .registerHandler(handlerRegistration(correlationFixture.firstHandlerId(),
+                                "approval", correlationFixture.traversalId(),
+                                correlationFixture.firstInvocationId(), "invoice-42", "dedup-a"))
+                        .registerHandler(handlerRegistration(correlationFixture.secondHandlerId(),
+                                "approval", correlationFixture.traversalId(),
+                                correlationFixture.secondInvocationId(), "invoice-42", "dedup-b"))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.HandlerCorrelationTaken.class, correlationTaken,
+                "two live handlers under one correlation key would make findHandler's answer "
+                        + "depend on iteration order and strand whichever one it did not return");
+        assertTrue(await(store().handlers(correlationKey)).isEmpty(),
+                "the refused batch registers neither handler");
+
+        ExecutionKey deduplicationKey = newKey();
+        var deduplicationFixture = twoWaitingInvocations(deduplicationKey);
+        ExecutionStoreFailure deduplicationRefused = failureOf(() -> await(store().apply(
+                deduplicationFixture.batch()
+                        .registerHandler(handlerRegistration(deduplicationFixture.firstHandlerId(),
+                                "approval-a", deduplicationFixture.traversalId(),
+                                deduplicationFixture.firstInvocationId(), "corr-a", "same-dedup"))
+                        .registerHandler(handlerRegistration(deduplicationFixture.secondHandlerId(),
+                                "approval-b", deduplicationFixture.traversalId(),
+                                deduplicationFixture.secondInvocationId(), "corr-b", "same-dedup"))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, deduplicationRefused);
+        assertTrue(await(store().handlers(deduplicationKey)).isEmpty(),
+                "a deduplication key that admitted two different handlers would break the "
+                        + "exactly-once registration a retried wait depends on");
+    }
+
+    /** The same registration twice in one batch is the retry case, and collapses rather than failing. */
+    @Test
+    final void theSameRegistrationRepeatedWithinOneBatchCollapsesToASingleHandler() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        ExecutionKey key = newKey();
+        var fixture = twoWaitingInvocations(key);
+        HandlerRegistration registration = handlerRegistration(fixture.firstHandlerId(), "approval",
+                fixture.traversalId(), fixture.firstInvocationId(), "invoice-42", "dedup-a");
+
+        await(store().apply(fixture.batch()
+                .registerHandler(registration)
+                .registerHandler(registration)
+                .build()));
+
+        assertEquals(1, await(store().handlers(key)).size(),
+                "a repeated identical registration is a retry, and a retry must not double-register");
+    }
+
+    /**
+     * The re-entry traversal must be one the resolving batch created, not merely one that exists.
+     *
+     * <p>Naming the traversal that was <em>waiting</em> passes an existence check and produces a
+     * trigger pointing a claimant at a traversal still in {@code WAITING} that nothing authorized it
+     * to resume. The store is where this has to be refused, for the reason it refuses everything else
+     * about a handler batch: a caller assembling its own batch is not bound by what the runtime
+     * happens to do.</p>
+     */
+    @Test
+    final void aTerminalTransitionMustNameATraversalTheSameBatchCreated() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        StoredProcessInstance waiting = await(store().load(fixture.key()));
+
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(waiting.revision()))
+                        .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(),
+                                "issuer|USER|approver", fixture.traversalId(),
+                                OpaquePayload.of("approved".getBytes(StandardCharsets.UTF_8),
+                                        "application/vnd.ravenroot.test-approval")))
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertEquals(HandlerStatus.WAITING,
+                await(store().loadHandler(fixture.key(), fixture.handlerId())).orElseThrow().status(),
+                "the handler is untouched, so the wait it records is still the truth");
+        assertEquals(waiting.revision(), await(store().load(fixture.key())).revision());
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).isEmpty(),
+                "nothing may become claimable from a re-entry point that was never authorized");
+    }
+
+    /** A trigger names the re-entry traversal and no invocation, because the new traversal has none. */
+    @Test
+    final void aTriggerNamesNoInvocationBecauseTheReEntryTraversalHasNotCreatedOneYet() {
+        assumeCapability(StoreCapability.DURABLE_HANDLERS);
+        var fixture = waitingHandler(newKey(), "approval", "invoice-42", "dedup-1");
+        UUID resumeTraversalId = resolve(fixture, "approved");
+
+        var trigger = assertInstanceOf(PendingWork.HandlerTrigger.class,
+                await(store().claimPendingWork(fixture.key().tenantId(), "worker-1", 10, TTL)).getFirst());
+
+        assertEquals(resumeTraversalId, trigger.traversalId());
+        assertNull(trigger.invocationId(),
+                "naming the waiting invocation would pair a new traversal with an invocation living "
+                        + "under the old one, which no lookup resolves");
+        assertTrue(await(store().load(fixture.key())).state().traversals().get(resumeTraversalId)
+                        .invocations().isEmpty(),
+                "and there is genuinely nothing to name: the claimant creates the first invocation");
+        assertEquals(fixture.invocationId(),
+                await(store().loadHandler(fixture.key(), trigger.workItemId())).orElseThrow()
+                        .invocationId(),
+                "the waiting invocation stays reachable through the handler the trigger is keyed by");
+    }
+
+    /** Identities for a batch that parks two invocations of one traversal, for the same-batch rules. */
+    private record TwoWaits(ExecutionKey key, UUID traversalId, UUID firstInvocationId,
+                            UUID secondInvocationId, UUID firstHandlerId, UUID secondHandlerId,
+                            long revision) {
+        /** The parking batch, open so a test can add the registrations it is actually asserting. */
+        private ExecutionBatch.Builder batch() {
+            return ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                            new NodeInvocation(firstInvocationId, "await-first", Set.of(),
+                                    NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                            new NodeInvocation(secondInvocationId, "await-second", Set.of(),
+                                    NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING));
+        }
+    }
+
+    private TwoWaits twoWaitingInvocations(ExecutionKey key) {
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return new TwoWaits(key, traversalId, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), created.revision());
+    }
+
+    private static HandlerRegistration handlerRegistration(UUID handlerId, String name, UUID traversalId,
+                                                           UUID invocationId, String correlationKey,
+                                                           String deduplicationKey) {
+        return new HandlerRegistration(handlerId, name, traversalId, invocationId, correlationKey,
+                deduplicationKey,
+                new HandlerPayloadSchema("application/vnd.ravenroot.test-approval", "approval/v1", 1024),
+                HandlerAuthorization.ofRoles("APPROVER"));
+    }
+
+    /** Identities the whole PERS-05 story is told in, kept together so a test reads as one wait. */
+    private record HandlerFixture(ExecutionKey key, UUID traversalId, UUID invocationId, UUID handlerId,
+                                  HandlerRegistration registration) {
+    }
+
+    /**
+     * Creates an instance whose only traversal is {@code WAITING} on one freshly registered handler.
+     *
+     * <p>The invocation carries no attempt, deliberately: an attempt would be claimable work of its
+     * own and every trigger assertion would then have to filter it out, which is exactly how a test
+     * comes to pass for the wrong reason.</p>
+     */
+    private HandlerFixture waitingHandler(ExecutionKey key, String name, String correlationKey,
+                                          String deduplicationKey) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID handlerId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        var registration = new HandlerRegistration(handlerId, name, traversalId, invocationId,
+                correlationKey, deduplicationKey,
+                new HandlerPayloadSchema("application/vnd.ravenroot.test-approval", "approval/v1", 1024),
+                HandlerAuthorization.ofRoles("APPROVER"));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                        new NodeInvocation(invocationId, "await-approval", Set.of(),
+                                NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING))
+                .registerHandler(registration)
+                .build()));
+        return new HandlerFixture(key, traversalId, invocationId, handlerId, registration);
+    }
+
+    /** Resolves a fixture's handler and returns the re-entry traversal the resolution committed. */
+    private UUID resolve(HandlerFixture fixture, String outcome) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        UUID resumeTraversalId = UUID.randomUUID();
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(resumeTraversalId, "work",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .applyHandler(new HandlerTransition.Resolved(fixture.handlerId(), "issuer|USER|approver",
+                        resumeTraversalId, OpaquePayload.of(outcome.getBytes(StandardCharsets.UTF_8),
+                                "application/vnd.ravenroot.test-approval")))
+                .build()));
+        return resumeTraversalId;
+    }
+
+    private void escalate(HandlerFixture fixture, String reason) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .applyHandler(new HandlerTransition.Escalated(fixture.handlerId(), reason))
+                .build()));
+    }
+
     // ============================================== PERS-07: journal, outbox and inbox (ADR 0011)
 
     @Test
@@ -2352,6 +3218,941 @@ public abstract class ExecutionStoreContract {
                 "and the floor must not move past a record the store is still holding");
         assertEquals(2, await(store().readJournal(DEFAULT_TENANT, 0, 10)).size(),
                 "both records stay readable from the very beginning of the journal");
+    }
+
+    // ======================== durable tenant-scoped process and traversal inventory
+
+    // ---- 1. restart discovery (acceptance criterion 1) ----
+
+    /**
+     * After a reopen, every retained non-terminal instance is rediscoverable and its traversals can
+     * be listed -- the reason the inventory exists. A terminal instance created before the restart
+     * must also survive it, because restart discovery is not limited to outstanding work.
+     */
+    @Test
+    final void restartDiscoveryFindsEveryRetainedInstanceAndItsTraversals() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.DURABLE);
+
+        ExecutionKey running = newKey();
+        UUID runningTraversal = UUID.randomUUID();
+        await(store().apply(creationBatch(running, runningTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(running).expecting(RevisionExpectation.any())
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+
+        ExecutionKey waiting = newKey();
+        UUID waitingTraversal = UUID.randomUUID();
+        await(store().apply(creationBatch(waiting, waitingTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(waiting).expecting(RevisionExpectation.any())
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .build()));
+
+        ExecutionKey completed = newKey();
+        UUID completedTraversal = UUID.randomUUID();
+        completeInstanceAndItsTraversal(completed, completedTraversal);
+
+        reopen();
+
+        ProcessInventoryPage page = await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(50)));
+        Set<UUID> found = page.items().stream().map(entry -> entry.key().processInstanceId())
+                .collect(Collectors.toSet());
+        assertTrue(found.containsAll(Set.of(running.processInstanceId(), waiting.processInstanceId(),
+                completed.processInstanceId())),
+                "every retained instance, terminal or not, must be rediscoverable after a restart");
+
+        List<TraversalInventoryEntry> runningTraversals = await(store().listTraversals(running));
+        assertEquals(1, runningTraversals.size());
+        assertEquals(runningTraversal, runningTraversals.get(0).traversalId());
+
+        List<TraversalInventoryEntry> waitingTraversals = await(store().listTraversals(waiting));
+        assertEquals(1, waitingTraversals.size());
+        assertEquals(waitingTraversal, waitingTraversals.get(0).traversalId());
+    }
+
+    // ---- 2. tenant isolation ----
+
+    @Test
+    final void findProcessInstanceIsEmptyForAnotherTenantsKeyNeverADenial() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey owner = keyFor("inv-tenant-find-owner");
+        UUID traversalId = UUID.randomUUID();
+        await(store().apply(creationBatch(owner, traversalId, "graph-v1")));
+
+        ExecutionKey impostor = new ExecutionKey("inv-tenant-find-impostor", owner.processInstanceId());
+        assertEquals(Optional.empty(), await(store().findProcessInstance(impostor)),
+                "a key belonging to another tenant is indistinguishable from a missing one");
+        assertTrue(await(store().findProcessInstance(owner)).isPresent());
+    }
+
+    @Test
+    final void listTraversalsIsNotFoundForAMissingOrForeignTenantKeyAndEmptyForNoTraversals() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey owner = keyFor("inv-tenant-trav-owner");
+        UUID traversalId = UUID.randomUUID();
+        await(store().apply(creationBatch(owner, traversalId, "graph-v1")));
+
+        ExecutionKey impostor = new ExecutionKey("inv-tenant-trav-impostor", owner.processInstanceId());
+        assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                failureOf(() -> await(store().listTraversals(impostor))));
+
+        ExecutionKey neverExisted = keyFor("inv-tenant-trav-owner");
+        assertInstanceOf(ExecutionStoreFailure.NotFound.class,
+                failureOf(() -> await(store().listTraversals(neverExisted))));
+
+        List<TraversalInventoryEntry> traversals = await(store().listTraversals(owner));
+        assertEquals(1, traversals.size());
+        assertEquals(traversalId, traversals.get(0).traversalId());
+        assertEquals(owner, traversals.get(0).key());
+    }
+
+    @Test
+    final void anotherTenantsInstancesNeverAppearInAListing() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey ownKey = keyFor("inv-tenant-list-a");
+        ExecutionKey otherKey = keyFor("inv-tenant-list-b");
+        await(store().apply(creationBatch(ownKey, UUID.randomUUID(), "graph-v1")));
+        await(store().apply(creationBatch(otherKey, UUID.randomUUID(), "graph-v1")));
+
+        ProcessInventoryPage page = await(store().listProcessInstances("inv-tenant-list-a",
+                ProcessInventoryQuery.everything(50)));
+        assertEquals(1, page.items().size());
+        assertEquals(ownKey, page.items().get(0).key());
+    }
+
+    @Test
+    final void aCursorMintedForOneTenantIsRejectedUnderAnother() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String tenantA = "inv-tenant-cursor-a";
+        String tenantB = "inv-tenant-cursor-b";
+        await(store().apply(creationBatch(keyFor(tenantA), UUID.randomUUID(), "graph-v1")));
+        await(store().apply(creationBatch(keyFor(tenantA), UUID.randomUUID(), "graph-v1")));
+        ProcessInventoryPage page = await(store().listProcessInstances(tenantA,
+                ProcessInventoryQuery.everything(1)));
+        String cursor = page.nextCursor().orElseThrow();
+
+        var failure = failureOf(() -> await(store().listProcessInstances(tenantB,
+                ProcessInventoryQuery.everything(1).after(cursor))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure,
+                "a cursor minted for one tenant must not be a usable position in another's inventory");
+    }
+
+    // ---- 3. pagination determinism ----
+
+    @Test
+    final void pagingIsStableWhileNewWorkIsAcceptedMidScan() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String tenant = "inv-page-new-work";
+        List<UUID> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            clock().advance(Duration.ofSeconds(10));
+            ExecutionKey key = keyFor(tenant);
+            await(store().apply(creationBatch(key, UUID.randomUUID(), "graph-v1")));
+            ids.add(0, key.processInstanceId()); // newest first, matching (createdAt DESC)
+        }
+
+        ProcessInventoryQuery firstQuery = ProcessInventoryQuery.builder().limit(2).build();
+        ProcessInventoryPage page1 = await(store().listProcessInstances(tenant, firstQuery));
+        assertEquals(2, page1.items().size());
+
+        // New work arrives strictly after the scan started; a stable cursor must not see it.
+        clock().advance(Duration.ofSeconds(10));
+        ExecutionKey lateArrival = keyFor(tenant);
+        await(store().apply(creationBatch(lateArrival, UUID.randomUUID(), "graph-v1")));
+
+        List<UUID> collected = new java.util.ArrayList<>();
+        page1.items().forEach(entry -> collected.add(entry.key().processInstanceId()));
+        Optional<String> cursor = page1.nextCursor();
+        while (cursor.isPresent()) {
+            ProcessInventoryPage page = await(store().listProcessInstances(tenant, firstQuery.after(cursor.get())));
+            page.items().forEach(entry -> collected.add(entry.key().processInstanceId()));
+            cursor = page.nextCursor();
+        }
+
+        assertEquals(ids, collected,
+                "every row present when the scan started must appear exactly once, in order, and "
+                        + "work accepted mid-scan must not appear at all");
+        assertFalse(collected.contains(lateArrival.processInstanceId()));
+    }
+
+    @Test
+    final void pagingIsStableWhileOldTerminalWorkExpiresMidScan() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        String tenant = "inv-page-expiry";
+        List<ExecutionKey> keys = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            clock().advance(Duration.ofSeconds(30));
+            ExecutionKey key = keyFor(tenant);
+            failInstance(key, UUID.randomUUID());
+            keys.add(0, key); // newest (soonest created, longest to retain) first
+        }
+        // keys.get(4) was created first and therefore expires first: its retainedUntil is earliest.
+        ExecutionKey oldest = keys.get(4);
+        Instant oldestDeadline = await(store().findProcessInstance(oldest)).orElseThrow()
+                .retainedUntil().orElseThrow();
+
+        ProcessInventoryQuery query = ProcessInventoryQuery.everything(2);
+        ProcessInventoryPage page1 = await(store().listProcessInstances(tenant, query));
+        assertEquals(List.of(keys.get(0).processInstanceId(), keys.get(1).processInstanceId()),
+                page1.items().stream().map(e -> e.key().processInstanceId()).toList());
+
+        // Land strictly between the oldest row's deadline and the next one's, then purge: only the
+        // row the scan has not reached yet -- the fifth, which would have been the sole item of a
+        // third page -- is removed.
+        clock().set(oldestDeadline.plusSeconds(1));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(tenant)));
+
+        ProcessInventoryPage page2 = await(store().listProcessInstances(tenant,
+                query.after(page1.nextCursor().orElseThrow())));
+        assertEquals(List.of(keys.get(2).processInstanceId(), keys.get(3).processInstanceId()),
+                page2.items().stream().map(e -> e.key().processInstanceId()).toList());
+
+        // The would-be third page does not surface as an error when the scan reaches for it: it is
+        // simply gone, so page2 -- which still returned its full two rows -- is already the last page.
+        // That is the short page the contract promises, not a hole: nothing between keys[0] and
+        // keys[3] was skipped or duplicated, and the one row that vanished is exactly the one that
+        // expired.
+        assertTrue(page2.nextCursor().isEmpty(),
+                "the expired row would have been the entire next page, so there is no next page at all");
+        assertEquals(oldestDeadline, page2.retainedFrom(),
+                "the page reports the floor so the caller can tell a short page from a hole");
+    }
+
+    @Test
+    final void tieBreakOrdersByProcessInstanceIdDescendingWhenCreatedAtCollides() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String tenant = "inv-tie-break";
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        UUID greater = a.toString().compareTo(b.toString()) > 0 ? a : b;
+        UUID lesser = greater.equals(a) ? b : a;
+
+        // Both rows are written at the SAME instant on the shared clock, so createdAt collides and
+        // only the id tie-break can order them.
+        await(store().apply(ExecutionBatch.to(new ExecutionKey(tenant, lesser))
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(acceptedInstance(lesser, UUID.randomUUID()),
+                        new GraphVersionPin("graph-v1")))
+                .build()));
+        await(store().apply(ExecutionBatch.to(new ExecutionKey(tenant, greater))
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(acceptedInstance(greater, UUID.randomUUID()),
+                        new GraphVersionPin("graph-v1")))
+                .build()));
+
+        ProcessInventoryPage page = await(store().listProcessInstances(tenant, ProcessInventoryQuery.everything(10)));
+        assertEquals(List.of(greater, lesser),
+                page.items().stream().map(e -> e.key().processInstanceId()).toList(),
+                "equal createdAt must resolve by processInstanceId, lexically descending");
+    }
+
+    // ---- 4. cursor opacity and validation ----
+
+    @Test
+    final void aTruncatedCursorIsInvalidRequest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String cursor = InventoryCursor.encode(DEFAULT_TENANT, clock().instant(), UUID.randomUUID());
+        String truncated = cursor.substring(0, Math.max(1, cursor.length() / 2));
+
+        var failure = failureOf(() -> await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(10).after(truncated))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void aWrongVersionCursorIsInvalidRequest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        // Hand-built payload mimicking InventoryCursor's own delimiter shape but with an unknown
+        // version tag, so a future ordering change cannot silently misinterpret an old cursor.
+        Instant now = clock().instant();
+        String raw = "bogus-version\0" + DEFAULT_TENANT + "\0" + now.getEpochSecond() + "\0" + now.getNano()
+                + "\0" + UUID.randomUUID();
+        String cursor = Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+
+        var failure = failureOf(() -> await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(10).after(cursor))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void aForeignTenantCursorConstructedDirectlyIsInvalidRequest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String cursor = InventoryCursor.encode("inv-cursor-someone-else", clock().instant(), UUID.randomUUID());
+
+        var failure = failureOf(() -> await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(10).after(cursor))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void notBase64AtAllIsInvalidRequestNotAStackTrace() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        var failure = failureOf(() -> await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(10).after("!!! not base64 !!!"))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    // ---- 11. cross-adapter cursor interop ----
+
+    /**
+     * {@link InventoryCursor} is one codec shared by every adapter rather than one each adapter
+     * re-encodes, so decoding a cursor minted by the store under test -- from the testkit, which both
+     * adapters already depend on -- is the actual interoperability guarantee: whichever store minted
+     * it, the same shared decode function resumes at the same logical position.
+     *
+     * <p>A literal "mint under adapter A, resume the scan under adapter B" test is not attempted and
+     * would not be meaningful even if it were: the two adapters hold different data, so there is no
+     * shared row for a resumed scan to land on. That is exactly what wave 1 could not test from
+     * {@code ravenroot-core}, which cannot depend on the SQLite module, and the reason still holds
+     * from here.</p>
+     */
+    @Test
+    final void aCursorMintedByTheStoreUnderTestRoundTripsThroughTheSharedPortCodec() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String tenant = "inv-cursor-roundtrip";
+        await(store().apply(creationBatch(keyFor(tenant), UUID.randomUUID(), "graph-v1")));
+        clock().advance(Duration.ofSeconds(1));
+        ExecutionKey second = keyFor(tenant);
+        await(store().apply(creationBatch(second, UUID.randomUUID(), "graph-v1")));
+
+        ProcessInventoryPage page = await(store().listProcessInstances(tenant, ProcessInventoryQuery.everything(1)));
+        ProcessInventoryEntry only = page.items().get(0);
+        assertEquals(second.processInstanceId(), only.key().processInstanceId());
+        String cursor = page.nextCursor().orElseThrow();
+
+        InventoryCursor.Position decoded = InventoryCursor.decode(tenant, cursor);
+        assertEquals(only.createdAt(), decoded.createdAt());
+        assertEquals(only.key().processInstanceId(), decoded.processInstanceId());
+    }
+
+    /**
+     * The tie-break rule that makes a cursor portable at all: {@link InventoryCursor.Position#precedes}
+     * compares {@code UUID.toString()} lexically, matching SQLite's default TEXT collation (BINARY,
+     * byte for byte), and deliberately not {@link UUID#compareTo(UUID)}, which orders by signed
+     * most-/least-significant-bit longs and disagrees with lexical order for a real fraction of UUID
+     * pairs. If the two ever diverged, a cursor encoded by one adapter's SQL {@code ORDER BY} would
+     * not resume at the same row this port-level position names -- the exact "page-one restart that
+     * looks like an empty result" {@link InventoryCursor}'s own javadoc warns about.
+     */
+    @Test
+    final void theTieBreakUsesUuidStringComparisonNotUuidValueComparison() {
+        UUID highBit = UUID.fromString("80000000-0000-0000-0000-000000000000");
+        UUID midBit = UUID.fromString("70000000-0000-0000-0000-000000000000");
+        UUID lowBit = UUID.fromString("60000000-0000-0000-0000-000000000000");
+
+        // A concrete pair where UUID's own compareTo and String.compareTo disagree on direction, so
+        // the assertion below is not a coincidence of how the ids happened to be generated.
+        assertTrue(highBit.compareTo(midBit) < 0,
+                "UUID.compareTo treats the set high bit as a negative signed long: 0x8... < 0x7...");
+        assertTrue(highBit.toString().compareTo(midBit.toString()) > 0,
+                "lexical comparison of the rendered text orders '8...' after '7...'");
+
+        Instant sameInstant = EPOCH;
+        InventoryCursor.Position position = new InventoryCursor.Position(sameInstant, midBit);
+        assertFalse(position.precedes(sameInstant, highBit),
+                "a lexically GREATER id at an equal createdAt must sort BEFORE this position, not after -- "
+                        + "UUID.compareTo would have said the opposite");
+        assertTrue(position.precedes(sameInstant, lowBit),
+                "a lexically SMALLER id at an equal createdAt must sort AFTER this position");
+    }
+
+    // ---- 5. limits ----
+
+    @Test
+    final void aPageSizeAboveTheDeclaredMaximumIsInvalidRequest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        int max = store().maxInventoryPageSize();
+        var failure = failureOf(() -> await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.builder().limit(max + 1).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void aNonPositiveLimitIsInvalidRequest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().listProcessInstances(DEFAULT_TENANT, ProcessInventoryQuery.builder().limit(0).build()))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().listProcessInstances(DEFAULT_TENANT, ProcessInventoryQuery.builder().limit(-1).build()))));
+    }
+
+    @Test
+    final void maxInventoryPageSizeIsHonouredEvenWhenMoreRowsExist() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        String tenant = "inv-max-page";
+        int max = store().maxInventoryPageSize();
+        for (int i = 0; i < max + 3; i++) {
+            await(store().apply(creationBatch(keyFor(tenant), UUID.randomUUID(), "graph-v1")));
+            clock().advance(Duration.ofMillis(1));
+        }
+        ProcessInventoryPage page = await(store().listProcessInstances(tenant,
+                ProcessInventoryQuery.builder().limit(max).build()));
+        assertEquals(max, page.items().size(), "a store must never return more than its declared maximum");
+        assertTrue(page.nextCursor().isPresent(), "more rows exist beyond the declared maximum");
+    }
+
+    @Test
+    final void aSelfContradictoryStatusFilterIsRejectedRatherThanAnsweredWithAnEmptyPage() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ProcessInventoryQuery query = ProcessInventoryQuery.builder()
+                .status(ProcessInstanceStatus.COMPLETED).status(ProcessInstanceStatus.FAILED)
+                .includeTerminal(false).limit(10).build();
+        assertTrue(query.isSelfContradictory());
+
+        var failure = failureOf(() -> await(store().listProcessInstances(DEFAULT_TENANT, query)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    // ---- 6. disposition ----
+
+    @Test
+    final void activeAndInterruptedTrackTheLiveLeaseWithNoWriteInBetween() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        await(store().apply(creationBatch(key, UUID.randomUUID(), "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.any())
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+
+        await(store().claim(key, "worker-1", TTL));
+        assertEquals(InventoryDisposition.ACTIVE,
+                await(store().findProcessInstance(key)).orElseThrow().disposition());
+
+        // Disposition is derived at read time: the lease lapses purely by the passage of time, with
+        // no write in between, and the very next read must reflect that with nobody having told the
+        // store.
+        clock().advance(TTL.plusSeconds(1));
+        assertEquals(InventoryDisposition.INTERRUPTED,
+                await(store().findProcessInstance(key)).orElseThrow().disposition());
+    }
+
+    @Test
+    final void aWaitingInstanceWithNoLeaseReportsWaitingNotInterrupted() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        await(store().apply(creationBatch(key, UUID.randomUUID(), "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.any())
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .build()));
+
+        assertEquals(InventoryDisposition.WAITING,
+                await(store().findProcessInstance(key)).orElseThrow().disposition(),
+                "a waiting instance holds no lease by design and must not be classified as abandoned");
+    }
+
+    @Test
+    final void aFailedInstanceWithAParkedAttemptReportsParkedNotTerminal() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance parked = parkTheOnlyAttempt(key, traversalId, invocationId, attemptId,
+                "unknown outcome");
+
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(parked.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()));
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(ProcessInstanceStatus.FAILED, entry.status(), "the lifecycle status is genuinely terminal");
+        assertEquals(InventoryDisposition.PARKED, entry.disposition(),
+                "the unresolved effect outranks TERMINAL, or retention could delete the sole record of it");
+    }
+
+    /**
+     * Wave 1 flagged {@code COMPLETED} as hard to reach in a fixture and covered only indirectly: it
+     * requires completing every traversal before completing the instance (the aggregate's own
+     * invariant), which is exactly what this fixture drives end to end.
+     */
+    @Test
+    final void completedStatusIsReachableEndToEndAndReportsTerminal() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(ProcessInstanceStatus.COMPLETED, entry.status());
+        assertEquals(InventoryDisposition.TERMINAL, entry.disposition());
+
+        ProcessInventoryPage page = await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(50)));
+        assertTrue(page.items().stream().anyMatch(e -> e.key().equals(key)
+                && e.status() == ProcessInstanceStatus.COMPLETED), "must be listable, not only directly readable");
+
+        List<TraversalInventoryEntry> traversals = await(store().listTraversals(key));
+        assertEquals(TraversalStatus.COMPLETED, traversals.get(0).status());
+        assertEquals(InventoryDisposition.TERMINAL, traversals.get(0).disposition());
+    }
+
+    // ---- 7. identity distinctness ----
+
+    @Test
+    final void inventoryIdentitiesStayDistinctAndAreExplicitlyRelated() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(acceptedInstance(key.processInstanceId(), traversalId),
+                        new GraphVersionPin("graph-v7")))
+                .recordOrigin(ExecutionOrigin.of("deployment-9", "workload-3", "corr-42"))
+                .build()));
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(key, entry.key());
+        assertEquals(new GraphVersionPin("graph-v7"), entry.graphVersionPin());
+        assertEquals(Optional.of("deployment-9"), entry.deploymentId());
+        assertEquals(Optional.of("workload-3"), entry.workloadId());
+        assertEquals(Optional.of("corr-42"), entry.correlationId());
+        assertNotEquals(entry.deploymentId(), entry.workloadId());
+        assertNotEquals(entry.deploymentId(), entry.correlationId());
+        assertNotEquals(entry.workloadId(), entry.correlationId());
+
+        List<TraversalInventoryEntry> traversals = await(store().listTraversals(key));
+        assertEquals(1, traversals.size());
+        TraversalInventoryEntry traversal = traversals.get(0);
+        assertEquals(key, traversal.key(), "the traversal row carries the SAME key as the process, not a copy");
+        assertNotEquals(key.processInstanceId(), traversal.traversalId(),
+                "the traversal identity is distinct from the process instance identity");
+
+        // Annotation semantics: a later write that names only correlationId must not erase the
+        // deployment and workload that creation recorded.
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .recordOrigin(ExecutionOrigin.of(null, null, "corr-updated"))
+                .build()));
+        ProcessInventoryEntry updated = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(Optional.of("deployment-9"), updated.deploymentId(), "absent components leave values untouched");
+        assertEquals(Optional.of("workload-3"), updated.workloadId());
+        assertEquals(Optional.of("corr-updated"), updated.correlationId(), "a present component is written");
+    }
+
+    /**
+     * {@code traversalCount}, {@code invocationCount} and {@code parkedAttemptCount} are counts, not
+     * flags, and every other fixture in this suite builds exactly one traversal holding exactly one
+     * invocation and at most one attempt -- a shape on which a count is indistinguishable from a
+     * boolean, and a join that silently multiplies its rows is indistinguishable from a correct one,
+     * because one times one is one whichever way it is wrong. This builds one instance with three
+     * traversals carrying <em>different</em> counts from one another, so a correlation dropped or
+     * widened between traversal, invocation and attempt would show up as one traversal's number
+     * leaking into another's. The third traversal has nothing in it at all: that is the row a dropped
+     * join correlation fails on, because an inner join or a missing tenant/instance predicate on the
+     * counting subquery would report it as having whatever the busiest sibling has, not zero.
+     */
+    @Test
+    final void countFieldsReflectEachTraversalsOwnContentsAndAnEmptySiblingReportsZero() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID busyTraversal = UUID.randomUUID();
+        UUID quietTraversal = UUID.randomUUID();
+        UUID emptyTraversal = UUID.randomUUID();
+        UUID invocation1 = UUID.randomUUID();
+        UUID invocation2 = UUID.randomUUID();
+        UUID invocation3 = UUID.randomUUID();
+        UUID attempt1 = UUID.randomUUID();
+
+        StoredProcessInstance created = await(store().apply(creationBatch(key, busyTraversal, "graph-v1")));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                // busyTraversal: two invocations, one attempt on the first, parked.
+                .apply(new ExecutionTransition.TraversalTransitioned(busyTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(busyTraversal,
+                        new NodeInvocation(invocation1, "work-1", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                .apply(new ExecutionTransition.InvocationTransitioned(busyTraversal, invocation1,
+                        NodeInvocationStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptAdded(busyTraversal, invocation1,
+                        new NodeAttempt(attempt1, 1, NodeAttemptStatus.SCHEDULED)))
+                .apply(new ExecutionTransition.AttemptTransitioned(busyTraversal, invocation1, attempt1,
+                        NodeAttemptStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptParked(busyTraversal, invocation1, attempt1, "unknown"))
+                .apply(new ExecutionTransition.InvocationAdded(busyTraversal,
+                        new NodeInvocation(invocation2, "work-2", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                // quietTraversal: one invocation, no parked attempts -- deliberately not the busy
+                // traversal's two, so a leaked correlation is visible as the wrong number, not merely
+                // as a nonzero one.
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(quietTraversal, "quiet-start",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .apply(new ExecutionTransition.TraversalTransitioned(quietTraversal, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.InvocationAdded(quietTraversal,
+                        new NodeInvocation(invocation3, "work-3", Set.of(), NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                // emptyTraversal: nothing at all.
+                .apply(new ExecutionTransition.TraversalAdded(new Traversal(emptyTraversal, "empty-start",
+                        TraversalStatus.ACCEPTED, Map.of())))
+                .build()));
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(3, entry.traversalCount(), "three traversals were added to this instance");
+
+        List<TraversalInventoryEntry> traversals = await(store().listTraversals(key));
+        assertEquals(3, traversals.size());
+        TraversalInventoryEntry busy = traversalNamed(traversals, busyTraversal);
+        TraversalInventoryEntry quiet = traversalNamed(traversals, quietTraversal);
+        TraversalInventoryEntry empty = traversalNamed(traversals, emptyTraversal);
+
+        assertEquals(2, busy.invocationCount(), "two invocations were added under the busy traversal");
+        assertEquals(1, busy.parkedAttemptCount(), "exactly one parked attempt, on the busy traversal");
+
+        assertEquals(1, quiet.invocationCount(), "one invocation on the quiet traversal, not the busy "
+                + "traversal's two -- a leaked correlation would surface here as the wrong count");
+        assertEquals(0, quiet.parkedAttemptCount());
+
+        assertEquals(0, empty.invocationCount(), "a sibling traversal with nothing in it must report "
+                + "zero, not the row count of a mis-joined neighbour");
+        assertEquals(0, empty.parkedAttemptCount());
+
+        // The same mis-join hazard, one field over. A traversal's disposition is derived from its OWN
+        // parked attempts against the INSTANCE's lease, so exactly one of these three may be PARKED --
+        // and an implementation that computed "is any attempt in this instance parked" instead of "in
+        // this traversal" would give every row here the same answer and pass every count assertion
+        // above, because the counts and the disposition are read from different expressions.
+        assertEquals(InventoryDisposition.PARKED, busy.disposition(),
+                "the traversal that actually holds the parked attempt");
+        assertEquals(InventoryDisposition.INTERRUPTED, quiet.disposition(),
+                "a running sibling with no parked attempt of its own is not parked because its "
+                        + "neighbour is; no lease is held here, so it is the recovery cohort");
+        assertEquals(InventoryDisposition.INTERRUPTED, empty.disposition(),
+                "and neither is an accepted sibling holding nothing at all");
+    }
+
+    @Test
+    final void lifecycleGenerationMovesOnTransitionsNotOnLeaseActivityWhileTheFencingTokenIsTheOpposite() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        long generationAtCreation = await(store().findProcessInstance(key)).orElseThrow().lifecycleGeneration();
+
+        LeaseHandle lease = await(store().claim(key, "worker-1", TTL));
+        ProcessInventoryEntry afterClaim = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(generationAtCreation, afterClaim.lifecycleGeneration(),
+                "claiming a lease is not a lifecycle transition");
+        assertEquals(lease.fencingToken(), afterClaim.fencingToken());
+
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .fencedBy(lease)
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+        ProcessInventoryEntry afterTransition = await(store().findProcessInstance(key)).orElseThrow();
+        assertTrue(afterTransition.lifecycleGeneration() > generationAtCreation,
+                "an applied status transition must move the generation forward");
+        assertEquals(lease.fencingToken(), afterTransition.fencingToken(),
+                "a transition applied under an unchanged lease does not mint a new fencing token");
+
+        await(store().release(lease));
+        clock().advance(Duration.ofMillis(1));
+        LeaseHandle secondLease = await(store().claim(key, "worker-2", TTL));
+        ProcessInventoryEntry afterSecondClaim = await(store().findProcessInstance(key)).orElseThrow();
+        assertTrue(secondLease.fencingToken() > lease.fencingToken(),
+                "a new claim must mint a fencing token never reused");
+        assertEquals(afterTransition.lifecycleGeneration(), afterSecondClaim.lifecycleGeneration(),
+                "acquiring a new lease over an already-settled instance is still not a lifecycle transition");
+    }
+
+    /**
+     * {@code lifecycleGeneration}'s javadoc states the rule precisely: it starts at {@code 1} for the
+     * batch that creates the instance, and every later accepted batch adds the number of
+     * {@link ExecutionTransition.ProcessTransitioned} transitions <em>that batch contains</em> — per
+     * transition, not per batch, and explicitly not derived by comparing status before and after. This
+     * pins the exact rule rather than only monotonicity, using the javadoc's own illustrative case: one
+     * batch containing {@code RUNNING -> WAITING -> RUNNING} (two {@code ProcessTransitioned} entries)
+     * leaves the net status unchanged, so an implementation that derived the count from a before/after
+     * status comparison would see zero change and add nothing. The correct answer is +2 regardless.
+     */
+    @Test
+    final void lifecycleGenerationCountsProcessTransitionedEntriesPerBatchNotPerNetStatusChange() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        assertEquals(1L, await(store().findProcessInstance(key)).orElseThrow().lifecycleGeneration(),
+                "creation is itself the first transition, into the initial status");
+
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+        assertEquals(2L, await(store().findProcessInstance(key)).orElseThrow().lifecycleGeneration(),
+                "one batch containing one ProcessTransitioned entry adds exactly one");
+
+        // The net status is RUNNING both before and after this batch: a before/after comparison would
+        // see no change. The contract counts transitions within the batch instead.
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+
+        ProcessInventoryEntry after = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(ProcessInstanceStatus.RUNNING, after.status(), "the net status change of this batch is zero");
+        assertEquals(4L, after.lifecycleGeneration(),
+                "1 (creation) + 1 (RUNNING) + 2 (WAITING, RUNNING in one batch) = 4, despite this "
+                        + "batch's net status change being zero -- an implementation deriving the count "
+                        + "from before/after status would wrongly answer 2");
+    }
+
+    // ---- 8. convergence under concurrency (acceptance criterion 3) ----
+
+    @Test
+    final void aRejectedStaleRevisionReplayDoesNotDoubleApplyOrInflateTheGeneration() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build()));
+        long generationAfterFirstApply = await(store().findProcessInstance(key)).orElseThrow().lifecycleGeneration();
+
+        // Simulates an at-least-once redelivery: a caller that never learned whether its first write
+        // committed replays the identical batch against the revision it last knew about.
+        var failure = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.ConcurrencyConflict.class, failure);
+
+        ProcessInventoryEntry afterReplay = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(generationAfterFirstApply, afterReplay.lifecycleGeneration(),
+                "a rejected replay must not be counted as a second transition");
+        assertEquals(running.revision(), await(store().load(key)).revision());
+    }
+
+    @Test
+    final void aFencedOutWriteFromAStaleOwnerNeverAdvancesTheGenerationOrDuplicatesTheRow() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        LeaseHandle first = await(store().claim(key, "worker-1", TTL));
+
+        // Failover: worker-1 never renews, its lease lapses, and worker-2 takes over.
+        clock().advance(TTL.plusSeconds(1));
+        LeaseHandle second = await(store().claim(key, "worker-2", TTL));
+        long generationBeforeStaleWrite = await(store().findProcessInstance(key)).orElseThrow()
+                .lifecycleGeneration();
+
+        var failure = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .fencedBy(first)
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.FencedOut.class, failure);
+
+        ProcessInventoryEntry afterFencedWrite = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(generationBeforeStaleWrite, afterFencedWrite.lifecycleGeneration());
+        assertEquals(second.fencingToken(), afterFencedWrite.fencingToken(),
+                "the current owner's token, not the stale one, remains the row's fencing token");
+
+        ProcessInventoryPage page = await(store().listProcessInstances(DEFAULT_TENANT,
+                ProcessInventoryQuery.everything(50)));
+        assertEquals(1, page.items().stream().filter(e -> e.key().equals(key)).count(),
+                "failover and a rejected stale write must never produce a second row for one instance");
+    }
+
+    // ---- 9. retention ----
+
+    @Test
+    final void terminalRetentionIsNeverShorterThanJournalRetention() {
+        // The construction-time guard itself is adapter-specific and out of the testkit's reach --
+        // createStore(storeId, clock) carries no retention parameters -- but its RESULT is a
+        // port-level invariant every conforming store must publish honestly: an event must never
+        // outlive the instance that names it.
+        assertFalse(store().terminalRetention().compareTo(store().journalRetention()) < 0,
+                "terminalRetention must never be shorter than journalRetention");
+    }
+
+    /**
+     * Pins the read path to the purge path, through the port, on <em>any</em> adapter: for every
+     * terminal row, {@link ExecutionStore#findProcessInstance} must publish a {@code retainedUntil},
+     * and a purge landing exactly on that instant must remove the row. This does not depend on how or
+     * whether an adapter stores the deadline (a computed column, a resolved fallback, or anything
+     * else) -- it only requires the two answers to agree with each other, which is what actually
+     * matters to a caller and is checkable without knowing anything about an adapter's schema.
+     *
+     * <p>The boundary itself is asserted in both directions, because an off-by-one in the comparison
+     * is the obvious next bug of this shape: one tick before the published deadline, the row must
+     * survive a purge; landed exactly on it, the row must be removed.
+     */
+    @Test
+    final void findProcessInstanceRetainedUntilIsPresentForEveryTerminalRowAndPurgeRemovesItExactlyAtThatInstant() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        ExecutionKey key = newKey();
+        failInstance(key, UUID.randomUUID());
+
+        ProcessInventoryEntry entry = await(store().findProcessInstance(key)).orElseThrow();
+        assertEquals(ProcessInstanceStatus.FAILED, entry.status());
+        Instant deadline = entry.retainedUntil().orElseThrow(() -> new AssertionError(
+                "every terminal row must publish a retainedUntil, whatever the adapter's storage shape"));
+
+        // One tick before the boundary: not yet due.
+        clock().set(deadline.minusMillis(1));
+        assertEquals(0L, await(store().purgeExpiredProcessInstances(DEFAULT_TENANT)),
+                "a row must not be purged before the instant its own retainedUntil publishes");
+        assertTrue(await(store().findProcessInstance(key)).isPresent(), "must still be readable one tick early");
+
+        // Landed exactly on the boundary: due.
+        clock().set(deadline);
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(DEFAULT_TENANT)),
+                "a purge landing exactly on the published retainedUntil must remove the row -- the read "
+                        + "path and the purge path must agree on this instant, not merely both exist");
+        assertEquals(Optional.empty(), await(store().findProcessInstance(key)));
+    }
+
+    /**
+     * Selectivity: only an expired terminal row is removed; a not-yet-due terminal row and a
+     * non-terminal row of any age both survive. This purges exactly one row, so it deliberately makes
+     * no claim about which of several removed deadlines the floor publishes -- that is a different
+     * question, with its own test below, because a single-row purge cannot distinguish "publishes the
+     * earliest deadline removed" from "publishes the latest deadline removed": the two coincide
+     * whenever there is only one.
+     */
+    @Test
+    final void purgeRemovesOnlyExpiredTerminalRowsAndLeavesNonTerminalAndNotYetDueRowsAlone() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        String tenant = "inv-retention-floor";
+
+        ExecutionKey early = keyFor(tenant);
+        failInstance(early, UUID.randomUUID());
+        Instant earlyDeadline = await(store().findProcessInstance(early)).orElseThrow()
+                .retainedUntil().orElseThrow();
+
+        clock().advance(Duration.ofSeconds(30));
+        ExecutionKey late = keyFor(tenant);
+        failInstance(late, UUID.randomUUID());
+
+        ExecutionKey stillRunning = keyFor(tenant);
+        await(store().apply(creationBatch(stillRunning, UUID.randomUUID(), "graph-v1")));
+        await(store().apply(ExecutionBatch.to(stillRunning).expecting(RevisionExpectation.any())
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING)).build()));
+
+        assertEquals(Instant.MIN, await(store().inventoryRetainedFrom(tenant)),
+                "nothing purged yet, so the floor has not moved");
+
+        // Land strictly between the two terminal deadlines: only "early" is expired.
+        clock().set(earlyDeadline.plusSeconds(1));
+        assertEquals(1L, await(store().purgeExpiredProcessInstances(tenant)));
+
+        assertEquals(Optional.empty(), await(store().findProcessInstance(early)));
+        assertTrue(await(store().findProcessInstance(late)).isPresent(), "not yet expired, must survive");
+        assertTrue(await(store().findProcessInstance(stillRunning)).isPresent(),
+                "non-terminal work is never purged however old it is");
+        assertEquals(earlyDeadline, await(store().inventoryRetainedFrom(tenant)),
+                "with exactly one row removed, the floor must land exactly at that row's own deadline");
+    }
+
+    /**
+     * {@code inventoryRetainedFrom}'s javadoc: the floor is the <strong>latest</strong> retention
+     * deadline the tenant has actually crossed, not the earliest, and the boundary is exclusive --
+     * "everything past this is still here" -- while collection itself is inclusive, so a row sitting
+     * exactly on the published floor is one that was removed. Publishing the earliest deadline instead
+     * breaks as soon as one purge removes two rows whose deadlines are further apart than
+     * {@code terminalRetention}: the later row is genuinely gone, yet it would sit strictly after an
+     * "earliest" floor, and a caller following the documented rule would conclude a completed
+     * execution never existed -- the ambiguity inverted into the unsafe direction. This is exactly that
+     * scenario, and it requires two rows spread wider than the retention window: a single-row purge
+     * cannot tell "earliest" and "latest" apart, which is why the test above does not attempt to.
+     */
+    @Test
+    final void purgeOfMultipleRowsPublishesTheLatestDeadlineCrossedNotTheEarliest() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        String tenant = "inv-retention-floor-latest";
+        Duration spread = store().terminalRetention().plusDays(1); // strictly more than terminalRetention
+
+        ExecutionKey early = keyFor(tenant);
+        failInstance(early, UUID.randomUUID());
+        Instant earlyDeadline = await(store().findProcessInstance(early)).orElseThrow()
+                .retainedUntil().orElseThrow();
+
+        clock().advance(spread);
+        ExecutionKey late = keyFor(tenant);
+        failInstance(late, UUID.randomUUID());
+        Instant lateDeadline = await(store().findProcessInstance(late)).orElseThrow()
+                .retainedUntil().orElseThrow();
+        assertTrue(lateDeadline.isAfter(earlyDeadline.plus(store().terminalRetention())),
+                "the fixture requires deadlines spread wider than the retention window, or this test "
+                        + "degenerates into the single-row case");
+
+        // Landed exactly on the later deadline: collection is inclusive, so both rows -- whose
+        // deadlines are at or before now -- are removed in one purge.
+        clock().set(lateDeadline);
+        assertEquals(2L, await(store().purgeExpiredProcessInstances(tenant)));
+        assertEquals(Optional.empty(), await(store().findProcessInstance(early)));
+        assertEquals(Optional.empty(), await(store().findProcessInstance(late)));
+
+        Instant floor = await(store().inventoryRetainedFrom(tenant));
+        assertEquals(lateDeadline, floor, "the floor must publish the LATEST deadline actually crossed, "
+                + "not the earliest -- the reviewer's exact regression");
+
+        // The property the floor exists to guarantee, stated directly against both removed rows: a
+        // row that was genuinely removed must never have a deadline strictly after the published
+        // floor. Under the reverted-to-earliest bug, lateDeadline.isAfter(floor) would be true here.
+        assertFalse(lateDeadline.isAfter(floor), "a removed row's deadline must not be strictly after the floor");
+        assertFalse(earlyDeadline.isAfter(floor), "likewise for every other row removed in the same run");
+    }
+
+    @Test
+    final void purgingOneTenantLeavesAnotherTenantsInventoryFloorAtInstantMin() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+
+        ExecutionKey keyA = keyFor("inv-retention-tenant-a");
+        failInstance(keyA, UUID.randomUUID());
+        Instant deadlineA = await(store().findProcessInstance(keyA)).orElseThrow().retainedUntil().orElseThrow();
+        clock().set(deadlineA.plusSeconds(1));
+
+        // Tenant B has only non-terminal work, so its purge finds nothing to remove.
+        ExecutionKey keyB = keyFor("inv-retention-tenant-b");
+        await(store().apply(creationBatch(keyB, UUID.randomUUID(), "graph-v1")));
+
+        assertEquals(0L, await(store().purgeExpiredProcessInstances("inv-retention-tenant-b")));
+        assertEquals(Instant.MIN, await(store().inventoryRetainedFrom("inv-retention-tenant-b")),
+                "a tenant that lost nothing must keep its floor exactly where it was");
+
+        assertEquals(1L, await(store().purgeExpiredProcessInstances("inv-retention-tenant-a")));
+        assertEquals(deadlineA, await(store().inventoryRetainedFrom("inv-retention-tenant-a")));
+        assertEquals(Instant.MIN, await(store().inventoryRetainedFrom("inv-retention-tenant-b")),
+                "purging one tenant must never advance another tenant's floor");
+    }
+
+    @Test
+    final void anExpiredInstanceAndOneNeverCreatedAreBothEmptyAndTheFloorIsWhatTellsThemApart() {
+        assumeCapability(StoreCapability.PROCESS_INVENTORY);
+        assumeCapability(StoreCapability.INVENTORY_RETENTION);
+        ExecutionKey expired = newKey();
+        failInstance(expired, UUID.randomUUID());
+        Instant deadline = await(store().findProcessInstance(expired)).orElseThrow().retainedUntil().orElseThrow();
+        clock().set(deadline.plusSeconds(1));
+        await(store().purgeExpiredProcessInstances(DEFAULT_TENANT));
+
+        ExecutionKey neverCreated = newKey();
+
+        // By design, findProcessInstance cannot and must not distinguish these two on its own.
+        assertEquals(Optional.empty(), await(store().findProcessInstance(expired)));
+        assertEquals(Optional.empty(), await(store().findProcessInstance(neverCreated)));
+
+        // The floor is what makes the absence readable: a caller compares a row's own timestamp
+        // (known from another source, such as a journal entry) against the floor to tell "purged"
+        // from "never happened".
+        assertEquals(deadline, await(store().inventoryRetainedFrom(DEFAULT_TENANT)));
     }
 
     /** An envelope for {@code key}, carrying causality so the assertions above have something to check. */

@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletableFuture;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -139,6 +140,62 @@ class GraphExecutionBudgetTest {
     }
 
     @Test
+    void actorCapacityRemainsChargedUntilTerminationActuallySettles() {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        var limits = new GraphExecutionLimits(defaults.graphMl(), defaults.payload(),
+                defaults.maxFanOut(), defaults.maxResidentActors(), 1,
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(),
+                defaults.maxTraversalSteps(), defaults.maxAmplifiedDeliveries(),
+                defaults.maxCumulativePayloadBytes(), defaults.maxRecoveryDeliveriesPerAttempt());
+        var budget = new ExecutionBudget(limits);
+        var terminated = new CompletableFuture<Void>();
+        var registry = new WorkerInstanceRegistry(
+                (name, node) -> new ai.ravenroot.api.execution.NodeRef(name), ignored -> terminated);
+        var identity = new WorkerInstanceIdentity("tenant", null, "v1", UUID.randomUUID(),
+                UUID.randomUUID(), "node", UUID.randomUUID(), UUID.randomUUID());
+        var instance = registry.acquire(identity,
+                (message, context) -> CompletableFuture.completedFuture(NodeResult.continueWith(null)),
+                budget.reserveActor());
+
+        var release = registry.release(instance).toCompletableFuture();
+        assertEquals(GraphExecutionLimitException.Reason.LIVE_ACTORS,
+                assertThrows(GraphExecutionLimitException.class, budget::reserveActor).reason(),
+                "asking an actor to stop must not release its capacity before termination");
+
+        terminated.complete(null);
+        release.join();
+        budget.reserveActor().close();
+        registry.close();
+    }
+
+    @Test
+    void traversalActorCapacityRemainsChargedUntilRetirementIsConfirmed() {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        var limits = new GraphExecutionLimits(defaults.graphMl(), defaults.payload(),
+                defaults.maxFanOut(), defaults.maxResidentActors(), 1,
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(),
+                defaults.maxTraversalSteps(), defaults.maxAmplifiedDeliveries(),
+                defaults.maxCumulativePayloadBytes(), defaults.maxRecoveryDeliveriesPerAttempt());
+        var budget = new ExecutionBudget(limits);
+        var registry = new TraversalInstanceRegistry(
+                (name, node) -> new ai.ravenroot.api.execution.NodeRef(name));
+        UUID traversalId = UUID.randomUUID();
+        var identity = new TraversalInstanceIdentity("tenant", null, "v1", UUID.randomUUID(),
+                traversalId, "node");
+        registry.acquire(identity,
+                (message, context) -> CompletableFuture.completedFuture(NodeResult.continueWith(null)),
+                budget::reserveActor);
+
+        var retiring = registry.deregister(traversalId);
+        assertEquals(GraphExecutionLimitException.Reason.LIVE_ACTORS,
+                assertThrows(GraphExecutionLimitException.class, budget::reserveActor).reason());
+
+        registry.retired(retiring);
+        budget.reserveActor().close();
+        registry.deregisterAll();
+    }
+
+    @Test
     void admissionQueueRefusesBeforeAllocatingAnotherWaiter() {
         var registry = new TraversalAdmissionRegistry();
         var key = new TraversalAdmissionRegistry.Key("tenant", "deployment", "version", UUID.randomUUID(), "n");
@@ -155,7 +212,7 @@ class GraphExecutionBudgetTest {
     }
 
     @Test
-    void wideAndDeepTopologiesStayLinearUnderAdmission() {
+    void wideAndDeepTopologiesStayLinearUnderAdmission() throws Exception {
         var engine = new JoinTestEngine();
         GraphExecutionLimits limits = limits(GraphMlLimits.DEFAULTS, PayloadLimits.DEFAULTS,
                 16, 100_000, 100_000, 64 * 1024 * 1024L);
@@ -164,7 +221,12 @@ class GraphExecutionBudgetTest {
                 GraphDefinition graph = fanOut(width);
                 try (var manager = GraphManager.from(graph)) {
                     if (width <= 16) {
-                        try (var ignored = runner(manager, engine, new BehaviorRegistry(), limits)) { }
+                        try (var admitted = runner(manager, engine, new BehaviorRegistry(), limits)) {
+                            if (width == 16) {
+                                admitted.execute(TestIdentities.TENANT_A, "payload")
+                                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+                            }
+                        }
                     } else {
                         GraphExecutionLimitException refused = assertThrows(GraphExecutionLimitException.class,
                                 () -> runner(manager, engine, new BehaviorRegistry(), limits));
@@ -173,7 +235,10 @@ class GraphExecutionBudgetTest {
                 }
             }
             try (var manager = GraphManager.from(deepChain(512));
-                 var ignored = runner(manager, engine, new BehaviorRegistry(), limits)) { }
+                 var admitted = runner(manager, engine, new BehaviorRegistry(), limits)) {
+                admitted.execute(TestIdentities.TENANT_A, "payload")
+                        .toCompletableFuture().get(10, java.util.concurrent.TimeUnit.SECONDS);
+            }
         }
     }
 

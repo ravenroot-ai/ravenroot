@@ -9891,6 +9891,10 @@ function handleRuntimeEvent(event) {
   if (event.type === 'NODE_BYPASSED') state = 'bypassed';
   if (event.type === 'NODE_COMPLETED' && state !== 'fallback' && state !== 'bypassed') state = 'completed';
   if (event.type === 'NODE_FAILED') state = 'failed';
+  // A retried attempt leaves the node ACTIVE, not failed: the visit has not settled, and the next
+  // attempt's own NODE_STARTED is already on its way. Rendering it as failed and then back to active
+  // would flash a terminal state the traversal never reached.
+  if (event.type === 'NODE_RETRY_SCHEDULED') state = 'active';
   // `activeInstances` is the count of LIVE INSTANCES of this node's actor -- 1 for a resident
   // nature however much traffic crosses it, one per concurrent invocation for the default one. It is
   // what the node is rendered by. `inFlightArrivals` is the queue depth and is deliberately kept in a
@@ -10097,6 +10101,15 @@ function activityIdentifiersHtml(event) {
     ['invocation', event.invocationId],
     ['attempt', event.attemptId],
   ];
+  // A fifth level, and the only one rendered conditionally. The four above are the execution
+  // hierarchy every event sits somewhere in, so an em dash for an absent one reads as "above that
+  // level". A handler is not part of that hierarchy: it is the durable wait a process is parked on,
+  // and only handler-lifecycle events carry one. Emitting an empty `handler —` on every node event
+  // would assert that every event has a handler slot, which is the opposite of the distinction this
+  // row exists to make.
+  if (event.handlerId) {
+    identifiers.push(['handler', event.handlerId]);
+  }
   return identifiers.map(([kind, value]) =>
     `<span class="activity-id" data-id-kind="${kind}">${escapeHtml(kind)} <code>${escapeHtml(shortId(value))}</code></span>`
   ).join('');

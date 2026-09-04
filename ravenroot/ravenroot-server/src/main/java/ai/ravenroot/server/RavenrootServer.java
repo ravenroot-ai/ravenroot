@@ -311,6 +311,9 @@ public final class RavenrootServer implements AutoCloseable {
     private final AtomicBoolean started = new AtomicBoolean();
     /** Installed only by the composition root before {@link #start()}; packages never see {@code HttpServer}. */
     private ai.ravenroot.server.ingress.ManagedIngressRegistry managedIngress;
+    /** Installed only by the packaged composition before start; absent hosts expose no approval authority. */
+    private ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
+    private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
     /**
      * Injectable: the narrower constructors below default to the stdout
      * {@link StructuredGraphMlRejectionLogger}/{@code StructuredPayloadRejectionLogger}, but
@@ -944,6 +947,19 @@ public final class RavenrootServer implements AutoCloseable {
         }
         managedIngress = java.util.Objects.requireNonNull(registry, "registry");
         registry.bind(server, handler -> publicContext(exchange -> protectedRequest(handler).handle(exchange)));
+    }
+
+    /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
+    synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals) {
+        installToolApprovals(approvals, ignored -> { });
+    }
+
+    synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals,
+                                           java.util.function.Consumer<String> sweep) {
+        if (started.get()) throw new IllegalStateException("tool approvals must be installed before start");
+        if (toolApprovals != null) throw new IllegalStateException("tool approvals are already installed");
+        toolApprovals = java.util.Objects.requireNonNull(approvals, "approvals");
+        toolApprovalSweep = java.util.Objects.requireNonNull(sweep, "sweep");
     }
 
     public int port() {
@@ -2261,6 +2277,15 @@ public final class RavenrootServer implements AutoCloseable {
                 listLiveExecutions(exchange);
                 return;
             }
+            if (segments.length == 2 && "inventory".equals(segments[1])) {
+                // Issue 154: "inventory" is reserved the same way "live" is -- never a valid
+                // traversal id, so no legitimate /v1/executions/{id} read is ever shadowed by it.
+                if (!method(exchange, "GET")) {
+                    return;
+                }
+                listProcessInventory(exchange);
+                return;
+            }
             if (segments.length == 2 && !segments[1].isBlank()) {
                 readExecution(exchange, segments[1]);
                 return;
@@ -2272,6 +2297,25 @@ public final class RavenrootServer implements AutoCloseable {
                     return;
                 }
                 controlExecution(exchange, segments[1], segments[2]);
+                return;
+            }
+            if (segments.length == 3 && !segments[1].isBlank() && "traversals".equals(segments[2])) {
+                // Issue 154: unlike every other sub-route under /v1/executions, {id} here names a
+                // durable process instance id, not a traversal/execution id -- see
+                // #readProcessInstanceTraversals's own Javadoc for why that is deliberate rather than
+                // an inconsistency.
+                if (!method(exchange, "GET")) {
+                    return;
+                }
+                readProcessInstanceTraversals(exchange, segments[1]);
+                return;
+            }
+            if (segments.length == 5 && !segments[1].isBlank()
+                    && "tool-approvals".equals(segments[2]) && !segments[3].isBlank()
+                    && ("approve".equals(segments[4]) || "deny".equals(segments[4])
+                        || "cancel".equals(segments[4]))) {
+                if (!method(exchange, "POST")) return;
+                decideToolApproval(exchange, segments[1], segments[3], segments[4]);
                 return;
             }
             fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
@@ -2307,6 +2351,51 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             submitExecution(exchange, policy);
+        }
+    }
+
+    /** Authenticated, tenant-derived decision path; no stored content is serialized. */
+    private void decideToolApproval(HttpExchange exchange, String processText, String approvalText,
+                                    String decision) throws IOException {
+        ai.ravenroot.core.approval.ToolApprovalService service = toolApprovals;
+        if (service == null) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        java.util.UUID processId;
+        java.util.UUID approvalId;
+        try {
+            processId = java.util.UUID.fromString(processText);
+            approvalId = java.util.UUID.fromString(approvalText);
+        } catch (IllegalArgumentException invalid) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        ai.ravenroot.core.approval.ToolApprovalResult result;
+        try {
+            result = switch (decision) {
+                case "approve" -> service.approve(context, processId, approvalId);
+                case "deny" -> service.deny(context, processId, approvalId);
+                case "cancel" -> service.cancel(context, processId, approvalId);
+                default -> throw new IllegalStateException("unreachable tool approval decision");
+            };
+            if (result.accepted()) toolApprovalSweep.accept(context.tenantId());
+        } catch (RuntimeException failure) {
+            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        switch (result.code()) {
+            case NOT_FOUND -> fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            case UNAUTHORIZED -> fail(exchange, ErrorCode.ACCESS_DENIED);
+            case SCOPE_MISMATCH, UNAVAILABLE -> fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            default -> {
+                String resume = result.resumeTraversalId() == null ? ""
+                        : ",\"resumeTraversalId\":\"" + result.resumeTraversalId() + "\"";
+                json(exchange, 200, "{\"outcome\":\""
+                        + result.code().name().toLowerCase(java.util.Locale.ROOT)
+                        + "\",\"approvalId\":\"" + approvalId + "\"" + resume + "}");
+            }
         }
     }
 
@@ -2726,9 +2815,9 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, ErrorCode.INVALID_REQUEST);
             return;
         }
-        var lookup = authorizedApplication.executionResult(
-                AuthenticatedPrincipalAttribute.requestContext(exchange), executionId);
         try {
+            var lookup = authorizedApplication.executionResult(
+                    AuthenticatedPrincipalAttribute.requestContext(exchange), executionId);
             switch (lookup) {
                 case ai.ravenroot.api.application.ExecutionLookup.Found found ->
                         json(exchange, 200, executionOutcomeJson(found.outcome()));
@@ -2772,6 +2861,237 @@ public final class RavenrootServer implements AutoCloseable {
                 + "\",\"executionId\":\"" + execution.executionId()
                 + "\",\"graphVersion\":\"" + escape(execution.graphVersion())
                 + "\",\"startedAt\":\"" + execution.startedAt() + "\"}";
+    }
+
+    /** Query parameters {@link #listProcessInventory} recognises; anything else is refused rather
+     * than silently ignored -- see that method's own Javadoc for why. Names match the response's own
+     * field names ({@code ownerWorkerId}, {@code deploymentId}) exactly, on purpose: an operator who
+     * writes the parameter name the response just showed them must filter by it, never fall through
+     * to an unfiltered page that reads as "all this work belongs to that value". */
+    private static final Set<String> INVENTORY_QUERY_PARAMETERS =
+            Set.of("status", "ownerWorkerId", "deploymentId", "includeTerminal", "limit", "cursor");
+
+    /**
+     * {@code GET /v1/executions/inventory}: one page of this tenant's durable, authoritative
+     * process inventory -- what API, CLI, UI, audit and recovery callers are meant to share instead of
+     * each maintaining an incompatible idea of what exists (acceptance criterion 7). Distinct from
+     * {@link #listLiveExecutions}: this reads the store's own persisted record, not runtime bookkeeping,
+     * and it survives a restart -- see {@link ai.ravenroot.api.application.RavenrootApplication#processInventoryAvailable()}
+     * for the full distinction between the two.
+     *
+     * <p>Query parameters, every one optional, and named exactly like the fields the response itself
+     * carries: {@code status} (comma-separated {@link ai.ravenroot.api.application.ProcessInstanceStatus}
+     * names), {@code ownerWorkerId} (lease holder worker id), {@code deploymentId} (hosting deployment
+     * id), {@code includeTerminal} ({@code true} to include {@code COMPLETED}/{@code FAILED} rows,
+     * which are excluded by default), {@code limit} and {@code cursor} (opaque, from a previous page's
+     * {@code nextCursor}). A parameter outside this set is refused as 400 rather than dropped: a typo
+     * or a stale name silently answering with an unfiltered page would read as "everything belongs to
+     * what I asked for", the wrong direction for a filter to fail in. A <em>recognised</em> name
+     * carrying a blank value is refused on the same ground and is the likelier accident of the two:
+     * {@code ?ownerWorkerId=} is what a script emits from a variable it never set, and dropping it
+     * would answer that same unfiltered page. The response body always carries
+     * {@code retainedFrom}, the tenant's inventory retention floor, so a caller can tell an instance
+     * that never existed from one that expired by policy without a second request, and
+     * {@code maxPageSize}, this deployment's declared page-size bound
+     * ({@link ai.ravenroot.api.application.RavenrootApplication#processInventoryMaxPageSize()}), so a
+     * caller paginating its own loop can read the bound instead of discovering it by bisection.</p>
+     *
+     * <p>501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when this deployment has no
+     * inventory-capable store composed at all -- a fact about the deployment, not the request, so it
+     * is checked before the request is otherwise parsed. Malformed query input (an unknown parameter
+     * name, an unrecognised status name, a non-numeric limit, a limit or cursor the store itself
+     * rejects) answers 400 {@link ErrorCode#INVALID_REQUEST} -- the store's own {@code InvalidRequest}
+     * classification is translated here rather than surfaced as 500, since it is a fact about the
+     * caller's request.</p>
+     */
+    private void listProcessInventory(HttpExchange exchange) throws IOException {
+        var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        if (!authorizedApplication.processInventoryAvailable()) {
+            fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        var parameters = query(exchange);
+        if (!INVENTORY_QUERY_PARAMETERS.containsAll(parameters.keySet())) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        var builder = ai.ravenroot.api.persistence.ProcessInventoryQuery.builder();
+        // A recognised name carrying a blank value is refused for the same reason an unrecognised name
+        // is, and it is the likelier accident of the two: `?ownerWorkerId=` is what a script emits from
+        // a variable it never set. Dropping it would answer with an unfiltered page, which a caller
+        // reads as "everything matches what I asked for" -- the wrong direction for a filter to fail
+        // in, and the one this handler's own contract says must not happen.
+        for (var parameter : parameters.entrySet()) {
+            if (parameter.getValue() == null || parameter.getValue().isBlank()) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+        }
+        String rawStatus = parameters.get("status");
+        if (rawStatus != null) {
+            for (String token : rawStatus.split(",", -1)) {
+                if (token.isBlank()) {
+                    // `status=RUNNING,,FAILED` is a malformed list, not a two-element one.
+                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    return;
+                }
+                try {
+                    builder.status(ai.ravenroot.api.application.ProcessInstanceStatus.valueOf(token.trim()));
+                } catch (IllegalArgumentException unknownStatus) {
+                    fail(exchange, ErrorCode.INVALID_REQUEST);
+                    return;
+                }
+            }
+        }
+        String owner = parameters.get("ownerWorkerId");
+        if (owner != null) {
+            builder.ownedBy(owner);
+        }
+        String deployment = parameters.get("deploymentId");
+        if (deployment != null) {
+            builder.hostedBy(deployment);
+        }
+        String rawIncludeTerminal = parameters.get("includeTerminal");
+        if (rawIncludeTerminal != null) {
+            if (!"true".equalsIgnoreCase(rawIncludeTerminal) && !"false".equalsIgnoreCase(rawIncludeTerminal)) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            builder.includeTerminal(Boolean.parseBoolean(rawIncludeTerminal));
+        }
+        String rawCursor = parameters.get("cursor");
+        if (rawCursor != null) {
+            builder.cursor(rawCursor);
+        }
+        String rawLimit = parameters.get("limit");
+        if (rawLimit != null) {
+            try {
+                builder.limit(Integer.parseInt(rawLimit.trim()));
+            } catch (NumberFormatException notANumber) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+        }
+        try {
+            var page = authorizedApplication.processInventory(requestContext, builder.build());
+            json(exchange, 200, processInventoryPageJson(page, authorizedApplication.processInventoryMaxPageSize()));
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.InvalidRequest) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    private static String processInventoryPageJson(ai.ravenroot.api.persistence.ProcessInventoryPage page,
+                                                    int maxPageSize) {
+        var body = new StringBuilder(256);
+        body.append("{\"items\":[");
+        var items = page.items();
+        for (int index = 0; index < items.size(); index++) {
+            if (index > 0) {
+                body.append(',');
+            }
+            body.append(processInventoryEntryJson(items.get(index)));
+        }
+        body.append("],\"nextCursor\":")
+                .append(page.nextCursor().map(cursor -> "\"" + escape(cursor) + "\"").orElse("null"))
+                .append(",\"retainedFrom\":\"").append(page.retainedFrom()).append('"')
+                .append(",\"maxPageSize\":").append(maxPageSize).append('}');
+        return body.toString();
+    }
+
+    /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */
+    private static String processInventoryEntryJson(ai.ravenroot.api.persistence.ProcessInventoryEntry entry) {
+        return "{\"tenantId\":\"" + escape(entry.key().tenantId())
+                + "\",\"processInstanceId\":\"" + entry.key().processInstanceId()
+                + "\",\"status\":\"" + entry.status()
+                + "\",\"disposition\":\"" + entry.disposition()
+                + "\",\"revision\":" + entry.revision()
+                + ",\"lifecycleGeneration\":" + entry.lifecycleGeneration()
+                + ",\"graphVersion\":\"" + escape(entry.graphVersionPin().reference())
+                + "\",\"deploymentId\":" + optionalStringJson(entry.deploymentId())
+                + ",\"workloadId\":" + optionalStringJson(entry.workloadId())
+                + ",\"correlationId\":" + optionalStringJson(entry.correlationId())
+                + ",\"ownerWorkerId\":" + optionalStringJson(entry.ownerWorkerId())
+                + ",\"fencingToken\":" + entry.fencingToken()
+                + ",\"leaseExpiresAt\":" + entry.leaseExpiresAt().map(instant -> "\"" + instant + "\"").orElse("null")
+                + ",\"traversalCount\":" + entry.traversalCount()
+                + ",\"createdAt\":\"" + entry.createdAt()
+                + "\",\"updatedAt\":\"" + entry.updatedAt() + "\""
+                + ",\"retainedUntil\":" + entry.retainedUntil().map(instant -> "\"" + instant + "\"").orElse("null")
+                + "}";
+    }
+
+    private static String optionalStringJson(java.util.Optional<String> value) {
+        return value.map(present -> "\"" + escape(present) + "\"").orElse("null");
+    }
+
+    /**
+     * {@code GET /v1/executions/{id}/traversals}: the durable inventory's traversal rows for
+     * one process instance.
+     *
+     * <p><strong>{@code id} names a process instance, not a traversal/execution id.</strong> Every
+     * other sub-route under {@code /v1/executions} addresses a traversal ({@code GET
+     * /v1/executions/{id}} and the cancel/pause/resume trio, where {@code id == executionId ==
+     * traversalId}). This route is keyed differently on purpose: the durable inventory's traversal
+     * listing is {@link ai.ravenroot.api.persistence.ExecutionStore#listTraversals} scoped by
+     * {@link ai.ravenroot.api.persistence.ExecutionKey}, whose second component is
+     * {@code processInstanceId} -- the durable aggregate's own identity -- and a process instance can
+     * contain more than one traversal, so a traversal id could not address "this instance's
+     * traversals" at all. The two id spaces are both UUIDs and are not interchangeable; a client that
+     * passes a traversal id here receives 404, indistinguishable from an id that never existed.</p>
+     *
+     * <p>404 {@link ErrorCode#UNKNOWN_PROCESS_INSTANCE} when the instance is absent, belongs to
+     * another tenant, or was purged past its terminal retention window -- all three
+     * indistinguishable by design, exactly as {@code GET /v1/executions/{id}} already is for its own
+     * id space. 501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when no inventory-capable store
+     * is composed at all.</p>
+     *
+     * <p>The response also carries {@code retainedFrom}, this tenant's inventory retention floor,
+     * exactly like {@code GET /v1/executions/inventory} does -- an operator diagnosing an absence
+     * needs it on whichever of the two listings they happen to be holding, not only on one of them.</p>
+     */
+    private void readProcessInstanceTraversals(HttpExchange exchange, String rawId) throws IOException {
+        var requestContext = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        if (!authorizedApplication.processInventoryAvailable()) {
+            fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        try {
+            var traversals = authorizedApplication.processInstanceTraversals(requestContext, processInstanceId);
+            var retainedFrom = authorizedApplication.processInventoryRetainedFrom(requestContext);
+            var body = traversals.stream().map(RavenrootServer::traversalInventoryEntryJson)
+                    .collect(java.util.stream.Collectors.joining(",", "{\"traversals\":[", "],\"retainedFrom\":\""
+                            + retainedFrom + "\"}"));
+            json(exchange, 200, body);
+        } catch (ai.ravenroot.api.persistence.ExecutionStoreException storeFailure) {
+            if (storeFailure.failure() instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.NotFound) {
+                fail(exchange, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+                return;
+            }
+            throw storeFailure;
+        }
+    }
+
+    /** Bounded, non-secret fields only -- no payloads, no opaque blobs. */
+    private static String traversalInventoryEntryJson(ai.ravenroot.api.persistence.TraversalInventoryEntry entry) {
+        return "{\"traversalId\":\"" + entry.traversalId()
+                + "\",\"position\":" + entry.position()
+                + ",\"ingressNodeId\":\"" + escape(entry.ingressNodeId())
+                + "\",\"status\":\"" + entry.status()
+                + "\",\"disposition\":\"" + entry.disposition()
+                + "\",\"invocationCount\":" + entry.invocationCount()
+                + ",\"parkedAttemptCount\":" + entry.parkedAttemptCount()
+                + "}";
     }
 
     /**
@@ -3315,18 +3635,36 @@ public final class RavenrootServer implements AutoCloseable {
             if (index > 0) {
                 body.append(',');
             }
-            var event = page.get(index);
-            String description = PublicExecutionDescription.forEventType(event.eventType());
-            body.append("{\"journalOffset\":").append(event.journalOffset())
-                    .append(",\"streamSequence\":").append(event.streamSequence())
-                    .append(",\"occurredAt\":\"").append(event.occurredAt()).append('"')
-                    .append(",\"type\":\"").append(escape(event.eventType())).append('"')
-                    .append(",\"description\":\"").append(escape(description)).append('"')
-                    .append(",\"processInstanceId\":\"").append(event.processInstanceId()).append('"')
-                    .append(",\"traversalId\":\"").append(event.traversalId()).append('"')
-                    .append("}");
+            body.append(durableRecentEventJson(page.get(index)));
         }
         return body.append("]}").toString();
+    }
+
+    /**
+     * One durable row of {@code /v1/events/recent}, exposed package-locally so its field set can be
+     * asserted directly.
+     *
+     * <p>Deliberately narrower than {@link #durableExecutionEventFrame}: this is the polling
+     * counterpart, and it has always carried the coarse position and identity rather than the full
+     * causal chain. {@code handlerId} is here for the same reason it is on the stream — a poller that
+     * saw {@code HANDLER_RESOLVED} and could not tell <em>which</em> handler resolved would have to go
+     * and ask, which is the question this projection exists to answer — and it is null on every other
+     * event type and on rows written before PERS-05.</p>
+     * @param event durable event to serialize.
+     * @return one JSON object, with no surrounding array or separator.
+     */
+    static String durableRecentEventJson(ai.ravenroot.api.application.DurableExecutionEvent event) {
+        String description = PublicExecutionDescription.forEventType(event.eventType());
+        return "{\"journalOffset\":" + event.journalOffset()
+                + ",\"streamSequence\":" + event.streamSequence()
+                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
+                + ",\"type\":\"" + escape(event.eventType()) + "\""
+                + ",\"description\":\"" + escape(description) + "\""
+                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
+                + ",\"traversalId\":\"" + event.traversalId() + "\""
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
+                + "}";
     }
 
     private void executionEvents(HttpExchange exchange) throws IOException {
@@ -3762,6 +4100,12 @@ public final class RavenrootServer implements AutoCloseable {
                 + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
                 + ",\"edgeId\":" + (event.edgeId() == null ? "null"
                         : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
+                // The fourth identity, beside the process, the traversal and the invocation, so a
+                // client can tell a handler event apart from a node event that shares all three
+                // instead of parsing the sentence. A UUID, so it needs no escaping and costs a fixed
+                // 36 bytes inside the projection's own reserve.
+                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
+                        : "\"" + event.handlerId() + "\"")
                 + "}";
         String frame = "id: " + event.journalOffset() + "\nevent: execution\ndata: " + body + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);

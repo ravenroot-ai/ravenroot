@@ -44,7 +44,6 @@ final class TraversalInstanceRegistry {
             if (traversalId.equals(identity.traversalId()) && live.remove(identity, instance)) {
                 removed.add(instance);
                 retiring.add(instance);
-                instance.actorReservation().close();
             }
         });
         return List.copyOf(removed);
@@ -55,7 +54,11 @@ final class TraversalInstanceRegistry {
         all.addAll(retiring);
         return List.copyOf(all);
     }
-    void retired(Collection<TraversalInstance> instances) { retiring.removeAll(instances); }
+    void retired(Collection<TraversalInstance> instances) {
+        instances.forEach(instance -> {
+            if (retiring.remove(instance)) instance.actorReservation().close();
+        });
+    }
     void deregisterAll() {
         live.values().forEach(instance -> instance.actorReservation().close());
         retiring.forEach(instance -> instance.actorReservation().close());

@@ -10,9 +10,13 @@ import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionTransition;
+import ai.ravenroot.api.persistence.InventoryDisposition;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
+import ai.ravenroot.api.persistence.ProcessInventoryQuery;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.catalog.AttemptRepeatability;
+import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.core.runtime.GraphExecutionLimits;
 
@@ -29,11 +33,11 @@ import java.util.concurrent.CompletionStage;
  * {@code claimPendingWork}, {@code claimDueTimers} and {@code ack}.
  *
  * <h2>What recovery means here</h2>
- * <p>Making outstanding items <em>dispatchable</em> with correct lease, fencing and idempotency
- * semantics — not resuming execution. Resuming would require re-parsing the graph, and the graph
- * bytes are stored nowhere; only a hash is pinned, and no definition store exists. Parked and
- * recovered state is meaningful and human-decidable without the definition, which is why this is a
- * complete unit of work even without a definition store.</p>
+ * <p>Generic attempt recovery makes outstanding items <em>dispatchable</em> with correct lease,
+ * fencing and idempotency semantics; it does not reconstruct arbitrary graph execution. Reserved
+ * handler triggers may instead carry a bounded, versioned continuation that a trusted
+ * {@link RecoveryDispatcher} understands. Unsupported continuations remain claimable and
+ * unacknowledged, so recovery fails closed without losing the durable wait.</p>
  *
  * <h2>The one rule the whole thing rests on</h2>
  * <p><strong>The {@code RUNNING} transition is committed under the fence before the engine send.</strong>
@@ -105,17 +109,114 @@ public final class ExecutionRecoveryService {
     public List<RecoveryOutcome> sweepOnce() {
         var outcomes = new ArrayList<RecoveryOutcome>();
         for (String tenantId : tenantIds) {
-            for (PendingWork item : await(store.claimPendingWork(tenantId, workerId, batchLimit, leaseTtl))) {
-                outcomes.add(recover(item));
-            }
+            outcomes.addAll(sweepOnce(tenantId));
         }
         return List.copyOf(outcomes);
     }
 
+    /** Runs the same bounded sweep for one configured tenant, used by authenticated decision routes. */
+    public List<RecoveryOutcome> sweepOnce(String tenantId) {
+        if (!tenantIds.contains(Objects.requireNonNull(tenantId, "tenantId"))) return List.of();
+        var outcomes = new ArrayList<RecoveryOutcome>();
+        for (PendingWork.TimerDue timer : await(store.claimDueTimers(
+                tenantId, workerId, batchLimit, leaseTtl))) {
+            outcomes.add(dispatchTimer(timer));
+        }
+        for (PendingWork item : await(store.claimPendingWork(
+                tenantId, workerId, batchLimit, leaseTtl))) {
+            outcomes.add(recover(item));
+        }
+        return List.copyOf(outcomes);
+    }
+
+    /** Drives only timers a trusted dispatcher explicitly recognises, then acknowledges their fence. */
+    private RecoveryOutcome dispatchTimer(PendingWork.TimerDue timer) {
+        if (!dispatcher.canDispatch(timer)) {
+            return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
+                    "no timer dispatcher available");
+        }
+        try {
+            dispatcher.dispatch(timer, timer.workItemId().toString());
+            acknowledge(timer);
+            afterAcknowledged(timer);
+            return new RecoveryOutcome.HandlerDispatched(timer.key(), timer.workItemId(),
+                    timer.traversalId());
+        } catch (RuntimeException unavailable) {
+            return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
+                    "timer dispatch unavailable");
+        }
+    }
+
+    /**
+     * Discovery path: identifies {@link InventoryDisposition#INTERRUPTED} process
+     * instances — non-terminal, with no lease or an expired one — directly from the durable
+     * inventory, across every tenant this service was constructed with.
+     *
+     * <h2>Why this exists beside {@link #sweepOnce()}, and what it deliberately does not do</h2>
+     * <p>{@link #sweepOnce()} discovers work at <em>attempt</em> granularity, through
+     * {@code claimPendingWork}: it finds attempts a dispatcher can act on, claimed and fenced,
+     * ready to be dispatched or parked. This method discovers at <em>instance</em> granularity,
+     * through the inventory's own derived {@link InventoryDisposition}, which the store computes
+     * from the same lease that {@code claimPendingWork} consults — but reports it directly, as a
+     * cohort an operator or a caller can see, rather than only implicitly through which attempts
+     * happen to still be claimable. Before this method, the only way to learn "which instances are
+     * stuck after a restart" was to already know their ids, or to infer it from
+     * {@code claimPendingWork}'s side effects; this reads it straight off the inventory instead.</p>
+     *
+     * <p>This method does <strong>not</strong> dispatch, park, or otherwise mutate anything it
+     * finds, and does not replace {@link #sweepOnce()}: a {@link ProcessInventoryEntry} carries no
+     * attempt identity or fencing token, so it cannot drive {@link #dispatchNeverStarted} or
+     * {@link #resolveAmbiguity} directly. It is deliberately read-only discovery, left for a caller
+     * to act on (typically by triggering {@link #sweepOnce()} for the same tenant, or by surfacing
+     * the cohort to an operator) — narrowing scope rather than silently reimplementing attempt-level
+     * recovery from coarser data.</p>
+     *
+     * <p>Requires {@link StoreCapability#PROCESS_INVENTORY}; the store itself rejects the query with
+     * {@code ExecutionStoreFailure.CapabilityNotSupported} when the capability is not declared,
+     * exactly as every other inventory read does.</p>
+     * @return interrupted process instances across every configured tenant, most recently created first
+     */
+    public List<ProcessInventoryEntry> discoverInterrupted() {
+        var interrupted = new ArrayList<ProcessInventoryEntry>();
+        for (String tenantId : tenantIds) {
+            interrupted.addAll(discoverInterrupted(tenantId));
+        }
+        return List.copyOf(interrupted);
+    }
+
+    /**
+     * The single-tenant half of {@link #discoverInterrupted()}, exposed separately so a caller that
+     * already knows which tenant it cares about — an operator console, or a test simulating one
+     * tenant's restart — is not forced to sweep every configured tenant to ask about one.
+     * @param tenantId tenant whose interrupted cohort is requested.
+     * @return that tenant's interrupted process instances, most recently created first.
+     */
+    public List<ProcessInventoryEntry> discoverInterrupted(String tenantId) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        var interrupted = new ArrayList<ProcessInventoryEntry>();
+        var query = ProcessInventoryQuery.outstanding(batchLimit);
+        while (true) {
+            var page = await(store.listProcessInstances(tenantId, query));
+            for (ProcessInventoryEntry entry : page.items()) {
+                if (entry.disposition() == InventoryDisposition.INTERRUPTED) {
+                    interrupted.add(entry);
+                }
+            }
+            if (page.nextCursor().isEmpty()) {
+                break;
+            }
+            query = query.after(page.nextCursor().get());
+        }
+        return List.copyOf(interrupted);
+    }
+
     private RecoveryOutcome recover(PendingWork item) {
+        if (item instanceof PendingWork.HandlerTrigger trigger) {
+            return dispatchHandler(trigger);
+        }
         if (!(item instanceof PendingWork.AttemptDispatch attemptItem)) {
-            // Timers and handler triggers carry no ambiguity of their own: they are signals to a
-            // waiting invocation, not effects that may already have happened. They are left
+            // Timers carry no ambiguity of their own: they are signals to a waiting invocation,
+            // not effects that may already have happened. They are left
             // unacknowledged so nothing is lost, because a lost timer is worse than a duplicate one.
             return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
                     "no dispatcher for " + item.getClass().getSimpleName());
@@ -142,6 +243,23 @@ public final class ExecutionRecoveryService {
             case WAITING -> acknowledgeStale(attemptItem, "waiting on a timer or trigger");
             case COMPLETED, FAILED -> acknowledgeStale(attemptItem, "already terminal");
         };
+    }
+
+    private RecoveryOutcome dispatchHandler(PendingWork.HandlerTrigger trigger) {
+        if (!dispatcher.canDispatch(trigger)) {
+            return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                    "no handler re-entry dispatcher available");
+        }
+        try {
+            dispatcher.dispatch(trigger, trigger.workItemId().toString());
+            acknowledge(trigger);
+            afterAcknowledged(trigger);
+            return new RecoveryOutcome.HandlerDispatched(trigger.key(), trigger.workItemId(),
+                    trigger.traversalId());
+        } catch (RuntimeException unavailable) {
+            return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                    "handler re-entry dispatch unavailable");
+        }
     }
 
     /**
@@ -242,6 +360,15 @@ public final class ExecutionRecoveryService {
         } catch (ExecutionStoreException alreadyGone) {
             // An item another worker acknowledged first, or one whose instance vanished. Both mean
             // the acknowledgement's purpose is already served.
+        }
+    }
+
+    private void afterAcknowledged(PendingWork item) {
+        try {
+            dispatcher.afterAcknowledged(item);
+        } catch (RuntimeException cleanupFailure) {
+            // A dispatcher cleanup cannot undo the durable acknowledgement. Any retained lease is
+            // bounded by its TTL, so keep the successful recovery outcome truthful.
         }
     }
 

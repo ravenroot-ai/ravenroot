@@ -34,7 +34,8 @@ is covered by the public [model, agent, and program integration guide](../../../
 | `PromptTemplate` | `{{payload}}` rendering, carried over from the departed core node |
 | `LlmPromptException` | the closed failure vocabulary; no payload, prompt, response body or credential ever travels in it |
 | `AgentNodeBehavior` | the `agent` node type: descriptor (declaring `ai` **and** `agentic`), the loop, the three budgets, admission held across turns |
-| `AgentTurn` | **the agent's own wire document**: a turn that may carry tools, and the reader that can tell an answer from a tool call |
+| `AgentTurn` | **the agent's own wire document**: immutable operator policy in the system role, untrusted graph content in user roles, tool declarations, and the reader that can tell an answer from a tool call |
+| `ModelInputProvenance` | per-invocation source-kind and SHA-256 evidence for untrusted inputs and model outputs, without retaining their content |
 | `AgentTool` / `LoadSkillTool` | what an agent may call; `load_skill` hands over one skill body per run, on request |
 | `AgentSkill` | the author-declared skill: the numbered slot properties, the reader, and every declaration this bundle refuses to build a node from |
 | `AgentException` | the agent's closed failure vocabulary, separate because a loop can exhaust turns and tokens and one call cannot |
@@ -42,16 +43,29 @@ is covered by the public [model, agent, and program integration guide](../../../
 
 ## Two properties worth knowing before reading the code
 
-**The credential is never in this process's reach.** The behavior requires `OUTBOUND_HTTP` and
-deliberately not `CREDENTIAL_RESOLUTION`. A profile names an `OutboundCredentialBinding`; the runtime
-resolves it and places it on the request. There is no code path here that could return a secret.
+**The credential is never in this process's reach.** Both behaviors require `OUTBOUND_HTTP` and
+deliberately not `CREDENTIAL_RESOLUTION`; the agent additionally requires `TOOL_AUTHORIZATION`. A
+profile names an `OutboundCredentialBinding`; the runtime resolves it and places it on the request.
+There is no code path here that could return a secret.
 
-**A skill's body is not in the prompt until it is asked for.** The system turn lists a declared
+**A skill's body is not in the prompt until it is asked for.** An untrusted author turn lists a declared
 skill's name and description; `LoadSkillTool` hands the body over when the model calls for it, once
 per run. That is the whole difference between a skill and more text in `instructions` — an unused
 skill costs one line. Keeping that disclosure boundary in `load_skill` also keeps the agent loop
 independent of how skills are declared. The shape of the slot properties, and the measurement behind choosing three numbered properties over one
 JSON document, are on `AgentSkill`.
+
+**Only operator policy receives the system role.** Graph instructions, objectives, payloads, skill
+metadata, retrieved tool content, and model output are all structurally untrusted. The invocation
+records bounded source-kind/digest provenance for each of those inputs; it never stores their raw
+content in the provenance record.
+
+**A model request is not authority.** In addition to `OUTBOUND_HTTP`, the `agent` behavior requires
+the `TOOL_AUTHORIZATION` package capability. The runtime parses and canonicalizes each requested
+argument object under fixed bounds, evaluates the deployment's tool policy with the trusted tenant
+identity immediately before the effect, and emits correlated payload-free audit records. Missing or
+malformed authorization denies by default. `REQUIRE_APPROVAL` is a no-effect refusal in this release;
+approval redemption belongs to the approval lifecycle.
 
 **A tool answers; a budget terminates.** An `agent` tool never fails the node: a wrong argument, an
 invented tool name or a broken tool comes back as a tool *result* the model can read and correct. A

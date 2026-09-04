@@ -34,6 +34,18 @@ public enum ErrorCode {
      */
     UNKNOWN_EXECUTION(404, "unknown execution"),
     /**
+     * The durable-inventory counterpart of {@link #UNKNOWN_EXECUTION}, and deliberately a distinct
+     * code rather than a reuse: a process instance is the durable aggregate, addressed by
+     * {@code processInstanceId}, and is not the same identity {@link #UNKNOWN_EXECUTION} names
+     * ({@code executionId}, which is the traversal id). Says nothing about why for the identical
+     * reason {@link #UNKNOWN_EXECUTION} does not: an instance that never existed, one belonging to
+     * another tenant, and one purged past its terminal retention window all answer with this code,
+     * because distinguishing the first two would disclose them. A caller that needs to tell "never
+     * existed" from "expired by policy" apart compares against the retention floor a durable
+     * inventory listing carries, not against a second failure channel here.
+     */
+    UNKNOWN_PROCESS_INSTANCE(404, "unknown process instance"),
+    /**
      * The counterpart that makes {@link #UNKNOWN_EXECUTION} honest rather than a catch-all: the
      * execution provably ran and its terminal status is still known, but its result is past the
      * retention horizon. A caller that receives this learns its run really did happen, which an empty
@@ -63,6 +75,16 @@ public enum ErrorCode {
     UNSUPPORTED_MEDIA_TYPE(415, "the request content type is not supported"),
     /** The deployment does not implement the requested execution policy. */
     EXECUTION_POLICY_UNSUPPORTED(501, "the requested execution policy is not implemented"),
+    /**
+     * This deployment has no durable, inventory-capable execution store configured, so
+     * the durable process inventory cannot answer at all. 501, the same status
+     * {@link #EXECUTION_POLICY_UNSUPPORTED} uses, because this is a fact about this deployment's
+     * composed capability rather than about the caller's request: an operator must compose a store
+     * that declares {@code StoreCapability.PROCESS_INVENTORY} before this route can answer, and no
+     * retry of the same request changes that.
+     */
+    PROCESS_INVENTORY_UNAVAILABLE(501, "this deployment has no durable process inventory configured; "
+            + "an operator must compose an execution store that declares PROCESS_INVENTORY"),
     /** Processing stopped before the operation reached a terminal result. */
     REQUEST_INTERRUPTED(503, "the operation was interrupted before it completed"),
     /** A request-rate or concurrency limit refused the operation. */

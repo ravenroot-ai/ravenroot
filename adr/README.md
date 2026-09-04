@@ -39,6 +39,8 @@ their architecture status and wording are ready for publication.
 | 2026-08-29 | 0028 | Accepted | [Iteration-correlated fan-in](0028-iteration-correlated-fan-in.md) |
 | 2026-08-29 | 0029 | Accepted | [The model-provider SPI after AI nodes leave the core](0029-model-provider-spi-after-externalization.md) |
 | 2026-08-30 | 0030 | Accepted contract, not implemented | [Zero or more independently routed node emissions](0030-zero-or-more-node-emissions.md) |
+| 2026-09-03 | 0031 | Accepted | [Durable canonical graph definitions for accepted executions](0031-durable-canonical-graph-definitions.md) |
+| 2026-09-03 | 0032 | Accepted | [The durable process inventory is authoritative rows, not a projection](0032-durable-process-inventory-is-authoritative-rows.md) |
 
 ## Status vocabulary
 

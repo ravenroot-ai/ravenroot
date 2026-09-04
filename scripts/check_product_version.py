@@ -36,6 +36,18 @@ def tracked_files() -> list[Path]:
     return [ROOT / item for item in result.stdout.decode("utf-8").split("\0") if item]
 
 
+def helm_errors(version: str, contents: str) -> list[str]:
+    findings: list[str] = []
+    for field in ("version", "appVersion"):
+        match = re.search(rf"(?m)^{field}:\s*[\"']?([^\s\"']+)[\"']?\s*$", contents)
+        candidate = match.group(1) if match else None
+        if candidate != version:
+            findings.append(
+                f"deploy/helm/ravenroot/Chart.yaml: {field} {candidate!r} differs from {version!r}"
+            )
+    return findings
+
+
 def errors(version: str) -> list[str]:
     findings: list[str] = []
     if not SEMVER.fullmatch(version):
@@ -56,6 +68,12 @@ def errors(version: str) -> list[str]:
         packages = document.get("packages")
         if isinstance(packages, dict) and packages.get("", {}).get("version") != version:
             findings.append(f"{relative}: packages[''] version differs from {version!r}")
+    findings.extend(
+        helm_errors(
+            version,
+            (ROOT / "deploy/helm/ravenroot/Chart.yaml").read_text(encoding="utf-8"),
+        )
+    )
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     coordinates = set(re.findall(r"<version>([^<]+)</version>", readme))
     if coordinates and coordinates != {version}:

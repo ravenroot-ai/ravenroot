@@ -18,7 +18,7 @@ import java.util.concurrent.CompletionStage;
  * {@code load_skill}: the built-in tool through which an agent asks for the body of a skill.
  *
  * <h2>Progressive disclosure, which is the whole point</h2>
- * <p>The system turn carries every declared skill's <b>name and description and nothing else</b>
+ * <p>The untrusted author turn carries every declared skill's <b>name and description and nothing else</b>
  * (see {@link AgentTurn#systemMessage}); the body arrives here, once, when the model asks for it.
  * Wiring that as a tool rather than as a prompt section is what makes an unused skill cost its one
  * line and no more. Keeping that disclosure boundary in the tool contract also keeps the loop
@@ -112,12 +112,12 @@ final class LoadSkillTool implements AgentTool {
     }
 
     @Override
-    public CompletionStage<String> invoke(String argumentsJson) {
+    public CompletionStage<Result> invoke(String argumentsJson) {
         // Wrapped rather than made asynchronous: reading a declared skill's body touches nothing but
         // this node's own properties. AgentTool returns a stage so that a tool which
         // DOES cross a network -- an MCP one -- cannot force a block inside the completion callback of
         // the model's own call. A local tool completes immediately and loses nothing.
-        return CompletableFuture.completedFuture(answer(argumentsJson));
+        return CompletableFuture.completedFuture(Result.succeeded(answer(argumentsJson)));
     }
 
     private String answer(String argumentsJson) {

@@ -380,7 +380,7 @@
     },
     "/v1/events": {
       "get": {
-        "summary": "Server-Sent Events stream of execution events, resumable via Last-Event-ID. Without a selector it uses the durable journal when available. 'include=diagnostics' instead selects the authenticated in-memory ring for the entire stream and declares source RING with PROCESS_LOCAL continuity. EDGE_TRAVERSED identifies an actual, unambiguous successor dispatch through stable edgeId; clients must not infer traversal from NODE_COMPLETED. edgeId is accepted unchanged up to 8192 strict UTF-8 bytes; all auxiliary traversal strings share a 12287-byte escaped budget, keeping the complete frame below 65536 bytes. Oversize values are rejected, never truncated. Ring-served views (also the default where no journal exists) carry author-safe failure messages and built-in log output; these are bounded, carry explicit redacted/truncated flags, are lost on restart or ring eviction, and are never persisted. Raw 'detail' is never serialized. The diagnostics stream is not assistant/provider context.",
+        "summary": "Server-Sent Events stream of execution events, resumable via Last-Event-ID. Without a selector it uses the durable journal when available. 'include=diagnostics' instead selects the authenticated in-memory ring for the entire stream and declares source RING with PROCESS_LOCAL continuity. EDGE_TRAVERSED identifies an actual, unambiguous successor dispatch through stable edgeId; clients must not infer traversal from NODE_COMPLETED. edgeId is accepted unchanged up to 8192 strict UTF-8 bytes; all auxiliary traversal strings share a 12287-byte escaped budget, keeping the complete frame below 65536 bytes. Oversize values are rejected, never truncated. Durable frames carry handlerId beside processInstanceId, traversalId and invocationId, so a handler-lifecycle event is told apart from a node event that shares all three; it is null on every other type. Ring-served views (also the default where no journal exists) carry author-safe failure messages and built-in log output; these are bounded, carry explicit redacted/truncated flags, are lost on restart or ring eviction, and are never persisted. Raw 'detail' is never serialized. The diagnostics stream is not assistant/provider context.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "responses": {
@@ -396,7 +396,7 @@
     },
     "/v1/events/recent": {
       "get": {
-        "summary": "Bounded, resumable read of recent execution events, ascending by cursor, strictly after 'after'. Declares which source served it and the oldest cursor still available; reports an explicit gap when 'after' precedes that floor rather than returning a silently continuous list. A 'limit' above the server cap is refused, never clamped. EDGE_TRAVERSED identifies an actual, unambiguous successor dispatch through stable edgeId; duplicate edges collapsed to one route produce no fabricated attribution. edgeId is accepted unchanged up to 8192 strict UTF-8 bytes; auxiliary traversal strings share a 12287-byte escaped budget, keeping each frame below 65536 bytes. Oversize values are rejected, never truncated. 'include=diagnostics' selects in-process instrumentation (activeInstances, inFlightArrivals, fallback, processingDuration), bounded author-safe failure messages and built-in log output by content rather than by source; when those have aged out the caller is told they are gone rather than handed events with silently absent fields. The gap marker describes retention only, never visibility. Every event carries a bounded public description built from source-authored text and, where the event's meaning depends on it, a classifier in 'publicReason' -- a token restricted to letters, digits and . _ - : so it cannot hold prose. A completed node names the outcome it routed instead of being reported as a success, and a failure names its cause's Java class. With diagnostics selected, separate message/output fields carry redacted/truncated flags and are process-local, lost on restart or ring eviction, never persisted, and never eligible for assistant/provider projection. Raw diagnostic detail never crosses this route or the SSE stream. The journal never captured the classifier, so a replayed completed node gets the weaker sentence that does not claim success rather than a confident one it cannot substantiate. The legacy 'detail' key, which held a copy of the public sentence under a name promising the diagnostic, is removed.",
+        "summary": "Bounded, resumable read of recent execution events, ascending by cursor, strictly after 'after'. Declares which source served it and the oldest cursor still available; reports an explicit gap when 'after' precedes that floor rather than returning a silently continuous list. A 'limit' above the server cap is refused, never clamped. EDGE_TRAVERSED identifies an actual, unambiguous successor dispatch through stable edgeId; duplicate edges collapsed to one route produce no fabricated attribution. edgeId is accepted unchanged up to 8192 strict UTF-8 bytes; auxiliary traversal strings share a 12287-byte escaped budget, keeping each frame below 65536 bytes. Oversize values are rejected, never truncated. Durable rows carry handlerId, so a handler-lifecycle event names the handler it is about; it is null on every other type. 'include=diagnostics' selects in-process instrumentation (activeInstances, inFlightArrivals, fallback, processingDuration), bounded author-safe failure messages and built-in log output by content rather than by source; when those have aged out the caller is told they are gone rather than handed events with silently absent fields. The gap marker describes retention only, never visibility. Every event carries a bounded public description built from source-authored text and, where the event's meaning depends on it, a classifier in 'publicReason' -- a token restricted to letters, digits and . _ - : so it cannot hold prose. A completed node names the outcome it routed instead of being reported as a success, and a failure names its cause's Java class. With diagnostics selected, separate message/output fields carry redacted/truncated flags and are process-local, lost on restart or ring eviction, never persisted, and never eligible for assistant/provider projection. Raw diagnostic detail never crosses this route or the SSE stream. The journal never captured the classifier, so a replayed completed node gets the weaker sentence that does not claim success rather than a confident one it cannot substantiate. The legacy 'detail' key, which held a copy of the public sentence under a name promising the diagnostic, is removed.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "responses": {
@@ -433,6 +433,24 @@
         }
       }
     },
+    "/v1/executions/inventory": {
+      "get": {
+        "summary": "Lists one page of this tenant's durable process inventory: what this deployment's own persisted record says exists, surviving a restart, as opposed to GET /v1/executions/live's process-local runtime view. Three optional query parameters are named exactly like the field each response row carries: status (comma-separated ProcessInstanceStatus names), ownerWorkerId (lease-holder worker id) and deploymentId (hosting deployment id). Three are not, because they describe the page rather than a row: includeTerminal (true to include COMPLETED/FAILED rows, excluded by default) has no response counterpart, limit is bounded by the response's maxPageSize, and cursor takes a previous page's nextCursor. Any other parameter name is refused as 400, and so is a recognised name carrying a blank value, rather than either being silently ignored. The response always carries retainedFrom, this tenant's inventory retention floor, so a caller can tell an instance that never existed from one purged by policy without a second request, and maxPageSize, this deployment's declared page-size bound, so a caller paginating its own loop can read it instead of discovering it by bisection. Tenant-scoped structurally, the same way GET /v1/executions/live is. 501 when this deployment has no inventory-capable execution store composed.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "501": {"description": "PROCESS_INVENTORY_UNAVAILABLE"}
+        }
+      }
+    },
     "/v1/executions/live": {
       "get": {
         "summary": "Lists this tenant's live executions (accepted and not yet terminal) with their identifiers. Read directly from runtime bookkeeping, never derived from the event stream, so a stalled traversal that has stopped emitting still appears -- that property is why this route exists. Tenant-scoped structurally, the same way GET /v1/executions/{id} is: never reveals whether another tenant has executions running.",
@@ -451,7 +469,7 @@
     },
     "/v1/executions/{id}": {
       "get": {
-        "summary": "Reads one execution's status, payload, visited nodes and defaulted nodes. 410: it ran, but its result is past the retention horizon. visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array of node ids with no repeats: the runtime holds every one of them as a set, so a node reached, defaulted, bypassed or failed-and-handled more than once in this traversal still appears exactly once here, and none of the four says how many times. A fifth field, untakenEdges (#519), is not one of these four and is not a node list: each entry is a string naming one outgoing edge of a node this run bypassed -- \"<source>-><target> [outcome=<outcome>]\" -- that the node's own hardcoded 'continue' outcome could never select, whether the bypass came from mode=test or from an individual edge naming the passthrough command under mode=run. It has no corresponding event on GET /v1/events. GET /v1/events, read directly and filtered client-side to this traversalId and a node id (neither endpoint takes such a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, bypassedNodes, defaultedNodes and handledFailureNodes respectively -- under both of that stream's sources, with two silent-undercount caveats of the same shape where the source is a durable journal. First, NODE_DEFAULTED rows exist only in a journal written by a build that emits them, and nothing in the data says which: envelopeVersion does not change, correctly, because the envelope's shape did not -- so a client counting defaults over a window spanning that upgrade undercounts with no signal. Second, nodeId is a best-effort join against invocation state with its own retention, so a client filtering by node can undercount silently too; from the in-memory ring the node id is carried on the event itself. Which applies is observable: /v1/events/recent's own response names its source, 'source=DURABLE' or 'source=RING' -- the only place on this API that surfaces it, since neither /v1/status nor /v1/runtime does. The durable response carries the type but not the node id, so it cannot attribute any of the four to a node; the ring response carries both, like /v1/events. Without a journal, /v1/events keeps a bounded in-memory window that resets on every restart and can be shorter than this result's own retention.",
+        "summary": "Reads one execution's status, payload, visited nodes and defaulted nodes. 410: it ran, but its result is past the retention horizon. visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array of node ids with no repeats: the runtime holds every one of them as a set, so a node reached, defaulted, bypassed or failed-and-handled more than once in this traversal still appears exactly once here, and none of the four says how many times. A fifth field, untakenEdges (#519), is not one of these four and is not a node list: each entry is a string naming one outgoing edge of a node this run bypassed -- \"<source>-><target> [outcome=<outcome>]\" -- that the node's own hardcoded 'continue' outcome could never select, whether the bypass came from mode=test or from an individual edge naming the passthrough command under mode=run. It has no corresponding event on GET /v1/events. GET /v1/events, read directly and filtered client-side to this traversalId and a node id (neither endpoint takes such a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, bypassedNodes, defaultedNodes and handledFailureNodes respectively -- except on a node with an orchestration retry policy, where a visit is one NODE_STARTED per attempt, each intermediate attempt settles as NODE_RETRY_SCHEDULED rather than NODE_FAILED, and only the last settles as one of the four. So a client counting visits by counting NODE_STARTED overcounts a retried node, and the attempt ordinal that would separate them is not on this projection -- the four node lists in this response are sets and remain exact. Under both of that stream's sources, with two silent-undercount caveats of the same shape where the source is a durable journal. First, NODE_DEFAULTED rows exist only in a journal written by a build that emits them, and nothing in the data says which: envelopeVersion does not change, correctly, because the envelope's shape did not -- so a client counting defaults over a window spanning that upgrade undercounts with no signal. Second, nodeId is a best-effort join against invocation state with its own retention, so a client filtering by node can undercount silently too; from the in-memory ring the node id is carried on the event itself. Which applies is observable: /v1/events/recent's own response names its source, 'source=DURABLE' or 'source=RING' -- the only place on this API that surfaces it, since neither /v1/status nor /v1/runtime does. The durable response carries the type but not the node id, so it cannot attribute any of the four to a node; the ring response carries both, like /v1/events. Without a journal, /v1/events keeps a bounded in-memory window that resets on every restart and can be shorter than this result's own retention.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -531,6 +549,51 @@
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "400": {"description": "INVALID_REQUEST"},
           "404": {"description": "UNKNOWN_RESOURCE"}
+        }
+      }
+    },
+    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}": {
+      "post": {
+        "summary": "Approves, denies, or cancels one exact durable tool call. The authenticated tenant and qualified approver identity are authoritative; unknown and cross-tenant approvals are indistinguishable, and the response never contains arguments or continuation state.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "approvalId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "decision", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/executions/{id}/traversals": {
+      "get": {
+        "summary": "Lists one durable process instance's traversals from the inventory (#154), alongside this tenant's inventory retention floor as retainedFrom -- the same field GET /v1/executions/inventory carries, present here too so an operator diagnosing an absence has it on whichever of the two listings they are holding. Unlike every other /v1/executions sub-route, {id} here is a processInstanceId, not the executionId/traversalId GET /v1/executions/{id} and the cancel/pause/resume trio use -- a process instance can contain more than one traversal, so a traversal id could not address this route's question. 404 when the instance is absent, belongs to another tenant, or was purged past its terminal retention window -- all three indistinguishable by design, exactly like GET /v1/executions/{id}'s own 404. 501 when this deployment has no inventory-capable execution store composed.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_PROCESS_INSTANCE"},
+          "501": {"description": "PROCESS_INVENTORY_UNAVAILABLE"}
         }
       }
     },

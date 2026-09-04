@@ -162,6 +162,82 @@ describe('process-local deployment client', () => {
   });
 });
 
+describe('durable process inventory client (issue 154)', () => {
+  const page = {
+    items: [{
+      tenantId: 'tenant-a', processInstanceId: 'aaaaaaaa-0000-0000-0000-000000000001',
+      status: 'RUNNING', disposition: 'ACTIVE', revision: 3, lifecycleGeneration: 2,
+      graphVersion: 'sha256:deadbeef', deploymentId: null, workloadId: null, correlationId: null,
+      ownerWorkerId: 'worker-1', fencingToken: 7, leaseExpiresAt: '2026-01-01T00:00:30Z',
+      traversalCount: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:05Z',
+      retainedUntil: null,
+    }],
+    nextCursor: null,
+    retainedFrom: '2025-12-25T00:00:00Z',
+    maxPageSize: 100,
+  };
+
+  it('reads GET /v1/executions/inventory unfiltered by default and returns the page unmodified', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(page) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    const result = await client.processInventory();
+
+    expect(fetchImpl.mock.calls[0][0]).toBe('/v1/executions/inventory');
+    expect(fetchImpl.mock.calls[0][1].method).toBe('GET');
+    expect(result).toEqual(page);
+  });
+
+  it('sends only the filters the caller actually supplies, as GET /v1/executions/inventory query parameters', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify(page) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await client.processInventory({ status: 'RUNNING,WAITING', deploymentId: 'deploy-1', includeTerminal: true });
+
+    const url = new URL(fetchImpl.mock.calls[0][0], 'http://localhost');
+    expect(url.pathname).toBe('/v1/executions/inventory');
+    expect(url.searchParams.get('status')).toBe('RUNNING,WAITING');
+    // Named exactly like the response field it filters by (deploymentId, not a shorter alias) --
+    // see #processInventory's own comment for why that match matters: a caller filtering by a value
+    // it just read off a previous response must be able to use that identical name.
+    expect(url.searchParams.get('deploymentId')).toBe('deploy-1');
+    expect(url.searchParams.get('includeTerminal')).toBe('true');
+    expect(url.searchParams.has('ownerWorkerId')).toBe(false);
+    expect(url.searchParams.has('cursor')).toBe(false);
+  });
+
+  it('reads GET /v1/executions/{id}/traversals for a process instance id, distinct from execution()', async () => {
+    const traversals = {
+      traversals: [{
+        traversalId: 'bbbbbbbb-0000-0000-0000-000000000002', position: 0, ingressNodeId: 'start',
+        status: 'RUNNING', disposition: 'ACTIVE', invocationCount: 1, parkedAttemptCount: 0,
+      }],
+      // Carried on this response too, the same field processInventory()'s page carries -- an
+      // operator diagnosing an absence needs it on whichever of the two responses it is holding.
+      retainedFrom: '2025-12-25T00:00:00Z',
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200, text: async () => JSON.stringify(traversals),
+    });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    const result = await client.processInstanceTraversals('aaaaaaaa-0000-0000-0000-000000000001');
+
+    expect(fetchImpl.mock.calls[0][0]).toBe(
+      '/v1/executions/aaaaaaaa-0000-0000-0000-000000000001/traversals');
+    expect(result).toEqual(traversals);
+    expect(result.retainedFrom).toBe('2025-12-25T00:00:00Z');
+  });
+
+  it('rejects a blank process instance id before making a request', async () => {
+    const fetchImpl = vi.fn();
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+
+    await expect(client.processInstanceTraversals('')).rejects.toThrow(/require an id/);
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+});
+
 function streamResponse(frames, status = 200) {
   const encoder = new TextEncoder();
   const chunks = frames.map(frame => encoder.encode(frame));

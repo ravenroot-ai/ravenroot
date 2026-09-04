@@ -65,6 +65,9 @@ public enum StoreCapability {
     /** Exact tool approvals can be registered and transitioned atomically with execution state. */
     TOOL_APPROVALS,
 
+    /** Process-rooted agent grants and reservations share the execution batch transaction. */
+    AGENT_AUTHORITY_BUDGETS,
+
     /** First-class human tasks can be registered, transitioned and listed atomically. */
     HUMAN_TASKS,
 

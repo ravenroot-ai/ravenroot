@@ -2,17 +2,29 @@ package ai.ravenroot.api.persistence;
 
 /** Durable lifecycle of one exact tool-call approval request. */
 public enum ToolApprovalStatus {
+    /** Awaiting an authorized decision. */
     PENDING,
+    /** Approved and awaiting single-use redemption. */
     APPROVED,
+    /** Explicitly denied with no effect. */
     DENIED,
+    /** Store-clock expiry won with no effect. */
     EXPIRED,
+    /** Explicitly cancelled with no effect. */
     CANCELLED,
+    /** The one-time grant was consumed immediately before effect. */
     CONSUMED,
+    /** The consumed effect completed successfully. */
     SUCCEEDED,
+    /** The consumed effect completed with known failure. */
     FAILED,
+    /** The consumed effect outcome cannot be determined safely. */
     INDETERMINATE;
 
-    /** Returns whether no further transition is legal. */
+    /**
+     * Returns whether no further transition is legal.
+     * @return whether the state is terminal
+     */
     public boolean terminal() {
         return switch (this) {
             case DENIED, EXPIRED, CANCELLED, SUCCEEDED, FAILED, INDETERMINATE -> true;
@@ -20,7 +32,11 @@ public enum ToolApprovalStatus {
         };
     }
 
-    /** Returns whether this state can move directly to {@code next}. */
+    /**
+     * Tests whether this state can move directly to {@code next}.
+     * @param next proposed successor
+     * @return whether the transition is legal
+     */
     public boolean canTransitionTo(ToolApprovalStatus next) {
         return switch (this) {
             case PENDING -> next == APPROVED || next == DENIED || next == EXPIRED || next == CANCELLED;

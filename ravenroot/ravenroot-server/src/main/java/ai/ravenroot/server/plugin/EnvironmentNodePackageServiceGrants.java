@@ -185,6 +185,17 @@ public final class EnvironmentNodePackageServiceGrants {
                                                              ToolCallAuditSink toolAuditSink,
                                                              ToolApprovalService approvals,
                                                              ToolApprovalSettings approvalSettings) {
+        return fromEnvironment(environment, credentials, toolPolicy, toolAuditSink, approvals,
+                approvalSettings, null);
+    }
+
+    public static NodePackageServiceRegistry fromEnvironment(Map<String, String> environment,
+                                                             TenantCredentialResolver credentials,
+                                                             ToolPolicy toolPolicy,
+                                                             ToolCallAuditSink toolAuditSink,
+                                                             ToolApprovalService approvals,
+                                                             ToolApprovalSettings approvalSettings,
+                                                             ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         Objects.requireNonNull(environment, "environment");
         Objects.requireNonNull(credentials, "credentials");
         Objects.requireNonNull(toolPolicy, "toolPolicy");
@@ -217,7 +228,7 @@ public final class EnvironmentNodePackageServiceGrants {
             Map<String, Object> grant = decode(variable, encoded);
             try {
                 registry.grant(packageId, services(variable, packageId, grant, credentials,
-                        toolPolicy, toolAuditSink, approvals, approvalSettings));
+                        toolPolicy, toolAuditSink, approvals, approvalSettings, agentBudgets));
             } catch (IllegalArgumentException refused) {
                 // Everything the operator wrote about origins, headers, methods, subprotocols,
                 // bindings and ceilings is validated by NodePackageEgressPolicy.Builder and by the
@@ -296,7 +307,8 @@ public final class EnvironmentNodePackageServiceGrants {
                                                        ToolPolicy toolPolicy,
                                                        ToolCallAuditSink toolAuditSink,
                                                        ToolApprovalService approvals,
-                                                       ToolApprovalSettings approvalSettings) {
+                                                       ToolApprovalSettings approvalSettings,
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         exactlyKnownKeys(variable, grant, GRANT_KEYS, "grant");
         Set<NodePackageCapability> capabilities = capabilities(variable, grant.get("capabilities"));
 
@@ -357,6 +369,7 @@ public final class EnvironmentNodePackageServiceGrants {
         if (approvals != null && approvalSettings != null) {
             services.durableToolApprovals(approvals, approvalSettings);
         }
+        if (agentBudgets != null) services.agentAuthorityBudgets(agentBudgets);
         capabilities.forEach(services::grant);
         return services.build();
     }

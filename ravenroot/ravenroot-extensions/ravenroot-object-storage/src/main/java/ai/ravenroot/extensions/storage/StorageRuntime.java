@@ -330,8 +330,10 @@ final class StorageRuntime {
                 case REQUEST_TOO_LARGE -> StorageException.Code.REQUEST_TOO_LARGE;
                 case RESPONSE_TOO_LARGE -> StorageException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> StorageException.Code.DEADLINE_EXCEEDED;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> StorageException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> StorageException.Code.TRANSPORT_UNAVAILABLE;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED ->
+                        StorageException.Code.CAPACITY_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        StorageException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return StorageException.of(ambiguous ? StorageException.Code.AMBIGUOUS

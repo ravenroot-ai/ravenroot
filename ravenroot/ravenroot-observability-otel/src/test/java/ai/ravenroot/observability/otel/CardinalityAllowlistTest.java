@@ -2,6 +2,7 @@ package ai.ravenroot.observability.otel;
 
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
+import ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry;
 
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -213,24 +215,30 @@ class CardinalityAllowlistTest {
     }
 
     /**
-     * The structural guard: the allowlist holds exactly the three bounded dimensions and nothing
+     * The structural guard: the allowlist holds exactly the five bounded dimensions and nothing
      * else, and every identifier that must never be a label is still refused.
      *
      * <p>The exact size is asserted rather than only the membership, and the number is meant to be
      * edited deliberately. Each entry costs a multiplicative factor on every metric's series count, so
      * an addition is a capacity decision; a test that only checked membership would let one arrive
-     * unnoticed inside an unrelated change. The three are: the event type, a fixed enum; the node
+     * unnoticed inside an unrelated change. The five are: the event type, a fixed enum; the node
      * type, bounded by the installed catalog; and the retry classification, a four-member enum fixed
-     * in source. None of the three grows with traffic, which is the property this list encodes.</p>
+     * in source; plus the agent-budget dimension and outcome enums. None grows with traffic, which
+     * is the property this list encodes.</p>
      */
     @Test
     void theAllowlistHoldsExactlyItsBoundedEntriesAndStillRefusesInstanceIdentifiers() {
-        assertEquals(3, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
-                "the allowlist should carry event_type, node_type and retry_classification and nothing "
+        assertEquals(5, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
+                "the allowlist should carry event_type, node_type, retry_classification, and the two "
+                        + "fixed agent-budget enums and nothing "
                         + "else: " + TelemetryBridge.METRIC_LABEL_ALLOWLIST);
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(TelemetryBridge.METRIC_ATTR_NODE_TYPE));
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
                 TelemetryBridge.METRIC_ATTR_RETRY_CLASSIFICATION));
+        assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
+                TelemetryBridge.METRIC_ATTR_AGENT_DIMENSION));
+        assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
+                TelemetryBridge.METRIC_ATTR_AGENT_OUTCOME));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(AttributeKey.stringKey("ravenroot.node_id")));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(AttributeKey.stringKey("ravenroot.tenant_id")));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
@@ -238,6 +246,36 @@ class CardinalityAllowlistTest {
                 "the attempt identity is unbounded by construction -- one per attempt -- and the "
                         + "ordinal that DOES distinguish a retry is carried on the event, never as a "
                         + "metric label");
+    }
+
+    @Test
+    void agentBudgetAggregatesUseOnlyFixedEnumLabelsAcrossManyInvocationIdentities() {
+        for (int i = 0; i < DISTINCT_VALUES; i++) {
+            bridge.record(AgentBudgetTelemetry.Dimension.INPUT_TOKENS,
+                    AgentBudgetTelemetry.Outcome.USED, 1);
+            bridge.record(AgentBudgetTelemetry.Dimension.TEAM_ACTIVE,
+                    i % 2 == 0 ? AgentBudgetTelemetry.Outcome.RESERVED
+                            : AgentBudgetTelemetry.Outcome.RELEASED, 1);
+        }
+
+        MetricData metric = onlyMetric("ravenroot.agent_budget.total");
+        assertEquals(3, metric.getLongSumData().getPoints().size(),
+                "only the three driven dimension/outcome enum pairs may create series");
+        assertTrue(metric.getLongSumData().getPoints().stream().allMatch(point -> {
+            var keys = point.getAttributes().asMap().keySet();
+            return keys.size() == 2
+                    && keys.contains(TelemetryBridge.METRIC_ATTR_AGENT_DIMENSION)
+                    && keys.contains(TelemetryBridge.METRIC_ATTR_AGENT_OUTCOME);
+        }));
+        assertEquals(DISTINCT_VALUES * 2L, metric.getLongSumData().getPoints().stream()
+                .mapToLong(point -> point.getValue()).sum());
+        assertEquals(DISTINCT_VALUES / 2L, metric.getLongSumData().getPoints().stream()
+                .filter(point -> "TEAM_ACTIVE".equals(point.getAttributes().get(
+                        TelemetryBridge.METRIC_ATTR_AGENT_DIMENSION)))
+                .filter(point -> "RELEASED".equals(point.getAttributes().get(
+                        TelemetryBridge.METRIC_ATTR_AGENT_OUTCOME)))
+                .mapToLong(point -> point.getValue()).sum(),
+                "durable active-slot releases must remain visible as one bounded aggregate series");
     }
 
     /**

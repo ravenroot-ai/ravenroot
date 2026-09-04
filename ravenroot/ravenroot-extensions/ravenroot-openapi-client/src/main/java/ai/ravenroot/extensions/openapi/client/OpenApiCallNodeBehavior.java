@@ -192,8 +192,10 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE -> OpenApiClientException.Code.REQUEST_TOO_LARGE;
                 case RESPONSE_TOO_LARGE -> OpenApiClientException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> OpenApiClientException.Code.DEADLINE_EXCEEDED;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> OpenApiClientException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> OpenApiClientException.Code.TRANSPORT_UNAVAILABLE;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED ->
+                        OpenApiClientException.Code.CAPACITY_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        OpenApiClientException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new OpenApiClientException(ambiguous ? OpenApiClientException.Code.AMBIGUOUS

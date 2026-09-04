@@ -15,5 +15,6 @@ An extension advertises behavior; it never self-grants egress, credentials, tool
 
 ## Linked contracts
 
+- [First-party extension dependency pack](extension-pack.md)
 - [Primary interface](../architecture/ai-extension-boundaries.md)
 - [Operational or security model](../troubleshooting/ai-extensions.md)

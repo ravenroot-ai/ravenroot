@@ -10,6 +10,7 @@ import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 import jakarta.mail.Flags;
 import jakarta.mail.Folder;
@@ -94,6 +95,7 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
     private final CredentialResolver credentials;
     private final UnaryOperator<Properties> sessionProperties;
     private final Executor executor;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public MailImapMutationNodeBehavior(Kind kind) {
         this(kind, new EnvironmentImapProfileResolver(), new EnvironmentImapMutationPolicyResolver(),
@@ -118,12 +120,21 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
                                  CredentialResolver credentials,
                                  UnaryOperator<Properties> sessionProperties,
                                  Executor executor) {
+        this(kind, profiles, policies, credentials, sessionProperties, executor,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+    MailImapMutationNodeBehavior(Kind kind, ImapProfileResolver profiles,
+                                 ImapMutationPolicyResolver policies,
+                                 CredentialResolver credentials,
+                                 UnaryOperator<Properties> sessionProperties,
+                                 Executor executor, ReservedNetworkPolicy destinationPolicy) {
         this.kind = Objects.requireNonNull(kind);
         this.profiles = Objects.requireNonNull(profiles);
         this.policies = Objects.requireNonNull(policies);
         this.credentials = Objects.requireNonNull(credentials);
         this.sessionProperties = Objects.requireNonNull(sessionProperties);
         this.executor = Objects.requireNonNull(executor);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public NodeTypeDescriptor descriptor() {
@@ -226,6 +237,8 @@ public final class MailImapMutationNodeBehavior implements NodeBehavior {
         ImapProfile profile = resolved.orElseThrow(MailImapMutationNodeBehavior::profileUnavailable);
         if (!tenant.equals(profile.tenant()) || !profileId.equals(profile.id()))
             throw profileUnavailable();
+        try { destinationPolicy.requireAllowedLiteral(profile.host()); }
+        catch (SecurityException refused) { throw profileUnavailable(); }
         return profile;
     }
 

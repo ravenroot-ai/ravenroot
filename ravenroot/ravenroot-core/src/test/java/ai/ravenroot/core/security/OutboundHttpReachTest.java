@@ -123,6 +123,8 @@ class OutboundHttpReachTest {
         assertThrows(SecurityException.class,
                 () -> allowing("[::ffff:169.254.169.254]")
                         .requireAllowed(URI.create("http://[::ffff:169.254.169.254]/")));
+        assertThrows(SecurityException.class,
+                () -> allowing("[::0.0.0.2]").requireAllowed(URI.create("http://[::0.0.0.2]/")));
     }
 
     @Test

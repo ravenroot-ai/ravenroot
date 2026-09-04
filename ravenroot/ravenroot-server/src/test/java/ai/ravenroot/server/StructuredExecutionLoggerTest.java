@@ -9,8 +9,11 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class StructuredExecutionLoggerTest {
@@ -79,6 +82,60 @@ class StructuredExecutionLoggerTest {
                 "a node that reported nothing must read as nothing, not as one attempt: " + silent);
         assertTrue(silent.contains("\"publicReason\":null"),
                 "an absent classifier stays absent rather than becoming an empty string: " + silent);
+    }
+
+    /**
+     * The exact set of keys the audit line carries and the SSE frame does not.
+     *
+     * <p>This class's own Javadoc used to say the two projections "differ in exactly one respect".
+     * It had silently become three, and nothing caught it because nothing compared them. The set is
+     * asserted rather than described so the next addition to either serialiser has to come here and
+     * say which side it belongs on — which is the review this divergence deserves, since one side is
+     * an operator's audit log and the other is a browser's event stream with its own disclosure
+     * rules (SEC-07).</p>
+     *
+     * <p>Asserted in both directions. The reverse set is empty today: everything the SSE frame
+     * carries, the audit line carries too, apart from the two <em>rendered</em> keys it composes for
+     * a browser — {@code description} and the {@code message}/{@code output} projections — which are
+     * presentation rather than data.</p>
+     */
+    @Test
+    @DisplayName("the audit line and the SSE frame diverge by exactly the keys this class documents")
+    void theDivergenceFromTheSseProjectionIsExactlyTheDocumentedSet() {
+        ExecutionEvent event = attemptEvent(7, UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(),
+                ExecutionEventType.NODE_RETRY_SCHEDULED, "retryable-no-effect", 2, 3);
+
+        Set<String> auditOnly = new TreeSet<>(topLevelKeys(StructuredExecutionLogger.toJson(event)));
+        Set<String> sseKeys = topLevelKeys(RavenrootServer.executionEventJson(event));
+        auditOnly.removeAll(sseKeys);
+
+        assertEquals(Set.of("tenantId", "requestId", "attemptOrdinal", "connectorAttempts", "event",
+                        "joinWaitDuration", "nodeCatalogKey", "deploymentId", "workloadId", "detail"),
+                auditOnly,
+                "the audit projection gained or lost a key without this class's Javadoc being "
+                        + "updated to say which side it belongs on");
+
+        Set<String> sseOnly = new TreeSet<>(sseKeys);
+        sseOnly.removeAll(topLevelKeys(StructuredExecutionLogger.toJson(event)));
+        assertEquals(Set.of("description", "message", "messageRedacted", "messageTruncated"), sseOnly,
+                "the SSE frame carries only rendered presentation the audit line has no reader for");
+    }
+
+    /**
+     * Top-level keys of a flat JSON object, by name.
+     *
+     * <p>Both serialisers emit one flat object of scalars, and the fixture above uses values with no
+     * quotes or colons in them, so a name-shaped match is exact here rather than approximate. A
+     * general JSON parser would be the right tool against arbitrary input and is not needed against
+     * two known producers and one known event.</p>
+     */
+    private static Set<String> topLevelKeys(String json) {
+        var keys = new TreeSet<String>();
+        var matcher = java.util.regex.Pattern.compile("\"([a-zA-Z]+)\":").matcher(json);
+        while (matcher.find()) {
+            keys.add(matcher.group(1));
+        }
+        return keys;
     }
 
     private static ExecutionEvent attemptEvent(long sequence, UUID processInstanceId, UUID traversalId,

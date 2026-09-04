@@ -10,13 +10,28 @@ import java.util.function.Consumer;
  * Emits execution events to the server's own log as one JSON object per line.
  *
  * <p>This is the <strong>server-side audit</strong> projection and is deliberately <em>not</em> the
- * SSE projection, which {@code RavenrootServer} serialises separately. The two differ in exactly one
- * respect: this one carries {@code tenantId} and {@code requestId}, so an operator can join an
- * execution to the authorization decision that permitted it, and the SSE frame carries neither, so a
- * browser client is not told about tenant naming (SEC-07).</p>
+ * SSE projection, which {@code RavenrootServer} serialises separately. They have different audiences
+ * and different disclosure rules, which is why the two serialisers are not merged.</p>
  *
- * <p>That divergence is the reason the two serialisers are not merged: they have different audiences
- * and different disclosure rules.</p>
+ * <h2>Everything this line carries that the SSE frame does not</h2>
+ * <p>Kept as a list rather than a sentence, because it used to say "exactly one respect" and had
+ * silently become three. Each entry is a deliberate divergence with its own reason, and
+ * {@code StructuredExecutionLoggerTest} asserts the set so the next addition cannot slip in
+ * unrecorded:</p>
+ * <ul>
+ *   <li>{@code tenantId} and {@code requestId} — so an operator can join an execution to the
+ *       authorization decision that permitted it. The SSE frame carries neither, so a browser client
+ *       is not told about tenant naming (SEC-07).</li>
+ *   <li>{@code attemptOrdinal} — without it a retry's {@code NODE_STARTED} is byte-identical to an
+ *       initial attempt's on the line an operator greps, so three starts could not be told from one
+ *       visit retried twice. It is durable state the aggregate already holds, so the HTTP projection
+ *       leaves it out rather than shipping a copy a durable replay could not reproduce; a log line is
+ *       written once, at the moment it was true, and has no replay to disagree with.</li>
+ *   <li>{@code connectorAttempts} — the same argument, for retries a connector performed inside one
+ *       orchestration attempt.</li>
+ * </ul>
+ *
+ * <p>{@code publicReason} is carried by both and is not a divergence.</p>
  */
 public final class StructuredExecutionLogger implements Consumer<ExecutionEvent> {
     private final PrintStream output;

@@ -2693,19 +2693,26 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     throw failure(ExecutionStoreFailure.invalid(
                             "human-task cursor does not belong to this tenant"));
                 }
+                List<HumanTaskStatus> admitted = java.util.Arrays.stream(HumanTaskStatus.values())
+                        .filter(query::admits).toList();
+                if (admitted.isEmpty()) return new HumanTaskPage(List.of(), Optional.empty());
                 var matching = new ArrayList<DurableHumanTask>();
                 String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ?"
                         + (query.cursor().isPresent() ? " AND t.task_id > ?" : "")
-                        + " ORDER BY t.task_id";
+                        + " AND t.status IN (" + admitted.stream().map(ignored -> "?")
+                                .collect(java.util.stream.Collectors.joining(",")) + ")"
+                        + " ORDER BY t.task_id LIMIT ?";
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
-                    statement.setString(1, tenantId);
+                    int parameter = 1;
+                    statement.setString(parameter++, tenantId);
                     if (query.cursor().isPresent()) {
-                        statement.setString(2, query.cursor().orElseThrow().toString());
+                        statement.setString(parameter++, query.cursor().orElseThrow().toString());
                     }
+                    for (HumanTaskStatus status : admitted) statement.setString(parameter++, status.name());
+                    statement.setInt(parameter, query.limit() + 1);
                     try (ResultSet rows = statement.executeQuery()) {
                         while (rows.next()) {
-                            DurableHumanTask task = readHumanTask(rows);
-                            if (query.admits(task.status())) matching.add(task);
+                            matching.add(readHumanTask(rows));
                         }
                     }
                 }

@@ -2425,19 +2425,26 @@ public final class RavenrootServer implements AutoCloseable {
             int limit;
             boolean includeTerminal;
             java.util.Optional<java.util.UUID> cursor;
+            java.util.Set<ai.ravenroot.api.persistence.HumanTaskStatus> statuses;
             try {
                 limit = Integer.parseInt(parameters.getOrDefault("limit", "50"));
                 includeTerminal = Boolean.parseBoolean(parameters.getOrDefault("includeTerminal", "false"));
                 cursor = parameters.containsKey("cursor")
                         ? java.util.Optional.of(java.util.UUID.fromString(parameters.get("cursor")))
                         : java.util.Optional.empty();
+                statuses = parameters.containsKey("status")
+                        ? java.util.Arrays.stream(parameters.get("status").split(",", -1))
+                                .map(value -> ai.ravenroot.api.persistence.HumanTaskStatus.valueOf(
+                                        value.toUpperCase(java.util.Locale.ROOT)))
+                                .collect(java.util.stream.Collectors.toUnmodifiableSet())
+                        : java.util.Set.of();
             } catch (IllegalArgumentException invalid) {
                 fail(exchange, ErrorCode.INVALID_REQUEST);
                 return;
             }
             try {
                 var page = service.inbox(context, new ai.ravenroot.api.persistence.HumanTaskQuery(
-                        java.util.Set.of(), includeTerminal, cursor, limit));
+                        statuses, includeTerminal, cursor, limit));
                 json(exchange, 200, humanTaskPageJson(page));
             } catch (IllegalArgumentException invalid) {
                 fail(exchange, ErrorCode.INVALID_REQUEST);

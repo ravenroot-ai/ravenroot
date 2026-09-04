@@ -5,7 +5,15 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.node.NodeAction;
+import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodeConfiguration;
+import ai.ravenroot.api.node.NodePackage;
+import ai.ravenroot.api.node.NodeSdk;
+import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.CanonicalGraphMl;
@@ -17,6 +25,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionReferences;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.ExecutionTransition;
@@ -24,6 +33,10 @@ import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.ToolCallAuditSink;
+import ai.ravenroot.api.security.ToolDecision;
+import ai.ravenroot.core.approval.ToolApprovalService;
+import ai.ravenroot.core.approval.ToolApprovalSettings;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
@@ -31,6 +44,8 @@ import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
 import ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher;
 import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor;
+import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
+import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import ai.ravenroot.core.recovery.ExecutionRecoveryService;
 import ai.ravenroot.core.recovery.RecoveryOutcome;
 import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
@@ -45,6 +60,7 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
@@ -94,6 +110,77 @@ class HumanTaskRestartIntegrationTest {
                   <data key="edge-outcome">resolved</data>
                 </edge>
                 <edge id="capture-end" source="capture" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] CHAINED_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <key id="responseSchema" for="node" attr.name="responseSchema" attr.type="string"/>
+              <key id="responseSchemaVersion" for="node" attr.name="responseSchemaVersion" attr.type="string"/>
+              <key id="authorizedRoles" for="node" attr.name="authorizedRoles" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="human-chain" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="first">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">human-task</data>
+                  <data key="title">First decision</data>
+                  <data key="responseSchema">release.decision</data>
+                  <data key="responseSchemaVersion">1</data>
+                  <data key="authorizedRoles">APPROVER</data>
+                </node>
+                <node id="second">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">human-task</data>
+                  <data key="title">Second decision</data>
+                  <data key="responseSchema">release.decision</data>
+                  <data key="responseSchemaVersion">1</data>
+                  <data key="authorizedRoles">APPROVER</data>
+                </node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-first" source="start" target="first"/>
+                <edge id="first-second" source="first" target="second">
+                  <data key="edge-outcome">resolved</data>
+                </edge>
+                <edge id="second-end" source="second" target="end">
+                  <data key="edge-outcome">resolved</data>
+                </edge>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] HUMAN_TO_TOOL_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <key id="responseSchema" for="node" attr.name="responseSchema" attr.type="string"/>
+              <key id="responseSchemaVersion" for="node" attr.name="responseSchemaVersion" attr.type="string"/>
+              <key id="authorizedRoles" for="node" attr.name="authorizedRoles" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="human-to-tool" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="review">
+                  <data key="kind">BEHAVIOR</data><data key="behavior">human-task</data>
+                  <data key="title">Approve tool request</data>
+                  <data key="responseSchema">release.decision</data>
+                  <data key="responseSchemaVersion">1</data>
+                  <data key="authorizedRoles">APPROVER</data>
+                </node>
+                <node id="tool"><data key="kind">BEHAVIOR</data>
+                  <data key="behavior">approval-request</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-review" source="start" target="review"/>
+                <edge id="review-tool" source="review" target="tool">
+                  <data key="edge-outcome">resolved</data>
+                </edge>
+                <edge id="tool-end" source="tool" target="end"/>
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
@@ -191,6 +278,139 @@ class HumanTaskRestartIntegrationTest {
         }
     }
 
+    @Test
+    void chainedHumanTaskAcknowledgesFirstTriggerAndDoesNotReplayAfterLeaseExpiry(
+            @TempDir Path directory) throws Exception {
+        var clock = new MutableClock(NOW);
+        Path database = directory.resolve("human-task-chain.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+
+        try (var store = new SqliteExecutionStore(database, clock);
+             var definitions = new SqliteGraphDefinitionStore(database, clock,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(CHAINED_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            String pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, clock);
+            BehaviorRegistry behaviors = standard(tasks);
+
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(CHAINED_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(),
+                         ExecutionIdentitySource.randomUuids(), GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "live-worker", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder)) {
+                assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                null, pin, null, null, recorder).toCompletableFuture()
+                                .get(10, TimeUnit.SECONDS));
+            }
+
+            DurableHumanTask first = taskAt(tasks, "first");
+            tasks.resolve(approver(), first.request().taskId(), first.generation(), response());
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "recovery-worker", TTL);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-worker",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> firstSweep = recovery.sweepOnce();
+            assertTrue(firstSweep.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    firstSweep::toString);
+            assertEquals(2, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size());
+            assertEquals(HumanTaskStatus.WAITING, taskAt(tasks, "second").status());
+            assertEquals(ProcessInstanceStatus.WAITING,
+                    store.load(key).toCompletableFuture().join().state().status());
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty(),
+                    "the first trigger acknowledgement must release its continuation lease");
+
+            clock.now = NOW.plus(TTL).plusSeconds(1);
+            assertTrue(recovery.sweepOnce().isEmpty(),
+                    "the acknowledged first trigger must not replay after its former lease expires");
+            assertEquals(2, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size(),
+                    "replaying the first continuation would register a third task");
+
+            DurableHumanTask second = taskAt(tasks, "second");
+            tasks.resolve(approver(), second.request().taskId(), second.generation(), response());
+            assertTrue(recovery.sweepOnce().stream()
+                    .anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance));
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+        }
+    }
+
+    @Test
+    void humanTaskContinuationCanHandOffToToolApprovalAndAcknowledgeItsTrigger(
+            @TempDir Path directory) throws Exception {
+        Path database = directory.resolve("human-to-tool.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(HUMAN_TO_TOOL_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            String pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            var approvals = new ToolApprovalService(store, CLOCK);
+            var services = ManagedNodePackageServices.builder("test.human-to-tool",
+                            NodePackageEgressPolicy.builder().build(),
+                            (packageId, tenantId, reference) -> java.util.Optional.empty())
+                    .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                    .toolAuthorization(ignored -> new ToolDecision(
+                                    ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "approval required", "policy-v1"),
+                            ToolCallAuditSink.discarding())
+                    .durableToolApprovals(approvals, new ToolApprovalSettings("policy-v1",
+                            Duration.ofMinutes(5), HandlerAuthorization.ofRoles(Role.APPROVER.name()), false))
+                    .build();
+            BehaviorRegistry behaviors = NodePackages.register(standard(tasks), new HumanToToolPackage(),
+                    NodePackageServiceRegistry.builder().grant("test.human-to-tool", services).build());
+
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(HUMAN_TO_TOOL_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "live-worker", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder)) {
+                assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                null, pin, null, null, recorder).toCompletableFuture()
+                                .get(10, TimeUnit.SECONDS));
+            }
+
+            DurableHumanTask task = onlyTask(tasks);
+            tasks.resolve(approver(), task.request().taskId(), task.generation(), response());
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    approvals, engine, behaviors, new ExecutionMonitor(),
+                    ExecutionIdentitySource.randomUuids(), "recovery-worker", TTL);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-worker",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    outcomes::toString);
+            assertEquals(1, store.toolApprovals(key).toCompletableFuture().join().size());
+            assertEquals(ai.ravenroot.api.persistence.ToolApprovalStatus.PENDING,
+                    store.toolApprovals(key).toCompletableFuture().join().getFirst().status());
+            assertTrue(store.claimPendingWork(TENANT, "probe", 10, TTL)
+                    .toCompletableFuture().join().isEmpty(),
+                    "the acknowledged human-task trigger must not replay while the tool approval waits");
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+        }
+    }
+
     private static BehaviorRegistry standard(HumanTaskService tasks) {
         return BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults(),
                 ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
@@ -220,6 +440,12 @@ class HumanTaskRestartIntegrationTest {
         return tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().getFirst();
     }
 
+    private static DurableHumanTask taskAt(HumanTaskService tasks, String nodeId) {
+        return tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().stream()
+                .filter(task -> task.request().nodeId().equals(nodeId))
+                .findFirst().orElseThrow();
+    }
+
     private static OpaquePayload response() {
         return OpaquePayload.of(PayloadEnvelope.of("release.decision", "1",
                         PayloadValue.map(Map.of("decision", PayloadValue.of("approved"))))
@@ -239,5 +465,44 @@ class HumanTaskRestartIntegrationTest {
     private static RequestContext approver() {
         return new RequestContext("approver-call", "approver", PrincipalType.USER, "issuer", TENANT,
                 Set.of(Role.APPROVER), Set.of());
+    }
+
+    private static final class HumanToToolPackage implements NodePackage {
+        @Override public String id() { return "test.human-to-tool"; }
+        @Override public String version() { return "1"; }
+        @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+        @Override public List<NodeBehavior> behaviors() { return List.of(new HumanToToolBehavior()); }
+    }
+
+    private static final class HumanToToolBehavior implements NodeBehavior {
+        @Override public Set<NodePackageCapability> requiredServices() {
+            return Set.of(NodePackageCapability.TOOL_AUTHORIZATION);
+        }
+        @Override public NodeTypeDescriptor descriptor() {
+            return new NodeTypeDescriptor("approval-request", "Approval request", "Test", "",
+                    "actor", false, List.of(), Set.of());
+        }
+        @Override public NodeAction create(NodeConfiguration configuration) {
+            return message -> java.util.concurrent.CompletableFuture.completedFuture(
+                    NodeResult.continueWith(message.payload()));
+        }
+        @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services) {
+            return message -> java.util.concurrent.CompletableFuture.failedFuture(
+                    services.toolAuthorization().authorize(message, "filesystem.read",
+                                    "{}".getBytes(StandardCharsets.UTF_8))
+                            .suspend(1, "checkpoint".getBytes(StandardCharsets.UTF_8)));
+        }
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
     }
 }

@@ -1405,29 +1405,27 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         + maxHumanTaskPageSize()));
             }
             synchronized (monitor) {
-                List<DurableHumanTask> all = instances.values().stream()
+                List<DurableHumanTask> tenantTasks = instances.values().stream()
                         .filter(entry -> tenantId.equals(entry.tenantId))
                         .flatMap(entry -> entry.humanTasks.values().stream())
-                        .sorted(Comparator.comparing(task -> task.request().taskId().toString()))
                         .toList();
-                int start = 0;
+                UUID cursor = null;
                 if (query.cursor().isPresent()) {
-                    UUID cursor = query.cursor().orElseThrow();
-                    int found = -1;
-                    for (int index = 0; index < all.size(); index++) {
-                        if (all.get(index).request().taskId().equals(cursor)) {
-                            found = index;
-                            break;
-                        }
-                    }
-                    if (found < 0) {
+                    cursor = query.cursor().orElseThrow();
+                    UUID requiredCursor = cursor;
+                    if (tenantTasks.stream().noneMatch(
+                            task -> task.request().taskId().equals(requiredCursor))) {
                         throw failure(ExecutionStoreFailure.invalid(
                                 "human-task cursor does not belong to this tenant"));
                     }
-                    start = found + 1;
                 }
-                List<DurableHumanTask> matching = all.subList(start, all.size()).stream()
-                        .filter(task -> query.admits(task.status())).toList();
+                String cursorText = cursor == null ? null : cursor.toString();
+                List<DurableHumanTask> matching = tenantTasks.stream()
+                        .filter(task -> cursorText == null
+                                || task.request().taskId().toString().compareTo(cursorText) > 0)
+                        .filter(task -> query.admits(task.status()))
+                        .sorted(Comparator.comparing(task -> task.request().taskId().toString()))
+                        .limit(query.limit() + 1L).toList();
                 int end = Math.min(query.limit(), matching.size());
                 List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
                 Optional<UUID> next = matching.size() > end

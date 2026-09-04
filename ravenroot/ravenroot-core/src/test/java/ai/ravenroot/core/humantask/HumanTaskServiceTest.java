@@ -14,6 +14,7 @@ import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
@@ -33,9 +34,12 @@ import ai.ravenroot.core.recovery.ExecutionRecoveryService;
 import ai.ravenroot.core.recovery.RecoveryOutcome;
 import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -49,15 +53,19 @@ import java.util.UUID;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class HumanTaskServiceTest {
     private static final String TENANT = "acme";
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
     private static final String CONTENT_TYPE = "application/vnd.ravenroot.payload+json";
 
+    @TempDir
+    Path directory;
+
     @Test
     void suspensionAndResolutionAreAtomicGenerationFencedAndPayloadSafe() throws Exception {
-        try (var store = new InMemoryExecutionStore(Clock.fixed(NOW, ZoneOffset.UTC))) {
+        try (var store = sqlite("resolution", Clock.fixed(NOW, ZoneOffset.UTC))) {
             Fixture fixture = running(store);
             var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
             ExecutionRecorder recorder = ExecutionRecorder.open(store, fixture.key, "worker",
@@ -102,7 +110,7 @@ class HumanTaskServiceTest {
 
     @Test
     void responseContractAndRequesterCancellationAreEnforced() throws Exception {
-        try (var store = new InMemoryExecutionStore(Clock.fixed(NOW, ZoneOffset.UTC))) {
+        try (var store = sqlite("contract", Clock.fixed(NOW, ZoneOffset.UTC))) {
             Fixture fixture = running(store);
             var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
             ExecutionRecorder recorder = ExecutionRecorder.open(store, fixture.key, "worker",
@@ -125,7 +133,7 @@ class HumanTaskServiceTest {
     @Test
     void recoveryAppliesEscalationAndExpiryUnderTheClaimFence() throws Exception {
         var clock = new MutableClock(NOW);
-        try (var store = new InMemoryExecutionStore(clock)) {
+        try (var store = sqlite("recovery", clock)) {
             Fixture fixture = running(store);
             var service = new HumanTaskService(store, clock);
             ExecutionRecorder recorder = ExecutionRecorder.open(store, fixture.key, "worker",
@@ -159,7 +167,7 @@ class HumanTaskServiceTest {
     @Test
     void aLateSweepExpiresInsteadOfBeingStrandedOnTheEarlierEscalationTimer() throws Exception {
         var clock = new MutableClock(NOW);
-        try (var store = new InMemoryExecutionStore(clock)) {
+        try (var store = sqlite("late-sweep", clock)) {
             Fixture fixture = running(store);
             var service = new HumanTaskService(store, clock);
             UUID taskId;
@@ -185,7 +193,7 @@ class HumanTaskServiceTest {
     @Test
     void aDecisionArrivingAfterTheDeadlineAtomicallyWinsAsExpiry() throws Exception {
         var clock = new MutableClock(NOW);
-        try (var store = new InMemoryExecutionStore(clock)) {
+        try (var store = sqlite("late-decision", clock)) {
             Fixture fixture = running(store);
             var service = new HumanTaskService(store, clock);
             HumanTaskResult task;
@@ -203,6 +211,47 @@ class HumanTaskServiceTest {
         }
     }
 
+    @Test
+    void durableCapabilityIsRequiredForTheRestartSafeContract() {
+        try (var store = new InMemoryExecutionStore(Clock.fixed(NOW, ZoneOffset.UTC))) {
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC)));
+            assertTrue(failure.getMessage().contains("durable human tasks"));
+        }
+    }
+
+    @Test
+    void terminalResolveRetriesMustExactlyMatchActorPayloadAndMediaType() throws Exception {
+        try (var store = sqlite("exact-redelivery", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            HumanTaskResult suspended;
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                suspended = service.suspend(fixture.message(), definition());
+            }
+            UUID taskId = suspended.task().request().taskId();
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(responder(), taskId, 1, response()).code());
+            assertEquals(HumanTaskResult.Code.ALREADY_APPLIED,
+                    service.resolve(responder(), taskId, 1, response()).code());
+
+            assertEquals(HumanTaskResult.Code.ALREADY_SETTLED,
+                    service.resolve(responder("another-responder"), taskId, 1, response()).code());
+            OpaquePayload different = OpaquePayload.of(PayloadEnvelope.of("release.decision", "1",
+                    PayloadValue.map(Map.of("decision", PayloadValue.of("rejected")))).toJson()
+                    .getBytes(StandardCharsets.UTF_8), CONTENT_TYPE);
+            assertEquals(HumanTaskResult.Code.ALREADY_SETTLED,
+                    service.resolve(responder(), taskId, 1, different).code());
+            assertEquals(HumanTaskResult.Code.PAYLOAD_REFUSED,
+                    service.resolve(responder(), taskId, 1,
+                            OpaquePayload.of("not-json".getBytes(StandardCharsets.UTF_8), CONTENT_TYPE)).code());
+            assertEquals(HumanTaskResult.Code.PAYLOAD_REFUSED,
+                    service.resolve(responder(), taskId, 1,
+                            OpaquePayload.of(response().bytes(), "application/json")).code());
+        }
+    }
+
     private static HumanTaskDefinition definition() {
         return new HumanTaskDefinition(new HumanTaskMetadata("Review release", "Check the bounded facts."),
                 new HumanTaskResponseSchema(CONTENT_TYPE, "release.decision", "1",
@@ -217,7 +266,11 @@ class HumanTaskServiceTest {
         return OpaquePayload.of(json.getBytes(StandardCharsets.UTF_8), CONTENT_TYPE);
     }
 
-    private static Fixture running(InMemoryExecutionStore store) {
+    private SqliteExecutionStore sqlite(String name, Clock clock) {
+        return new SqliteExecutionStore(directory.resolve(name + ".db"), clock);
+    }
+
+    private static Fixture running(ExecutionStore store) {
         ExecutionKey key = new ExecutionKey(TENANT, UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         UUID invocationId = UUID.randomUUID();
@@ -243,7 +296,11 @@ class HumanTaskServiceTest {
     }
 
     private static RequestContext responder() {
-        return new RequestContext("responder-call", "responder", PrincipalType.USER, "issuer", TENANT,
+        return responder("responder");
+    }
+
+    private static RequestContext responder(String subject) {
+        return new RequestContext("responder-call", subject, PrincipalType.USER, "issuer", TENANT,
                 Set.of(Role.APPROVER), Set.of());
     }
 

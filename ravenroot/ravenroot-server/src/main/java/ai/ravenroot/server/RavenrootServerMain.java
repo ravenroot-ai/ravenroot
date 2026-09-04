@@ -164,6 +164,7 @@ public final class RavenrootServerMain {
                 ? new ai.ravenroot.core.approval.ToolApprovalService(
                         approvalStore, java.time.Clock.systemUTC()) : null;
         ai.ravenroot.core.humantask.HumanTaskService humanTasks = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.HUMAN_TASKS)
                 ? new ai.ravenroot.core.humantask.HumanTaskService(
                         approvalStore, java.time.Clock.systemUTC()) : null;
@@ -238,7 +239,7 @@ public final class RavenrootServerMain {
             if (toolApprovals != null) {
                 toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
                 var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
-                        executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals,
+                        executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl());
                 dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
@@ -247,7 +248,7 @@ public final class RavenrootServerMain {
             if (humanTasks != null) {
                 humanTasks.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
                 var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
-                        executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks,
+                        executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl());
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(

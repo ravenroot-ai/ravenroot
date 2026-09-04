@@ -2281,6 +2281,16 @@ public abstract class ExecutionStoreContract {
         HumanTaskPage outstanding = await(store().listHumanTasks(tenant,
                 HumanTaskQuery.outstanding(10)));
         assertEquals(2, outstanding.items().size());
+        HumanTaskPage boundedOutstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(1)));
+        assertEquals(1, boundedOutstanding.items().size());
+        assertTrue(boundedOutstanding.nextCursor().isPresent(),
+                "filtered-out terminal rows must not consume the bounded page lookahead");
+        HumanTaskPage nextOutstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(1).after(boundedOutstanding.nextCursor().orElseThrow())));
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                nextOutstanding.items().getFirst().request().taskId());
+        assertTrue(nextOutstanding.nextCursor().isEmpty());
         HumanTaskPage first = await(store().listHumanTasks(tenant, HumanTaskQuery.everything(1)));
         assertEquals(1, first.items().size());
         assertTrue(first.nextCursor().isPresent());

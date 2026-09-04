@@ -55,7 +55,8 @@ public final class OpenApiSpecGenerator {
         json.append("  \"components\": {\n");
         json.append("    \"securitySchemes\": {\n");
         json.append("      \"bearerAuth\": {\"type\": \"http\", \"scheme\": \"bearer\"}\n");
-        json.append("    }\n");
+        json.append("    },\n");
+        json.append(humanTaskSchemas());
         json.append("  }\n");
         json.append("}\n");
         return json.toString();
@@ -80,14 +81,20 @@ public final class OpenApiSpecGenerator {
         if (route.authenticated()) {
             entry.append("        \"security\": [{\"bearerAuth\": []}],\n");
         }
-        String parameters = pathParameters(route.path());
+        String parameters = operationParameters(route, method);
         if (!parameters.isEmpty()) {
             entry.append(parameters);
+        }
+        if (isHumanTaskDecision(route, method)) {
+            entry.append("        \"requestBody\": {\"required\": false, \"description\": "
+                    + "\"Required when decision is resolve; ignored for deny and cancel.\", "
+                    + "\"content\": {\"application/vnd.ravenroot.payload+json\": {\"schema\": "
+                    + "{\"$ref\": \"#/components/schemas/PayloadEnvelope\"}}}},\n");
         }
         entry.append("        \"responses\": {\n");
         var responses = new java.util.ArrayList<String>();
         route.successStatuses().stream().sorted().forEach(status ->
-                responses.add("          \"" + status + "\": {\"description\": \"success\"}"));
+                responses.add(successResponse(route, method, status)));
         route.wireErrorCodes().forEach(code ->
                 responses.add("          \"" + statusOrDefault(code) + "\": {\"description\": \""
                         + JsonStrings.escape(code) + "\"}"));
@@ -108,19 +115,82 @@ public final class OpenApiSpecGenerator {
      * to the point, means a route added later cannot reintroduce the defect by forgetting to declare
      * something by hand — there is nothing to forget.</p>
      */
-    private static String pathParameters(String path) {
+    private static String operationParameters(RouteDescriptor route, String method) {
         var names = new java.util.LinkedHashSet<String>();
-        var matcher = java.util.regex.Pattern.compile("\\{([^/{}]+)}").matcher(path);
+        var matcher = java.util.regex.Pattern.compile("\\{([^/{}]+)}").matcher(route.path());
         while (matcher.find()) {
             names.add(matcher.group(1));
         }
-        if (names.isEmpty()) {
-            return "";
+        var parameters = new java.util.ArrayList<String>();
+        names.forEach(name -> parameters.add("          {\"name\": \""
+                + JsonStrings.escape(name) + "\", \"in\": \"path\", "
+                + "\"required\": true, \"schema\": {\"type\": \"string\"}}"));
+        if ("/v1/human-tasks".equals(route.path()) && "GET".equals(method)) {
+            parameters.add("          {\"name\": \"status\", \"in\": \"query\", \"required\": false, "
+                    + "\"description\": \"Comma-separated lifecycle statuses.\", \"schema\": "
+                    + "{\"type\": \"string\"}}");
+            parameters.add("          {\"name\": \"includeTerminal\", \"in\": \"query\", "
+                    + "\"required\": false, \"schema\": {\"type\": \"boolean\", \"default\": false}}");
+            parameters.add("          {\"name\": \"cursor\", \"in\": \"query\", \"required\": false, "
+                    + "\"schema\": {\"type\": \"string\", \"format\": \"uuid\"}}");
+            parameters.add("          {\"name\": \"limit\", \"in\": \"query\", \"required\": false, "
+                    + "\"schema\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 100, "
+                    + "\"default\": 50}}");
         }
-        return names.stream()
-                .map(name -> "          {\"name\": \"" + JsonStrings.escape(name) + "\", \"in\": \"path\", "
-                        + "\"required\": true, \"schema\": {\"type\": \"string\"}}")
+        if (isHumanTaskDecision(route, method)) {
+            parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
+                    + "\"schema\": {\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1}}");
+        }
+        return parameters.isEmpty() ? "" : parameters.stream()
                 .collect(Collectors.joining(",\n", "        \"parameters\": [\n", "\n        ],\n"));
+    }
+
+    private static boolean isHumanTaskDecision(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/{taskId}/{decision}".equals(route.path()) && "POST".equals(method);
+    }
+
+    private static String successResponse(RouteDescriptor route, String method, int status) {
+        String schema = null;
+        if ("/v1/human-tasks".equals(route.path()) && "GET".equals(method)) {
+            schema = "HumanTaskInboxPage";
+        } else if (isHumanTaskDecision(route, method)) {
+            schema = "HumanTaskDecisionResult";
+        }
+        return "          \"" + status + "\": {\"description\": \"success\""
+                + (schema == null ? "}" : ", \"content\": {\"application/json\": "
+                        + "{\"schema\": {\"$ref\": \"#/components/schemas/" + schema + "\"}}}}");
+    }
+
+    private static String humanTaskSchemas() {
+        return "    \"schemas\": {\n"
+                + "      \"PayloadEnvelope\": {\"type\": \"object\", \"required\": [\"schema\", "
+                + "\"schemaVersion\", \"kind\", \"value\"], \"properties\": {"
+                + "\"schema\": {\"type\": \"string\"}, \"schemaVersion\": {\"type\": \"string\"}, "
+                + "\"kind\": {\"type\": \"string\"}, \"value\": {}}},\n"
+                + "      \"HumanTaskInboxItem\": {\"type\": \"object\", \"required\": [\"taskId\", "
+                + "\"processInstanceId\", \"nodeId\", \"title\", \"description\", \"status\", "
+                + "\"generation\", \"responseSchema\", \"responseSchemaVersion\", \"responseKind\", "
+                + "\"maxResponseBytes\", \"expiresAt\"], \"properties\": {"
+                + "\"taskId\": {\"type\": \"string\", \"format\": \"uuid\"}, "
+                + "\"processInstanceId\": {\"type\": \"string\", \"format\": \"uuid\"}, "
+                + "\"nodeId\": {\"type\": \"string\"}, \"title\": {\"type\": \"string\"}, "
+                + "\"description\": {\"type\": \"string\"}, \"status\": {\"type\": \"string\"}, "
+                + "\"generation\": {\"type\": \"integer\", \"format\": \"int64\"}, "
+                + "\"responseSchema\": {\"type\": \"string\"}, \"responseSchemaVersion\": "
+                + "{\"type\": \"string\"}, \"responseKind\": {\"type\": \"string\"}, "
+                + "\"maxResponseBytes\": {\"type\": \"integer\"}, \"expiresAt\": "
+                + "{\"type\": \"string\", \"format\": \"date-time\"}, \"escalateAt\": "
+                + "{\"type\": \"string\", \"format\": \"date-time\"}}},\n"
+                + "      \"HumanTaskInboxPage\": {\"type\": \"object\", \"required\": [\"items\", "
+                + "\"nextCursor\"], \"properties\": {\"items\": {\"type\": \"array\", \"items\": "
+                + "{\"$ref\": \"#/components/schemas/HumanTaskInboxItem\"}}, \"nextCursor\": "
+                + "{\"type\": \"string\", \"format\": \"uuid\", \"nullable\": true}}},\n"
+                + "      \"HumanTaskDecisionResult\": {\"type\": \"object\", \"required\": [\"outcome\", "
+                + "\"taskId\", \"generation\"], \"properties\": {\"outcome\": {\"type\": \"string\"}, "
+                + "\"taskId\": {\"type\": \"string\", \"format\": \"uuid\"}, \"generation\": "
+                + "{\"type\": \"integer\", \"format\": \"int64\"}, \"resumeTraversalId\": "
+                + "{\"type\": \"string\", \"format\": \"uuid\"}}}\n"
+                + "    }\n";
     }
 
     /**

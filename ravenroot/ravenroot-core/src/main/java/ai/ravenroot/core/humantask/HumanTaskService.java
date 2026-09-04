@@ -65,11 +65,12 @@ public final class HumanTaskService {
     public HumanTaskService(ExecutionStore store, Clock clock) {
         this.store = Objects.requireNonNull(store, "store");
         this.clock = Objects.requireNonNull(clock, "clock");
-        if (!store.supports(StoreCapability.HUMAN_TASKS)
+        if (!store.supports(StoreCapability.DURABLE)
+                || !store.supports(StoreCapability.HUMAN_TASKS)
                 || !store.supports(StoreCapability.DURABLE_HANDLERS)
                 || !store.supports(StoreCapability.EVENT_JOURNAL)) {
             throw new IllegalArgumentException(
-                    "human-task requires human tasks, handlers, timers, and journal support");
+                    "human-task requires durable human tasks, handlers, timers, and journal support");
         }
     }
 
@@ -240,9 +241,17 @@ public final class HumanTaskService {
             auditOnly(task, "HUMAN_TASK_UNAUTHORIZED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
         }
-        if (task.status() == target && task.generation() == expectedGeneration + 1) {
-            return new HumanTaskResult(HumanTaskResult.Code.ALREADY_APPLIED, task,
-                    resumeTraversalOf(task));
+        boolean possibleRedelivery = task.status() == target
+                && task.generation() == expectedGeneration + 1;
+        if (possibleRedelivery && target == HumanTaskStatus.RESOLVED
+                && !validResponse(task, response)) {
+            auditOnly(task, "HUMAN_TASK_PAYLOAD_REFUSED", context.requestId());
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
+        }
+        if (possibleRedelivery) {
+            return new HumanTaskResult(exactRedelivery(task, target, expectedGeneration, actor, response)
+                    ? HumanTaskResult.Code.ALREADY_APPLIED : HumanTaskResult.Code.ALREADY_SETTLED,
+                    task, resumeTraversalOf(task));
         }
         if (task.status().terminal()) {
             return new HumanTaskResult(HumanTaskResult.Code.ALREADY_SETTLED, task,
@@ -324,7 +333,7 @@ public final class HumanTaskService {
                 return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
             }
             if (task.generation() != expectedGeneration) {
-                if (task.status() == target && task.generation() == expectedGeneration + 1) {
+                if (exactRedelivery(task, target, expectedGeneration, actor, response)) {
                     return new HumanTaskResult(HumanTaskResult.Code.ALREADY_APPLIED, task,
                             resumeTraversalOf(task));
                 }
@@ -422,6 +431,15 @@ public final class HumanTaskService {
                         || attempt == MAX_WRITE_ATTEMPTS) throw conflict;
             }
         }
+    }
+
+    private boolean exactRedelivery(DurableHumanTask task, HumanTaskStatus target,
+                                    long expectedGeneration, String actor, OpaquePayload response) {
+        if (task.status() != target || task.generation() != expectedGeneration + 1
+                || !task.actor().equals(actor)) return false;
+        if (target != HumanTaskStatus.RESOLVED) return true;
+        DurableHandler handler = await(store.loadHandler(task.key(), task.request().taskId())).orElse(null);
+        return handler != null && response != null && response.equals(handler.outcomePayload());
     }
 
     private EventEnvelope event(ExecutionKey key, StoredProcessInstance stored,

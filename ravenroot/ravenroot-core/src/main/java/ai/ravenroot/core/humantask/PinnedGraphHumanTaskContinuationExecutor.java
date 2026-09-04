@@ -16,6 +16,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.StoredGraphDefinition;
+import ai.ravenroot.core.approval.ToolApprovalService;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
@@ -23,6 +24,7 @@ import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.core.runtime.GraphRunner;
+import ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
 
 import java.io.ByteArrayInputStream;
 import java.time.Duration;
@@ -33,12 +35,15 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ForkJoinPool;
 
 /** Re-enters from a settled human task against the immutable graph bytes pinned at registration. */
 public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTaskContinuationExecutor {
+    private static final java.util.concurrent.Executor CLEANUP_EXECUTOR = ForkJoinPool.commonPool();
     private final GraphDefinitionStore definitions;
     private final ExecutionStore executions;
     private final HumanTaskService tasks;
+    private final ToolApprovalService approvals;
     private final ExecutionEngine engine;
     private final BehaviorRegistry behaviors;
     private final ExecutionMonitor monitor;
@@ -56,9 +61,30 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     ExecutionMonitor monitor,
                                                     ExecutionIdentitySource identities,
                                                     String workerId, Duration leaseTtl) {
+        this(definitions, executions, tasks, null, engine, behaviors, monitor, identities,
+                workerId, leaseTtl);
+    }
+
+    /**
+     * Creates a continuation executor that can hand off to either durable decision service.
+     *
+     * <p>The tool-approval service is additive so embedders using the earlier constructor retain
+     * source compatibility. Production supplies both services and therefore permits a resumed
+     * human task to suspend safely on either another human task or a tool approval.</p>
+     */
+    public PinnedGraphHumanTaskContinuationExecutor(GraphDefinitionStore definitions,
+                                                    ExecutionStore executions,
+                                                    HumanTaskService tasks,
+                                                    ToolApprovalService approvals,
+                                                    ExecutionEngine engine,
+                                                    BehaviorRegistry behaviors,
+                                                    ExecutionMonitor monitor,
+                                                    ExecutionIdentitySource identities,
+                                                    String workerId, Duration leaseTtl) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
+        this.approvals = approvals;
         this.engine = Objects.requireNonNull(engine, "engine");
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors");
         this.monitor = Objects.requireNonNull(monitor, "monitor");
@@ -98,8 +124,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                     GraphRunner.DEFAULT_SHUTDOWN_BOUND);
             AutoCloseable binding;
             try {
-                binding = tasks.bindLive(new ExecutionKey(task.key().tenantId(),
-                        task.key().processInstanceId()), recorder);
+                binding = bindLive(task.key(), recorder);
             } catch (RuntimeException failure) {
                 runner.close();
                 recorder.detachForAcknowledgement();
@@ -109,7 +134,15 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             CompletionStage<Void> result = runner.executeAfterHumanTask(task.request().requester(),
                     task.key().processInstanceId(), claim.traversalId(), task.request().nodeId(),
                     task.request().graphVersionPin().reference(), recorder, result(task, handler));
-            return result.whenComplete((ignored, failure) -> {
+            CompletionStage<Void> handoff = result.handle((ignored, failure) -> {
+                Throwable cause = unwrap(failure);
+                if (cause == null || cause instanceof DurableHumanTaskSuspension
+                        || cause instanceof DurableToolApprovalSuspension) return null;
+                throw new CompletionException(cause);
+            });
+            // Pekko may complete on the node's actor-dispatcher thread. Runner shutdown waits for
+            // that node, so cleanup must move off the completion thread to avoid waiting on itself.
+            return handoff.whenCompleteAsync((ignored, failure) -> {
                 try {
                     close(binding);
                 } finally {
@@ -125,7 +158,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                     }
                     manager.close();
                 }
-            });
+            }, CLEANUP_EXECUTOR);
         } catch (CompletionException wrapped) {
             return CompletableFuture.failedFuture(wrapped.getCause());
         } catch (RuntimeException failure) {
@@ -179,6 +212,38 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         } catch (Exception failure) {
             throw new IllegalStateException("failed to release human-task continuation binding", failure);
         }
+    }
+
+    private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
+        AutoCloseable taskBinding = tasks.bindLive(key, recorder);
+        if (approvals == null) return taskBinding;
+        try {
+            AutoCloseable approvalBinding = approvals.bindLive(key, recorder);
+            return () -> {
+                try {
+                    close(approvalBinding);
+                } finally {
+                    close(taskBinding);
+                }
+            };
+        } catch (RuntimeException failure) {
+            try {
+                close(taskBinding);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+    }
+
+    private static Throwable unwrap(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     private record Prepared(GraphManager manager, GraphVersionSnapshot snapshot) { }

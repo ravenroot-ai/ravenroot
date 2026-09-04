@@ -57,6 +57,15 @@ class RouteTableSpecServerAgreementTest {
         assertTrue(buildStatusSpec.contains("\"202\": {\"description\": \"success\"}"),
                 "removing the accepted/incomplete mapping must fail independently of regeneration: "
                         + buildStatusSpec);
+        String humanInbox = pathEntry(generatedNow, "/v1/human-tasks");
+        assertTrue(humanInbox.contains("\"name\": \"status\""), humanInbox);
+        assertTrue(humanInbox.contains("\"name\": \"includeTerminal\""), humanInbox);
+        assertTrue(humanInbox.contains("#/components/schemas/HumanTaskInboxPage"), humanInbox);
+        String humanDecision = pathEntry(generatedNow, "/v1/human-tasks/{taskId}/{decision}");
+        assertTrue(humanDecision.contains("\"name\": \"generation\""), humanDecision);
+        assertTrue(humanDecision.contains("\"required\": true"), humanDecision);
+        assertTrue(humanDecision.contains("#/components/schemas/PayloadEnvelope"), humanDecision);
+        assertTrue(humanDecision.contains("#/components/schemas/HumanTaskDecisionResult"), humanDecision);
         String onDisk = checkedInSpec();
         assertEquals(generatedNow, onDisk, () -> "the checked-in OpenAPI fixture is stale -- regenerate it with "
                 + "SpecGeneratorMain (see its own Javadoc) after changing RouteTable");

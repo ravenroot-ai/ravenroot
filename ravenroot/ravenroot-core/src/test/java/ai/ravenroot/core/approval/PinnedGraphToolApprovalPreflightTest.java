@@ -38,6 +38,8 @@ import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
@@ -50,10 +52,12 @@ import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.api.security.ToolCallAuditSink;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
+import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.recovery.ExecutionRecoveryService;
 import ai.ravenroot.core.recovery.RecoveryOutcome;
 import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.NodePackages;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
@@ -100,6 +104,28 @@ class PinnedGraphToolApprovalPreflightTest {
                 <node id="end"><data key="kind">END</data></node>
                 <edge id="e1" source="start" target="agent"/>
                 <edge id="e2" source="agent" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] TOOL_TO_HUMAN_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <graph id="tool-to-human" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="agent"><data key="kind">BEHAVIOR</data><data key="behavior">probe</data></node>
+                <node id="review">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">human-task</data>
+                  <data key="title">Review tool result</data>
+                </node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="e1" source="start" target="agent"/>
+                <edge id="e2" source="agent" target="review"/>
+                <edge id="e3" source="review" target="end"/>
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
@@ -207,6 +233,57 @@ class PinnedGraphToolApprovalPreflightTest {
                     "revision drift from an audit cannot turn a known successful effect into failure");
             assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
                     .toCompletableFuture().join().isEmpty());
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+        }
+    }
+
+    @Test
+    void toolApprovalContinuationCanHandOffToHumanTaskAndAcknowledgeItsTrigger(
+            @TempDir Path directory) throws Exception {
+        var clock = new MutableClock(NOW);
+        var definitions = new InMemoryGraphDefinitionStore(clock);
+        String pin = storeGraph(definitions, TOOL_TO_HUMAN_GRAPH);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        try (ExecutionStore store = new SqliteExecutionStore(directory.resolve("tool-to-human.db"), clock);
+             var engine = new InlineExecutionEngine()) {
+            createRunning(store, key, traversal, invocation, attempt, pin);
+            var approvals = new ToolApprovalService(store, clock);
+            var tasks = new HumanTaskService(store, clock);
+            approvals.request(key, request(approvalId, traversal, invocation, attempt, pin, 1), "create");
+            approvals.approve(approver(), key.processInstanceId(), approvalId);
+            BehaviorRegistry behaviors = NodePackages.register(
+                    BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults(),
+                            ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
+                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), tasks),
+                    new ProbePackage());
+            var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
+                    tasks, engine, behaviors, new ExecutionMonitor(),
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                    "worker", Duration.ofSeconds(30));
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, approvals,
+                            ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "unchanged", "policy-v1"), executor));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    outcomes::toString);
+            assertEquals(ToolApprovalStatus.SUCCEEDED,
+                    store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                            .orElseThrow().status());
+            var humanTasks = tasks.inbox(approver(), HumanTaskQuery.everything(10)).items();
+            assertEquals(1, humanTasks.size());
+            assertEquals("review", humanTasks.getFirst().request().nodeId());
+            assertEquals(HumanTaskStatus.WAITING, humanTasks.getFirst().status());
+            assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
+                    .toCompletableFuture().join().isEmpty(),
+                    "the old approval trigger must be acknowledged while the new task waits");
             assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
         }
     }
@@ -385,7 +462,11 @@ class PinnedGraphToolApprovalPreflightTest {
     }
 
     private static String storeGraph(InMemoryGraphDefinitionStore definitions) {
-        CanonicalGraphMl canonical = CanonicalGraphMl.of(GRAPH);
+        return storeGraph(definitions, GRAPH);
+    }
+
+    private static String storeGraph(InMemoryGraphDefinitionStore definitions, byte[] graph) {
+        CanonicalGraphMl canonical = CanonicalGraphMl.of(graph);
         return definitions.put(TENANT, GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
                 .toCompletableFuture().join().key().contentId().value();
     }

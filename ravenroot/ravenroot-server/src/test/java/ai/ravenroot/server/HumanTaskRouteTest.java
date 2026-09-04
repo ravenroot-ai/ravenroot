@@ -14,6 +14,7 @@ import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
@@ -29,15 +30,16 @@ import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.humantask.HumanTaskDefinition;
 import ai.ravenroot.core.humantask.HumanTaskResult;
 import ai.ravenroot.core.humantask.HumanTaskService;
-import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import ai.ravenroot.server.security.RequestAuthenticator;
 import com.sun.net.httpserver.Headers;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
@@ -46,6 +48,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -65,10 +68,13 @@ class HumanTaskRouteTest {
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
     private static final String CONTENT_TYPE = "application/vnd.ravenroot.payload+json";
 
+    @TempDir
+    Path directory;
+
     @Test
     void tenantInboxAndGenerationFencedResolutionExposeNoResponseContent() throws Exception {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
-        try (var store = new InMemoryExecutionStore(clock);
+        try (var store = new SqliteExecutionStore(directory.resolve("human-task-route.db"), clock);
              var engine = new PekkoExecutionEngine("human-task-route-test")) {
             Fixture fixture = request(store, clock);
             var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
@@ -88,6 +94,9 @@ class HumanTaskRouteTest {
                 assertTrue(inbox.body().contains(fixture.taskId().toString()), inbox.body());
                 assertTrue(inbox.body().contains("Approve release"), inbox.body());
                 assertFalse(inbox.body().contains("not copied"), inbox.body());
+                assertTrue(get(server, "tenant-a", "?status=RESOLVED&includeTerminal=true")
+                        .body().contains("\"items\":[]"));
+                assertEquals(400, get(server, "tenant-a", "?status=not-a-status").statusCode());
 
                 assertEquals(400, post(server, fixture, "tenant-a", null, CONTENT_TYPE).statusCode(),
                         "the generation fence is mandatory");
@@ -103,6 +112,8 @@ class HumanTaskRouteTest {
                 assertFalse(resolved.body().contains("approved"), resolved.body());
                 assertFalse(resolved.body().contains("response"), resolved.body());
                 assertEquals(1, sweeps.get());
+                assertTrue(get(server, "tenant-a", "?status=resolved&includeTerminal=true")
+                        .body().contains(fixture.taskId().toString()));
 
                 HttpResponse<String> retry = post(server, fixture, "tenant-a", "1", CONTENT_TYPE);
                 assertEquals(200, retry.statusCode(), retry.body());
@@ -112,7 +123,7 @@ class HumanTaskRouteTest {
         }
     }
 
-    private static Fixture request(InMemoryExecutionStore store, Clock clock) {
+    private static Fixture request(ExecutionStore store, Clock clock) {
         var key = new ExecutionKey("tenant-a", UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         UUID invocationId = UUID.randomUUID();
@@ -147,8 +158,13 @@ class HumanTaskRouteTest {
     }
 
     private static HttpResponse<String> get(RavenrootServer server, String tenant) throws Exception {
+        return get(server, tenant, "");
+    }
+
+    private static HttpResponse<String> get(RavenrootServer server, String tenant, String query)
+            throws Exception {
         return HttpClient.newHttpClient().send(HttpRequest.newBuilder(
-                        URI.create("http://127.0.0.1:" + server.port() + "/v1/human-tasks"))
+                        URI.create("http://127.0.0.1:" + server.port() + "/v1/human-tasks" + query))
                         .header("X-Test-Tenant", tenant).GET().build(),
                 HttpResponse.BodyHandlers.ofString());
     }

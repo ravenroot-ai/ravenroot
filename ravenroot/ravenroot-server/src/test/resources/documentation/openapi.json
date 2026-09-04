@@ -620,8 +620,14 @@
         "summary": "Lists a bounded page of the authenticated tenant's outstanding durable human tasks. Terminal tasks are omitted unless includeTerminal=true; responses contain bounded display and schema metadata, never execution or response payloads.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "status", "in": "query", "required": false, "description": "Comma-separated lifecycle statuses.", "schema": {"type": "string"}},
+          {"name": "includeTerminal", "in": "query", "required": false, "schema": {"type": "boolean", "default": false}},
+          {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}},
+          {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}
+        ],
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskInboxPage"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -640,10 +646,12 @@
         "security": [{"bearerAuth": []}],
         "parameters": [
           {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
-          {"name": "decision", "in": "path", "required": true, "schema": {"type": "string"}}
+          {"name": "decision", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
         ],
+        "requestBody": {"required": false, "description": "Required when decision is resolve; ignored for deny and cancel.", "content": {"application/vnd.ravenroot.payload+json": {"schema": {"$ref": "#/components/schemas/PayloadEnvelope"}}}},
         "responses": {
-          "200": {"description": "success"},
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskDecisionResult"}}}},
           "401": {"description": "AUTHENTICATION_REQUIRED"},
           "403": {"description": "ACCESS_DENIED"},
           "405": {"description": "METHOD_NOT_ALLOWED"},
@@ -992,6 +1000,12 @@
   "components": {
     "securitySchemes": {
       "bearerAuth": {"type": "http", "scheme": "bearer"}
+    },
+    "schemas": {
+      "PayloadEnvelope": {"type": "object", "required": ["schema", "schemaVersion", "kind", "value"], "properties": {"schema": {"type": "string"}, "schemaVersion": {"type": "string"}, "kind": {"type": "string"}, "value": {}}},
+      "HumanTaskInboxItem": {"type": "object", "required": ["taskId", "processInstanceId", "nodeId", "title", "description", "status", "generation", "responseSchema", "responseSchemaVersion", "responseKind", "maxResponseBytes", "expiresAt"], "properties": {"taskId": {"type": "string", "format": "uuid"}, "processInstanceId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "status": {"type": "string"}, "generation": {"type": "integer", "format": "int64"}, "responseSchema": {"type": "string"}, "responseSchemaVersion": {"type": "string"}, "responseKind": {"type": "string"}, "maxResponseBytes": {"type": "integer"}, "expiresAt": {"type": "string", "format": "date-time"}, "escalateAt": {"type": "string", "format": "date-time"}}},
+      "HumanTaskInboxPage": {"type": "object", "required": ["items", "nextCursor"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskInboxItem"}}, "nextCursor": {"type": "string", "format": "uuid", "nullable": true}}},
+      "HumanTaskDecisionResult": {"type": "object", "required": ["outcome", "taskId", "generation"], "properties": {"outcome": {"type": "string"}, "taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "resumeTraversalId": {"type": "string", "format": "uuid"}}}
     }
   }
 }

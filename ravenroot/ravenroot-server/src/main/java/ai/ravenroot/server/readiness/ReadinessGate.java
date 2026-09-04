@@ -7,6 +7,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 
 /**
@@ -17,6 +18,8 @@ import java.util.function.Supplier;
  * <h2>Priority, checked in {@link #evaluate()}</h2>
  * <ol>
  *   <li>{@code engineState.get()} not {@code "RUNNING"} &rarr; {@link ReadinessState#DRAINING}</li>
+ *   <li>{@code recoveryClassified.getAsBoolean()} is {@code false} &rarr;
+ *       {@link ReadinessState#RECOVERING}</li>
  *   <li>{@link #storeCheck}'s active probe throws or exceeds {@link ReadinessConfiguration#storeCheckTimeout()}
  *       &rarr; {@link ReadinessState#STORE_DEGRADED}</li>
  *   <li>otherwise &rarr; {@link ReadinessState#READY}</li>
@@ -39,13 +42,47 @@ public final class ReadinessGate implements AutoCloseable {
     private final Supplier<String> engineState;
     private final StoreLivenessCheck storeCheck;
     private final Supplier<List<DependencyStatus>> dependencies;
+    /**
+     * Whether the startup pass over inherited durable work has finished. Supplied rather than
+     * computed here for the same reason the engine state and the store check are: a gate that could
+     * only be built against the real discovery pass would make "does this report unready" testable
+     * only by failure injection against live infrastructure.
+     */
+    private final BooleanSupplier recoveryClassified;
     private final ReadinessConfiguration configuration;
     private final ExecutorService probeExecutor;
     private final Object probeMonitor = new Object();
     private Future<Boolean> outstandingProbe;
 
+    /**
+     * A gate for a deployment that runs no startup recovery classification, which therefore never
+     * reports {@link ReadinessState#RECOVERING}. Retained as the additive default so an existing
+     * composition keeps exactly the behaviour it had.
+     *
+     * @param engineState   supplier of the engine's own lifecycle state.
+     * @param storeCheck    the required durable dependency probe.
+     * @param dependencies  optional dependencies, reported but never gating.
+     * @param configuration probe timeout and drain settings.
+     */
     public ReadinessGate(Supplier<String> engineState, StoreLivenessCheck storeCheck,
-                         Supplier<List<DependencyStatus>> dependencies, ReadinessConfiguration configuration) {
+                         Supplier<List<DependencyStatus>> dependencies,
+                         ReadinessConfiguration configuration) {
+        this(engineState, storeCheck, dependencies, () -> true, configuration);
+    }
+
+    /**
+     * A gate that stays closed until the startup pass over inherited durable work has completed.
+     *
+     * @param engineState        supplier of the engine's own lifecycle state.
+     * @param storeCheck         the required durable dependency probe.
+     * @param dependencies       optional dependencies, reported but never gating.
+     * @param recoveryClassified whether startup recovery classification has finished.
+     * @param configuration      probe timeout and drain settings.
+     */
+    public ReadinessGate(Supplier<String> engineState, StoreLivenessCheck storeCheck,
+                         Supplier<List<DependencyStatus>> dependencies,
+                         BooleanSupplier recoveryClassified, ReadinessConfiguration configuration) {
+        this.recoveryClassified = Objects.requireNonNull(recoveryClassified, "recoveryClassified");
         this.engineState = Objects.requireNonNull(engineState, "engineState");
         this.storeCheck = Objects.requireNonNull(storeCheck, "storeCheck");
         this.dependencies = Objects.requireNonNull(dependencies, "dependencies");
@@ -68,6 +105,9 @@ public final class ReadinessGate implements AutoCloseable {
         List<DependencyStatus> currentDependencies = dependencies.get();
         if (!RUNNING.equals(engineState.get())) {
             return new ReadinessReport(false, ReadinessState.DRAINING, currentDependencies);
+        }
+        if (!recoveryClassified.getAsBoolean()) {
+            return new ReadinessReport(false, ReadinessState.RECOVERING, currentDependencies);
         }
         if (!storeIsHealthy()) {
             return new ReadinessReport(false, ReadinessState.STORE_DEGRADED, currentDependencies);

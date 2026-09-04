@@ -131,6 +131,8 @@ public final class ExecutionRecoveryService {
 
     /** Drives only timers a trusted dispatcher explicitly recognises, then acknowledges their fence. */
     private RecoveryOutcome dispatchTimer(PendingWork.TimerDue timer) {
+        RecoveryOutcome withheld = withheld(timer);
+        if (withheld != null) return withheld;
         if (!dispatcher.canDispatch(timer)) {
             return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
                     "no timer dispatcher available");
@@ -211,6 +213,8 @@ public final class ExecutionRecoveryService {
     }
 
     private RecoveryOutcome recover(PendingWork item) {
+        RecoveryOutcome withheld = withheld(item);
+        if (withheld != null) return withheld;
         if (item instanceof PendingWork.HandlerTrigger trigger) {
             return dispatchHandler(trigger);
         }
@@ -294,7 +298,7 @@ public final class ExecutionRecoveryService {
      */
     private RecoveryOutcome resolveAmbiguity(PendingWork.AttemptDispatch item, StoredProcessInstance stored) {
         String nodeId = nodeIdOf(stored.state(), item);
-        AttemptRepeatability declaration = declarationOf(nodeId);
+        AttemptRepeatability declaration = declarationOf(item.key(), nodeId);
         if (item.deliveryAttempt() > maxRecoveryDeliveriesPerAttempt) {
             String cause = "recovery delivery limit exceeded on delivery " + item.deliveryAttempt();
             return park(item, stored, declaration, cause);
@@ -333,16 +337,53 @@ public final class ExecutionRecoveryService {
     }
 
     /**
+     * The dispatcher's own refusal to act on this execution at all, or {@code null} to proceed.
+     *
+     * <p>Consulted before anything else is decided about a claimed item, and deliberately kept
+     * separate from {@link RecoveryDispatcher#canDispatch}. The two say different things and call for
+     * different dispositions. "No dispatcher owns this kind" is a fact about this deployment's
+     * composition and, for an ambiguous attempt, still resolves to a park: an effect was performed,
+     * its outcome is unknown, and a human is owed a decision whether or not anything here could have
+     * re-sent it. "This execution is withheld" is a fact about the execution's own preconditions —
+     * its pinned document or its manifest does not resolve here — and parking on that would convert a
+     * repairable deployment mistake into permanent manual work, at exactly the moment the
+     * declaration could not be read, so every such attempt would park reported as though its author
+     * had declared nothing.</p>
+     *
+     * <p>A withheld item is left exactly as it was found: nothing written, nothing acknowledged, the
+     * claim allowed to lapse. A corrected deployment's next sweep reaches the real decision.</p>
+     */
+    private RecoveryOutcome withheld(PendingWork item) {
+        boolean refused;
+        try {
+            refused = dispatcher.withholds(item);
+        } catch (RuntimeException unreadable) {
+            // A dispatcher that cannot answer has not authorised anything. Withholding is the
+            // fail-closed direction and costs one deferred sweep.
+            refused = true;
+        }
+        return refused
+                ? new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
+                        "recovery is withheld for this execution")
+                : null;
+    }
+
+    /**
      * Reads the declaration and converts any failure of the source into
      * {@link AttemptRepeatability#UNDECLARED}.
      *
      * <p>A source that throws has not declared anything. Letting the exception escape would abort the
      * sweep and leave the ambiguous attempt neither dispatched nor parked — which is the one outcome
      * worse than either, because nothing records that a decision was owed.</p>
+     *
+     * <p>The instance is passed as well as the node, because after a restart the node id alone does
+     * not identify a declaration: the same id in two graphs is two different authors' assertions.
+     * A source that resolves the document an execution was pinned to needs the instance to find it;
+     * a source that is already a snapshot of one graph ignores it through the interface default.</p>
      */
-    private AttemptRepeatability declarationOf(String nodeId) {
+    private AttemptRepeatability declarationOf(ExecutionKey key, String nodeId) {
         try {
-            AttemptRepeatability declared = declarations.declaredFor(nodeId);
+            AttemptRepeatability declared = declarations.declaredFor(key, nodeId);
             return declared == null ? AttemptRepeatability.UNDECLARED : declared;
         } catch (RuntimeException unreadable) {
             return AttemptRepeatability.UNDECLARED;

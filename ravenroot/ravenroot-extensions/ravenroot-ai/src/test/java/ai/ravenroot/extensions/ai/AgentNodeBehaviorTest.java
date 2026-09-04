@@ -50,7 +50,8 @@ class AgentNodeBehaviorTest {
     @DisplayName("the behavior requires managed HTTP and server-side tool authorization")
     void theBehaviorRequiresManagedBoundaries() {
         assertEquals(java.util.Set.of(NodePackageCapability.OUTBOUND_HTTP,
-                        NodePackageCapability.TOOL_AUTHORIZATION),
+                        NodePackageCapability.TOOL_AUTHORIZATION,
+                        NodePackageCapability.AGENT_RESOURCES),
                 new AgentNodeBehavior().requiredServices());
     }
 
@@ -286,9 +287,14 @@ class AgentNodeBehaviorTest {
 
         // PromptTemplate is shared with llm-prompt and speaks that node's vocabulary. A reader of an
         // agent failure must never have to know the other node exists, so it is translated.
+        var resources = new AiTestSupport.TrackingAgentResources();
+        http.resources(resources);
         AgentException refusal = failureOf(behavior.create(configuration(Map.of("provider", "local",
                 "instructions", "be terse", "objective", "summarise {{payload.missing}}")), http));
         assertEquals(AgentException.Code.TEMPLATE_UNRENDERABLE, refusal.code());
+        assertEquals(1, resources.admissions.get());
+        assertEquals(1, resources.cancels.get(),
+                "a constructor-time refusal must cancel its already-admitted durable grant");
     }
 
     @Test

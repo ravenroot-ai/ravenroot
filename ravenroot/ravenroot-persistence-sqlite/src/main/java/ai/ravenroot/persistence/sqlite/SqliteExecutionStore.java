@@ -5,6 +5,9 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -156,7 +159,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // offset to repair and no rebuild that could invent work.
             StoreCapability.PROCESS_INVENTORY,
             StoreCapability.INVENTORY_RETENTION,
-            StoreCapability.TOOL_APPROVALS);
+            StoreCapability.TOOL_APPROVALS,
+            StoreCapability.AGENT_AUTHORITY_BUDGETS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -384,6 +388,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // a wait -- and a re-entry -- atomic with the transitions beside it.
         writeHandlers(key, batch, folded, revision);
         writeToolApprovals(key, batch, folded, pin, revision, now);
+        writeAgentAuthorityBudget(key, batch, folded, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of the shared
         // transactional boundary the event journal promises. There is no publish step to crash
@@ -407,6 +412,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return new StoredProcessInstance(state, meta.revision(), meta.graphVersionPin(),
                         key.tenantId(), meta.updatedAt());
             });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> readAgentAuthorityBudget(key));
         });
     }
 
@@ -2537,6 +2550,63 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
             }
             updateToolApproval(current.apply(transition, revision));
+        }
+    }
+
+    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT aggregate FROM agent_authority_budget WHERE tenant_id = ? "
+                        + "AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                try {
+                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes(1)));
+                } catch (RuntimeException corrupted) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+            }
+        }
+    }
+
+    private void writeAgentAuthorityBudget(ExecutionKey key, ExecutionBatch batch,
+                                           ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.agentBudgetOperations().isEmpty()) return;
+        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(key).orElse(null);
+        for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+            if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                var invocation = folded.traversals().values().stream()
+                        .flatMap(traversal -> traversal.invocations().values().stream())
+                        .filter(candidate -> candidate.invocationId().equals(register.binding().invocationId()))
+                        .findFirst().orElse(null);
+                if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                        || !invocation.parentInvocationIds()
+                                .equals(register.binding().causalParentInvocationIds())) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent grant binding does not name the post-fold invocation"));
+                }
+            }
+            try {
+                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+            } catch (IllegalArgumentException | IllegalStateException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+        }
+        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        if (encoded.length > config.maxPayloadBytes()) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length, config.maxPayloadBytes()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO agent_authority_budget (tenant_id, process_instance_id, aggregate) "
+                        + "VALUES (?, ?, ?) ON CONFLICT(tenant_id, process_instance_id) "
+                        + "DO UPDATE SET aggregate = excluded.aggregate")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setBytes(3, encoded);
+            statement.executeUpdate();
         }
     }
 

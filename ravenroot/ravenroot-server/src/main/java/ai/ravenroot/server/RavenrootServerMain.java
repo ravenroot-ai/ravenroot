@@ -159,17 +159,27 @@ public final class RavenrootServerMain {
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
         ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
+                ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
+                        approvalStore, java.time.Clock.systemUTC(),
+                        ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration
+                                .fromEnvironment(System.getenv()),
+                        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.discarding())
+                : null;
         ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
                 ? new ai.ravenroot.core.approval.ToolApprovalService(
-                        approvalStore, java.time.Clock.systemUTC()) : null;
+                        approvalStore, java.time.Clock.systemUTC(), agentBudgets == null
+                                ? ai.ravenroot.core.approval.ToolApprovalBudgetHooks.none()
+                                : agentBudgets) : null;
         ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings = toolApprovals == null
                 ? null : ai.ravenroot.server.approval.ToolApprovalConfiguration
                         .fromEnvironment(System.getenv());
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
-                toolApprovals, toolApprovalSettings);
+                toolApprovals, toolApprovalSettings, agentBudgets);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -222,7 +232,7 @@ public final class RavenrootServerMain {
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
-                executionStoreOwner.graphDefinitionStore(), toolApprovals);
+                executionStoreOwner.graphDefinitionStore(), toolApprovals, agentBudgets);
         final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
         if (toolApprovals == null) {
             approvalRecovery = null;
@@ -234,7 +244,7 @@ public final class RavenrootServerMain {
             var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
                     executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals,
                     engine, behaviors, monitor,
-                    executionIdentities, recoveryWorker, recoveryConfiguration.leaseTtl());
+                    executionIdentities, recoveryWorker, recoveryConfiguration.leaseTtl(), agentBudgets);
             var approvalDispatcher = new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
                     executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor);
             var recoveryService = new ai.ravenroot.core.recovery.ExecutionRecoveryService(
@@ -566,11 +576,12 @@ public final class RavenrootServerMain {
             AuditTrailPluginActivationSink auditSink,
             ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
             ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
-            ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings) {
+            ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
                     new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
-                    toolAuditSink, toolApprovals, toolApprovalSettings);
+                    toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment), System.getenv(), services);
         } catch (RuntimeException activationFailed) {

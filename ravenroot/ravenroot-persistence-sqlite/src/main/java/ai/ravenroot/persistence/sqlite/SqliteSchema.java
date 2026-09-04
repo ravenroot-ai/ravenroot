@@ -534,7 +534,18 @@ final class SqliteSchema {
                 )
                 """,
                 "CREATE INDEX tool_approval_pending_expiry ON tool_approval "
-                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")));
+                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")),
+                new SchemaMigration(9, "process-rooted agent authority budgets", List.of(
+                """
+                CREATE TABLE agent_authority_budget (
+                    tenant_id            TEXT NOT NULL,
+                    process_instance_id  TEXT NOT NULL,
+                    aggregate            BLOB NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """)));
     }
 
     static int currentVersion() {

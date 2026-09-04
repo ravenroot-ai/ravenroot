@@ -28,6 +28,70 @@ final class AiTestSupport {
     private AiTestSupport() {
     }
 
+    static ai.ravenroot.api.node.service.AgentResourceService unlimitedTestResources() {
+        return new ai.ravenroot.api.node.service.AgentResourceService() {
+            private final ai.ravenroot.api.node.service.AgentResourceSession session =
+                    new ai.ravenroot.api.node.service.AgentResourceSession() {
+                @Override public ai.ravenroot.api.node.service.AgentModelReservation reserveModelTurn(long ordinal) {
+                    return new ai.ravenroot.api.node.service.AgentModelReservation() {
+                        @Override public void settle(java.util.Optional<Long> inputTokens,
+                                                     java.util.Optional<Long> outputTokens) { }
+                        @Override public void indeterminate() { }
+                    };
+                }
+                @Override public ai.ravenroot.api.node.service.AgentResourceSession createChild(
+                        ai.ravenroot.api.node.service.AgentChildResourceRequest request) { return this; }
+                @Override public void complete() { }
+                @Override public void cancel() { }
+                @Override public void suspend() { }
+            };
+            @Override public ai.ravenroot.api.node.service.AgentResourceSession admit(
+                    ai.ravenroot.api.execution.NodeMessage message,
+                    ai.ravenroot.api.node.service.AgentResourceRequest request) { return session; }
+            @Override public ai.ravenroot.api.node.service.AgentResourceSession resume(
+                    ai.ravenroot.api.node.ToolCallContinuationInput continuation,
+                    ai.ravenroot.api.node.service.AgentResourceRequest request) { return session; }
+        };
+    }
+
+    static final class TrackingAgentResources implements ai.ravenroot.api.node.service.AgentResourceService {
+        final AtomicInteger admissions = new AtomicInteger();
+        final AtomicInteger completes = new AtomicInteger();
+        final AtomicInteger cancels = new AtomicInteger();
+        final AtomicInteger suspends = new AtomicInteger();
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceSession admit(
+                ai.ravenroot.api.execution.NodeMessage message,
+                ai.ravenroot.api.node.service.AgentResourceRequest request) {
+            admissions.incrementAndGet();
+            return session();
+        }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceSession resume(
+                ai.ravenroot.api.node.ToolCallContinuationInput continuation,
+                ai.ravenroot.api.node.service.AgentResourceRequest request) {
+            admissions.incrementAndGet();
+            return session();
+        }
+
+        private ai.ravenroot.api.node.service.AgentResourceSession session() {
+            return new ai.ravenroot.api.node.service.AgentResourceSession() {
+                @Override public ai.ravenroot.api.node.service.AgentModelReservation reserveModelTurn(long ordinal) {
+                    return new ai.ravenroot.api.node.service.AgentModelReservation() {
+                        @Override public void settle(java.util.Optional<Long> inputTokens,
+                                                     java.util.Optional<Long> outputTokens) { }
+                        @Override public void indeterminate() { }
+                    };
+                }
+                @Override public ai.ravenroot.api.node.service.AgentResourceSession createChild(
+                        ai.ravenroot.api.node.service.AgentChildResourceRequest request) { return session(); }
+                @Override public void complete() { completes.incrementAndGet(); }
+                @Override public void cancel() { cancels.incrementAndGet(); }
+                @Override public void suspend() { suspends.incrementAndGet(); }
+            };
+        }
+    }
+
     static NodeMessage message(Object payload) {
         return message("tenant-a", payload, Map.of());
     }
@@ -79,6 +143,7 @@ final class AiTestSupport {
         final AtomicReference<OutboundHttpRequest> request = new AtomicReference<>();
         final AtomicInteger calls = new AtomicInteger();
         volatile RuntimeException synchronousFailure;
+        volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
         volatile CompletableFuture<OutboundHttpResponse> response = CompletableFuture.completedFuture(
                 new OutboundHttpResponse(200, Map.of("content-type", java.util.List.of("application/json")),
                         ChatCompletionsDouble.completion("hello").getBytes(StandardCharsets.UTF_8)));
@@ -89,6 +154,10 @@ final class AiTestSupport {
         }
 
         @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+            return resources;
+        }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -138,6 +207,7 @@ final class AiTestSupport {
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final AtomicInteger next = new AtomicInteger();
         private volatile Step forever;
+        private volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
 
         /** Adds one 200 response carrying {@code json}. */
         ScriptedHttp then(String json) {
@@ -169,6 +239,11 @@ final class AiTestSupport {
             return this;
         }
 
+        ScriptedHttp resources(ai.ravenroot.api.node.service.AgentResourceService service) {
+            resources = java.util.Objects.requireNonNull(service);
+            return this;
+        }
+
         int calls() {
             return next.get();
         }
@@ -195,6 +270,10 @@ final class AiTestSupport {
         }
 
         @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+            return resources;
+        }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -266,6 +345,7 @@ final class AiTestSupport {
         private volatile boolean uncancellable;
         private volatile boolean cancellationThrows;
         private volatile ToolCallAuthorizationService toolAuthorization = allowingTools();
+        private volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
         private final java.util.List<CompletableFuture<OutboundHttpResponse>> stalled =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final java.util.List<Boolean> cancelled =
@@ -339,6 +419,11 @@ final class AiTestSupport {
             return this;
         }
 
+        RoutedHttp resources(ai.ravenroot.api.node.service.AgentResourceService service) {
+            resources = java.util.Objects.requireNonNull(service);
+            return this;
+        }
+
         int chatCalls() {
             return chatCalls.get();
         }
@@ -373,6 +458,10 @@ final class AiTestSupport {
         }
 
         @Override public ToolCallAuthorizationService toolAuthorization() { return toolAuthorization; }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+            return resources;
+        }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();

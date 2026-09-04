@@ -7,6 +7,9 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -223,7 +226,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
                 StoreCapability.DURABLE_HANDLERS,
                 StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
-                StoreCapability.TOOL_APPROVALS);
+                StoreCapability.TOOL_APPROVALS, StoreCapability.AGENT_AUTHORITY_BUDGETS);
     }
 
     @Override
@@ -355,12 +358,35 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.approvals);
                 applyToolApprovalWrites(key, batch, folded, pin, approvals, revision, now);
 
+                DurableAgentAuthorityBudget agentBudget = existing == null ? null : existing.agentBudget;
+                for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+                    if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                        NodeInvocation invocation = folded.traversals().values().stream()
+                                .flatMap(traversal -> traversal.invocations().values().stream())
+                                .filter(candidate -> candidate.invocationId()
+                                        .equals(register.binding().invocationId()))
+                                .findFirst().orElse(null);
+                        if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                                || !invocation.parentInvocationIds()
+                                        .equals(register.binding().causalParentInvocationIds())) {
+                            throw failure(ExecutionStoreFailure.invalid(
+                                    "agent grant binding does not name the post-fold invocation"));
+                        }
+                    }
+                    try {
+                        agentBudget = AgentAuthorityBudgetFold.apply(key, agentBudget, operation, now);
+                    } catch (IllegalArgumentException | IllegalStateException invalid) {
+                        throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                    }
+                }
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
                         timers,
                         handlers,
                         approvals,
+                        agentBudget,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -391,6 +417,17 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     throw failure(new ExecutionStoreFailure.NotFound(key));
                 }
                 return entry.toStoredRevalidated(key);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.agentBudget);
             }
         });
     }
@@ -2031,6 +2068,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableHandler> handlers;
         /** Registration order, retained for deterministic operator inspection. */
         private final Map<UUID, DurableToolApproval> approvals;
+        private final DurableAgentAuthorityBudget agentBudget;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -2043,6 +2081,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
                       Map<UUID, DurableHandler> handlers,
                       Map<UUID, DurableToolApproval> approvals,
+                      DurableAgentAuthorityBudget agentBudget,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -2055,6 +2094,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.timers = timers;
             this.handlers = handlers;
             this.approvals = approvals;
+            this.agentBudget = agentBudget;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;

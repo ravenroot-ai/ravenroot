@@ -30,6 +30,7 @@ public final class ExecutionBatch {
     private final List<HandlerTransition> handlerTransitions;
     private final List<ToolApprovalRegistration> toolApprovalsToRegister;
     private final List<ToolApprovalTransition> toolApprovalTransitions;
+    private final List<AgentBudgetOperation> agentBudgetOperations;
 
     private ExecutionBatch(Builder builder) {
         this.key = builder.key;
@@ -45,6 +46,7 @@ public final class ExecutionBatch {
         this.handlerTransitions = List.copyOf(builder.handlerTransitions);
         this.toolApprovalsToRegister = List.copyOf(builder.toolApprovalsToRegister);
         this.toolApprovalTransitions = List.copyOf(builder.toolApprovalTransitions);
+        this.agentBudgetOperations = List.copyOf(builder.agentBudgetOperations);
         // Every operation category is named here, and the guard has to grow with each one. An origin
         // counts as an operation: recording a deployment, workload or correlation identity changes
         // stored state and is a legitimate write on its own, which is what lets a caller that learns
@@ -55,7 +57,7 @@ public final class ExecutionBatch {
                 && idempotency == null && events.isEmpty() && origin.isEmpty()
                 && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()
                 && toolApprovalsToRegister.isEmpty()
-                && toolApprovalTransitions.isEmpty()) {
+                && toolApprovalTransitions.isEmpty() && agentBudgetOperations.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -257,6 +259,9 @@ public final class ExecutionBatch {
         return toolApprovalTransitions;
     }
 
+    /** Agent authority and budget mutations applied atomically with this batch. */
+    public List<AgentBudgetOperation> agentBudgetOperations() { return agentBudgetOperations; }
+
 /**
  * Defines the builder contract exposed to Ravenroot integrators.
  */
@@ -274,6 +279,7 @@ public final class ExecutionBatch {
         private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
         private final List<ToolApprovalRegistration> toolApprovalsToRegister = new ArrayList<>();
         private final List<ToolApprovalTransition> toolApprovalTransitions = new ArrayList<>();
+        private final List<AgentBudgetOperation> agentBudgetOperations = new ArrayList<>();
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -419,6 +425,13 @@ public final class ExecutionBatch {
         public Builder applyToolApproval(ToolApprovalTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             toolApprovalTransitions.add(transition);
+            return this;
+        }
+
+        /** Adds one ordered agent authority/budget mutation to this transaction. */
+        public Builder applyAgentBudget(AgentBudgetOperation operation) {
+            if (operation == null) throw new IllegalArgumentException("operation cannot be null");
+            agentBudgetOperations.add(operation);
             return this;
         }
 

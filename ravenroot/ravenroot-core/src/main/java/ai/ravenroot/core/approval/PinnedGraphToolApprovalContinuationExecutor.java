@@ -44,6 +44,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     private final ExecutionIdentitySource identities;
     private final String workerId;
     private final Duration leaseTtl;
+    private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     private final Map<PendingWork.HandlerTrigger, ExecutionRecorder> awaitingAcknowledgement
             = new ConcurrentHashMap<>();
 
@@ -55,6 +56,19 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        ExecutionMonitor monitor,
                                                        ExecutionIdentitySource identities,
                                                        String workerId, Duration leaseTtl) {
+        this(definitions, executions, approvals, engine, behaviors, monitor, identities, workerId,
+                leaseTtl, null);
+    }
+
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl,
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.approvals = Objects.requireNonNull(approvals, "approvals");
@@ -64,6 +78,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         this.identities = Objects.requireNonNull(identities, "identities");
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
+        this.agentBudgets = agentBudgets;
     }
 
     @Override
@@ -113,16 +128,22 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                     executions, claim, workerId, leaseTtl, revision);
             var runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
                     GraphRunner.DEFAULT_SHUTDOWN_BOUND);
-            AutoCloseable approvalBinding;
+            AutoCloseable approvalBinding = null;
+            AutoCloseable budgetBinding = null;
             try {
                 approvalBinding = approvals.bindLive(new ExecutionKey(
                         continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
+                budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(new ExecutionKey(
+                        continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
             } catch (RuntimeException bindingFailure) {
+                if (approvalBinding != null) closeBinding(approvalBinding);
                 runner.close();
                 recorder.detachForAcknowledgement();
                 manager.close();
                 throw bindingFailure;
             }
+            AutoCloseable approvalResourceBinding = approvalBinding;
+            AutoCloseable budgetResourceBinding = budgetBinding;
             CompletionStage<Boolean> result = runner.executeFrom(continuation.requester(),
                     continuation.processInstanceId(), continuation.resumeTraversalId(),
                     continuation.nodeId(), continuation.graphVersionPin().reference(), recorder,
@@ -149,21 +170,25 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             });
             return effectResult.whenComplete((ignored, failure) -> {
                 try {
-                    closeBinding(approvalBinding);
+                    closeBinding(approvalResourceBinding);
                 } finally {
-                    runner.close();
-                    if (failure == null) {
-                        recorder.detachForAcknowledgement();
-                        ExecutionRecorder existing = awaitingAcknowledgement.putIfAbsent(claim, recorder);
-                        if (existing != null) {
-                            recorder.close();
-                            throw new IllegalStateException(
-                                    "duplicate continuation claim awaiting acknowledgement");
+                    try {
+                        if (budgetResourceBinding != null) closeBinding(budgetResourceBinding);
+                    } finally {
+                        runner.close();
+                        if (failure == null) {
+                            recorder.detachForAcknowledgement();
+                            ExecutionRecorder existing = awaitingAcknowledgement.putIfAbsent(claim, recorder);
+                            if (existing != null) {
+                                recorder.close();
+                                throw new IllegalStateException(
+                                        "duplicate continuation claim awaiting acknowledgement");
+                            }
+                        } else {
+                            recorder.detachForAcknowledgement();
                         }
-                    } else {
-                        recorder.detachForAcknowledgement();
+                        manager.close();
                     }
-                    manager.close();
                 }
             });
         } catch (CompletionException wrapped) {

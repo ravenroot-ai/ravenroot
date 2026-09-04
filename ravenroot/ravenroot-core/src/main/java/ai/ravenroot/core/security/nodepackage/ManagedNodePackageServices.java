@@ -120,6 +120,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private final ToolCallAuditSink toolAuditSink;
     private final ToolApprovalService toolApprovalService;
     private final ToolApprovalSettings toolApprovalSettings;
+    private final ai.ravenroot.api.node.service.AgentResourceService agentResources;
+    private final AgentAuthorityBudgetService agentAuthorityBudgets;
     private volatile HttpClient client;
     private final AdmissionController admission;
     private final NodePackageServices unavailable = NodePackageServices.unavailable();
@@ -135,6 +137,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         toolAuditSink = Objects.requireNonNull(builder.toolAuditSink, "toolAuditSink");
         toolApprovalService = builder.toolApprovalService;
         toolApprovalSettings = builder.toolApprovalSettings;
+        agentResources = builder.agentResources;
+        agentAuthorityBudgets = builder.agentAuthorityBudgets;
         admission = new AdmissionController(policy.maximumConcurrentOperations(),
                 policy.maximumConcurrentPerTenant());
     }
@@ -217,6 +221,15 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         return this::authorizeToolCall;
     }
 
+    @Override
+    public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+        if (!capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
+                || agentResources == null) {
+            return unavailable.agentResources();
+        }
+        return agentResources;
+    }
+
     /**
      * Parses, canonicalizes, decides and audits one model-requested call before its effect can run.
      * The package receives the canonical bytes, not the unchecked bytes the model emitted.
@@ -227,6 +240,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         String tool = safeToolName(rawTool);
         UUID callId = UUID.randomUUID();
         if ("invalid-tool".equals(tool)) {
+            chargeDeniedTool(delivered, callId);
             recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
                     "TOOL_INVALID");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
@@ -246,6 +260,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             arguments = object;
             canonical = PayloadJson.write(arguments).getBytes(StandardCharsets.UTF_8);
         } catch (RuntimeException invalid) {
+            chargeDeniedTool(delivered, callId);
             recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
                     "ARGUMENTS_INVALID");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
@@ -261,6 +276,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                     delivered.processInstanceId(), delivered.nodeId(), tool, policyArguments)),
                     "toolPolicy decision");
         } catch (RuntimeException policyFailure) {
+            chargeDeniedTool(delivered, callId);
             recordTool(delivered, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED,
                     "POLICY_UNAVAILABLE");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, digest, canonical,
@@ -282,9 +298,28 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             case DENY -> "POLICY_DENIED";
             case REQUIRE_APPROVAL -> "APPROVAL_REQUIRED";
         };
+        AgentAuthorityBudgetService.ToolReservation reservation = null;
+        if (disposition == ToolCallAuthorization.Disposition.ALLOW) {
+            reservation = reserveTool(delivered, callId);
+        } else if (disposition == ToolCallAuthorization.Disposition.DENY) {
+            chargeDeniedTool(delivered, callId);
+        }
         recordTool(delivered, callId, tool, digest, auditDisposition, reason);
         return new ManagedToolCall(callId, disposition, digest, canonical, delivered, tool,
-                disposition == ToolCallAuthorization.Disposition.ALLOW);
+                disposition == ToolCallAuthorization.Disposition.ALLOW, reservation);
+    }
+
+    private AgentAuthorityBudgetService.ToolReservation reserveTool(NodeMessage message, UUID callId) {
+        if (!capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
+                || agentAuthorityBudgets == null) return null;
+        return agentAuthorityBudgets.reserveDirectTool(message, callId);
+    }
+
+    private void chargeDeniedTool(NodeMessage message, UUID callId) {
+        if (capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
+                && agentAuthorityBudgets != null) {
+            agentAuthorityBudgets.chargeDeniedTool(message, callId);
+        }
     }
 
     private void recordTool(NodeMessage message, UUID callId, String tool, String digest,
@@ -329,12 +364,21 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private final NodeMessage message;
         private final String tool;
         private final boolean terminalExpected;
+        private final AgentAuthorityBudgetService.ToolReservation budgetReservation;
         private final AtomicBoolean completed = new AtomicBoolean();
         private final UUID approvalId = UUID.randomUUID();
 
         private ManagedToolCall(UUID callId, Disposition disposition, String argumentsDigest,
                                 byte[] canonicalArguments, NodeMessage message, String tool,
                                 boolean terminalExpected) {
+            this(callId, disposition, argumentsDigest, canonicalArguments, message, tool,
+                    terminalExpected, null);
+        }
+
+        private ManagedToolCall(UUID callId, Disposition disposition, String argumentsDigest,
+                                byte[] canonicalArguments, NodeMessage message, String tool,
+                                boolean terminalExpected,
+                                AgentAuthorityBudgetService.ToolReservation budgetReservation) {
             this.callId = callId;
             this.disposition = disposition;
             this.argumentsDigest = argumentsDigest;
@@ -342,6 +386,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             this.message = message;
             this.tool = tool;
             this.terminalExpected = terminalExpected;
+            this.budgetReservation = budgetReservation;
         }
 
         @Override public UUID callId() { return callId; }
@@ -373,6 +418,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         public void complete(Outcome outcome) {
             Objects.requireNonNull(outcome, "outcome");
             if (!terminalExpected || !completed.compareAndSet(false, true)) return;
+            if (budgetReservation != null) budgetReservation.settle();
             recordTool(message, callId, tool, argumentsDigest,
                     outcome == Outcome.SUCCEEDED ? ToolCallAuditEvent.Disposition.SUCCEEDED
                             : ToolCallAuditEvent.Disposition.FAILED,
@@ -845,6 +891,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private ToolCallAuditSink toolAuditSink = ToolCallAuditSink.discarding();
         private ToolApprovalService toolApprovalService;
         private ToolApprovalSettings toolApprovalSettings;
+        private ai.ravenroot.api.node.service.AgentResourceService agentResources;
+        private AgentAuthorityBudgetService agentAuthorityBudgets;
 
         private Builder(String packageId, NodePackageEgressPolicy policy, TenantCredentialResolver credentials) {
             this.packageId = packageId;
@@ -868,6 +916,19 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         public Builder durableToolApprovals(ToolApprovalService service, ToolApprovalSettings settings) {
             this.toolApprovalService = Objects.requireNonNull(service, "service");
             this.toolApprovalSettings = Objects.requireNonNull(settings, "settings");
+            return this;
+        }
+
+        /** Installs mandatory finite agent accounting for packages explicitly granted it. */
+        public Builder agentAuthorityBudgets(AgentAuthorityBudgetService service) {
+            this.agentAuthorityBudgets = Objects.requireNonNull(service, "service");
+            this.agentResources = service;
+            return this;
+        }
+
+        /** Installs an invocation mediator; primarily useful for constrained embedding adapters. */
+        public Builder agentResources(ai.ravenroot.api.node.service.AgentResourceService service) {
+            this.agentResources = Objects.requireNonNull(service, "service");
             return this;
         }
 

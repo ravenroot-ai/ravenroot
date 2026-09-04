@@ -15,6 +15,9 @@ import ai.ravenroot.api.node.ToolCallContinuationResult;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.AgentResourceRequest;
+import ai.ravenroot.api.node.service.AgentResourceSession;
+import ai.ravenroot.api.node.service.AgentModelReservation;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
@@ -166,7 +169,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
     @Override
     public Set<NodePackageCapability> requiredServices() {
         return Set.of(NodePackageCapability.OUTBOUND_HTTP,
-                NodePackageCapability.TOOL_AUTHORIZATION);
+                NodePackageCapability.TOOL_AUTHORIZATION,
+                NodePackageCapability.AGENT_RESOURCES);
     }
 
     @Override
@@ -206,7 +210,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                                 + DEFAULT_MAX_TURNS + ", never exceeds " + MAX_TURNS_CEILING + ".", ""),
                 NodePropertyDescriptor.optional("maxTotalTokens", "Max tokens", NodePropertyType.INTEGER,
                         "Cumulative reported tokens across the whole run before it is refused. "
-                                + "Unbounded when absent.", ""),
+                                + "The operator's finite ceiling still applies when absent.", ""),
                 NodePropertyDescriptor.optional("timeoutMs", "Deadline", NodePropertyType.INTEGER,
                         "Deadline for the WHOLE run, not for one turn. May only tighten the "
                                 + "profile deadline.", ""),
@@ -471,11 +475,19 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // path is where a leak lives in every implementation that has one.
         var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
         leases.add(lease);
+        AgentResourceSession resources;
+        try {
+            resources = services.agentResources().admit(message, resourceRequest(settings));
+        } catch (RuntimeException refused) {
+            leases.forEach(Admission.Lease::close);
+            return CompletableFuture.failedFuture(sanitize(refused));
+        }
         for (McpProfile server : settings.mcpServers()) {
             Admission.Lease held = mcpAdmission.tryAcquire(
                     message.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
                 leases.forEach(Admission.Lease::close);
+                resources.cancel();
                 return CompletableFuture.failedFuture(
                         new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
             }
@@ -483,9 +495,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
         }
         Run run;
         try {
-            run = new Run(message, services, settings);
+            run = new Run(message, services, settings, resources);
         } catch (RuntimeException failure) {
             leases.forEach(Admission.Lease::close);
+            resources.cancel();
             return CompletableFuture.failedFuture(sanitize(failure));
         }
         var result = new CompletableFuture<NodeResult>();
@@ -503,9 +516,14 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // The leases are held until the LAST turn finishes, not until the first returns -- and, with
         // MCP servers declared, until after discovery, which happens before the first turn. Every
         // lease is idempotent, so a run that fails between two turns releases here exactly once.
-        result.whenComplete((ignored, alsoIgnored) -> {
+        result.whenComplete((ignored, failure) -> {
             try {
                 run.abort();
+                if (failure == null) {
+                    resources.complete();
+                } else if (!run.suspended()) {
+                    resources.cancel();
+                }
             } finally {
                 // The finally is the whole point, and it was learned the expensive way. Fusing the
                 // two actions into one callback bought the ordering and lost something the two
@@ -551,10 +569,17 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 supplied.traversalId(), supplied.invocationId(), supplied.attemptId(),
                 supplied.parentInvocationIds(), supplied.nodeId(), null, checkpoint.inboundAttributes(),
                 supplied.command());
+        AgentResourceSession resources;
+        try {
+            resources = services.agentResources().resume(input, resourceRequest(settings));
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(sanitize(refused));
+        }
         var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
         Admission.Lease profile = profileAdmission.tryAcquire(
                 restored.tenantId() + " " + settings.profile().name(), settings.profile().maxConcurrency());
         if (profile == null) {
+            resources.cancel();
             return CompletableFuture.failedFuture(new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
         }
         leases.add(profile);
@@ -563,6 +588,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     restored.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
                 leases.forEach(Admission.Lease::close);
+                resources.cancel();
                 return CompletableFuture.failedFuture(
                         new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
             }
@@ -570,24 +596,37 @@ public final class AgentNodeBehavior implements NodeBehavior {
         }
         Run run;
         try {
-            run = new Run(restored, services, settings, checkpoint);
+            run = new Run(restored, services, settings, checkpoint, resources);
         } catch (RuntimeException invalid) {
             leases.forEach(Admission.Lease::close);
+            resources.cancel();
             return CompletableFuture.failedFuture(invalid);
         }
         var result = new CompletableFuture<ToolCallContinuationResult>();
-        Runnable cleanup = () -> {
+        java.util.function.Consumer<Throwable> cleanup = failure -> {
             try { run.abort(); } finally { leases.forEach(Admission.Lease::close); }
+            if (failure == null) {
+                resources.complete();
+            } else if (!run.suspended()) {
+                resources.cancel();
+            }
         };
         result.whenComplete((continued, failure) -> {
             if (failure != null) {
-                cleanup.run();
+                cleanup.accept(failure);
             } else {
-                continued.nodeResult().whenComplete((ignored, continuationFailure) -> cleanup.run());
+                continued.nodeResult().whenComplete((ignored, continuationFailure) -> cleanup.accept(
+                        continuationFailure));
             }
         });
         run.resume(input, checkpoint, result);
         return result;
+    }
+
+    private static AgentResourceRequest resourceRequest(Settings settings) {
+        long perTurn = settings.tuning().maxTokens().orElse(0L);
+        return new AgentResourceRequest(settings.maxTurns(), settings.maxTotalTokens(), perTurn,
+                Duration.ofMillis(settings.deadlineMs()));
     }
 
     private static RestartCheckpoint validateContinuation(ToolCallContinuationInput input) {
@@ -768,6 +807,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
          * caller had said stop and after the admission had been given back.</p>
          */
         private volatile OutboundCall<OutboundHttpResponse> inFlight;
+        private volatile AgentModelReservation inFlightBudget;
+        /** Expected durable approval suspension is detach-only, never grant cancellation. */
+        private volatile boolean suspended;
         /** Set once the run is over, by any route. Read before every step the loop would take next. */
         private volatile boolean over;
         private final long deadlineNanos;
@@ -775,11 +817,14 @@ public final class AgentNodeBehavior implements NodeBehavior {
         private int toolCalls;
         private long tokens;
         private String finishReason = "";
+        private final AgentResourceSession resources;
 
-        Run(NodeMessage message, NodePackageServices services, Settings settings) {
+        Run(NodeMessage message, NodePackageServices services, Settings settings,
+            AgentResourceSession resources) {
             this.message = message;
             this.services = services;
             this.settings = settings;
+            this.resources = resources;
             this.loadSkill = new LoadSkillTool(settings.skills());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
@@ -816,10 +861,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
         }
 
         Run(NodeMessage message, NodePackageServices services, Settings settings,
-            RestartCheckpoint checkpoint) {
+            RestartCheckpoint checkpoint, AgentResourceSession resources) {
             this.message = message;
             this.services = services;
             this.settings = settings;
+            this.resources = resources;
             this.loadSkill = new LoadSkillTool(settings.skills());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
@@ -992,15 +1038,30 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 return;
             }
             turns++;
-            OutboundCall<OutboundHttpResponse> call;
+            byte[] body;
             try {
-                byte[] body = AgentTurn.writeRequest(settings.model(), messages, tools, settings.tuning());
+                body = AgentTurn.writeRequest(settings.model(), messages, tools, settings.tuning());
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            OutboundCall<OutboundHttpResponse> call;
+            final AgentModelReservation turnBudget;
+            try {
+                turnBudget = resources.reserveModelTurn(turns);
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            inFlightBudget = turnBudget;
+            try {
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
                         Duration.ofMillis(remaining),
                         settings.profile().credentialBinding().orElse(null)));
             } catch (RuntimeException failure) {
+                turnBudget.indeterminate();
                 result.completeExceptionally(sanitize(failure));
                 return;
             }
@@ -1017,17 +1078,20 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 }
                 try {
                     if (failure != null) {
+                        turnBudget.indeterminate();
                         result.completeExceptionally(sanitize(failure));
                     } else {
-                        advance(response, result);
+                        advance(response, result, turnBudget);
                     }
                 } catch (RuntimeException invalid) {
+                    turnBudget.indeterminate();
                     result.completeExceptionally(sanitize(invalid));
                 }
             });
         }
 
-        private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result) {
+        private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result,
+                             AgentModelReservation turnBudget) {
             int status = response.statusCode();
             if (status < 200 || status >= 300) {
                 // The body is NOT read into the failure. An endpoint's error document is remote text
@@ -1035,6 +1099,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 throw new AgentException(AgentException.Code.ENDPOINT_REJECTED);
             }
             AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
+            turnBudget.settle(turn.promptTokens(), turn.completionTokens());
             var modelOutput = new LinkedHashMap<String, Object>();
             modelOutput.put("answer", turn.answer());
             var requestedTools = new ArrayList<Map<String, Object>>(turn.toolCalls().size());
@@ -1107,6 +1172,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 try {
                     Throwable cause = unwrap(failure);
                     if (cause instanceof AgentApprovalSuspension suspension) {
+                        suspended = true;
+                        resources.suspend();
                         result.completeExceptionally(suspension.signal());
                         return;
                     }
@@ -1276,10 +1343,16 @@ public final class AgentNodeBehavior implements NodeBehavior {
          */
         void abort() {
             over = true;
+            AgentModelReservation budget = inFlightBudget;
+            if (budget != null) budget.indeterminate();
             OutboundCall<OutboundHttpResponse> current = inFlight;
             if (current != null) {
                 current.cancel();
             }
+        }
+
+        boolean suspended() {
+            return suspended;
         }
     }
 

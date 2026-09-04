@@ -450,6 +450,15 @@ public interface ExecutionStore extends AutoCloseable {
         return toolApprovalsUnsupported();
     }
 
+    /** Loads this process's durable agent authority ledger, when registered. */
+    default CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        if (!supports(StoreCapability.AGENT_AUTHORITY_BUDGETS)) {
+            return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                    new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
+        }
+        return java.util.concurrent.CompletableFuture.completedFuture(Optional.empty());
+    }
+
     /** Additive fail-closed default for adapters that have not implemented tool approvals. */
     private static <T> CompletionStage<T> toolApprovalsUnsupported() {
         var refused = new java.util.concurrent.CompletableFuture<T>();

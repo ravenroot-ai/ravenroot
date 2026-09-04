@@ -386,7 +386,9 @@ class AgentMcpToolsTest {
                 AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
                 AiTestSupport.resolvingMcp(new McpProfile("alpha", java.net.URI.create(ALPHA),
                         java.util.Optional.empty(), 5_000, 1024 * 1024, 1, Set.of("search"))));
+        var resources = new AiTestSupport.TrackingAgentResources();
         var http = new AiTestSupport.RoutedHttp(CHAT)
+                .resources(resources)
                 .chattingForever()
                 .serving(ALPHA, new McpDouble("alpha", "search"));
 
@@ -398,10 +400,14 @@ class AgentMcpToolsTest {
 
         AgentException failure = failureOf(behavior.create(configuration("alpha"), http));
         assertEquals(AgentException.Code.CAPACITY_UNAVAILABLE, failure.code());
+        assertEquals(2, resources.admissions.get());
+        assertEquals(1, resources.cancels.get(),
+                "the run refused after admission must cancel its durable grant");
 
         // And the refusal released the model-profile lease it had already taken before reaching the
         // full server -- the unwind path that only this ordering exercises.
         holding.cancel(true);
+        assertEquals(2, resources.cancels.get());
         assertEquals(0, behavior.mcpAdmissionEntries());
         assertEquals(0, behavior.admissionEntries());
     }
@@ -413,7 +419,8 @@ class AgentMcpToolsTest {
         // has no path that could return one. Adding CREDENTIAL_RESOLUTION here would replace that
         // property with a promise.
         assertEquals(Set.of(NodePackageCapability.OUTBOUND_HTTP,
-                        NodePackageCapability.TOOL_AUTHORIZATION),
+                        NodePackageCapability.TOOL_AUTHORIZATION,
+                        NodePackageCapability.AGENT_RESOURCES),
                 new AgentNodeBehavior().requiredServices());
         assertTrue(new AgentNodeBehavior().descriptor().properties().stream()
                 .anyMatch(property -> "mcpServers".equals(property.name())));

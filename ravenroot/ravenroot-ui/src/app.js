@@ -2,6 +2,10 @@ import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
+import { isLayeredMode } from './layered-drawing.js';
+import {
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, layeredDrawingOf, registerLayeredLayout,
+} from './layered-layout.js';
 import * as d3 from 'd3';
 import {
   detectAndParse,
@@ -2751,6 +2755,7 @@ function initCy(elements, gd, options = {}) {
   }
   if (typeof cytoscapeElk !== 'undefined') {
     try { cytoscape.use(cytoscapeElk); } catch(e) { /* already registered */ }
+    try { registerLayeredLayout(cytoscape); } catch(e) { /* already registered */ }
   }
   if (typeof cytoscapeEuler !== 'undefined') {
     try { cytoscape.use(cytoscapeEuler); } catch(e) { /* already registered */ }
@@ -3043,6 +3048,18 @@ function initCy(elements, gd, options = {}) {
         owner.cytoEdgeGeometryRaf = null;
         if (owner.cy !== event.cy || owner.layoutMode !== 'hierarchical') return;
         applyHierarchicalEdgeRoutes(owner.cy);
+      });
+      return;
+    }
+    if (isLayeredMode(owner.layoutMode)) {
+      // The animated arrangement itself publishes its routes once, after `layoutstop`; only a
+      // later manual move needs edges repainted, and then only the moved node's edges leave the
+      // drawing while every other route stays exactly as drawn.
+      if (owner.layoutBusy || owner.cytoEdgeGeometryRaf != null) return;
+      owner.cytoEdgeGeometryRaf = requestAnimationFrame(() => {
+        owner.cytoEdgeGeometryRaf = null;
+        if (owner.cy !== event.cy || !isLayeredMode(owner.layoutMode)) return;
+        applyLayeredRoutes(owner.cy, owner);
       });
       return;
     }
@@ -3781,6 +3798,36 @@ function scheduleHierarchicalEdgeRoutes(owner, target, token, complete = null) {
   });
 }
 
+// The layered arrangements draw placement and routing as one result. Edges the drawing still
+// describes are painted from it; a self-loop keeps the Cyto loop; an edge the drawing cannot
+// vouch for — authored since, or with an endpoint moved by hand — takes the dynamic Cyto route.
+function applyLayeredRoutes(target = cy, owner = workspace.documents.find(document_ => document_.cy === target)) {
+  if (!target) return;
+  const drawing = layeredDrawingOf(target);
+  if (!drawing) return applyCytoEdgeCurves(target, owner);
+  const stale = applyLayeredEdgeRoutes(target, drawing, { loop: edge => applyCustomLoop(edge, { cytoMode: true }) });
+  if (!stale.length) return;
+  const routes = rendererRouteSet(target, 'cyto', null, owner);
+  stale.forEach(edge => {
+    const route = routes.get(edge.id());
+    if (route) applyViewerUnbundledRoute(edge, route, { lineCap: 'round' });
+  });
+}
+
+function scheduleLayeredEdgeRoutes(owner, target, token, complete = null) {
+  if (!layoutRequestIsCurrent(token)) return;
+  owner.layoutDeferredRaf = requestAnimationFrame(() => {
+    owner.layoutDeferredRaf = null;
+    if (layoutRequestIsCurrent(token)) {
+      if (!layeredDrawingOf(target) && owner === workspace.active) {
+        announceGraph('The layered arrangement could not be computed. Node positions are unchanged.');
+      }
+      applyLayeredRoutes(target, owner);
+    }
+    complete?.();
+  });
+}
+
 function scheduleN8n3EdgeCurves(owner, target, token, complete = null) {
   if (!layoutRequestIsCurrent(token)) return;
   owner.layoutDeferredRaf = requestAnimationFrame(() => {
@@ -3947,6 +3994,7 @@ function applyActiveEdgeVisualContract(target = cy, mode = visualStyle) {
   });
   if (route.family === 'taxi' && mode === 'n8n') applyN8nBaseEdgeStyle(target, mode);
   else if (routeMode === 'hierarchical') applyHierarchicalEdgeRoutes(target);
+  else if (isLayeredMode(owner?.layoutMode) && mode === 'cyto') applyLayeredRoutes(target, owner);
   else if (route.family === 'round-taxi') applyN8n2EdgeCurves(target);
   else if (mode === 'n8n3') applyN8n3EdgeCurves(target);
   // N8N4 is deliberately hybrid per edge. Never choose a renderer-wide fallback from the last
@@ -3984,7 +4032,7 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // as ELK-backed modes even though only ELK modes need the per-document serialisation slot. Keeping
 // the two concerns separate prevents an ELK -> native queue hand-off from briefly publishing idle
 // while the replacement layout is already registered and about to start.
-const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', ...ELK_LAYOUT_MODES]);
+const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'flow-new', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
 const DESIGN_ARRANGEMENTS = Object.freeze({
@@ -3992,6 +4040,9 @@ const DESIGN_ARRANGEMENTS = Object.freeze({
   flow: Object.freeze({ layout: 'dagre' }),
   organic: Object.freeze({ layout: 'cose' }),
   keep: Object.freeze({ preservePositions: true }),
+  // Additive layered drawings (ADR 0034). The four entries above are untouched by design.
+  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
+  'flow-new': Object.freeze({ layout: 'flow-new' }),
 });
 
 function renderModeLabel(mode) {
@@ -4063,6 +4114,7 @@ function finishOwnedLayout(token) {
       }
     }
     const deferredRouting = token.mode === 'hierarchical' ? scheduleHierarchicalEdgeRoutes
+      : isLayeredMode(token.mode) ? scheduleLayeredEdgeRoutes
       : owner.visualStyle === 'n8n2' ? scheduleN8n2EdgeCurves
       : owner.visualStyle === 'n8n3' ? scheduleN8n3EdgeCurves
         : owner.visualStyle === 'n8n4' ? scheduleN8n4EdgeCurves
@@ -4196,6 +4248,13 @@ function runOwnedLayout(token) {
     fit: !fitAfterLayout,
     animate,
   }));
+  else if (isLayeredMode(token.mode)) nativeLayout = target.layout({
+    name: LAYERED_LAYOUT_NAME, mode: token.mode,
+    animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
+    fit: !fitAfterLayout, padding: 70,
+    isCurrent: () => layoutRequestIsCurrent(token),
+    onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
+  });
   else if (token.mode === 'preset') {
     target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
     target.fit(60);
@@ -4283,7 +4342,9 @@ function setLayout(name, options = {}) {
   syncPaneLayout();
 
   let job;
-  const kind = ELK_LAYOUT_MODES.has(name) ? 'elk' : 'native';
+  // Layered drawings share the ELK serialisation contract: one asynchronous engine run per
+  // document at a time, cancelled before it starts and otherwise allowed to settle.
+  const kind = ELK_LAYOUT_MODES.has(name) || isLayeredMode(name) ? 'elk' : 'native';
   const request = layoutSessions.request({
     documentId: owner.id,
     cy: target,

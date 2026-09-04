@@ -42,6 +42,7 @@ their architecture status and wording are ready for publication.
 | 2026-09-03 | 0031 | Accepted | [Durable canonical graph definitions for accepted executions](0031-durable-canonical-graph-definitions.md) |
 | 2026-09-03 | 0032 | Superseded in part | [The durable process inventory is authoritative rows, not a projection](0032-durable-process-inventory-is-authoritative-rows.md) |
 | 2026-09-04 | 0033 | Accepted | [Durable operator holds on traversals](0033-durable-operator-holds.md) |
+| 2026-09-04 | 0034 | Accepted | [Layered graph drawing in the design editor](0034-layered-graph-drawing-in-the-design-editor.md) |
 
 ## Status vocabulary
 

@@ -140,6 +140,31 @@ describe('application command catalog', () => {
     expect(setRenderMode.mock.calls).toEqual([['design'], ['monitoring']]);
   });
 
+  it('adds the layered arrangements as a sibling group after the established four', () => {
+    const commands = createAppCommands({});
+    const established = commands.filter(command => command.group === 'design-arrange');
+    const layered = commands.filter(command => command.group === 'design-arrange-layered');
+    expect(layered.map(command => command.id)).toEqual([
+      'layout.arrange.hierarchical-new',
+      'layout.arrange.flow-new',
+    ]);
+    expect(layered.map(command => command.label)).toEqual([
+      'Arrange — Hierarchical (new)',
+      'Arrange — Flow (new)',
+    ]);
+    expect(Math.min(...layered.map(command => command.order)))
+      .toBeGreaterThan(Math.max(...established.map(command => command.order)));
+    expect(layered.every(command => command.kind == null
+      && command.placements.includes('menu.layout') && command.placements.includes('help'))).toBe(true);
+    expect(layered.every(command => command.isEnabled({ hasDocument: true, renderMode: 'design' }))).toBe(true);
+    expect(layered.some(command => command.isEnabled({ hasDocument: true, renderMode: 'monitoring' }))).toBe(false);
+    const arrange = vi.fn();
+    const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));
+    spied['layout.arrange.hierarchical-new'].execute();
+    spied['layout.arrange.flow-new'].execute();
+    expect(arrange.mock.calls).toEqual([['hierarchical-new'], ['flow-new']]);
+  });
+
   it('offers semantic Design arrangements as actions after the render modes', () => {
     const byId = Object.fromEntries(commands.map(command => [command.id, command]));
     const arrangeCommands = commands.filter(command => command.group === 'design-arrange');

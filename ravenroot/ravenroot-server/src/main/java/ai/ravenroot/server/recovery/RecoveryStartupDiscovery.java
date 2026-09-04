@@ -47,10 +47,23 @@ public final class RecoveryStartupDiscovery implements AutoCloseable {
     private static final System.Logger LOGGER =
             System.getLogger("ai.ravenroot.server.recovery.RecoveryStartupDiscovery");
 
+    /**
+     * How many inherited instances one startup pass classifies before it reports and opens readiness.
+     *
+     * <p>Bounded because readiness waits for this pass, and an unbounded scan makes the wait a
+     * function of how much work the deployment inherited. A deployment restarting with a very large
+     * interrupted cohort would refuse traffic for the whole scan — turning a check that exists to
+     * prevent an outage into one. The instances past the bound are not lost or ignored: the ordinary
+     * sweep claims and decides them exactly as it decides the ones inside it, which is what acts on
+     * any of them. Only the startup report is truncated, and it says so.</p>
+     */
+    public static final int DEFAULT_MAX_CLASSIFICATIONS = 500;
+
     private final ExecutionRecoveryService recovery;
     private final ExecutionRecoveryCoordinator coordinator;
     private final Predicate<StoreCapability> storeSupports;
     private final Duration retryInterval;
+    private final int maxClassifications;
     private final ScheduledExecutorService executor;
     private final AtomicReference<Result> result = new AtomicReference<>();
 
@@ -67,6 +80,26 @@ public final class RecoveryStartupDiscovery implements AutoCloseable {
                                     ExecutionRecoveryCoordinator coordinator,
                                     Predicate<StoreCapability> storeSupports,
                                     Duration retryInterval) {
+        this(recovery, coordinator, storeSupports, retryInterval, DEFAULT_MAX_CLASSIFICATIONS);
+    }
+
+    /**
+     * Composes the startup pass with an explicit bound on how much it classifies.
+     *
+     * @param recovery      the sweep whose durable inventory discovery this pass reuses.
+     * @param coordinator   the authority each discovered instance is classified through.
+     * @param storeSupports the composed store's capability test.
+     * @param retryInterval how long to wait before re-running a pass that could not complete.
+     * @param maxClassifications greatest number of instances one pass classifies; must be positive.
+     */
+    public RecoveryStartupDiscovery(ExecutionRecoveryService recovery,
+                                    ExecutionRecoveryCoordinator coordinator,
+                                    Predicate<StoreCapability> storeSupports,
+                                    Duration retryInterval, int maxClassifications) {
+        if (maxClassifications < 1) {
+            throw new IllegalArgumentException("maxClassifications must be positive");
+        }
+        this.maxClassifications = maxClassifications;
         this.recovery = Objects.requireNonNull(recovery, "recovery");
         this.coordinator = Objects.requireNonNull(coordinator, "coordinator");
         this.storeSupports = Objects.requireNonNull(storeSupports, "storeSupports");
@@ -115,15 +148,21 @@ public final class RecoveryStartupDiscovery implements AutoCloseable {
                 // not have to work out from the adapter's documentation why nothing was scanned.
                 LOGGER.log(System.Logger.Level.INFO,
                         "ravenroot_recovery_discovery skipped=no-durable-inventory");
-                result.compareAndSet(null, new Result(List.of(), false));
+                result.compareAndSet(null, new Result(List.of(), false, false));
                 return;
             }
-            List<RecoveryCandidate> candidates = coordinator.classify(recovery.discoverInterrupted());
+            // One more than the bound, so a cohort that exactly fills it is not reported as truncated
+            // and one that overflows is — without a second scan to find out which.
+            List<ai.ravenroot.api.persistence.ProcessInventoryEntry> discovered =
+                    recovery.discoverInterrupted(maxClassifications + 1);
+            boolean truncated = discovered.size() > maxClassifications;
+            List<RecoveryCandidate> candidates = coordinator.classify(
+                    truncated ? discovered.subList(0, maxClassifications) : discovered);
             long refused = candidates.stream().filter(candidate -> !candidate.rehydratable()).count();
             LOGGER.log(System.Logger.Level.INFO,
-                    "ravenroot_recovery_discovery interrupted={0} recoverable={1} refused={2}",
-                    candidates.size(), candidates.size() - refused, refused);
-            result.compareAndSet(null, new Result(candidates, true));
+                    "ravenroot_recovery_discovery interrupted={0} recoverable={1} refused={2} truncated={3}",
+                    candidates.size(), candidates.size() - refused, refused, truncated);
+            result.compareAndSet(null, new Result(candidates, true, truncated));
         } catch (RuntimeException incomplete) {
             // Deliberately not completed: the durable state could not be read, so nothing is known
             // about it yet, and readiness stays closed until a later pass does know.
@@ -144,8 +183,10 @@ public final class RecoveryStartupDiscovery implements AutoCloseable {
      * @param scanned    whether a durable inventory was actually scanned; {@code false} when the
      *                   composed store offers none, in which case {@code candidates} is empty because
      *                   nothing was looked at rather than because nothing was found.
+     * @param truncated  whether more interrupted instances exist than this pass classified. The rest
+     *                   are decided by the ordinary sweep; only this report stops short of them.
      */
-    public record Result(List<RecoveryCandidate> candidates, boolean scanned) {
+    public record Result(List<RecoveryCandidate> candidates, boolean scanned, boolean truncated) {
 
         /** Freezes the classified cohort. */
         public Result {

@@ -147,17 +147,50 @@ class RecoveryStartupDiscoveryTest {
         }
     }
 
+    @Test
+    @DisplayName("readiness is not held hostage to the size of the inherited cohort")
+    void aCohortLargerThanTheBoundIsReportedTruncatedRatherThanScannedWhole() throws Exception {
+        try (var store = new InMemoryExecutionStore(clock);
+             var definitions = new InMemoryGraphDefinitionStore(clock)) {
+            for (int instance = 0; instance < 5; instance++) {
+                interrupted(store, "66".repeat(32));
+            }
+            Composed composed = recoveryOver(store, definitions);
+            try (var discovery = new RecoveryStartupDiscovery(composed.service(), composed.coordinator(),
+                    capability -> true, TICK, 2)) {
+                discovery.start();
+
+                RecoveryStartupDiscovery.Result result = awaitCompletion(discovery);
+
+                assertTrue(result.scanned());
+                assertEquals(2, result.candidates().size(),
+                        "the pass stops at its bound so readiness does not wait on a scan whose "
+                                + "length is a function of how much work was inherited");
+                assertTrue(result.truncated(),
+                        "and it says so, rather than reporting a partial cohort as the whole one");
+            }
+        }
+    }
+
     // ------------------------------------------------------------------ fixture
 
     private RecoveryStartupDiscovery discoveryOver(ExecutionStore store,
                                                    InMemoryGraphDefinitionStore definitions,
                                                    java.util.function.Predicate<StoreCapability> supports) {
+        Composed composed = recoveryOver(store, definitions);
+        return new RecoveryStartupDiscovery(composed.service(), composed.coordinator(), supports, TICK);
+    }
+
+    private Composed recoveryOver(ExecutionStore store, InMemoryGraphDefinitionStore definitions) {
         var authority = new PinnedGraphRecoveryAuthority(store, definitions, null,
                 behavior -> Optional.empty(), GraphExecutionLimits.DEFAULTS);
         var coordinator = new ExecutionRecoveryCoordinator(authority, List.of());
         var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "startup-discovery", 10,
                 Duration.ofSeconds(30), coordinator.declarations(), coordinator);
-        return new RecoveryStartupDiscovery(recovery, coordinator, supports, TICK);
+        return new Composed(recovery, coordinator);
+    }
+
+    private record Composed(ExecutionRecoveryService service, ExecutionRecoveryCoordinator coordinator) {
     }
 
     /** An instance left non-terminal with no live lease: the durable shape of interrupted work. */

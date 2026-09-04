@@ -86,7 +86,13 @@ class ExecutionRecoveryCoordinatorTest {
 
         PendingWork claimed = claim();
 
-        assertFalse(coordinator.canDispatch(claimed));
+        RecoveryAdmission admission = coordinator.admits(claimed);
+
+        assertFalse(admission.proceeds());
+        assertFalse(admission.repairableByWaiting(),
+                "a document that was never stored will not appear by waiting, so this refusal is the "
+                        + "bounded kind rather than the kind that resolves on its own");
+        assertFalse(admission.detail().isBlank());
         assertTrue(adapter.asked.isEmpty(),
                 "the adapter must not even be consulted: asking it spends a durable read to reach a "
                         + "refusal the coordinator had already decided");
@@ -208,6 +214,118 @@ class ExecutionRecoveryCoordinatorTest {
                         + "must not re-read and re-parse it");
     }
 
+    @Test
+    @DisplayName("an ambiguous attempt this deployment will never rebuild parks once its delivery budget is spent")
+    void aDeterministicRefusalIsBoundedAndEndsInAParkNamingTheDeploymentFault() {
+        // The reviewer's probe shape: a pin naming a document that was never stored, which classifies
+        // DEFINITION_UNRESOLVED and will classify identically on every later sweep.
+        Fixture fixture = scheduleAttempt("33".repeat(32));
+        driveToRunning(fixture);
+        var adapter = new RecordingAdapter(true);
+        var coordinator = new ExecutionRecoveryCoordinator(authority(), List.of(adapter));
+        // Two deliveries of budget, and the crash above already spent one: the sweep below is
+        // delivery two and is inside the bound, the next is delivery three and is past it. Stated
+        // rather than tuned, because a budget that happened to park on the first sweep would pass
+        // this test while proving nothing about the grace period.
+        var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-1", 10, TTL,
+                coordinator.declarations(), coordinator, 2);
+
+        RecoveryOutcome first = recovery.sweepOnce().get(0);
+        assertInstanceOf(RecoveryOutcome.Deferred.class, first,
+                "inside the bound the item is withheld, which is the grace an operator gets to "
+                        + "correct the deployment");
+        assertEquals(NodeAttemptStatus.RUNNING, currentAttempt(fixture).status());
+
+        clock.advance(TTL.plusSeconds(1));
+        RecoveryOutcome second = recovery.sweepOnce().get(0);
+
+        var parked = assertInstanceOf(RecoveryOutcome.Parked.class, second,
+                "withholding an effect that already happened, forever, is worse than the park it "
+                        + "replaced: the park at least puts the decision in front of a human");
+        assertEquals(NodeAttemptStatus.PARKED, currentAttempt(fixture).status());
+        assertTrue(parked.cause().contains("cannot rebuild the execution"),
+                () -> "the cause must name the deployment fault rather than report the attempt as "
+                        + "though its author had declared nothing. Got: " + parked.cause());
+        assertTrue(parked.cause().contains("no graph definition is stored"),
+                () -> "and it must carry the classified reason through. Got: " + parked.cause());
+        assertTrue(adapter.asked.isEmpty(), "unsafe dispatch stayed closed throughout");
+
+        // Parked means out of the loop: a conforming adapter excludes it from the claim query.
+        clock.advance(TTL.multipliedBy(10));
+        assertTrue(await(store.claimPendingWork(TENANT, "recovery-2", 10, TTL)).isEmpty());
+    }
+
+    @Test
+    @DisplayName("a refusal that waiting could clear never parks, however many sweeps it survives")
+    void aRetryableRefusalIsWithheldWithoutEverConsumingTheDeliveryBudget() {
+        Fixture fixture = storedGraphFixture();
+        driveToRunning(fixture);
+        // The document exists; the store simply cannot be read right now. Spending the budget on
+        // this would park every ambiguous attempt outstanding during an outage the moment it cleared.
+        definitions.unavailable = true;
+        var coordinator = new ExecutionRecoveryCoordinator(authority(), List.of(new RecordingAdapter(true)));
+        var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-1", 10, TTL,
+                coordinator.declarations(), coordinator, 2);
+
+        for (int sweep = 0; sweep < 6; sweep++) {
+            assertInstanceOf(RecoveryOutcome.Deferred.class, recovery.sweepOnce().get(0),
+                    "a store that may answer later must not be treated as a deployment fault");
+            clock.advance(TTL.plusSeconds(1));
+        }
+        assertEquals(NodeAttemptStatus.RUNNING, currentAttempt(fixture).status(),
+                "six sweeps past a budget of two, and still not parked");
+
+        definitions.unavailable = false;
+        var outcome = recovery.sweepOnce().get(0);
+        assertInstanceOf(RecoveryOutcome.Parked.class, outcome,
+                "once the store answers, the ordinary ambiguity decision runs: this node declares "
+                        + "nothing, so it parks for a human on its own merits");
+    }
+
+    @Test
+    @DisplayName("a never-started attempt is withheld and never parked, however long the refusal lasts")
+    void aNeverStartedAttemptIsNeverParkedForADeploymentFault() {
+        Fixture fixture = scheduleAttempt("44".repeat(32));
+        var coordinator = new ExecutionRecoveryCoordinator(authority(), List.of(new RecordingAdapter(true)));
+        var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-1", 10, TTL,
+                coordinator.declarations(), coordinator, 2);
+
+        for (int sweep = 0; sweep < 4; sweep++) {
+            assertInstanceOf(RecoveryOutcome.Deferred.class, recovery.sweepOnce().get(0));
+            clock.advance(TTL.plusSeconds(1));
+        }
+
+        assertEquals(NodeAttemptStatus.SCHEDULED, currentAttempt(fixture).status(),
+                "parking asks a human to adjudicate an effect, and this attempt provably never "
+                        + "produced one; the aggregate refuses SCHEDULED -> PARKED for the same reason");
+    }
+
+    @Test
+    @DisplayName("a due timer is not withheld by an execution this deployment cannot rebuild")
+    void anExpiryTimerClosesItsWaitEvenOnAnUnrebuildableExecution() {
+        Fixture fixture = scheduleAttempt("55".repeat(32));
+        UUID timerId = UUID.randomUUID();
+        StoredProcessInstance current = await(store.load(fixture.key));
+        await(store.apply(ExecutionBatch.to(fixture.key)
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .scheduleTimer(new ai.ravenroot.api.persistence.TimerSchedule(timerId, clock.instant(),
+                        fixture.traversalId, fixture.invocationId,
+                        ai.ravenroot.api.persistence.OpaquePayload.empty("application/octet-stream")))
+                .build()));
+        var adapter = new TimerAdapter();
+        var coordinator = new ExecutionRecoveryCoordinator(authority(), List.of(adapter));
+        var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-1", 10, TTL,
+                coordinator.declarations(), coordinator);
+
+        List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+        assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                () -> "closing a durable wait rebuilds nothing -- the dispatcher commits store "
+                        + "transitions under this claim's fence -- so gating it on a rebuild that "
+                        + "never happens strands a task that can then never expire. Got: " + outcomes);
+        assertEquals(List.of(timerId), adapter.dispatched);
+    }
+
     // ------------------------------------------------------------------ fixture
 
     private PinnedGraphRecoveryAuthority authority() {
@@ -285,6 +403,19 @@ class ExecutionRecoveryCoordinatorTest {
                 .orElseThrow(() -> new IllegalStateException("the inventory does not hold " + key));
     }
 
+    /** Claims the attempt, writes RUNNING under the fence and abandons it -- a crash mid-dispatch. */
+    private void driveToRunning(Fixture fixture) {
+        PendingWork claimed = await(store.claimPendingWork(TENANT, "dead-worker", 10, TTL)).get(0);
+        StoredProcessInstance current = await(store.load(fixture.key));
+        await(store.apply(ExecutionBatch.to(fixture.key)
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .fencedBy(claimed.fencingToken())
+                .apply(new ExecutionTransition.AttemptTransitioned(fixture.traversalId,
+                        fixture.invocationId, fixture.attemptId, NodeAttemptStatus.RUNNING))
+                .build()));
+        clock.advance(TTL.plusSeconds(1));
+    }
+
     private PendingWork claim() {
         return await(store.claimPendingWork(TENANT, "recovery-1", 1, TTL)).get(0);
     }
@@ -337,6 +468,8 @@ class ExecutionRecoveryCoordinatorTest {
             implements ai.ravenroot.api.persistence.GraphDefinitionStore {
         private final ai.ravenroot.api.persistence.GraphDefinitionStore delegate;
         private int loads;
+        /** Flipped by a test to make the store answer "ask me later" rather than "never". */
+        private boolean unavailable;
 
         private CountingGraphDefinitionStore(ai.ravenroot.api.persistence.GraphDefinitionStore delegate) {
             this.delegate = delegate;
@@ -362,6 +495,12 @@ class ExecutionRecoveryCoordinatorTest {
         public CompletionStage<ai.ravenroot.api.persistence.StoredGraphDefinition> load(
                 ai.ravenroot.api.persistence.GraphDefinitionKey key) {
             loads++;
+            if (unavailable) {
+                return java.util.concurrent.CompletableFuture.failedStage(
+                        new ai.ravenroot.api.persistence.GraphDefinitionStoreException(
+                                new ai.ravenroot.api.persistence.GraphDefinitionStoreFailure
+                                        .Unavailable("the definition store is unreachable")));
+            }
             return delegate.load(key);
         }
 
@@ -389,6 +528,21 @@ class ExecutionRecoveryCoordinatorTest {
         @Override
         public void close() {
             delegate.close();
+        }
+    }
+
+    /** Claims only timers, so a timer's disposition is observed apart from every other kind. */
+    private static final class TimerAdapter implements RecoveryDispatcher {
+        private final List<UUID> dispatched = new ArrayList<>();
+
+        @Override
+        public boolean canDispatch(PendingWork item) {
+            return item instanceof PendingWork.TimerDue;
+        }
+
+        @Override
+        public void dispatch(PendingWork item, String idempotencyKey) {
+            dispatched.add(item.workItemId());
         }
     }
 

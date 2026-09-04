@@ -28,7 +28,7 @@ import java.util.Objects;
  * discovers and classifies its outstanding work, it simply sends none of it.</p>
  *
  * <h2>Classification precedes ownership</h2>
- * <p>{@link #withholds} is answered before any adapter is consulted, not after. An adapter's
+ * <p>{@link #admits} is answered before any adapter is consulted, not after. An adapter's
  * {@code canDispatch} is not a pure question — it loads durable state and, for the continuation
  * executors, rebuilds a graph — so asking an adapter about an execution this deployment has already
  * decided it cannot reproduce spends that work to reach a refusal that was already known. Deciding
@@ -73,52 +73,63 @@ public final class ExecutionRecoveryCoordinator implements RecoveryDispatcher {
     }
 
     /**
-     * Whether this deployment may act on {@code item}'s execution at all.
+     * Whether this deployment may act on {@code item}'s execution at all, and if not, whether waiting
+     * could change that.
      *
      * <p>This is where the fail-closed gate lives, rather than inside {@link #canDispatch}, because
-     * the recovery loop disposes of the two answers differently — see
-     * {@link RecoveryDispatcher#withholds}. A refusal is reported here, once, with its reason intact;
-     * inside {@code canDispatch} it would disappear into a boolean the loop reads as "nothing owns
-     * this kind", and an ambiguous attempt would then be parked for a deployment fault.</p>
+     * the recovery loop disposes of the two answers differently — see {@link RecoveryDispatcher#admits}.
+     * A refusal is reported here, once, with its reason intact; inside {@code canDispatch} it would
+     * disappear into a boolean the loop reads as "nothing owns this kind", and an ambiguous attempt
+     * would then be parked immediately for a deployment fault, reported as though its author had
+     * declared nothing.</p>
+     *
+     * <p>The classification's own retryability decides which refusal this is, and the mapping is the
+     * whole point of keeping the two apart. A document or manifest that is absent, that does not
+     * verify, or that this deployment resolves differently will answer the same way on every later
+     * sweep, so waiting alone repairs none of them: those are deterministic, and the loop bounds them.
+     * A store that could not be read is expected to answer eventually, so that one waits.</p>
      *
      * @param item claimed work item.
-     * @return {@code true} when the pinned document or the manifest does not resolve here.
+     * @return whether the item proceeds, waits, or waits and then parks.
      */
     @Override
-    public boolean withholds(PendingWork item) {
+    public RecoveryAdmission admits(PendingWork item) {
         Objects.requireNonNull(item, "item");
         RecoveryClassification classification = authority.classify(item.key());
-        if (classification instanceof RecoveryClassification.Refused refused) {
-            authority.report(refused);
-            return true;
+        if (!(classification instanceof RecoveryClassification.Refused refused)) {
+            return RecoveryAdmission.admitted();
         }
-        return false;
+        authority.report(refused);
+        return refused.reason() == RecoveryClassification.Reason.UNAVAILABLE
+                ? RecoveryAdmission.retryable(refused.detail())
+                : RecoveryAdmission.deterministic(refused.detail());
     }
 
     /**
-     * Whether an adapter may be handed {@code item} at all.
+     * Whether exactly one registered adapter claims {@code item}.
      *
-     * <p>Honours {@link #withholds} as well as ownership. The recovery loop asks the two in order and
-     * would never reach here on a withheld item, so this is not that call site's guard: it is the
-     * guard for any other caller of the dispatcher contract, and for a later loop that adds a path
-     * without repeating the first question.</p>
+     * <p>Ownership only. It deliberately does <em>not</em> repeat the classification: the recovery
+     * loop asks {@link #admits} first and does not reach this method on a withheld item, and
+     * classifying again here cost a second aggregate read and a second manifest verification per
+     * item per sweep to re-derive an answer the caller was already holding. A caller that reaches
+     * this method without having asked {@link #admits} is asking a different question than the loop
+     * asks, and would get an answer about ownership rather than about entitlement.</p>
      *
      * @param item claimed work item.
-     * @return {@code true} only when this deployment may act on the execution and exactly one
-     *         registered adapter claims the item.
+     * @return {@code true} when exactly one registered adapter claims the item.
      */
     @Override
     public boolean canDispatch(PendingWork item) {
-        return !withholds(item) && owner(item, false) != null;
+        return owner(item, false) != null;
     }
 
     /**
      * Hands {@code item} to the adapter that owns it.
      *
-     * <p>The classification is not repeated here. The recovery loop asks {@link #withholds} and then
-     * {@link #canDispatch} immediately before this, and re-reading the manifest and the document a
-     * third time would be a new answer to a question already answered — one that could differ from
-     * the answer the loop acted on, which is worse than not asking.</p>
+     * <p>The classification is not repeated here. The recovery loop asks {@link #admits} and then
+     * {@link #canDispatch} immediately before this, and re-reading the manifest and the document
+     * again would be a new answer to a question already answered — one that could differ from the
+     * answer the loop acted on, which is worse than not asking.</p>
      *
      * @param item           claimed work item.
      * @param idempotencyKey effect identity to present.

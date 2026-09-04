@@ -30,9 +30,9 @@ Begin with process and readiness probes, then isolate bind, identity, engine, or
 
 **Diagnosis:** The retained graph document or the execution manifest for that instance does not resolve in this deployment: it is missing, does not verify, or the deployment now resolves something the manifest does not describe.
 
-**Action:** Read the refusal logged for that instance; it names the instance and the reason. Restore the deployment the execution was accepted under, or abandon that work deliberately. Refused work is left untouched and still claimable — it is not parked, acknowledged or discarded — so correcting the deployment lets it proceed.
+**Action:** Read the refusal logged for that instance; it names the instance and the reason. Restore the deployment the execution was accepted under, or abandon that work deliberately. You have a bounded window: refused work is left untouched and still claimable while it waits, but an attempt that was already in flight when the process died is parked once its delivery budget is spent, with a cause naming this fault, because it stands for an effect whose outcome nobody knows. An attempt that had not started is never parked and waits for you indefinitely.
 
-**Verify:** Restart and confirm the instance no longer appears among the refusals in the recovery classification log line.
+**Verify:** Restart and confirm the instance no longer appears among the refusals in the recovery classification log line. If an attempt was parked while the deployment was wrong, correcting the deployment does not un-park it — parked attempts are resolved deliberately, never by a later sweep.
 
 ## The selected engine is unavailable
 

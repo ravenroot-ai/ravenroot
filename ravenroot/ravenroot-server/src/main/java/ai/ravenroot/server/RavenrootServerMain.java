@@ -158,9 +158,18 @@ public final class RavenrootServerMain {
         // never be allowed to replace the real diagnosis with an unrelated audit failure. See
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
+        ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
+                ? new ai.ravenroot.core.approval.ToolApprovalService(
+                        approvalStore, java.time.Clock.systemUTC()) : null;
+        ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings = toolApprovals == null
+                ? null : ai.ravenroot.server.approval.ToolApprovalConfiguration
+                        .fromEnvironment(System.getenv());
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
-                new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail));
+                new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
+                toolApprovals, toolApprovalSettings);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -208,11 +217,34 @@ public final class RavenrootServerMain {
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
+        var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
-                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), executionStore,
+                executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
-                executionStoreOwner.graphDefinitionStore());
+                executionStoreOwner.graphDefinitionStore(), toolApprovals);
+        final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
+        if (toolApprovals == null) {
+            approvalRecovery = null;
+        } else {
+            var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
+                    .fromEnvironment(System.getenv());
+            toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
+            String recoveryWorker = "ravenroot-tool-approval-" + java.util.UUID.randomUUID();
+            var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
+                    executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals,
+                    engine, behaviors, monitor,
+                    executionIdentities, recoveryWorker, recoveryConfiguration.leaseTtl());
+            var approvalDispatcher = new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
+                    executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor);
+            var recoveryService = new ai.ravenroot.core.recovery.ExecutionRecoveryService(
+                    executionStore, recoveryConfiguration.tenantIds(), recoveryWorker,
+                    recoveryConfiguration.batchLimit(), recoveryConfiguration.leaseTtl(),
+                    ai.ravenroot.core.recovery.RepeatabilityDeclarations.NONE_DECLARED,
+                    approvalDispatcher);
+            approvalRecovery = new ai.ravenroot.server.approval.ToolApprovalRecoveryDriver(
+                    recoveryService, recoveryConfiguration.interval());
+        }
         application.configureArtifactDualControl(artifactLifecycle.dualControl());
         serverStartup.installInto(application::installManagedIngress);
         // Stated at startup rather than left to be discovered from a run's outcome: an operator who
@@ -318,6 +350,9 @@ public final class RavenrootServerMain {
                         new AuditTrailExecutionControlSink(auditTrail),
                         assistantComposition.service(),
                         embedConfiguration, userCredentials);
+                if (toolApprovals != null) {
+                    server.installToolApprovals(toolApprovals, approvalRecovery::sweepTenant);
+                }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(
                             ai.ravenroot.server.ingress.ManagedIngressRegistry ingress) {
@@ -368,6 +403,7 @@ public final class RavenrootServerMain {
             try {
                 startupHandle.gracefulShutdown();
             } finally {
+                if (approvalRecovery != null) approvalRecovery.close();
                 try {
                     registered.activation().close();
                 } finally {
@@ -419,7 +455,9 @@ public final class RavenrootServerMain {
         }));
         try {
             startupHandle.start();
+            if (approvalRecovery != null) approvalRecovery.start();
         } catch (RuntimeException | Error startFailure) {
+            if (approvalRecovery != null) approvalRecovery.close();
             userCredentials.close();
             closeEmbedRegistrations(embedRegistrations);
             assistantComposition.close();
@@ -526,11 +564,13 @@ public final class RavenrootServerMain {
     private static PluginActivationOrchestrator.Registration registerNodePackagesOrRefuse(
             BehaviorEnvironment environment, CredentialResolver credentials,
             AuditTrailPluginActivationSink auditSink,
-            ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink) {
+            ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
+            ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+            ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
                     new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
-                    toolAuditSink);
+                    toolAuditSink, toolApprovals, toolApprovalSettings);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment), System.getenv(), services);
         } catch (RuntimeException activationFailed) {

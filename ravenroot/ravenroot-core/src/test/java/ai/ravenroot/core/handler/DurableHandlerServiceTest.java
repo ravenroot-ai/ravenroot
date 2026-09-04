@@ -239,12 +239,32 @@ class DurableHandlerServiceTest {
                 "the principal was permitted to act; what they decided is the payload, not the outcome");
     }
 
+    @Test
+    void genericHandlerAuthorityCannotSettleOrEscalateTheReservedToolApprovalName() {
+        Fixture fixture = waitingHandler(TENANT, "approval-id", "tool-approval");
+
+        assertInstanceOf(HandlerTriggerOutcome.NotFound.class,
+                service.resolve(approver(TENANT), "tool-approval", "approval-id", payload("approved")));
+        assertInstanceOf(HandlerTriggerOutcome.NotFound.class,
+                service.deny(approver(TENANT), "tool-approval", "approval-id", payload("denied")));
+        assertInstanceOf(HandlerTriggerOutcome.NotFound.class,
+                service.expire(fixture.key, fixture.handlerId, "expiry"));
+        assertInstanceOf(HandlerTriggerOutcome.NotFound.class,
+                service.escalate(fixture.key, fixture.handlerId, "attention", "escalation"));
+        assertEquals(HandlerStatus.WAITING,
+                await(store.loadHandler(fixture.key, fixture.handlerId)).orElseThrow().status());
+    }
+
     // ---------------------------------------------------------------- fixtures
 
     private record Fixture(ExecutionKey key, UUID traversalId, UUID invocationId, UUID handlerId) {
     }
 
     private Fixture waitingHandler(String tenantId, String correlationKey) {
+        return waitingHandler(tenantId, correlationKey, "approval");
+    }
+
+    private Fixture waitingHandler(String tenantId, String correlationKey, String handlerName) {
         var key = new ExecutionKey(tenantId, UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         UUID invocationId = UUID.randomUUID();
@@ -264,7 +284,7 @@ class DurableHandlerServiceTest {
                         new NodeInvocation(invocationId, "await-approval", Set.of(),
                                 NodeInvocationStatus.SCHEDULED, List.of())))
                 .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING))
-                .registerHandler(new HandlerRegistration(handlerId, "approval", traversalId, invocationId,
+                .registerHandler(new HandlerRegistration(handlerId, handlerName, traversalId, invocationId,
                         correlationKey, "dedup-" + handlerId,
                         new HandlerPayloadSchema(CONTENT_TYPE, "approval/v1", 1024),
                         HandlerAuthorization.ofRoles(Role.APPROVER.name())))

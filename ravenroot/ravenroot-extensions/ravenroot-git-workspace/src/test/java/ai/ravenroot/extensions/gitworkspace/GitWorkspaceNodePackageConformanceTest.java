@@ -20,10 +20,11 @@ class GitWorkspaceNodePackageConformanceTest extends NodeBehaviorContract {
         try {
             Path authority = Files.createDirectories(temporary.resolve("authority"));
             Path remote = Files.createDirectories(temporary.resolve("remote"));
-            Path git = Path.of(GitWorkspaceTestSupport.run(temporary, "sh", "-c", "command -v git").trim());
+            Path git = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
             GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant-a", "workspace", authority,
                     remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                    Path.of("/bin/sh"), "sha1", null, null, Duration.ofSeconds(5), 1, 64 * 1024, 10);
+                    GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
+                    Duration.ofSeconds(5), 1, 64 * 1024, 10);
             return new GitWorkspaceNodePackage((tenant, name) -> Optional.of(profile));
         } catch (Exception failed) {
             throw new IllegalStateException(failed);

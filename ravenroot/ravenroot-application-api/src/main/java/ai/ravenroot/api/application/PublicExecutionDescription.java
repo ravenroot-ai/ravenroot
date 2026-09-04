@@ -77,6 +77,9 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case NODE_COMPLETED -> "Node completed.";
             case EDGE_TRAVERSED -> "Edge was traversed.";
             case NODE_FAILED -> "Node failed. Protected diagnostics may contain more detail.";
+            // No count and no delay: this is the classifier-less branch, so it knows neither. The
+            // ordinal and the wait are on the event's own components for a reader entitled to them.
+            case NODE_RETRY_SCHEDULED -> "Node attempt failed and another attempt was scheduled.";
             case JOIN_SATISFIED -> "Join conditions were satisfied.";
             case JOIN_ITERATION_BACKLOG -> "A join is holding state for several iterations.";
             case JOIN_ARRIVAL_DISCARDED -> "A duplicate or late join arrival was ignored.";
@@ -118,6 +121,12 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case EXECUTION_FAILED -> "Execution failed with " + reason
                     + ". Protected diagnostics may contain more detail.";
             case JOIN_FAILED -> "Join conditions could not be satisfied: " + reason + ".";
+            // The classifier here is the failure's retry classification, a fixed vocabulary token
+            // from Retryability rather than a Java type name, so it is named rather than
+            // characterised for the same reason a routed outcome is: this class cannot know whether
+            // an author reads "retry-after-reread" as good news.
+            case NODE_RETRY_SCHEDULED -> "Node attempt failed as \"" + reason
+                    + "\" and another attempt was scheduled.";
             // Two different facts now share NODE_BYPASSED, and the difference matters to
             // whoever is reading the activity view: one says the run itself is not executing
             // anything, the other says one node is switched off in the saved graph while the rest of

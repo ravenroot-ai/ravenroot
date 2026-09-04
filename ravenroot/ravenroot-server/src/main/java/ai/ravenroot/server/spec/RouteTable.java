@@ -357,7 +357,14 @@ public final class RouteTable {
                             + "a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, "
                             + "NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, "
                             + "bypassedNodes, defaultedNodes and handledFailureNodes respectively -- "
-                            + "under both of that stream's sources, with two silent-undercount "
+                            + "except on a node with an orchestration retry policy, where a visit is "
+                            + "one NODE_STARTED per attempt, each intermediate attempt settles as "
+                            + "NODE_RETRY_SCHEDULED rather than NODE_FAILED, and only the last "
+                            + "settles as one of the four. So a client counting visits by counting "
+                            + "NODE_STARTED overcounts a retried node, and the attempt ordinal that "
+                            + "would separate them is not on this projection -- the four node lists "
+                            + "in this response are sets and remain exact. "
+                            + "Under both of that stream's sources, with two silent-undercount "
                             + "caveats of the same shape where the source is a durable journal. "
                             + "First, NODE_DEFAULTED rows exist only in a journal written by a build "
                             + "that emits them, and nothing in the data says which: envelopeVersion "
@@ -478,6 +485,15 @@ public final class RouteTable {
                             + "silently successful.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
+                    "Approves, denies, or cancels one exact durable tool call. The authenticated "
+                            + "tenant and qualified approver identity are authoritative; unknown and "
+                            + "cross-tenant approvals are indistinguishable, and the response never "
+                            + "contains arguments or continuation state.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "

@@ -18,6 +18,33 @@ public enum ExecutionEventType {
     NODE_FAILED,
 
     /**
+     * An attempt failed, its failure was classified retryable, and the orchestrator committed a
+     * further durable attempt.
+     *
+     * <h4>It replaces {@link #NODE_FAILED}, it does not accompany it</h4>
+     * <p>The precedent is {@link #NODE_BYPASSED}, which replaces {@link #NODE_COMPLETED} rather than
+     * qualifying it: both are "a settlement the framework qualifies", and one event per settlement is
+     * the rule this runtime already follows. Publishing both would also change what
+     * {@code NODE_FAILED} means for every consumer that already counts it — a node whose transient
+     * blips are absorbed by two retries and then succeeds would start reporting failures it does not
+     * report today, and a failure count that rises because retries were <em>added</em> is a metric
+     * that says the opposite of what happened. The last attempt of an exhausted policy publishes
+     * {@link #NODE_FAILED} exactly as before.</p>
+     *
+     * <p>The event names the attempt that <em>failed</em>, not the one that was scheduled: its
+     * {@code attemptId} and {@link ExecutionEvent#attemptOrdinal()} are the failing attempt's, and the
+     * successor announces itself with its own {@link #NODE_STARTED} carrying the next ordinal. Naming
+     * the new attempt here instead would put an attempt's identity on the wire before the durable
+     * decision to run it had any observable effect, and a crash in the backoff would leave a
+     * started-looking attempt that no {@code NODE_STARTED} ever followed.</p>
+     *
+     * <p>{@link ExecutionEvent#publicReason()} carries the failure's classification token, and
+     * {@link ExecutionEvent#detail()} the next ordinal and the wait — so an operator reading the
+     * activity log sees why it is being retried and when, without correlating two events.</p>
+     */
+    NODE_RETRY_SCHEDULED,
+
+    /**
      * A fan-in join met its quorum and fired (CORE-03).
      *
      * <p>Published <b>once per iteration</b> of that join, not once per traversal — the wording this

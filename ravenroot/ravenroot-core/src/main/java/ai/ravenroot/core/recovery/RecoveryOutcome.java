@@ -33,6 +33,11 @@ public sealed interface RecoveryOutcome {
     record ReDispatched(ExecutionKey key, UUID workItemId, UUID attemptId) implements RecoveryOutcome {
     }
 
+    /** A settled durable handler was handed to its registered re-entry dispatcher and acknowledged. */
+    record HandlerDispatched(ExecutionKey key, UUID workItemId, UUID traversalId)
+            implements RecoveryOutcome {
+    }
+
     /**
      * The attempt was ambiguous and nothing authorised repeating it, so it was parked and
      * acknowledged. It has left the claim loop and waits for a human decision about the past.

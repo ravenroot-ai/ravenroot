@@ -10,6 +10,7 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionOrigin;
@@ -42,17 +43,25 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.List;
+import java.util.HexFormat;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -1190,6 +1199,115 @@ public abstract class ExecutionStoreContract {
                 .build()));
     }
 
+    /**
+     * The orchestration retry's write, held to the same standard as the park resolution above.
+     *
+     * <p>An orchestration retry is not a distinct transition type: it is
+     * {@code AttemptTransitioned(FAILED)} followed by {@code AttemptAdded(next)} in one batch, and it
+     * relies on three properties of the port that were true before this test existed and were never
+     * asserted together for this shape. All three are asserted here, in both adapters, because the
+     * runtime's crash-safety argument is built on them.</p>
+     * <ol>
+     *   <li><b>The pair is atomic.</b> The batch does not partially apply, so there is no instant at
+     *       which the invocation has a failed attempt and no successor.</li>
+     *   <li><b>The invocation stays {@code RUNNING}.</b> Unlike a terminal failure, a retried
+     *       invocation is a visit still in progress, and an aggregate that marked it {@code FAILED}
+     *       would refuse the very attempt this batch appends.</li>
+     *   <li><b>The successor is immediately claimable, and it is the only claimable item.</b> That is
+     *       what makes a crash during the backoff recoverable: the retry is durably {@code SCHEDULED},
+     *       which recovery reads as provably effect-free.</li>
+     * </ol>
+     */
+    @Test
+    final void anOrchestrationRetryFailsAndAppendsInOneStepAndLeavesTheInvocationRunning() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID secondAttempt = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, firstAttempt);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, firstAttempt,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+
+        await(store().apply(retryBatch(key, traversalId, invocationId, firstAttempt, secondAttempt,
+                running.revision())));
+
+        StoredProcessInstance afterRetry = await(store().load(key));
+        List<NodeAttempt> attempts = attemptsOf(afterRetry, traversalId, invocationId);
+        assertEquals(2, attempts.size(), "fail-and-append is one commit, so neither half can be lost");
+        assertEquals(NodeAttemptStatus.FAILED, attempts.get(0).status());
+        assertEquals(1, attempts.get(0).ordinal());
+        assertEquals(NodeAttemptStatus.SCHEDULED, attempts.get(1).status());
+        assertEquals(2, attempts.get(1).ordinal(), "a retry is the next ordinal, never a counter");
+        assertEquals(NodeInvocationStatus.RUNNING,
+                afterRetry.state().traversals().get(traversalId).invocations().get(invocationId).status(),
+                "an invocation with a scheduled retry is a visit still in progress");
+
+        List<PendingWork> claimed = await(store().claimPendingWork(key.tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size(), "the failed attempt has left the claim loop, the retry has entered it");
+        var dispatch = assertInstanceOf(PendingWork.AttemptDispatch.class, claimed.get(0));
+        assertEquals(secondAttempt, dispatch.attemptId());
+        assertEquals(2, dispatch.attemptOrdinal(),
+                "the ordinal reaches a recovering worker on the claim, not only in the aggregate");
+    }
+
+    /**
+     * Replaying the identical retry commit is refused, so a crash between the write and its
+     * acknowledgement cannot produce a third attempt.
+     *
+     * <p>This is the exactly-once property the runtime depends on, and it is asserted through the
+     * revision expectation rather than through an idempotency key on purpose: the retry decision is
+     * made by a worker that already holds the instance's revision, so the cheapest correct guard is
+     * the one it is already carrying. The second assertion is the independent domain guard behind it —
+     * even with a revision that matched, the aggregate refuses an ordinal that is not exactly one past
+     * its history — so the property does not rest on a single mechanism.</p>
+     */
+    @Test
+    final void replayingARetryCommitCannotProduceASecondAppendedAttempt() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID secondAttempt = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, firstAttempt);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, firstAttempt,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        StoredProcessInstance retried = await(store().apply(retryBatch(key, traversalId, invocationId,
+                firstAttempt, secondAttempt, running.revision())));
+
+        ExecutionStoreFailure staleReplay = failureOf(() -> await(store().apply(retryBatch(key, traversalId,
+                invocationId, firstAttempt, UUID.randomUUID(), running.revision()))));
+        assertInstanceOf(ExecutionStoreFailure.ConcurrencyConflict.class, staleReplay,
+                "the revision the retry was decided at is gone, so the replay cannot land");
+
+        ExecutionStoreFailure freshReplay = failureOf(() -> await(store().apply(retryBatch(key, traversalId,
+                invocationId, firstAttempt, UUID.randomUUID(), retried.revision()))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, freshReplay,
+                "even at the current revision, the aggregate refuses to fail an attempt that already "
+                        + "failed and to append an ordinal that already exists");
+
+        assertEquals(2, attemptsOf(await(store().load(key)), traversalId, invocationId).size(),
+                "neither refusal may leave a third attempt behind");
+    }
+
+    /** The retry commit both adapters must apply identically: fail the attempt, append the next. */
+    private static ExecutionBatch retryBatch(ExecutionKey key, UUID traversalId, UUID invocationId,
+                                             UUID failedAttemptId, UUID nextAttemptId, long revision) {
+        return ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
+                        NodeAttemptStatus.FAILED))
+                .apply(new ExecutionTransition.AttemptAdded(traversalId, invocationId,
+                        new NodeAttempt(nextAttemptId, 2, NodeAttemptStatus.SCHEDULED)))
+                .build();
+    }
+
     private static NodeAttempt onlyAttempt(StoredProcessInstance stored) {
         return stored.state().traversals().values().iterator().next()
                 .invocations().values().iterator().next().attempts().getLast();
@@ -2010,6 +2128,167 @@ public abstract class ExecutionStoreContract {
                                                            UUID traversalId) {
         return traversals.stream().filter(entry -> entry.traversalId().equals(traversalId)).findFirst()
                 .orElseThrow(() -> new AssertionError("no traversal row for " + traversalId));
+    }
+
+    // ============================================== SEC-15: durable tool approvals
+
+    @Test
+    final void toolApprovalRoundTripsEveryScopeAndDefensivelyCopiesSensitiveBytes() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+
+        DurableToolApproval stored = await(store().loadToolApproval(fixture.key(), fixture.approvalId()))
+                .orElseThrow();
+        assertEquals(ToolApprovalStatus.PENDING, stored.status());
+        assertEquals(fixture.registration().traversalId(), stored.request().traversalId());
+        assertEquals(fixture.registration().invocationId(), stored.request().invocationId());
+        assertEquals(fixture.registration().attemptId(), stored.request().attemptId());
+        assertEquals(fixture.registration().callId(), stored.request().callId());
+        assertEquals(fixture.registration().nodeId(), stored.request().nodeId());
+        assertEquals(fixture.registration().tool(), stored.request().tool());
+        assertEquals(fixture.registration().argumentsDigest(), stored.request().argumentsDigest());
+        assertEquals(fixture.registration().requester(), stored.request().requester());
+        assertEquals(fixture.registration().graphVersionPin(), stored.request().graphVersionPin());
+        assertEquals(fixture.registration().policyVersion(), stored.request().policyVersion());
+        assertEquals(fixture.registration().expiresAt(), stored.request().expiresAt());
+        assertEquals(fixture.registration().approverRequirements(), stored.request().approverRequirements());
+        assertEquals(fixture.registration().requesterMayApprove(), stored.request().requesterMayApprove());
+        assertEquals(fixture.registration().continuationVersion(), stored.request().continuationVersion());
+        byte[] arguments = stored.request().canonicalArguments();
+        arguments[0] = '!';
+        assertEquals('{', stored.request().canonicalArguments()[0]);
+        byte[] continuation = stored.request().continuation();
+        continuation[0] = '!';
+        assertEquals('c', stored.request().continuation()[0]);
+    }
+
+    @Test
+    final void toolApprovalRegistrationIsExactlyOnceAndDifferentContentUnderTheIdIsRefused() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerToolApproval(fixture.registration())
+                .build()));
+        assertEquals(1, await(store().toolApprovals(fixture.key())).size());
+
+        byte[] altered = "{\"amount\":2}".getBytes(StandardCharsets.UTF_8);
+        ToolApprovalRegistration changed = copyApproval(fixture.registration(), altered, digest(altered));
+        StoredProcessInstance after = await(store().load(fixture.key()));
+        ExecutionStoreFailure failure = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(after.revision()))
+                .registerToolApproval(changed)
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+    }
+
+    @Test
+    final void toolApprovalTransitionsAreFirstWriterWinsIdempotentAndSingleUse() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        transitionApproval(fixture, new ToolApprovalTransition.Approved(fixture.approvalId(),
+                "issuer|USER|approver"));
+        transitionApproval(fixture, new ToolApprovalTransition.Approved(fixture.approvalId(),
+                "issuer|USER|approver"));
+        transitionApproval(fixture, new ToolApprovalTransition.Consumed(fixture.approvalId()));
+
+        StoredProcessInstance beforeReplay = await(store().load(fixture.key()));
+        ExecutionStoreFailure replay = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(beforeReplay.revision()))
+                .applyToolApproval(new ToolApprovalTransition.Consumed(fixture.approvalId()))
+                .build())));
+        var refused = assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class, replay);
+        assertEquals(ToolApprovalStatus.CONSUMED, refused.current());
+
+        transitionApproval(fixture, new ToolApprovalTransition.Indeterminate(fixture.approvalId()));
+        assertEquals(ToolApprovalStatus.INDETERMINATE,
+                await(store().loadToolApproval(fixture.key(), fixture.approvalId())).orElseThrow().status());
+    }
+
+    @Test
+    final void storeClockRejectsLateApprovalAndIsTheOnlyAuthorityThatMayExpire() {
+        assumeCapability(StoreCapability.TOOL_APPROVALS);
+        ToolApprovalFixture fixture = pendingToolApproval(newKey());
+        StoredProcessInstance beforeDue = await(store().load(fixture.key()));
+        ExecutionStoreFailure earlyExpiry = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(beforeDue.revision()))
+                        .applyToolApproval(new ToolApprovalTransition.Expired(fixture.approvalId()))
+                        .build())));
+        assertEquals(ToolApprovalStatus.PENDING,
+                assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class, earlyExpiry).current());
+
+        clock().advance(Duration.ofMinutes(5));
+        StoredProcessInstance afterDue = await(store().load(fixture.key()));
+        ExecutionStoreFailure lateApproval = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(afterDue.revision()))
+                        .applyToolApproval(new ToolApprovalTransition.Approved(fixture.approvalId(),
+                                "issuer|USER|approver"))
+                        .build())));
+        assertEquals(ToolApprovalStatus.EXPIRED,
+                assertInstanceOf(ExecutionStoreFailure.ToolApprovalNotResolvable.class,
+                        lateApproval).requested());
+        transitionApproval(fixture, new ToolApprovalTransition.Expired(fixture.approvalId()));
+        assertEquals(ToolApprovalStatus.EXPIRED,
+                await(store().loadToolApproval(fixture.key(), fixture.approvalId())).orElseThrow().status());
+    }
+
+    private ToolApprovalFixture pendingToolApproval(ExecutionKey key) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        byte[] arguments = "{\"amount\":1}".getBytes(StandardCharsets.UTF_8);
+        UUID approvalId = UUID.randomUUID();
+        byte[] checkpoint = "checkpoint".getBytes(StandardCharsets.UTF_8);
+        var registration = new ToolApprovalRegistration(approvalId, traversalId, invocationId, attemptId,
+                UUID.randomUUID(), "work", "payments.charge", arguments, digest(arguments),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                new GraphVersionPin("graph-v1"), "policy-v1", clock().instant().plus(Duration.ofMinutes(5)),
+                HandlerAuthorization.ofRoles("APPROVER"), false, 1,
+                checkpoint, digest(checkpoint));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .registerToolApproval(registration)
+                .build()));
+        return new ToolApprovalFixture(key, approvalId, registration);
+    }
+
+    private void transitionApproval(ToolApprovalFixture fixture, ToolApprovalTransition transition) {
+        StoredProcessInstance stored = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(stored.revision()))
+                .applyToolApproval(transition)
+                .build()));
+    }
+
+    private static ToolApprovalRegistration copyApproval(ToolApprovalRegistration source,
+                                                         byte[] arguments, String digest) {
+        return new ToolApprovalRegistration(source.approvalId(), source.traversalId(), source.invocationId(),
+                source.attemptId(), source.callId(), source.nodeId(), source.tool(), arguments, digest,
+                source.requester(), source.graphVersionPin(), source.policyVersion(), source.expiresAt(),
+                source.approverRequirements(), source.requesterMayApprove(), source.continuationVersion(),
+                source.continuation(), source.continuationDigest());
+    }
+
+    private static String digest(byte[] bytes) {
+        try {
+            return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+        } catch (NoSuchAlgorithmException impossible) {
+            throw new IllegalStateException(impossible);
+        }
+    }
+
+    private record ToolApprovalFixture(ExecutionKey key, UUID approvalId,
+                                       ToolApprovalRegistration registration) {
     }
 
     // ============================================== PERS-05: durable handlers, wait and re-entry

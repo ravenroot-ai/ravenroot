@@ -29,6 +29,9 @@ import ai.ravenroot.api.security.ToolCallAuditSink;
 import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.api.security.ToolInvocation;
 import ai.ravenroot.api.security.ToolPolicy;
+import ai.ravenroot.core.approval.ToolApprovalService;
+import ai.ravenroot.core.approval.ToolApprovalSettings;
+import ai.ravenroot.core.approval.ToolApprovalResult;
 import ai.ravenroot.core.security.egress.BoundedBodyHandlers;
 import ai.ravenroot.core.security.egress.EgressAddressGuard;
 import ai.ravenroot.core.security.egress.EgressHttpClients;
@@ -115,6 +118,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private final Clock clock;
     private final ToolPolicy toolPolicy;
     private final ToolCallAuditSink toolAuditSink;
+    private final ToolApprovalService toolApprovalService;
+    private final ToolApprovalSettings toolApprovalSettings;
     private volatile HttpClient client;
     private final AdmissionController admission;
     private final NodePackageServices unavailable = NodePackageServices.unavailable();
@@ -128,6 +133,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         clock = Objects.requireNonNull(builder.clock, "clock");
         toolPolicy = Objects.requireNonNull(builder.toolPolicy, "toolPolicy");
         toolAuditSink = Objects.requireNonNull(builder.toolAuditSink, "toolAuditSink");
+        toolApprovalService = builder.toolApprovalService;
+        toolApprovalSettings = builder.toolApprovalSettings;
         admission = new AdmissionController(policy.maximumConcurrentOperations(),
                 policy.maximumConcurrentPerTenant());
     }
@@ -251,7 +258,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             @SuppressWarnings("unchecked")
             Map<String, Object> policyArguments = (Map<String, Object>) arguments.toJava();
             decision = Objects.requireNonNull(toolPolicy.evaluate(new ToolInvocation(delivered.security(),
-                    delivered.executionId(), delivered.nodeId(), tool, policyArguments)),
+                    delivered.processInstanceId(), delivered.nodeId(), tool, policyArguments)),
                     "toolPolicy decision");
         } catch (RuntimeException policyFailure) {
             recordTool(delivered, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED,
@@ -323,6 +330,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private final String tool;
         private final boolean terminalExpected;
         private final AtomicBoolean completed = new AtomicBoolean();
+        private final UUID approvalId = UUID.randomUUID();
 
         private ManagedToolCall(UUID callId, Disposition disposition, String argumentsDigest,
                                 byte[] canonicalArguments, NodeMessage message, String tool,
@@ -340,6 +348,26 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         @Override public Disposition disposition() { return disposition; }
         @Override public String argumentsDigest() { return argumentsDigest; }
         @Override public byte[] canonicalArguments() { return canonicalArguments.clone(); }
+
+        @Override
+        public RuntimeException suspend(int continuationVersion, byte[] continuation) {
+            if (continuationVersion < 1) {
+                throw new IllegalArgumentException("continuationVersion must be positive");
+            }
+            byte[] checkpoint = Objects.requireNonNull(continuation, "continuation").clone();
+            if (disposition != Disposition.REQUIRE_APPROVAL
+                    || toolApprovalService == null || toolApprovalSettings == null) {
+                return ToolCallAuthorization.super.suspend(continuationVersion, checkpoint);
+            }
+            ToolApprovalResult result = toolApprovalService.suspend(message, approvalId, callId, tool,
+                    canonicalArguments,
+                    argumentsDigest, toolApprovalSettings, continuationVersion, checkpoint);
+            if (result.code() != ToolApprovalResult.Code.CREATED
+                    && result.code() != ToolApprovalResult.Code.ALREADY_APPLIED) {
+                return new NodePackageServiceException(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+            }
+            return new DurableToolApprovalSuspension(approvalId);
+        }
 
         @Override
         public void complete(Outcome outcome) {
@@ -815,6 +843,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private Clock clock = Clock.systemUTC();
         private ToolPolicy toolPolicy = ToolPolicy.denyAll();
         private ToolCallAuditSink toolAuditSink = ToolCallAuditSink.discarding();
+        private ToolApprovalService toolApprovalService;
+        private ToolApprovalSettings toolApprovalSettings;
 
         private Builder(String packageId, NodePackageEgressPolicy policy, TenantCredentialResolver credentials) {
             this.packageId = packageId;
@@ -831,6 +861,13 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         public Builder toolAuthorization(ToolPolicy policy, ToolCallAuditSink auditSink) {
             this.toolPolicy = Objects.requireNonNull(policy, "policy");
             this.toolAuditSink = Objects.requireNonNull(auditSink, "auditSink");
+            return this;
+        }
+
+        /** Enables durable suspension for {@code REQUIRE_APPROVAL} decisions. */
+        public Builder durableToolApprovals(ToolApprovalService service, ToolApprovalSettings settings) {
+            this.toolApprovalService = Objects.requireNonNull(service, "service");
+            this.toolApprovalSettings = Objects.requireNonNull(settings, "settings");
             return this;
         }
 

@@ -143,7 +143,7 @@ public final class DurableHandlerService {
      */
     public HandlerTriggerOutcome expire(ExecutionKey key, UUID handlerId, String correlationId) {
         DurableHandler handler = await(store.loadHandler(key, handlerId)).orElse(null);
-        if (handler == null) {
+        if (handler == null || reserved(handler.name())) {
             return audited(key.tenantId(), systemPrincipal(), correlationId, "handler.expire",
                     String.valueOf(handlerId), new HandlerTriggerOutcome.NotFound());
         }
@@ -168,7 +168,7 @@ public final class DurableHandlerService {
     public HandlerTriggerOutcome escalate(ExecutionKey key, UUID handlerId, String reason,
                                           String correlationId) {
         DurableHandler handler = await(store.loadHandler(key, handlerId)).orElse(null);
-        if (handler == null) {
+        if (handler == null || reserved(handler.name())) {
             return audited(key.tenantId(), systemPrincipal(), correlationId, "handler.escalate",
                     String.valueOf(handlerId), new HandlerTriggerOutcome.NotFound());
         }
@@ -185,6 +185,11 @@ public final class DurableHandlerService {
         HandlerRegistration.requireBoundedKey(correlationKey, "correlationKey");
         String action = target == HandlerStatus.RESOLVED ? "handler.resolve" : "handler.deny";
         String principal = SecurityContext.of(context).qualifiedIdentity();
+
+        if (reserved(handlerName)) {
+            return audited(context.tenantId(), principal, context.requestId(), action, correlationKey,
+                    new HandlerTriggerOutcome.NotFound());
+        }
 
         Optional<DurableHandler> found =
                 await(store.findHandler(context.tenantId(), handlerName, correlationKey));
@@ -221,6 +226,11 @@ public final class DurableHandlerService {
         return audited(context.tenantId(), principal, context.requestId(), action,
                 handler.handlerId().toString(),
                 commit(handler, context.requestId(), target, principal, payload));
+    }
+
+    /** Tool approvals are settled only by their dedicated scope-checking reference monitor. */
+    private static boolean reserved(String handlerName) {
+        return ai.ravenroot.core.approval.ToolApprovalService.HANDLER_NAME.equals(handlerName);
     }
 
     // ---------------------------------------------------------------- durable write

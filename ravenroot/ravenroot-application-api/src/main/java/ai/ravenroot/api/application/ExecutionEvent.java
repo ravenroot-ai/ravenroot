@@ -137,6 +137,15 @@ import ai.ravenroot.api.application.RuntimeActivityData.TextProjection;
 * @param nodeId graph node identity associated with the operation or event
 * @param fallback whether the node used its configured fallback behavior
 * @param nodeCatalogKey bounded catalog identity used for node-type correlation
+ * @param attemptOrdinal the one-based ordinal of the attempt this event is about: {@code 1} an
+ * initial attempt, greater than one an orchestration retry, {@code 0} an event above attempt scope.
+ * This is the component that lets an event stream and a metric tell an initial attempt from a retry
+ * without correlating two events, and it is the same ordinal the durable attempt history carries
+ * @param connectorAttempts how many times a connector attempted the underlying operation inside this
+ * one orchestration attempt, or {@link ai.ravenroot.api.execution.ConnectorRetryReport#NOT_REPORTED}
+ * when the node reported nothing. Together with {@code attemptOrdinal} it separates the three things
+ * that otherwise look alike: an initial attempt, a retry the orchestrator made, and retries a
+ * connector made inside one attempt without producing a durable attempt at all
  */
 public record ExecutionEvent(
         long sequence,
@@ -163,7 +172,9 @@ public record ExecutionEvent(
         String publicReason,
         TextProjection authorMessage,
         OutputProjection authorOutput,
-        String edgeId) {
+        String edgeId,
+        int attemptOrdinal,
+        int connectorAttempts) {
 
     /**
  * Bound on {@code detail}, marker included, so an event cannot become an unbounded text sink.
@@ -255,8 +266,14 @@ public ExecutionEvent {
         // Absent, never blank: this value becomes a metric label, and "" would be a series
         // that looks like a node type nobody can find in the catalog.
         nodeCatalogKey = nodeCatalogKey == null || nodeCatalogKey.isBlank() ? null : nodeCatalogKey;
+        // NODE_RETRY_SCHEDULED carries author-facing failure text for the same reason the other three
+        // do: it is the settlement of an attempt that failed, and the only one that attempt receives,
+        // because it replaces NODE_FAILED rather than preceding it. Excluding it would delete the
+        // diagnostic for every non-final attempt -- so a node that fails twice and then succeeds
+        // would leave no record of what went wrong anywhere on this surface.
         boolean failureEvent = type == ExecutionEventType.NODE_FAILED || type == ExecutionEventType.JOIN_FAILED
-                || type == ExecutionEventType.EXECUTION_FAILED;
+                || type == ExecutionEventType.EXECUTION_FAILED
+                || type == ExecutionEventType.NODE_RETRY_SCHEDULED;
         if (!failureEvent) authorMessage = null;
         if (type != ExecutionEventType.NODE_COMPLETED || !"log".equals(nodeCatalogKey)) authorOutput = null;
         if (type == ExecutionEventType.EDGE_TRAVERSED) {
@@ -274,7 +291,12 @@ public ExecutionEvent {
                 throw new IllegalArgumentException("processingDuration cannot be negative");
             }
             if (type != ExecutionEventType.NODE_COMPLETED && type != ExecutionEventType.NODE_BYPASSED
-                    && type != ExecutionEventType.NODE_FAILED) {
+                    && type != ExecutionEventType.NODE_FAILED
+                    // A retried attempt has ENDED -- that is precisely what the event says -- so it
+                    // has a processing duration in exactly the sense the other three do. Excluding it
+                    // would make the duration histogram silently omit every attempt that was retried,
+                    // which is the population an operator investigating latency is looking for.
+                    && type != ExecutionEventType.NODE_RETRY_SCHEDULED) {
                 throw new IllegalArgumentException(
                         "processingDuration is only valid for terminal node events");
             }
@@ -283,6 +305,68 @@ public ExecutionEvent {
             EdgeTraversalWireBudget.requireLiveProjection(tenantId, requestId, engineId, graphVersion,
                     nodeId, publicReason, detail, nodeCatalogKey, deploymentId, workloadId);
         }
+        // Both counts are refused rather than clamped when negative. Clamping to zero would turn an
+        // unreadable value into the exact value that means "not stated", so a producer bug would be
+        // indistinguishable from a producer that correctly said nothing -- which is the distinction
+        // both components exist to carry.
+        if (attemptOrdinal < 0) {
+            throw new IllegalArgumentException("attemptOrdinal cannot be negative: " + attemptOrdinal);
+        }
+        if (connectorAttempts < 0) {
+            throw new IllegalArgumentException("connectorAttempts cannot be negative: " + connectorAttempts);
+        }
+    }
+
+    /**
+ * Compatibility constructor preserving the 25-component shape published before attempt ordinals and
+ * connector-retry reporting.
+ *
+ * <p>Both new components default to {@code 0}, and that default is honest rather than a fabricated
+ * measurement, by the argument the {@code inFlightArrivals} overload below already makes. For
+ * {@code attemptOrdinal} zero reads "above attempt scope", which is what an adapter or a test with no
+ * attempt in hand is entitled to say; for {@code connectorAttempts} zero is
+ * {@link ai.ravenroot.api.execution.ConnectorRetryReport#NOT_REPORTED}, which is silence and not a
+ * claim that a connector attempted exactly once. Defaulting {@code attemptOrdinal} to {@code 1}
+ * instead was considered and refused: it would make every event built outside
+ * {@code ExecutionMonitor} assert that it describes an initial attempt, which is precisely the claim
+ * that must not be manufactured, since a retry is the case a reader is looking for.</p>
+* @param sequence producer-assigned sequence in the live event stream
+* @param occurredAt time at which the event occurred
+* @param tenantId authenticated tenant that owns the operation or event
+* @param requestId request correlation identity established at ingress
+* @param engineId identity of the execution engine that emitted the event
+* @param graphVersion pinned graph version for the execution
+* @param processInstanceId identity of the process instance that owns the event
+* @param traversalId identity of the traversal that owns the event
+* @param invocationId identity of the node invocation, or {@code null} above invocation scope
+* @param attemptId identity of the node attempt, or {@code null} above attempt scope
+* @param type execution event type
+* @param nodeId graph node identity associated with the operation or event
+* @param activeInstances number of live runtime instances serving this node
+* @param fallback whether the node used its configured fallback behavior
+* @param detail bounded trusted diagnostic text
+* @param joinWaitDuration elapsed join wait, or {@code null} when not measured
+* @param processingDuration monotonic node-processing duration, or {@code null} when not measured
+* @param nodeCatalogKey bounded catalog identity used for node-type correlation
+* @param deploymentId owning deployment identity, or {@code null} outside a deployment
+* @param workloadId deployment-scoped unit-of-work identity, or {@code null} outside a deployment
+* @param inFlightArrivals number of arrivals started at this node and not yet finished
+* @param publicReason bounded public classifier, or {@code null} when none applies
+* @param authorMessage bounded failure text for the authenticated author view
+* @param authorOutput bounded output from the trusted built-in log action
+* @param edgeId stable GraphML edge identity, required only on edge-traversal events
+ */
+    public ExecutionEvent(long sequence, Instant occurredAt, String tenantId, String requestId, String engineId,
+                          String graphVersion, UUID processInstanceId, UUID traversalId, UUID invocationId,
+                          UUID attemptId, ExecutionEventType type, String nodeId, int activeInstances,
+                          boolean fallback, String detail, Duration joinWaitDuration,
+                          Duration processingDuration, String nodeCatalogKey, String deploymentId,
+                          String workloadId, int inFlightArrivals, String publicReason,
+                          TextProjection authorMessage, OutputProjection authorOutput, String edgeId) {
+        this(sequence, occurredAt, tenantId, requestId, engineId, graphVersion, processInstanceId, traversalId,
+                invocationId, attemptId, type, nodeId, activeInstances, fallback, detail, joinWaitDuration,
+                processingDuration, nodeCatalogKey, deploymentId, workloadId, inFlightArrivals, publicReason,
+                authorMessage, authorOutput, edgeId, 0, 0);
     }
 
     /**

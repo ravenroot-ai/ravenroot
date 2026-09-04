@@ -174,14 +174,11 @@ class SqliteSchemaMigrationTest {
             assertEquals(SqliteSchema.highestKnownVersion(), SqliteSchema.migrate(connection, CLOCK));
 
             // The inventory migration is identified by what it does, not by the number it happens to
-            // hold. That number has already moved twice, each time because another feature merged
-            // ahead of it and took it; a literal here would fail on the next such merge for a reason
-            // that has nothing to do with what this test is about. What must stay true is that it is
-            // the LAST migration -- our columns are added to tables earlier migrations create -- and
-            // that the sequence has no gaps, because the downgrade guard compares integers and
-            // nothing else, so two structures sharing one version are indistinguishable to it.
-            assertEquals(SqliteSchema.highestKnownVersion(), inventoryMigration().version(),
-                    "the inventory migration must be the head of the sequence");
+            // hold. Later additive migrations may follow it, but they must have distinct successive
+            // versions: the downgrade guard compares integers and nothing else, so two structures
+            // sharing one version are indistinguishable to it.
+            assertTrue(inventoryMigration().version() > 4,
+                    "the inventory migration must follow the schema its columns extend");
             assertEquals(java.util.stream.IntStream.rangeClosed(1, SqliteSchema.highestKnownVersion())
                             .boxed().toList(),
                     SqliteSchema.migrations().stream().map(SchemaMigration::version).sorted().toList(),
@@ -202,6 +199,8 @@ class SqliteSchemaMigrationTest {
                     "a migration cannot know the configured retention, so it schedules no deletion; "
                             + "the store resolves a terminal row with no deadline against updated_at");
             assertTrue(tableNames(connection).contains("inventory_watermark"));
+            assertTrue(tableNames(connection).contains("tool_approval"),
+                    "the approval migration following inventory must also run during an upgrade");
             assertTrue(indexNames(connection).containsAll(List.of("idx_process_instance_inventory",
                     "idx_process_instance_status", "idx_process_instance_deployment",
                     "idx_lease_worker")));

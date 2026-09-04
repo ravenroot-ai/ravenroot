@@ -19,6 +19,9 @@ public interface ToolApprovalContinuationExecutor {
     CompletionStage<Boolean> execute(ToolApprovalContinuation continuation,
                                      PendingWork.HandlerTrigger claim);
 
+    /** Releases execution resources after recovery has acknowledged the trigger claim. */
+    default void afterAcknowledged(PendingWork.HandlerTrigger claim) { }
+
     /** Fail-closed compatibility implementation for hosts with no continuation executor. */
     ToolApprovalContinuationExecutor NONE = new ToolApprovalContinuationExecutor() {
         @Override public boolean supports(DurableToolApproval approval) { return false; }

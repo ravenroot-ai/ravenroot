@@ -197,9 +197,10 @@ class PromptInjectionBoundaryTest {
         action.validate(input);
         var resumed = action.resume(input).toCompletableFuture().get();
 
-        assertEquals("resumed", resumed.nodeResult().payload());
+        NodeResult resumedNode = resumed.nodeResult().toCompletableFuture().join();
+        assertEquals("resumed", resumedNode.payload());
         assertTrue(resumed.effectSucceeded());
-        assertEquals("kept", resumed.nodeResult().attributes().get("trace"));
+        assertEquals("kept", resumedNode.attributes().get("trace"));
         assertEquals(2, http.chatBodies().size());
         var unknownVersion = new ToolCallContinuationInput(reentry, input.approvalId(),
                 input.originalTraversalId(), input.originalInvocationId(), input.originalAttemptId(),

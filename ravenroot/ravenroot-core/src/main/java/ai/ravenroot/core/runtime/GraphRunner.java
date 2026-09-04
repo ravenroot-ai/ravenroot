@@ -816,8 +816,10 @@ public final class GraphRunner implements AutoCloseable {
                                                 ExecutionRecorder recorder,
                                                 java.util.function.Function<NodeMessage,
                                                         ToolCallContinuationInput> inputFactory,
+                                                java.util.function.Consumer<Boolean> effectCompletion,
                                                 ToolCallContinuationAction action) {
         java.util.Objects.requireNonNull(action, "action");
+        java.util.Objects.requireNonNull(effectCompletion, "effectCompletion");
         GraphNode node = graph.node(nodeId);
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
                 processInstanceId, traversalId, nodeCatalogKeys, null, null);
@@ -835,7 +837,7 @@ public final class GraphRunner implements AutoCloseable {
         UUID invocationId = identitySource.nextNodeInvocationId();
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
-                NodeCommand.PROCESS, null);
+                NodeCommand.PROCESS, state.traversalAcceptedEventId());
         NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
                 invocationId, attemptId, Set.of(), node.id(), null, Map.of(), NodeCommand.PROCESS);
         CompletionStage<ToolCallContinuationResult> resumed;
@@ -847,6 +849,14 @@ public final class GraphRunner implements AutoCloseable {
         }
         return resumed.handle((continued, failure) -> {
                     if (failure != null) {
+                        state.nodeFailed(invocationId, attemptId, startedEventId);
+                        throw new CompletionException(unwrap(failure));
+                    }
+                    effectCompletion.accept(continued.effectSucceeded());
+                    return continued;
+                })
+                .thenCompose(continued -> continued.nodeResult().handle((rawResult, failure) -> {
+                    if (failure != null) {
                         Throwable cause = unwrap(failure);
                         if (cause instanceof DurableToolApprovalSuspension suspension
                                 && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
@@ -857,16 +867,14 @@ public final class GraphRunner implements AutoCloseable {
                     }
                     UUID completedEventId = state.nodeCompleted(
                             invocationId, attemptId, startedEventId, false, false);
-                    NodeResult result = markSyntheticProvenance(node, delivered, continued.nodeResult());
+                    NodeResult result = markSyntheticProvenance(node, delivered, rawResult);
                     List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
                     if (next.isEmpty() && !"continue".equals(result.outcome())) {
                         next = graph.nextEdges(node.id(), "continue");
                     }
-                    return new java.util.AbstractMap.SimpleImmutableEntry<>(continued.effectSucceeded(),
-                            dispatchSuccessors(next, node, result, delivered, completedEventId,
-                                    state, identity, coordinator, IterationContext.EMPTY));
-                })
-                .thenCompose(pair -> pair.getValue().thenApply(ignored -> pair.getKey()))
+                    return dispatchSuccessors(next, node, result, delivered, completedEventId,
+                            state, identity, coordinator, IterationContext.EMPTY);
+                }).thenCompose(next -> next.thenApply(ignored -> continued.effectSucceeded())))
                 .handle((succeeded, failure) -> {
                     Throwable outcome = unwrap(failure);
                     try {
@@ -3128,8 +3136,7 @@ public final class GraphRunner implements AutoCloseable {
             this.identity = identity;
             this.identitySource = identitySource;
             this.clock = clock;
-            this.traversalAcceptedEventId = null;
-            this.traversalAcceptedPublished = true;
+            this.traversalAcceptedEventId = journalling() ? identitySource.nextEventId() : null;
             this.lifecycle = java.util.Objects.requireNonNull(storedLifecycle, "storedLifecycle");
             if (!lifecycle.processInstanceId().equals(processInstanceId)
                     || !lifecycle.traversals().containsKey(traversalId)

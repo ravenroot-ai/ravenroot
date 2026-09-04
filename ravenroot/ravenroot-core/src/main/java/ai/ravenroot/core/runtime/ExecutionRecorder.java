@@ -293,6 +293,33 @@ public final class ExecutionRecorder implements AutoCloseable {
         revision = applied.revision();
     }
 
+    /** Commits the exact redeemed effect outcome through this recorder's current claim fence. */
+    public synchronized void completeToolApproval(UUID approvalId, boolean succeeded,
+                                                  EventEnvelope event) {
+        requireFence();
+        Objects.requireNonNull(approvalId, "approvalId");
+        var transition = succeeded
+                ? new ai.ravenroot.api.persistence.ToolApprovalTransition.Succeeded(approvalId)
+                : new ai.ravenroot.api.persistence.ToolApprovalTransition.Failed(approvalId);
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease)
+                .applyToolApproval(transition);
+        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+            batch.publish(Objects.requireNonNull(event, "event"));
+        }
+        try {
+            StoredProcessInstance applied = await(store.apply(batch.build()));
+            revision = applied.revision();
+        } catch (ExecutionStoreException failed) {
+            if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                    || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                loseFence(failed.failure());
+            }
+            throw failed;
+        }
+    }
+
     /** Confirms that a core signal names the exact invocation this recorder durably suspended. */
     public synchronized boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
         if (!key.tenantId().equals(message.security().tenantId())

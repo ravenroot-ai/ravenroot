@@ -36,6 +36,15 @@ public interface RecoveryDispatcher {
      */
     void dispatch(PendingWork item, String idempotencyKey);
 
+    /**
+     * Releases dispatcher-owned resources after recovery has acknowledged the claimed work.
+     *
+     * <p>The recovery service remains the sole owner of the store acknowledgement. Dispatchers
+     * that must retain a fenced process lease until that acknowledgement completes can release it
+     * here. The default is deliberately additive for existing dispatchers.</p>
+     */
+    default void afterAcknowledged(PendingWork item) { }
+
     /** Declines everything for hosts that install no recovery dispatcher. */
     RecoveryDispatcher NONE = new RecoveryDispatcher() {
         @Override

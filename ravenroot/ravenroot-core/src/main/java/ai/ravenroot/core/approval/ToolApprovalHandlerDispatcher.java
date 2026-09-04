@@ -88,15 +88,27 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
         try {
             Boolean succeeded = await(Objects.requireNonNull(executor.execute(continuation, trigger),
                     "continuation execution"));
-            if (consumed.status() == ToolApprovalStatus.CONSUMED) {
+            DurableToolApproval afterExecution = await(store.loadToolApproval(
+                    consumed.key(), consumed.request().approvalId())).orElse(consumed);
+            if (afterExecution.status() == ToolApprovalStatus.CONSUMED) {
                 approvals.complete(consumed.key(), consumed.request().approvalId(),
                         Boolean.TRUE.equals(succeeded), idempotencyKey);
             }
         } catch (RuntimeException failedBeforeReturn) {
-            if (consumed.status() == ToolApprovalStatus.CONSUMED) {
+            DurableToolApproval afterFailure = await(store.loadToolApproval(
+                    consumed.key(), consumed.request().approvalId())).orElse(consumed);
+            if (afterFailure.status() == ToolApprovalStatus.CONSUMED) {
                 approvals.complete(consumed.key(), consumed.request().approvalId(), false, idempotencyKey);
             }
             throw failedBeforeReturn;
+        }
+    }
+
+    @Override
+    public void afterAcknowledged(PendingWork item) {
+        if (item instanceof PendingWork.HandlerTrigger trigger
+                && ToolApprovalService.HANDLER_NAME.equals(trigger.handlerName())) {
+            executor.afterAcknowledged(trigger);
         }
     }
 

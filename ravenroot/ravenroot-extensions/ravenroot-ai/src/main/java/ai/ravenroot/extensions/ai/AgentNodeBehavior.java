@@ -948,10 +948,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 provenance.add(ModelInputProvenance.Kind.TOOL_RESULT,
                         "tool-call:" + (checkpoint.index() + 1), safe);
                 var nodeResult = new CompletableFuture<NodeResult>();
-                nodeResult.whenComplete((answer, failure) -> {
-                    if (failure != null) result.completeExceptionally(failure);
-                    else result.complete(new ToolCallContinuationResult(answer, effectSucceeded));
-                });
+                result.complete(new ToolCallContinuationResult(nodeResult, effectSucceeded));
                 runTools(checkpoint.calls(), checkpoint.index() + 1, nodeResult);
             } catch (RuntimeException invalid) {
                 result.completeExceptionally(sanitize(invalid));

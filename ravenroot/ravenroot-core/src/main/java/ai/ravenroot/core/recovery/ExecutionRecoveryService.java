@@ -122,6 +122,7 @@ public final class ExecutionRecoveryService {
         try {
             dispatcher.dispatch(timer, timer.workItemId().toString());
             acknowledge(timer);
+            afterAcknowledged(timer);
             return new RecoveryOutcome.HandlerDispatched(timer.key(), timer.workItemId(),
                     timer.traversalId());
         } catch (RuntimeException unavailable) {
@@ -236,6 +237,7 @@ public final class ExecutionRecoveryService {
         try {
             dispatcher.dispatch(trigger, trigger.workItemId().toString());
             acknowledge(trigger);
+            afterAcknowledged(trigger);
             return new RecoveryOutcome.HandlerDispatched(trigger.key(), trigger.workItemId(),
                     trigger.traversalId());
         } catch (RuntimeException unavailable) {
@@ -333,6 +335,15 @@ public final class ExecutionRecoveryService {
         } catch (ExecutionStoreException alreadyGone) {
             // An item another worker acknowledged first, or one whose instance vanished. Both mean
             // the acknowledgement's purpose is already served.
+        }
+    }
+
+    private void afterAcknowledged(PendingWork item) {
+        try {
+            dispatcher.afterAcknowledged(item);
+        } catch (RuntimeException cleanupFailure) {
+            // A dispatcher cleanup cannot undo the durable acknowledgement. Any retained lease is
+            // bounded by its TTL, so keep the successful recovery outcome truthful.
         }
     }
 

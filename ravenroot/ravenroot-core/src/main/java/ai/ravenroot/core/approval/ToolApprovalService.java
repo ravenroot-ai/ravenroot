@@ -368,6 +368,24 @@ public final class ToolApprovalService {
                 succeeded ? "TOOL_APPROVAL_EFFECT_SUCCEEDED" : "TOOL_APPROVAL_EFFECT_FAILED", correlationId);
     }
 
+    /** Commits a recovered effect outcome on the same recorder revision and fence as re-entry. */
+    void completeFenced(ExecutionRecorder recorder, DurableToolApproval approval, boolean succeeded,
+                        String correlationId) {
+        Objects.requireNonNull(recorder, "recorder");
+        Objects.requireNonNull(approval, "approval");
+        if (!approval.key().tenantId().equals(recorder.tenantId())
+                || !approval.key().processInstanceId().equals(recorder.processInstanceId())
+                || approval.status() != ToolApprovalStatus.CONSUMED) {
+            throw new IllegalArgumentException("approval outcome does not match the claimed recorder");
+        }
+        String eventType = succeeded
+                ? "TOOL_APPROVAL_EFFECT_SUCCEEDED" : "TOOL_APPROVAL_EFFECT_FAILED";
+        StoredProcessInstance stored = load(approval.key());
+        recorder.completeToolApproval(approval.request().approvalId(), succeeded,
+                event(approval.key(), stored, approval.request(), eventType, correlationId,
+                        approval.request().traversalId()));
+    }
+
     /** Marks every crash-left consumed grant indeterminate; none is returned for automatic effect replay. */
     public int markConsumedIndeterminate(ExecutionKey key, String correlationId) {
         int changed = 0;

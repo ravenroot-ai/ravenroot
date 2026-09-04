@@ -213,17 +213,31 @@ class CardinalityAllowlistTest {
     }
 
     /**
-     * The structural guard, restated for the new label: the allowlist gained exactly one entry, and
-     * the identifier that must never be a label is still refused.
+     * The structural guard: the allowlist holds exactly the three bounded dimensions and nothing
+     * else, and every identifier that must never be a label is still refused.
+     *
+     * <p>The exact size is asserted rather than only the membership, and the number is meant to be
+     * edited deliberately. Each entry costs a multiplicative factor on every metric's series count, so
+     * an addition is a capacity decision; a test that only checked membership would let one arrive
+     * unnoticed inside an unrelated change. The three are: the event type, a fixed enum; the node
+     * type, bounded by the installed catalog; and the retry classification, a four-member enum fixed
+     * in source. None of the three grows with traffic, which is the property this list encodes.</p>
      */
     @Test
-    void theAllowlistGainedExactlyOneBoundedEntryAndStillRefusesInstanceIdentifiers() {
-        assertEquals(2, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
-                "the allowlist should carry event_type and node_type and nothing else: "
-                        + TelemetryBridge.METRIC_LABEL_ALLOWLIST);
+    void theAllowlistHoldsExactlyItsBoundedEntriesAndStillRefusesInstanceIdentifiers() {
+        assertEquals(3, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
+                "the allowlist should carry event_type, node_type and retry_classification and nothing "
+                        + "else: " + TelemetryBridge.METRIC_LABEL_ALLOWLIST);
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(TelemetryBridge.METRIC_ATTR_NODE_TYPE));
+        assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
+                TelemetryBridge.METRIC_ATTR_RETRY_CLASSIFICATION));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(AttributeKey.stringKey("ravenroot.node_id")));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(AttributeKey.stringKey("ravenroot.tenant_id")));
+        assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
+                AttributeKey.stringKey("ravenroot.attempt_id")),
+                "the attempt identity is unbounded by construction -- one per attempt -- and the "
+                        + "ordinal that DOES distinguish a retry is carried on the event, never as a "
+                        + "metric label");
     }
 
     /**

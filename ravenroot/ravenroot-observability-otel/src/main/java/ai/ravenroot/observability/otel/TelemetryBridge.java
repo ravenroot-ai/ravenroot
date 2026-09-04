@@ -145,11 +145,27 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
      */
     static final AttributeKey<String> METRIC_ATTR_NODE_TYPE = AttributeKey.stringKey("ravenroot.node_type");
 
+    /**
+     * How a retried attempt's failure was classified &mdash; the {@code Retryability} vocabulary,
+     * lower-cased and hyphenated as the event already carries it.
+     *
+     * <p>Admissible for the same reason {@link #METRIC_ATTR_NODE_TYPE} is: the value domain is a
+     * four-member enum fixed in source, so it does not grow with traffic, with a deployment's
+     * installed packages, or with anything a graph author writes. It is the label that makes the
+     * retry counter answer the question an operator actually has &mdash; "are we retrying because
+     * calls are timing out, or because a store keeps telling us to re-read" &mdash; which a bare
+     * count cannot.</p>
+     */
+    static final AttributeKey<String> METRIC_ATTR_RETRY_CLASSIFICATION =
+            AttributeKey.stringKey("ravenroot.retry_classification");
+
     static final Set<AttributeKey<?>> METRIC_LABEL_ALLOWLIST =
-            Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE);
+            Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE, METRIC_ATTR_RETRY_CLASSIFICATION);
 
     private final Tracer tracer;
     private final LongCounter eventCounter;
+    private final LongCounter orchestrationRetries;
+    private final LongCounter connectorRetries;
     private final DoubleHistogram nodeDuration;
     private final DoubleHistogram executionDuration;
     private final DoubleHistogram joinWait;
@@ -163,6 +179,19 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         this.eventCounter = meter.counterBuilder("ravenroot.execution.events")
                 .setDescription("Count of ExecutionEvents by type. Bounded: labeled only by "
                         + "ravenroot.event_type, a fixed enum.")
+                .build();
+        this.orchestrationRetries = meter.counterBuilder("ravenroot.node.retries")
+                .setDescription("Count of orchestration-level node retries: one per further durable "
+                        + "attempt the retry policy committed. Bounded: labeled by "
+                        + "ravenroot.node_type and ravenroot.retry_classification, both fixed value "
+                        + "domains. This counts retries the ORCHESTRATOR made -- retries a connector "
+                        + "performed inside one attempt are ravenroot.node.connector_retries.")
+                .build();
+        this.connectorRetries = meter.counterBuilder("ravenroot.node.connector_retries")
+                .setDescription("Count of retries a connector performed INSIDE one orchestration "
+                        + "attempt, as reported by the node itself. Never inferred: a node that "
+                        + "reports nothing contributes nothing, which is distinct from reporting a "
+                        + "single attempt. Bounded: labeled only by ravenroot.node_type.")
                 .build();
         this.nodeDuration = meter.histogramBuilder("ravenroot.node.duration")
                 .setDescription("Node invocation duration, start to terminal outcome (completed or "
@@ -200,7 +229,19 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
             case EXECUTION_STARTED -> startTraversal(event);
             case EXECUTION_COMPLETED, EXECUTION_FAILED -> endTraversal(event);
             case NODE_STARTED -> startNode(event);
-            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> endNode(event);
+            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> {
+                endNode(event);
+                recordConnectorRetries(event);
+            }
+            // Ends the failed attempt's span, and it must: the retry runs under a NEW attempt id and
+            // opens a span of its own, so leaving this one open would leak an entry in nodeSpans for
+            // every retry and never close a trace an operator is reading. The retry's own span then
+            // hangs off the same traversal, which is what makes a retry chain visible as a chain.
+            case NODE_RETRY_SCHEDULED -> {
+                endNode(event);
+                recordConnectorRetries(event);
+                orchestrationRetries.add(1, retryAttributes(event));
+            }
             case NODE_DEFAULTED -> annotateNode(event, "ravenroot.node.defaulted");
             case JOIN_SATISFIED -> annotateJoin(event, "ravenroot.join.satisfied", StatusCode.UNSET);
             case JOIN_FAILED -> annotateJoin(event, "ravenroot.join.failed", StatusCode.ERROR);
@@ -252,7 +293,13 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         Span span = pending.span();
         span.setAttribute(ATTR_DETAIL, event.detail());
         span.setAttribute(ATTR_FALLBACK, event.fallback());
-        span.setStatus(event.type() == ExecutionEventType.NODE_FAILED ? StatusCode.ERROR : StatusCode.OK);
+        // A retried attempt's span is ERROR alongside a terminal failure, because the attempt did
+        // fail -- what the retry changes is what happens next, not what happened. A trace showing the
+        // first two attempts as OK because they were eventually recovered from would hide precisely
+        // the latency and the failure an operator opened the trace to find.
+        span.setStatus(event.type() == ExecutionEventType.NODE_FAILED
+                || event.type() == ExecutionEventType.NODE_RETRY_SCHEDULED
+                ? StatusCode.ERROR : StatusCode.OK);
         span.end(event.occurredAt());
         // The node-type dimension. Absent stays absent -- a structural node or an
         // unregistered behavior records without the label rather than under a placeholder, so the
@@ -262,6 +309,44 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
                         ? Attributes.of(METRIC_ATTR_EVENT_TYPE, event.type().name())
                         : Attributes.of(METRIC_ATTR_EVENT_TYPE, event.type().name(),
                                 METRIC_ATTR_NODE_TYPE, event.nodeCatalogKey()));
+    }
+
+    /**
+     * The label set for one orchestration retry: its classification always, its node type when the
+     * catalog resolved one.
+     *
+     * <p>Absent stays absent, exactly as {@link #endNode} treats it: a structural node or an
+     * unregistered behavior records without the node-type label rather than under a placeholder, so
+     * the series set stays the installed catalog and nothing that merely looks like it.</p>
+     */
+    private static Attributes retryAttributes(ExecutionEvent event) {
+        String classification = event.publicReason() == null ? "unclassified" : event.publicReason();
+        return event.nodeCatalogKey() == null
+                ? Attributes.of(METRIC_ATTR_RETRY_CLASSIFICATION, classification)
+                : Attributes.of(METRIC_ATTR_RETRY_CLASSIFICATION, classification,
+                        METRIC_ATTR_NODE_TYPE, event.nodeCatalogKey());
+    }
+
+    /**
+     * Records the retries a connector performed inside this one attempt, when it reported any.
+     *
+     * <p>Counts {@code connectorAttempts - 1}, which is retries rather than attempts, because that is
+     * what the counter's name promises and what adds meaningfully across attempts. Nothing is recorded
+     * for a report of one, and nothing for
+     * {@link ai.ravenroot.api.execution.ConnectorRetryReport#NOT_REPORTED} &mdash; and those two must
+     * not be conflated into a zero: a connector that attempted once and a node that said nothing both
+     * add zero to a counter, but only the first is a measurement, and a deployment reading this
+     * metric has to be able to tell whether its connectors are instrumented at all. The distinction it
+     * needs for that lives on the event, not here.</p>
+     */
+    private void recordConnectorRetries(ExecutionEvent event) {
+        int attempts = event.connectorAttempts();
+        if (attempts <= 1) {
+            return;
+        }
+        connectorRetries.add(attempts - 1L, event.nodeCatalogKey() == null
+                ? Attributes.empty()
+                : Attributes.of(METRIC_ATTR_NODE_TYPE, event.nodeCatalogKey()));
     }
 
     /** NODE_DEFAULTED always precedes NODE_COMPLETED for the same attempt (ExecutionMonitor's own

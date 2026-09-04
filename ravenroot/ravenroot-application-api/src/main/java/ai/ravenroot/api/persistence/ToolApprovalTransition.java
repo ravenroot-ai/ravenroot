@@ -45,7 +45,7 @@ public sealed interface ToolApprovalTransition {
     }
 
     /**
-     * A store-clock expiry decision.
+     * A store-clock expiry before effect authority is consumed, including after approval.
      * @param approvalId target approval
      */
     record Expired(UUID approvalId) implements ToolApprovalTransition {

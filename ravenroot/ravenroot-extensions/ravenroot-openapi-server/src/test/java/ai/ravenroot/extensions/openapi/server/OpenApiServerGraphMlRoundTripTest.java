@@ -4,7 +4,8 @@ import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -16,12 +17,14 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
 class OpenApiServerGraphMlRoundTripTest {
-    @Test void graphCarriesOnlyOpaqueProfileOperationSubsetAndLowerCeilings() throws Exception {
+    @ParameterizedTest
+    @ValueSource(strings = {OpenApiReceiveNodeBehavior.BEHAVIOR, OpenApiRequestReplyNodeBehavior.BEHAVIOR})
+    void graphCarriesOnlyOpaqueProfileOperationSubsetAndLowerCeilings(String behavior) throws Exception {
         Map<String, Object> properties = Map.of("apiProfile", "orders", "operations", "createOrder",
                 "deadlineMs", "750", "maxRequestBytes", "2048", "maxIdempotencyBytes", "64",
-                "maxConcurrency", "1");
+                "maxResponseBytes", "512", "maxConcurrency", "1");
         var definition = new GraphDefinition(List.of(GraphNode.start("start"),
-                new GraphNode("receive", NodeKind.BEHAVIOR, OpenApiReceiveNodeBehavior.BEHAVIOR, properties),
+                new GraphNode("receive", NodeKind.BEHAVIOR, behavior, properties),
                 GraphNode.error("error"), GraphNode.end("end")), List.of());
         byte[] graphMl;
         try (var graph = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {

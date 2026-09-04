@@ -3,7 +3,13 @@ package ai.ravenroot.server;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.deployment.DeploymentId;
 import ai.ravenroot.api.deployment.DeploymentState;
+import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.node.NodeAction;
+import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.node.NodePackage;
+import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.security.DefaultAuthorizationService;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
@@ -69,7 +75,7 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
         this.owner = owner;
         this.directory = directory;
         Files.createDirectories(directory);
-        this.behaviors = NodePackages.register(new BehaviorRegistry(), nodePackage);
+        this.behaviors = NodePackages.registerAll(new BehaviorRegistry(), List.of(nodePackage, responsePackage()));
         this.engine = new PekkoExecutionEngine("openapi-production-" + System.nanoTime());
         var monitor = new ExecutionMonitor();
         this.store = new SqliteExecutionStore(directory.resolve("primary.db"), Clock.systemUTC());
@@ -197,6 +203,39 @@ public final class OpenApiServerProductionHarness implements AutoCloseable {
             }
             return new AuthenticatedPrincipal(identity[1], AuthenticatedPrincipal.Type.USER, "issuer", identity[0],
                     Set.of(), Set.of("graph:execute"));
+        };
+    }
+
+    private static NodePackage responsePackage() {
+        return new NodePackage() {
+            @Override public String id() { return "ai.ravenroot.test.openapi-response"; }
+            @Override public String version() { return "1"; }
+            @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+            @Override public List<NodeBehavior> behaviors() {
+                return List.of(new NodeBehavior() {
+                    @Override public NodeTypeDescriptor descriptor() {
+                        return new NodeTypeDescriptor("test.openapi-response", "Test OpenAPI response",
+                                "Test", "Produces a deterministic declared response.", "actor", false,
+                                List.of(), Set.of());
+                    }
+
+                    @Override public NodeAction create(NodeConfiguration configuration) {
+                        return message -> {
+                            Map<?, ?> request = (Map<?, ?>) message.payload();
+                            Map<?, ?> exchange = (Map<?, ?>) request.get("requestReply");
+                            Map<String, Object> response = new java.util.LinkedHashMap<>();
+                            response.put("correlationId", exchange.get("correlationId"));
+                            response.put("operationId", request.get("operationId"));
+                            response.put("status", 200);
+                            response.put("headers", Map.of("result-id", "production"));
+                            response.put("mediaType", "application/json");
+                            response.put("body", Map.of("result", "accepted"));
+                            return java.util.concurrent.CompletableFuture.completedFuture(
+                                    NodeResult.continueWith(response));
+                        };
+                    }
+                });
+            }
         };
     }
 }

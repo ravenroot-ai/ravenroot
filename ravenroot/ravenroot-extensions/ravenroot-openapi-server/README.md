@@ -1,7 +1,7 @@
 # Ravenroot OpenAPI server extension
 
 `ai.ravenroot.extensions.openapi.server` is an optional Node SDK `/2` plugin contributing the
-deployment-scoped source `openapi.receive`. It exposes no listener and imports no server or core
+deployment-scoped sources `openapi.receive` and `openapi.request-reply`. It exposes no listener and imports no server or core
 implementation. After the graph has reached source readiness, Ravenroot gives the source a
 generation-fenced managed route capability; the source leases one prefix below its package authority.
 Stop, rollback and shutdown release that lease before returning. Loading the package or compiling a
@@ -16,6 +16,41 @@ refusals and deadline expiry return `503`, while a full deployment or package ad
 `429`. The response contains only `openapi.receive.receipt.v1` and the caller's bounded idempotency
 key. There is deliberately no synchronous graph result, status endpoint, callback, webhook, replay or
 acknowledgement API.
+
+## Synchronous request/reply contract
+
+`openapi.request-reply` is a separate behavior so enabling the plugin does not widen the commands,
+properties, payload, or HTTP semantics of `openapi.receive`. It admits one live traversal through
+the deployment's generation-fenced `RequestReplyIngress`, retains both local and profile capacity
+until that exchange is terminal, and waits no longer than the earlier of the managed HTTP deadline
+and the profile deadline. Capacity refusal returns `429`, timeout returns `504`, and cancellation,
+failed traversal, malformed response, or unavailable admission returns a bounded empty `5xx`
+response without exposing graph or provider detail.
+
+The request payload is `openapi.request.v2`. In addition to the same validated request projection as
+v1, it carries a `requestReply` object containing runtime-issued correlation, process, traversal,
+absolute deadline, deployment, generation, and source-node values. These values are observations,
+not graph-selectable identity. A graph must route its response back to the same source node with the
+descriptor-admitted application command `respond`. The proposal contains exactly
+`correlationId`, `operationId`, `status`, `headers`, `mediaType`, and `body`; the behavior stamps the
+internal `openapi.response.v1` envelope. A terminal graph payload that merely resembles this
+envelope but did not pass through `respond` is rejected.
+
+The selected status must be declared for the matched OpenAPI operation. Response headers must be a
+lower-case subset of the digest-pinned OpenAPI response declaration and the fixed managed-response
+shape (at most 32 headers, 512 characters per value, and 8192 aggregate UTF-8 bytes); the request
+projection does not authorize responses. Hop-by-hop, credential, cookie, host, framing, and
+content-length headers are forbidden. JSON media and body are validated against the declared response
+schema and byte ceiling. `HEAD`, `204`, and `304` never emit a body. Exactly one response command can
+win; duplicates, late results, and cross-tenant,
+cross-process, cross-traversal, cross-node, or stale-generation proposals fail closed. Client
+disconnect triggers best-effort traversal cancellation, and stop, rollback, and route replacement
+cancel pending exchanges and release their permits exactly once.
+
+The synchronous exchange registry is intentionally process-local and supports a single live replica
+for a deployed route. It is not a distributed waiter or cross-replica handoff protocol. Operators
+must keep a synchronous route on one replica; deployment stop or process loss terminates its live
+HTTP exchanges. Durable asynchronous custody remains available through `openapi.receive`.
 
 The payload contains the compiled operation id, method, typed path/query/approved-header projection,
 validated JSON body, idempotency key and server-derived principal. Tenant and principal data are
@@ -49,6 +84,12 @@ and bounded internal component references). Omitted `additionalProperties` follo
 defaults to `true`; explicit `false` closes the object. JSON bodies require a projected
 `Content-Type: application/json`; syntactically valid media-type parameters are accepted. Ambiguous
 same-method template shapes are refused.
+
+For `openapi.request-reply`, response entries are also compiled at source start. Each selected
+operation must declare bounded explicit status codes; response content is either absent or one
+`application/json` schema from the same bounded subset, and response header schemas must be scalar.
+The asynchronous source deliberately retains its original shallow response handling and does not
+interpret response schemas.
 
 An executable configuration can be generated from an OpenAPI file without placing its contents in
 the graph:

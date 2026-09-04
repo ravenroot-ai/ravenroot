@@ -6,6 +6,7 @@ import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.graph.JoinSemantics;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.server.OpenApiServerProductionHarness;
 import org.junit.jupiter.api.Test;
@@ -66,6 +67,19 @@ class OpenApiServerProductionIntegrationTest {
                 assertTrue(harness.readinessDetail().contains(":1:ACTIVE"));
                 assertEquals(202, harness.post("tenant-a:alice", "application/json", "winner").statusCode());
             }
+        }
+    }
+
+    @Test void synchronousRequestReplyTraversesTheDeclaredRespondCommandOverProductionHttp() throws Exception {
+        OpenApiServerNodePackage nodePackage = new OpenApiServerNodePackage(
+                () -> Optional.of(OpenApiServerTestSupport.configuration()));
+        try (var harness = OpenApiServerProductionHarness.start(nodePackage, synchronousGraph(), OWNER,
+                temporaryDirectory.resolve("request-reply"))) {
+            harness.startGraph();
+            var response = harness.post("tenant-a:alice", "application/json", "sync");
+            assertEquals(200, response.statusCode());
+            assertEquals("production", response.headers().firstValue("result-id").orElseThrow());
+            assertEquals("{\"result\":\"accepted\"}", response.body());
         }
     }
 
@@ -198,6 +212,28 @@ class OpenApiServerProductionIntegrationTest {
         var definition = new GraphDefinition(List.of(GraphNode.start("start"), source,
                         GraphNode.error("error"), GraphNode.end("end")),
                 List.of(GraphEdge.to("start", "openapi"), GraphEdge.to("openapi", "end")));
+        try (var manager = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {
+            manager.writeGraphMl(output);
+            return output.toByteArray();
+        }
+    }
+
+    private static byte[] synchronousGraph() throws Exception {
+        GraphNode source = new GraphNode("openapi", NodeKind.BEHAVIOR,
+                OpenApiRequestReplyNodeBehavior.BEHAVIOR,
+                Map.of("apiProfile", "orders", "operations", "createOrder",
+                        JoinSemantics.POLICY_PROPERTY, JoinSemantics.EACH_POLICY));
+        GraphNode responder = new GraphNode("responder", NodeKind.BEHAVIOR,
+                "test.openapi-response", Map.of());
+        var definition = new GraphDefinition(List.of(GraphNode.start("start"), source, responder,
+                        GraphNode.error("error"), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "openapi"), new GraphEdge("openapi", "responder", "continue",
+                                Map.of(GraphManager.COMMAND, "process")),
+                        new GraphEdge("responder", "openapi", "continue",
+                                Map.of(GraphManager.COMMAND, "respond")),
+                        new GraphEdge("openapi", "end", "responded",
+                                Map.of(GraphManager.COMMAND, "process"))),
+                Map.of(JoinSemantics.MARKER_PROPERTY, JoinSemantics.DECLARED));
         try (var manager = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {
             manager.writeGraphMl(output);
             return output.toByteArray();

@@ -5,10 +5,22 @@ import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.IngressDisposition;
 import ai.ravenroot.api.deployment.IngressOverflowPolicy;
 import ai.ravenroot.api.deployment.IngressReceipt;
+import ai.ravenroot.api.deployment.IngressTarget;
+import ai.ravenroot.api.deployment.RequestReplyAdmission;
+import ai.ravenroot.api.deployment.RequestReplyBinding;
+import ai.ravenroot.api.deployment.RequestReplyContext;
+import ai.ravenroot.api.deployment.RequestReplyExchange;
+import ai.ravenroot.api.deployment.RequestReplyIngress;
+import ai.ravenroot.api.deployment.RequestReplyOutcome;
+import ai.ravenroot.api.deployment.RequestReplyProjection;
+import ai.ravenroot.api.deployment.RequestReplyTerminalState;
 import ai.ravenroot.api.deployment.TrustedIngress;
+import ai.ravenroot.api.application.ExecutionOutcome;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.ingress.IngressAuthorityDeclaration;
 import ai.ravenroot.api.ingress.IngressPrincipal;
 import ai.ravenroot.api.ingress.IngressRequest;
+import ai.ravenroot.api.ingress.IngressRequestContext;
 import ai.ravenroot.api.ingress.IngressRequestProjectionPolicy;
 import ai.ravenroot.api.ingress.IngressResponse;
 import ai.ravenroot.api.ingress.IngressRouteAuthority;
@@ -17,12 +29,17 @@ import ai.ravenroot.api.ingress.IngressRouteLease;
 import ai.ravenroot.api.ingress.IngressRouteOwner;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.payload.PayloadValue;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -82,6 +99,7 @@ final class OpenApiServerTestSupport {
 
     static final class FakeContext implements InboundSourceContext {
         final FakeIngress ingress;
+        final FakeRequestReply requestReply = new FakeRequestReply();
         FakeContext(FakeIngress ingress) { this.ingress = ingress; }
         @Override public DeploymentId deploymentId() { return DeploymentId.of("deployment-a"); }
         @Override public String nodeId() { return "openapi-node"; }
@@ -89,8 +107,64 @@ final class OpenApiServerTestSupport {
             return new SecurityContext("request", "tenant-a", "operator", PrincipalType.WORKLOAD, "runtime");
         }
         @Override public TrustedIngress ingress() { return ingress; }
+        @Override public RequestReplyIngress requestReply() { return requestReply; }
         @Override public void reportDegraded(String reason) { }
         @Override public void reportHealthy() { }
+    }
+
+    static final class FakeRequestReply implements RequestReplyIngress {
+        final AtomicReference<PayloadValue> payload = new AtomicReference<>();
+        final AtomicReference<FakeExchange> exchange = new AtomicReference<>();
+
+        @Override public RequestReplyAdmission request(IngressTarget target, PayloadValue payload, Instant deadline) {
+            return new RequestReplyAdmission.Refused(ai.ravenroot.api.deployment.RequestReplyRefusal.UNSUPPORTED);
+        }
+
+        @Override public RequestReplyAdmission requestProjected(IngressTarget target,
+                                                                 RequestReplyProjection projection,
+                                                                 Instant deadline) {
+            UUID process = UUID.randomUUID();
+            UUID traversal = UUID.randomUUID();
+            var context = new RequestReplyContext(new RequestReplyBinding(
+                    "tenant-a", "deployment-a", 1, Optional.of("openapi-node")), target,
+                    UUID.randomUUID(), process, traversal, deadline);
+            PayloadValue projected = projection.project(context);
+            payload.set(projected);
+            FakeExchange created = new FakeExchange(context);
+            exchange.set(created);
+            return new RequestReplyAdmission.Accepted(created);
+        }
+    }
+
+    static final class FakeExchange implements RequestReplyExchange {
+        private final RequestReplyContext context;
+        private final CompletableFuture<RequestReplyOutcome> completion = new CompletableFuture<>();
+        final AtomicInteger cancellations = new AtomicInteger();
+
+        FakeExchange(RequestReplyContext context) { this.context = context; }
+        @Override public UUID correlationId() { return context.correlationId(); }
+        @Override public UUID processInstanceId() { return context.processInstanceId(); }
+        @Override public UUID traversalId() { return context.traversalId(); }
+        @Override public Instant deadline() { return context.deadline(); }
+        @Override public java.util.concurrent.CompletionStage<RequestReplyOutcome> completion() { return completion; }
+        @Override public boolean cancel() {
+            boolean won = completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
+                    RequestReplyTerminalState.CANCELLED, Optional.empty()));
+            if (won) cancellations.incrementAndGet();
+            return won;
+        }
+
+        void complete(Object result) {
+            completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
+                    RequestReplyTerminalState.COMPLETED, Optional.of(new ExecutionOutcome(
+                    processInstanceId(), traversalId(), ProcessInstanceStatus.COMPLETED, result,
+                    Set.of("openapi-node"), Set.of()))));
+        }
+
+        void timeout() {
+            completion.complete(new RequestReplyOutcome(processInstanceId(), traversalId(),
+                    RequestReplyTerminalState.TIMED_OUT, Optional.empty()));
+        }
     }
 
     static final class FakeAuthority implements IngressRouteAuthority {
@@ -122,6 +196,11 @@ final class OpenApiServerTestSupport {
 
         IngressResponse invoke(IngressRequest request) {
             return handler.handle(request).toCompletableFuture().join();
+        }
+
+        java.util.concurrent.CompletionStage<IngressResponse> invokeStage(IngressRequest request,
+                                                                          IngressRequestContext context) {
+            return handler.handle(request, context);
         }
     }
 

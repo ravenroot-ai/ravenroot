@@ -1,8 +1,10 @@
 package ai.ravenroot.extensions.openapi.server;
 
 import ai.ravenroot.api.ingress.IngressRequest;
+import ai.ravenroot.api.ingress.IngressResponse;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.payload.PayloadValue;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -17,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 
 /** Immutable, bounded OpenAPI 3.0.3 request-validation and route plan. */
 final class OpenApiIngressPlan {
@@ -26,8 +29,12 @@ final class OpenApiIngressPlan {
     private static final Set<String> METHODS = Set.of("get", "put", "post", "delete", "options", "head", "patch");
     private static final Set<String> ROOT_KEYS = Set.of("openapi", "info", "paths", "components", "tags");
     private static final Set<String> FORBIDDEN_HEADERS = Set.of("authorization", "proxy-authorization", "cookie",
-            "host", "content-length", "connection", "transfer-encoding", "upgrade");
+            "host", "content-length", "connection", "proxy-connection", "keep-alive", "transfer-encoding",
+            "te", "trailer", "upgrade");
     private static final Set<String> IGNORED_OAS_HEADERS = Set.of("accept", "content-type", "authorization");
+    private static final int MAX_RESPONSE_HEADERS = 32;
+    private static final int MAX_RESPONSE_HEADER_VALUE_CHARS = 512;
+    private static final int MAX_RESPONSE_HEADER_BYTES = 8192;
 
     private final List<Operation> operations;
     private final Set<String> methods;
@@ -41,6 +48,16 @@ final class OpenApiIngressPlan {
 
     static OpenApiIngressPlan compile(OpenApiServerProfile profile, Set<String> graphOperations,
                                       Set<String> projectedHeaders) {
+        return compile(profile, graphOperations, projectedHeaders, false);
+    }
+
+    static OpenApiIngressPlan compileRequestReply(OpenApiServerProfile profile, Set<String> graphOperations,
+                                                  Set<String> projectedHeaders) {
+        return compile(profile, graphOperations, projectedHeaders, true);
+    }
+
+    private static OpenApiIngressPlan compile(OpenApiServerProfile profile, Set<String> graphOperations,
+                                              Set<String> projectedHeaders, boolean requestReply) {
         requireDigest(profile.specification(), profile.specificationSha256());
         final Object decoded;
         try { decoded = PayloadJson.read(profile.specification(), SPEC_LIMITS).toJava(); }
@@ -77,7 +94,7 @@ final class OpenApiIngressPlan {
                 if (!found.add(operationId)) throw configuration();
                 if (!selected.contains(operationId)) continue;
                 Operation operation = compileOperation(operationId, method, path, raw, inherited, schemaCompiler,
-                        projectedHeaders);
+                        projectedHeaders, requestReply);
                 if (!routeShapes.add(operation.method + "\u0000" + path.shape())) throw configuration();
                 compiled.add(operation);
             }
@@ -105,7 +122,7 @@ final class OpenApiIngressPlan {
 
     private static Operation compileOperation(String id, String method, PathTemplate path, Map<String, Object> raw,
                                               List<Parameter> inherited, Schema.Compiler schemaCompiler,
-                                              Set<String> projectedHeaders) {
+                                              Set<String> projectedHeaders, boolean requestReply) {
         rejectExtensions(raw);
         OpenApiValues.exactKeys(raw, Set.of("operationId", "summary", "description", "tags", "parameters",
                 "requestBody", "responses", "deprecated"), "operation");
@@ -117,8 +134,57 @@ final class OpenApiIngressPlan {
         for (Parameter parameter : parameters) if (parameter.location == Location.PATH) declaredPath.add(parameter.name);
         if (!pathNames.equals(declaredPath)) throw configuration();
         Body body = requestBody(raw.get("requestBody"), schemaCompiler);
-        OpenApiValues.object(raw.get("responses"), "responses");
-        return new Operation(id, method.toUpperCase(Locale.ROOT), path, parameters, body);
+        Map<Integer, Response> responses;
+        if (requestReply) responses = responses(raw.get("responses"), schemaCompiler);
+        else {
+            OpenApiValues.object(raw.get("responses"), "responses");
+            responses = Map.of();
+        }
+        return new Operation(id, method.toUpperCase(Locale.ROOT), path, parameters, body, responses);
+    }
+
+    private static Map<Integer, Response> responses(Object raw, Schema.Compiler schemas) {
+        Map<String, Object> values = OpenApiValues.object(raw, "responses");
+        if (values.isEmpty() || values.size() > 32) throw configuration();
+        Map<Integer, Response> result = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : values.entrySet()) {
+            if (!entry.getKey().matches("[2-5][0-9]{2}")) throw configuration();
+            int status = Integer.parseInt(entry.getKey());
+            Map<String, Object> value = OpenApiValues.object(entry.getValue(), "response");
+            rejectExtensions(value);
+            OpenApiValues.exactKeys(value, Set.of("description", "headers", "content"), "response");
+            OpenApiValues.string(value.get("description"), "response description", 1024);
+
+            Map<String, Schema> headers = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> header :
+                    OpenApiValues.optionalObject(value.get("headers"), "response headers").entrySet()) {
+                String name = OpenApiServerProfile.header(header.getKey());
+                if (!name.equals(header.getKey().toLowerCase(Locale.ROOT))
+                        || FORBIDDEN_HEADERS.contains(name) || name.equals("content-type")
+                        || headers.size() >= 64) {
+                    throw configuration();
+                }
+                Map<String, Object> definition = OpenApiValues.object(header.getValue(), "response header");
+                rejectExtensions(definition);
+                OpenApiValues.exactKeys(definition, Set.of("description", "schema"), "response header");
+                if (definition.containsKey("description")) {
+                    OpenApiValues.string(definition.get("description"), "response header description", 1024);
+                }
+                Schema schema = schemas.compile(definition.get("schema"));
+                if (!schema.scalar() || headers.putIfAbsent(name, schema) != null) throw configuration();
+            }
+
+            Map<String, Object> content = OpenApiValues.optionalObject(value.get("content"), "response content");
+            Schema body = null;
+            if (!content.isEmpty()) {
+                if (!content.keySet().equals(Set.of("application/json"))) throw configuration();
+                Map<String, Object> media = OpenApiValues.object(content.get("application/json"), "response media");
+                OpenApiValues.exactKeys(media, Set.of("schema"), "response media");
+                body = schemas.compile(media.get("schema"));
+            }
+            result.put(status, new Response(headers, body));
+        }
+        return Collections.unmodifiableMap(result);
     }
 
     private static List<Parameter> parameters(Object raw, Schema.Compiler schemaCompiler,
@@ -215,14 +281,87 @@ final class OpenApiIngressPlan {
         int status() { return status; }
     }
 
-    record Match(String operationId, Map<String, Object> path, Map<String, Object> query,
-                 Map<String, Object> headers, Object body) { }
+    record Match(String operationId, String method, Map<String, Object> path, Map<String, Object> query,
+                 Map<String, Object> headers, Object body, Map<Integer, Response> responses) {
+        IngressResponse projectResponse(Object raw, UUID expectedCorrelation, int maximumBodyBytes) {
+            Map<String, Object> command = OpenApiValues.object(raw, "response command");
+            Set<String> fields = Set.of("version", "correlationId", "operationId", "status",
+                    "headers", "mediaType", "body");
+            OpenApiValues.exactKeys(command, fields, "response command");
+            if (!command.keySet().equals(fields)) throw new ResponseFailure("shape");
+            if (!"openapi.response.v1".equals(command.get("version"))
+                    || !expectedCorrelation.toString().equals(command.get("correlationId"))
+                    || !operationId.equals(command.get("operationId"))) {
+                throw new ResponseFailure("identity");
+            }
+            int status;
+            try {
+                status = OpenApiValues.integer(command.get("status"), "status", 200, 599);
+            } catch (RuntimeException invalid) {
+                throw new ResponseFailure("status-value");
+            }
+            Response response = responses.get(status);
+            if (response == null) throw new ResponseFailure("status-declaration");
+
+            Map<String, Object> suppliedHeaders = OpenApiValues.object(command.get("headers"), "response headers");
+            if (suppliedHeaders.size() > MAX_RESPONSE_HEADERS
+                    || !response.headers.keySet().containsAll(suppliedHeaders.keySet())) {
+                throw new ResponseFailure("headers");
+            }
+            Map<String, String> projectedHeaders = new LinkedHashMap<>();
+            long headerBytes = 0;
+            try {
+                for (Map.Entry<String, Object> entry : suppliedHeaders.entrySet()) {
+                    String name = OpenApiServerProfile.header(entry.getKey());
+                    if (!name.equals(entry.getKey())) throw new ResponseFailure("headers");
+                    String value = OpenApiValues.string(entry.getValue(), "response header",
+                            MAX_RESPONSE_HEADER_VALUE_CHARS);
+                    if (value.getBytes(StandardCharsets.UTF_8).length > MAX_RESPONSE_HEADER_VALUE_CHARS
+                            || value.codePoints().anyMatch(codePoint -> codePoint < 0x20 || codePoint == 0x7f)) {
+                        throw new ResponseFailure("headers");
+                    }
+                    response.headers.get(name).parseScalar(value);
+                    headerBytes = Math.addExact(headerBytes,
+                            Math.addExact(name.getBytes(StandardCharsets.UTF_8).length,
+                                    value.getBytes(StandardCharsets.UTF_8).length));
+                    projectedHeaders.put(name, value);
+                }
+            } catch (RuntimeException invalid) {
+                throw new ResponseFailure("headers");
+            }
+            if (headerBytes > MAX_RESPONSE_HEADER_BYTES) throw new ResponseFailure("headers");
+
+            Object body = command.get("body");
+            Object mediaType = command.get("mediaType");
+            byte[] bytes;
+            boolean bodyForbidden = method.equals("HEAD") || status == 204 || status == 304;
+            if (response.body == null || bodyForbidden) {
+                if (body != null || mediaType != null) throw new ResponseFailure("body");
+                bytes = new byte[0];
+            } else {
+                if (!"application/json".equals(mediaType) || body == null) throw new ResponseFailure("media");
+                try {
+                    response.body.validate(body);
+                    PayloadLimits limits = new PayloadLimits(maximumBodyBytes, 32, 512, 10_000,
+                            maximumBodyBytes, 128);
+                    String encoded = PayloadJson.write(PayloadValue.fromJava(body, limits));
+                    bytes = encoded.getBytes(StandardCharsets.UTF_8);
+                    if (bytes.length > maximumBodyBytes) throw new ResponseFailure("body");
+                } catch (RuntimeException invalid) {
+                    throw new ResponseFailure("body");
+                }
+                projectedHeaders.put("content-type", "application/json");
+            }
+            return new IngressResponse(status, projectedHeaders, bytes);
+        }
+    }
 
     private enum Location { PATH, QUERY, HEADER, COOKIE }
     private record Parameter(String name, Location location, boolean required, Schema schema) { }
     private record Body(boolean required, Schema schema) { }
 
-    private record Operation(String id, String method, PathTemplate path, List<Parameter> parameters, Body body) {
+    private record Operation(String id, String method, PathTemplate path, List<Parameter> parameters,
+                             Body body, Map<Integer, Response> responses) {
         Match validate(IngressRequest request, Map<String, String> captures, String idempotencyHeader)
                 throws RequestFailure {
             Map<String, Object> pathValues = new LinkedHashMap<>();
@@ -273,12 +412,25 @@ final class OpenApiIngressPlan {
                         body.schema.validate(bodyValue);
                     }
                 } else if (bytes.length != 0) throw new RequestFailure(400);
-                return new Match(id, immutable(pathValues), immutable(queryValues), immutable(headerValues), bodyValue);
+                return new Match(id, method, immutable(pathValues), immutable(queryValues), immutable(headerValues),
+                        bodyValue, responses);
             } catch (RequestFailure failure) {
                 throw failure;
             } catch (RuntimeException invalid) {
                 throw new RequestFailure(400);
             }
+        }
+    }
+
+    private record Response(Map<String, Schema> headers, Schema body) {
+        private Response {
+            headers = Map.copyOf(headers);
+        }
+    }
+
+    static final class ResponseFailure extends RuntimeException {
+        private ResponseFailure(String boundary) {
+            super("response validation failed at " + boundary, null, false, false);
         }
     }
 

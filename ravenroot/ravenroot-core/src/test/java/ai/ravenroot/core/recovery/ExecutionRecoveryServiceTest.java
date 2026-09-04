@@ -18,13 +18,16 @@ import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.ProcessInventoryEntry;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -318,6 +321,67 @@ class ExecutionRecoveryServiceTest {
      * A catalog-resolved snapshot: the node's type declares the property canonically and the instance
      * carries {@code value}. This is the wired route — descriptor first, instance value second.
      */
+    @Test
+    @DisplayName("a bounded discovery stops the scan itself, not just the list it returns")
+    void aBoundedDiscoveryStopsPagingRatherThanTrimmingAfterwards() {
+        // Twelve interrupted instances and a page size of three: an unbounded pager needs four round
+        // trips to materialise the tenant's cohort. A bound of four must need two.
+        for (int instance = 0; instance < 12; instance++) {
+            interruptedInstance();
+        }
+        var pages = new java.util.concurrent.atomic.AtomicInteger();
+        ExecutionStore counting = countingPages(store, pages);
+        var service = new ExecutionRecoveryService(counting, List.of(TENANT), "recovery-1", 3, TTL,
+                RepeatabilityDeclarations.NONE_DECLARED, RecoveryDispatcher.NONE);
+
+        List<ProcessInventoryEntry> bounded = service.discoverInterrupted(4);
+
+        assertEquals(4, bounded.size());
+        assertEquals(2, pages.get(),
+                "the caller blocking on this is holding readiness closed, so trimming a cohort that "
+                        + "was already fetched bounds nothing: the round trips are the cost");
+
+        pages.set(0);
+        assertEquals(12, service.discoverInterrupted().size(),
+                "and the unbounded form still answers the whole question it was always asked");
+        assertEquals(4, pages.get(), "which is what four pages of three looks like");
+    }
+
+    /** Counts inventory page reads, so the bound is measured rather than asserted about. */
+    private static ExecutionStore countingPages(ExecutionStore backing,
+                                                java.util.concurrent.atomic.AtomicInteger pages) {
+        return (ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                ExecutionRecoveryServiceTest.class.getClassLoader(),
+                new Class<?>[] {ExecutionStore.class},
+                (proxy, method, args) -> {
+                    if ("listProcessInstances".equals(method.getName())) {
+                        pages.incrementAndGet();
+                    }
+                    try {
+                        return method.invoke(backing, args);
+                    } catch (java.lang.reflect.InvocationTargetException invoked) {
+                        throw invoked.getCause();
+                    }
+                });
+    }
+
+    /** A non-terminal instance nobody holds a lease on: the durable shape of interrupted work. */
+    private void interruptedInstance() {
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        var accepted = new ProcessInstance(key.processInstanceId(), ProcessInstanceStatus.ACCEPTED,
+                Map.of(traversalId, new Traversal(traversalId, "start", TraversalStatus.ACCEPTED, Map.of())));
+        StoredProcessInstance created = await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(accepted, new GraphVersionPin("graph-v1")))
+                .build()));
+        await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .build()));
+    }
+
     private RepeatabilityDeclarations declaredInCatalog(String value) {
         var declaring = new NodeTypeDescriptor("work", "Work", "General", "", "actor", false,
                 List.of(RecoveryRepeatabilityProperty.declaration(null)), Set.of("side-effect"));

@@ -696,7 +696,16 @@ final class SqliteSchema {
                                 REFERENCES execution_manifest (tenant_id, process_instance_id)
                                 ON DELETE CASCADE
                         )
-                        """)));
+                        """)),
+                // Recovery's own bookkeeping, on the attempt it is about. Zero is the honest default
+                // for every pre-existing row: an attempt written before this column existed was never
+                // withheld by a mechanism that did not exist, so the subtraction it feeds is a no-op
+                // and the delivery limit behaves exactly as it did. Nothing rewrites old rows, and a
+                // binary that predates the column still reads every row it wrote, because the column
+                // is additive and carries a default rather than a new status name.
+                new SchemaMigration(16, "recovery records the deliveries it withheld", List.of(
+                        "ALTER TABLE attempt ADD COLUMN withheld_through_delivery "
+                                + "INTEGER NOT NULL DEFAULT 0")));
     }
 
     static int currentVersion() {

@@ -256,30 +256,72 @@ class ExecutionRecoveryCoordinatorTest {
     }
 
     @Test
-    @DisplayName("a refusal that waiting could clear never parks, however many sweeps it survives")
+    @DisplayName("a refusal that waiting could clear consumes no delivery budget, so the effect is still redelivered")
     void aRetryableRefusalIsWithheldWithoutEverConsumingTheDeliveryBudget() {
-        Fixture fixture = storedGraphFixture();
+        // The node declares recovery.repeatable and the catalog declares the property, so an admitted
+        // classification can only ever re-dispatch. A park here therefore cannot be the merits branch
+        // — it can only be the delivery limit, which is exactly the branch this test is about. The
+        // previous version of this test could not tell the two apart and attributed the park to the
+        // wrong one.
+        Fixture fixture = declaringGraphFixture();
         driveToRunning(fixture);
-        // The document exists; the store simply cannot be read right now. Spending the budget on
-        // this would park every ambiguous attempt outstanding during an outage the moment it cleared.
         definitions.unavailable = true;
-        var coordinator = new ExecutionRecoveryCoordinator(authority(), List.of(new RecordingAdapter(true)));
+        var adapter = new RecordingAdapter(true);
+        var coordinator = new ExecutionRecoveryCoordinator(declaringAuthority(), List.of(adapter));
         var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-1", 10, TTL,
                 coordinator.declarations(), coordinator, 2);
 
-        for (int sweep = 0; sweep < 6; sweep++) {
+        for (int sweep = 0; sweep < 8; sweep++) {
             assertInstanceOf(RecoveryOutcome.Deferred.class, recovery.sweepOnce().get(0),
                     "a store that may answer later must not be treated as a deployment fault");
             clock.advance(TTL.plusSeconds(1));
         }
         assertEquals(NodeAttemptStatus.RUNNING, currentAttempt(fixture).status(),
-                "six sweeps past a budget of two, and still not parked");
+                "eight deliveries past a budget of two, and still not parked");
+        assertTrue(adapter.dispatched.isEmpty(), "and nothing was sent while the store was silent");
 
         definitions.unavailable = false;
-        var outcome = recovery.sweepOnce().get(0);
-        assertInstanceOf(RecoveryOutcome.Parked.class, outcome,
-                "once the store answers, the ordinary ambiguity decision runs: this node declares "
-                        + "nothing, so it parks for a human on its own merits");
+        RecoveryOutcome afterRecovery = recovery.sweepOnce().get(0);
+
+        assertInstanceOf(RecoveryOutcome.ReDispatched.class, afterRecovery,
+                () -> "the effect is declared repeatable, so the instant the store answers it must be "
+                        + "redelivered. A park here would mean the outage spent the budget and the "
+                        + "limit cashed it in, which is the failure the withholding exists to "
+                        + "prevent. Got: " + afterRecovery);
+        assertEquals(List.of(fixture.attemptId.toString()), adapter.dispatched,
+                "and under its original effect identity, so the redelivery dedupes rather than "
+                        + "becoming a second effect");
+        assertEquals(NodeAttemptStatus.RUNNING, currentAttempt(fixture).status());
+    }
+
+    @Test
+    @DisplayName("the withheld mark is durable, so an outage that straddles a restart still costs no budget")
+    void theWithheldMarkSurvivesAProcessThatDoesNotHoldIt() {
+        Fixture fixture = declaringGraphFixture();
+        driveToRunning(fixture);
+        definitions.unavailable = true;
+        var firstProcess = new ExecutionRecoveryCoordinator(declaringAuthority(), List.of(new RecordingAdapter(true)));
+        var before = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-before", 10, TTL,
+                firstProcess.declarations(), firstProcess, 2);
+        for (int sweep = 0; sweep < 5; sweep++) {
+            before.sweepOnce();
+            clock.advance(TTL.plusSeconds(1));
+        }
+        assertTrue(currentAttempt(fixture).withheldThroughDelivery() >= 5,
+                "the mark is in the aggregate, not in the sweeping process");
+
+        // A second service with a different worker identity and no shared state: everything the
+        // restarted process knows about the outage it reads back from the store.
+        definitions.unavailable = false;
+        var adapter = new RecordingAdapter(true);
+        var afterRestart = new ExecutionRecoveryCoordinator(declaringAuthority(), List.of(adapter));
+        RecoveryOutcome outcome = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-after",
+                10, TTL, afterRestart.declarations(), afterRestart, 2).sweepOnce().get(0);
+
+        assertInstanceOf(RecoveryOutcome.ReDispatched.class, outcome,
+                () -> "a process that had never seen the outage must still not charge it to the "
+                        + "attempt's budget. Got: " + outcome);
+        assertEquals(List.of(fixture.attemptId.toString()), adapter.dispatched);
     }
 
     @Test
@@ -327,6 +369,26 @@ class ExecutionRecoveryCoordinatorTest {
     }
 
     // ------------------------------------------------------------------ fixture
+
+    /** A catalog whose one type declares recovery.repeatable with the canonical shape. */
+    private PinnedGraphRecoveryAuthority declaringAuthority() {
+        var declaring = new ai.ravenroot.api.catalog.NodeTypeDescriptor("work", "Work", "General", "",
+                "actor", false,
+                List.of(ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty.declaration(null)),
+                Set.of("side-effect"));
+        return new PinnedGraphRecoveryAuthority(store, definitions, null,
+                behavior -> "work".equals(behavior) ? java.util.Optional.of(declaring)
+                        : java.util.Optional.empty(),
+                GraphExecutionLimits.DEFAULTS);
+    }
+
+    /** Stores a document whose node the author declared repeatable, and pins an execution to it. */
+    private Fixture declaringGraphFixture() {
+        CanonicalGraphMl canonical = canonicalDocument(
+                ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty.REPEATABLE);
+        await(definitions.put(TENANT, GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical));
+        return scheduleAttempt(canonical.contentId().value(), ExecutionOrigin.none());
+    }
 
     private PinnedGraphRecoveryAuthority authority() {
         // No catalog entry declares anything here: this file is about the fail-closed gate and the
@@ -382,9 +444,14 @@ class ExecutionRecoveryCoordinatorTest {
     }
 
     private static CanonicalGraphMl canonicalDocument() {
+        return canonicalDocument(null);
+    }
+
+    private static CanonicalGraphMl canonicalDocument(String declaration) {
         var definition = new GraphDefinition(List.of(
                 GraphNode.start("start"),
-                new GraphNode("work", NodeKind.BEHAVIOR, "work", Map.of()),
+                new GraphNode("work", NodeKind.BEHAVIOR, "work", declaration == null ? Map.of()
+                        : Map.of(ai.ravenroot.api.catalog.RecoveryRepeatabilityProperty.NAME, declaration)),
                 GraphNode.error("error"), GraphNode.end("end")),
                 List.of(GraphEdge.to("start", "work"), GraphEdge.to("work", "end")));
         try (var manager = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {

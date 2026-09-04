@@ -245,12 +245,38 @@ public final class ExecutionRecoveryService {
         if (limit < 1) throw new IllegalArgumentException("limit must be positive");
         var interrupted = new ArrayList<ProcessInventoryEntry>();
         for (String tenantId : tenantIds) {
-            for (ProcessInventoryEntry entry : discoverInterrupted(tenantId)) {
-                if (interrupted.size() >= limit) return List.copyOf(interrupted);
-                interrupted.add(entry);
+            // The limit reaches the pager itself rather than trimming its result. Collecting a
+            // tenant's whole cohort and cutting it afterwards would leave the scan exactly as long as
+            // it was -- the same page round trips, the same rows resident -- and the caller blocking
+            // on this is holding readiness closed, which is the one thing the bound exists to stop.
+            // A tenant that fills the limit therefore ends the scan mid-page, and later tenants are
+            // not visited at all.
+            pageInterrupted(tenantId, limit - interrupted.size(), interrupted);
+            if (interrupted.size() >= limit) {
+                break;
             }
         }
         return List.copyOf(interrupted);
+    }
+
+    /** Pages one tenant only until {@code remaining} interrupted instances have been collected. */
+    private void pageInterrupted(String tenantId, int remaining, List<ProcessInventoryEntry> into) {
+        var query = ProcessInventoryQuery.outstanding(Math.min(batchLimit, Math.max(1, remaining)));
+        while (true) {
+            var page = await(store.listProcessInstances(tenantId, query));
+            for (ProcessInventoryEntry entry : page.items()) {
+                if (entry.disposition() == InventoryDisposition.INTERRUPTED) {
+                    into.add(entry);
+                    if (--remaining <= 0) {
+                        return;
+                    }
+                }
+            }
+            if (page.nextCursor().isEmpty()) {
+                return;
+            }
+            query = query.after(page.nextCursor().get());
+        }
     }
 
     private RecoveryOutcome recover(PendingWork item) {
@@ -290,7 +316,7 @@ public final class ExecutionRecoveryService {
         RecoveryAdmission admission = admissionOf(attemptItem);
         return switch (attempt.status()) {
             case SCHEDULED -> dispatchNeverStarted(attemptItem, stored, admission);
-            case RUNNING -> resolveAmbiguity(attemptItem, stored, admission);
+            case RUNNING -> resolveAmbiguity(attemptItem, stored, attempt, admission);
             // Unreachable through a conforming adapter, which excludes these from the claim query.
             // Handled anyway: a claim that raced a concurrent transition must be acknowledged rather
             // than re-decided, and a PARKED attempt must never be re-decided by a machine at all.
@@ -359,12 +385,16 @@ public final class ExecutionRecoveryService {
      * not recognise, a type that never declared the property — parks.</p>
      */
     private RecoveryOutcome resolveAmbiguity(PendingWork.AttemptDispatch item, StoredProcessInstance stored,
-                                             RecoveryAdmission admission) {
+                                             NodeAttempt attempt, RecoveryAdmission admission) {
         if (admission.repairableByWaiting()) {
-            // Withheld without consuming a delivery. The budget below exists to end a wait that
-            // cannot end on its own; spending it on a store that is briefly unreachable would park
-            // every ambiguous attempt outstanding during an outage, en masse, the moment the store
-            // came back — punishing work whose only fault was being in flight at the wrong moment.
+            // Withheld without consuming a delivery, and the store's counter is what makes that a
+            // claim rather than a hope. It counts claims, not decisions, so a delivery on which
+            // nothing was dispatched still increments it; left alone, an outage would spend the whole
+            // budget and the limit below would fire the moment the outage ended, parking en masse
+            // work whose only fault was being in flight at the wrong moment. The mark below is
+            // subtracted at evaluation, and it is durable because the outage and the recovery
+            // routinely straddle a restart.
+            recordWithheld(item, stored);
             return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
                     "recovery is withheld until this execution can be classified: " + admission.detail());
         }
@@ -374,7 +404,9 @@ public final class ExecutionRecoveryService {
         // spend a second aggregate read and a second manifest verification to be told UNDECLARED.
         AttemptRepeatability declaration = admission.proceeds()
                 ? declarationOf(item.key(), nodeId) : AttemptRepeatability.UNDECLARED;
-        if (item.deliveryAttempt() > maxRecoveryDeliveriesPerAttempt) {
+        // Deliveries that reached a decision, not claims. See NodeAttempt.decidedDeliveries.
+        int decided = attempt.decidedDeliveries(item.deliveryAttempt());
+        if (decided > maxRecoveryDeliveriesPerAttempt) {
             // The bound that ends a deterministic refusal. An execution this deployment will never
             // rebuild strands an effect that already happened and whose outcome nobody knows, and
             // withholding that forever is worse than the park it replaced: the park at least puts the
@@ -387,8 +419,8 @@ public final class ExecutionRecoveryService {
             // calling a human, and a deterministic refusal is that same wait arriving by a different
             // route. A separate setting would be a second thing to tune for one behaviour.
             String cause = admission.proceeds()
-                    ? "recovery delivery limit exceeded on delivery " + item.deliveryAttempt()
-                    : "recovery delivery limit exceeded on delivery " + item.deliveryAttempt()
+                    ? "recovery delivery limit exceeded on decided delivery " + decided
+                    : "recovery delivery limit exceeded on decided delivery " + decided
                             + "; this deployment cannot rebuild the execution: " + admission.detail();
             return park(item, stored, declaration, cause);
         }
@@ -411,6 +443,29 @@ public final class ExecutionRecoveryService {
                 + "; node '" + nodeId + "' is " + declaration.name().toLowerCase(java.util.Locale.ROOT)
                 .replace('_', ' ');
         return park(item, stored, declaration, cause);
+    }
+
+    /**
+     * Raises the attempt's withheld high-water mark to this delivery, under the claim's own fence.
+     *
+     * <p>Best effort by design. The mark is an optimisation of the delivery limit, not a safety
+     * property: failing to write it costs exactly one delivery of budget, which is the behaviour that
+     * existed before the mark did, whereas letting the failure escape would abort the sweep and leave
+     * every item behind this one undecided. The write is fenced and revision-checked like every other
+     * write here, so a stale owner cannot raise a mark after takeover, and re-writing a value the
+     * attempt already carries is a no-op rather than a conflict.</p>
+     */
+    private void recordWithheld(PendingWork.AttemptDispatch item, StoredProcessInstance stored) {
+        try {
+            await(store.apply(ExecutionBatch.to(item.key())
+                    .expecting(RevisionExpectation.exactly(stored.revision()))
+                    .fencedBy(item.fencingToken())
+                    .apply(new ExecutionTransition.RecoveryWithheld(item.traversalId(),
+                            item.invocationId(), item.attemptId(), item.deliveryAttempt()))
+                    .build()));
+        } catch (RuntimeException notRecorded) {
+            // See above: one delivery of budget, and the sweep continues.
+        }
     }
 
     private RecoveryOutcome park(PendingWork.AttemptDispatch item, StoredProcessInstance stored,

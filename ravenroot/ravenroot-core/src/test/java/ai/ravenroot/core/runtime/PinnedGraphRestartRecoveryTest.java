@@ -268,6 +268,99 @@ class PinnedGraphRestartRecoveryTest {
         }
     }
 
+    @Test
+    @DisplayName("the withheld mark is written to the database and read back by a process that never saw the outage")
+    void theWithheldMarkRoundTripsThroughARealCloseAndReopen(@TempDir Path dir) {
+        var clock = new MovableClock(EPOCH);
+        Fixture fixture = crashMidEffect(dir, RecoveryRepeatabilityProperty.REPEATABLE, clock);
+        Path database = dir.resolve("restart.db");
+
+        // First process: the document store is unreachable, so every sweep withholds and marks.
+        try (ExecutionStore store = new SqliteExecutionStore(database, clock);
+             GraphDefinitionStore documents = new SqliteGraphDefinitionStore(database, clock,
+                     ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE)) {
+            var unreachable = new UnreachableDefinitions(documents);
+            var coordinator = new ExecutionRecoveryCoordinator(new PinnedGraphRecoveryAuthority(
+                    store, unreachable, null, declaringCatalog(), GraphExecutionLimits.DEFAULTS),
+                    List.of(new RecordingDispatcher()));
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker-before", 10, TTL,
+                    coordinator.declarations(), coordinator, 2);
+            for (int sweep = 0; sweep < 5; sweep++) {
+                assertInstanceOf(RecoveryOutcome.Deferred.class, recovery.sweepOnce().get(0));
+                clock.advance(TTL.plusSeconds(1));
+            }
+        }
+
+        // Second process on the same file: nothing but the database connects the two halves, so the
+        // mark it reads was written to the column rather than remembered.
+        try (ExecutionStore reopened = new SqliteExecutionStore(database, clock);
+             GraphDefinitionStore documents = new SqliteGraphDefinitionStore(database, clock,
+                     ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE)) {
+            assertTrue(attemptIn(reopened, fixture).withheldThroughDelivery() >= 5,
+                    "the mark must have survived the process that wrote it, because the outage and "
+                            + "the recovery routinely straddle a restart");
+            var dispatcher = new RecordingDispatcher();
+            var coordinator = new ExecutionRecoveryCoordinator(new PinnedGraphRecoveryAuthority(
+                    reopened, documents, null, declaringCatalog(), GraphExecutionLimits.DEFAULTS),
+                    List.of(dispatcher));
+            RecoveryOutcome outcome = new ExecutionRecoveryService(reopened, List.of(TENANT),
+                    "worker-after", 10, TTL, coordinator.declarations(), coordinator, 2)
+                    .sweepOnce().get(0);
+
+            assertInstanceOf(RecoveryOutcome.ReDispatched.class, outcome,
+                    () -> "a restarted process must not charge the outage to the attempt's budget. "
+                            + "Got: " + outcome);
+            assertEquals(List.of(fixture.attemptId.toString()), dispatcher.effectKeys);
+        }
+    }
+
+    /** Delegates everything but the document read, which answers "ask me later". */
+    private record UnreachableDefinitions(GraphDefinitionStore delegate) implements GraphDefinitionStore {
+        @Override public java.util.Set<ai.ravenroot.api.persistence.StoreCapability> capabilities() {
+            return delegate.capabilities();
+        }
+
+        @Override public int maxDefinitionBytes() {
+            return delegate.maxDefinitionBytes();
+        }
+
+        @Override public CompletionStage<ai.ravenroot.api.persistence.StoredGraphDefinition> put(
+                String tenantId, GraphDefinitionIdentity identity, CanonicalGraphMl canonical) {
+            return delegate.put(tenantId, identity, canonical);
+        }
+
+        @Override public CompletionStage<ai.ravenroot.api.persistence.StoredGraphDefinition> load(
+                ai.ravenroot.api.persistence.GraphDefinitionKey key) {
+            return java.util.concurrent.CompletableFuture.failedStage(
+                    new ai.ravenroot.api.persistence.GraphDefinitionStoreException(
+                            new ai.ravenroot.api.persistence.GraphDefinitionStoreFailure.Unavailable(
+                                    "the definition store is unreachable")));
+        }
+
+        @Override public CompletionStage<ai.ravenroot.api.persistence.StoredGraphDefinition> resolve(
+                String tenantId, GraphDefinitionIdentity identity) {
+            return delegate.resolve(tenantId, identity);
+        }
+
+        @Override public CompletionStage<Boolean> contains(
+                ai.ravenroot.api.persistence.GraphDefinitionKey key) {
+            return delegate.contains(key);
+        }
+
+        @Override public CompletionStage<Void> remove(
+                ai.ravenroot.api.persistence.GraphDefinitionKey key) {
+            return delegate.remove(key);
+        }
+
+        @Override public CompletionStage<Long> purgeUnreferencedDefinitions(String tenantId) {
+            return delegate.purgeUnreferencedDefinitions(tenantId);
+        }
+
+        @Override public void close() {
+            delegate.close();
+        }
+    }
+
     // ------------------------------------------------------------------ fixture
 
     private record Fixture(ExecutionKey key, UUID traversalId, UUID invocationId, UUID attemptId,

@@ -53,7 +53,9 @@ public final class RecoveryStartupDiscovery implements AutoCloseable {
      * <p>Bounded because readiness waits for this pass, and an unbounded scan makes the wait a
      * function of how much work the deployment inherited. A deployment restarting with a very large
      * interrupted cohort would refuse traffic for the whole scan — turning a check that exists to
-     * prevent an outage into one. The instances past the bound are not lost or ignored: the ordinary
+     * prevent an outage into one. The bound reaches the inventory pager itself rather than trimming a
+     * cohort that was already fetched: the page round trips are the cost readiness is waiting on, so
+     * a cap applied afterwards would bound nothing that mattered. The instances past the bound are not lost or ignored: the ordinary
      * sweep claims and decides them exactly as it decides the ones inside it, which is what acts on
      * any of them. Only the startup report is truncated, and it says so.</p>
      */

@@ -151,7 +151,8 @@ final class AggregateStorage {
             throws SQLException {
         var attempts = new LinkedHashMap<UUID, List<NodeAttempt>>();
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT invocation_id, attempt_id, ordinal, status, completion, park_cause FROM attempt "
+                "SELECT invocation_id, attempt_id, ordinal, status, completion, park_cause, "
+                        + "withheld_through_delivery FROM attempt "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY invocation_id, ordinal")) {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
@@ -164,7 +165,8 @@ final class AggregateStorage {
                                     rows.getInt("ordinal"),
                                     NodeAttemptStatus.valueOf(rows.getString("status")),
                                     completion == null ? null : NodeAttemptCompletion.valueOf(completion),
-                                    rows.getString("park_cause")));
+                                    rows.getString("park_cause"),
+                                    rows.getInt("withheld_through_delivery")));
                 }
             }
         }
@@ -193,7 +195,8 @@ final class AggregateStorage {
                              + "parent_invocation_id) VALUES (?, ?, ?, ?)");
              PreparedStatement attempt = connection.prepareStatement(
                      "INSERT INTO attempt (tenant_id, process_instance_id, invocation_id, attempt_id, "
-                             + "ordinal, status, completion, park_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "ordinal, status, completion, park_cause, withheld_through_delivery) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
 
             int traversalPosition = 0;
             for (Traversal current : state.traversals().values()) {
@@ -241,6 +244,7 @@ final class AggregateStorage {
                         attempt.setString(6, held0.status().name());
                         attempt.setString(7, held0.completion() == null ? null : held0.completion().name());
                         attempt.setString(8, held0.parkCause());
+                        attempt.setInt(9, held0.withheldThroughDelivery());
                         attempt.executeUpdate();
                     }
                 }

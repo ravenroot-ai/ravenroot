@@ -158,6 +158,36 @@ public sealed interface ExecutionTransition {
     }
 
     /**
+     * Records that recovery declined to act on an attempt on one delivery, because this deployment
+     * could not yet classify the execution and waiting might still change that.
+     *
+     * <p>It moves no lifecycle state: the attempt keeps its status, and the only thing that changes
+     * is the high-water mark the recovery delivery limit is evaluated against. Written so that a
+     * dependency outage does not silently spend an attempt's delivery budget and park it the moment
+     * the outage ends -- see {@link ai.ravenroot.api.application.NodeAttempt#withheldThrough(int)}.</p>
+     *
+     * @param traversalId the stable traversal id used to identify the requested resource.
+     * @param invocationId the stable invocation id used to identify the requested resource.
+     * @param attemptId the stable attempt id used to identify the requested resource.
+     * @param throughDelivery the recovery delivery on which the attempt was withheld.
+     */
+    record RecoveryWithheld(UUID traversalId, UUID invocationId, UUID attemptId, int throughDelivery)
+            implements ExecutionTransition {
+        /** Rejects a mark that names no delivery. */
+        public RecoveryWithheld {
+            if (throughDelivery < 1) {
+                throw new IllegalArgumentException("throughDelivery must be positive");
+            }
+        }
+
+        @Override
+        public ProcessInstance applyTo(ProcessInstance current) {
+            return required(current).recordRecoveryWithheld(traversalId, invocationId, attemptId,
+                    throughDelivery);
+        }
+    }
+
+    /**
      * Records an attempt as dispatched-with-unknown-outcome (ADR 0022, PERS-04).
      *
      * <p>The runtime writes this in the same fenced batch that acknowledges the work item, so a

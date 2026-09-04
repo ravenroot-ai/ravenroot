@@ -329,7 +329,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE, RESPONSE_TOO_LARGE -> LlmPromptException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> LlmPromptException.Code.DEADLINE_EXCEEDED;
                 case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> LlmPromptException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> LlmPromptException.Code.TRANSPORT_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE, BUDGET_EXHAUSTED ->
+                        LlmPromptException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new LlmPromptException(LlmPromptException.Code.TRANSPORT_UNAVAILABLE);

@@ -69,12 +69,18 @@ public final class ToolApprovalService {
 
     private final ExecutionStore store;
     private final Clock clock;
+    private final ToolApprovalBudgetHooks budgetHooks;
     private final Map<ExecutionKey, LiveBinding> liveRecorders = new ConcurrentHashMap<>();
     private volatile Set<String> recoverableTenants;
 
     public ToolApprovalService(ExecutionStore store, Clock clock) {
+        this(store, clock, ToolApprovalBudgetHooks.none());
+    }
+
+    public ToolApprovalService(ExecutionStore store, Clock clock, ToolApprovalBudgetHooks budgetHooks) {
         this.store = Objects.requireNonNull(store, "store");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.budgetHooks = Objects.requireNonNull(budgetHooks, "budgetHooks");
         if (!store.supports(StoreCapability.DURABLE_HANDLERS)
                 || !store.supports(StoreCapability.TOOL_APPROVALS)
                 || !store.supports(StoreCapability.EVENT_JOURNAL)) {
@@ -159,7 +165,8 @@ public final class ToolApprovalService {
                 new TimerSchedule(expiryTimerId(approvalId), request.expiresAt(), request.traversalId(),
                         request.invocationId(), identity),
                 event(key, stored, request, "TOOL_APPROVAL_REQUESTED",
-                        message.security().requestId(), request.traversalId()));
+                        message.security().requestId(), request.traversalId()),
+                budgetHooks.hold(key, request).orElse(null));
         return new ToolApprovalResult(ToolApprovalResult.Code.CREATED,
                 await(store.loadToolApproval(key, approvalId)).orElseThrow(), null);
     }
@@ -416,7 +423,7 @@ public final class ToolApprovalService {
         StoredProcessInstance stored = load(approval.key());
         recorder.completeToolApproval(approval.request().approvalId(), succeeded,
                 event(approval.key(), stored, approval.request(), eventType, correlationId,
-                        approval.request().traversalId()));
+                        approval.request().traversalId()), budgetHooks.settle(approval).orElse(null));
     }
 
     /** Marks every crash-left consumed grant indeterminate; none is returned for automatic effect replay. */
@@ -528,10 +535,13 @@ public final class ToolApprovalService {
                     .applyHandler(handlerTransition)
                     .cancelTimer(expiryTimerId(approval.request().approvalId()))
                     .publish(event(approval.key(), stored, approval.request(),
-                            "TOOL_APPROVAL_" + target.name(), correlationId, resumeTraversalId))
-                    .build();
+                            "TOOL_APPROVAL_" + target.name(), correlationId, resumeTraversalId));
+            if (target == ToolApprovalStatus.DENIED || target == ToolApprovalStatus.EXPIRED
+                    || target == ToolApprovalStatus.CANCELLED) {
+                budgetHooks.release(approval).ifPresent(batch::applyAgentBudget);
+            }
             try {
-                await(store.apply(batch));
+                await(store.apply(batch.build()));
                 ToolApprovalResult.Code code = ToolApprovalResult.Code.valueOf(target.name());
                 return new ToolApprovalResult(code,
                         await(store.loadToolApproval(approval.key(), approval.request().approvalId())).orElseThrow(),
@@ -622,10 +632,10 @@ public final class ToolApprovalService {
             var batch = builder
                     .applyToolApproval(transition)
                     .publish(event(approval.key(), stored, approval.request(), eventType, correlationId,
-                            approval.request().traversalId()))
-                    .build();
+                            approval.request().traversalId()));
+            budgetOperations(approval, transition).forEach(batch::applyAgentBudget);
             try {
-                await(store.apply(batch));
+                await(store.apply(batch.build()));
                 return new ToolApprovalResult(ToolApprovalResult.Code.valueOf(transition.next().name()),
                         await(store.loadToolApproval(approval.key(), approval.request().approvalId())).orElseThrow(),
                         null);
@@ -638,6 +648,17 @@ public final class ToolApprovalService {
             }
         }
         throw new IllegalStateException("tool approval transition retry budget exhausted");
+    }
+
+    private java.util.List<ai.ravenroot.api.persistence.AgentBudgetOperation> budgetOperations(
+            DurableToolApproval approval, ToolApprovalTransition transition) {
+        return switch (transition.next()) {
+            case CONSUMED -> budgetHooks.dispatch(approval);
+            case DENIED, EXPIRED, CANCELLED -> budgetHooks.release(approval).stream().toList();
+            case SUCCEEDED, FAILED -> budgetHooks.settle(approval).stream().toList();
+            case INDETERMINATE -> budgetHooks.indeterminate(approval).stream().toList();
+            default -> java.util.List.of();
+        };
     }
 
     private void auditOnly(DurableToolApproval approval, String eventType, String correlationId) {

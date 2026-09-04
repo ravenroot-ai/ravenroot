@@ -5,7 +5,13 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -46,6 +52,9 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
@@ -166,7 +175,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoreCapability.PROCESS_INVENTORY,
             StoreCapability.INVENTORY_RETENTION,
             StoreCapability.TOOL_APPROVALS,
-            StoreCapability.HUMAN_TASKS);
+            StoreCapability.HUMAN_TASKS,
+            StoreCapability.EXECUTION_PAUSES,
+            StoreCapability.AGENT_AUTHORITY_BUDGETS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -174,6 +185,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
      */
     private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
     private static final String TOOL_APPROVAL_COLUMNS = "SELECT a.* FROM tool_approval a";
+    private static final String EXECUTION_PAUSE_COLUMNS = "SELECT p.* FROM execution_pause p";
     private static final String HUMAN_TASK_COLUMNS = "SELECT t.* FROM human_task t";
 
     /**
@@ -395,6 +407,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // a wait -- and a re-entry -- atomic with the transitions beside it.
         writeHandlers(key, batch, folded, revision);
         writeToolApprovals(key, batch, folded, pin, revision, now);
+        writeAgentAuthorityBudget(key, batch, folded, now);
+        writeExecutionPauses(key, batch, folded, pin, revision);
         writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of the shared
@@ -418,6 +432,71 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 ProcessInstance state = readAggregate(key, meta);
                 return new StoredProcessInstance(state, meta.revision(), meta.graphVersionPin(),
                         key.tenantId(), meta.updatedAt());
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> readAgentAuthorityBudget(key));
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return async(() -> inReadTransaction(null, this::readAgentAuthorityControl));
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return async(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            return inWriteTransaction(null, () -> {
+                AgentAuthorityControl current = readAgentAuthorityControl();
+                if (current.state() != expectedState || current.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                long nextEpoch;
+                try {
+                    nextEpoch = Math.addExact(expectedEpoch, 1);
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control epoch is exhausted"));
+                }
+                long releasedTeamActive = targetState == AgentAuthorityControlState.KILLED
+                        ? killAgentAuthorityBudgets(expectedEpoch) : 0;
+                AgentAuthorityControl next;
+                try {
+                    next = new AgentAuthorityControl(targetState, nextEpoch, clock.instant(),
+                            Math.addExact(current.teamActiveReleased(), releasedTeamActive));
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority release aggregate is exhausted"));
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "UPDATE agent_authority_control SET state = ?, epoch = ?, "
+                                + "changed_at_epoch_second = ?, changed_at_nano = ?, "
+                                + "team_active_released = ? "
+                                + "WHERE singleton = 1 AND state = ? AND epoch = ?")) {
+                    statement.setString(1, next.state().name());
+                    statement.setLong(2, next.epoch());
+                    statement.setLong(3, next.changedAt().getEpochSecond());
+                    statement.setInt(4, next.changedAt().getNano());
+                    statement.setLong(5, next.teamActiveReleased());
+                    statement.setString(6, expectedState.name());
+                    statement.setLong(7, expectedEpoch);
+                    if (statement.executeUpdate() != 1) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority control expectation is stale"));
+                    }
+                }
+                return next;
             });
         });
     }
@@ -2552,6 +2631,147 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
+    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(ExecutionKey key)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT aggregate FROM agent_authority_budget WHERE tenant_id = ? "
+                        + "AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) return Optional.empty();
+                try {
+                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes(1)));
+                } catch (RuntimeException corrupted) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+            }
+        }
+    }
+
+    private AgentAuthorityControl readAgentAuthorityControl() throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state, epoch, changed_at_epoch_second, changed_at_nano, team_active_released "
+                        + "FROM agent_authority_control WHERE singleton = 1");
+             ResultSet rows = statement.executeQuery()) {
+            if (!rows.next()) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is unavailable"));
+            }
+            try {
+                return new AgentAuthorityControl(AgentAuthorityControlState.valueOf(rows.getString(1)),
+                        rows.getLong(2), Instant.ofEpochSecond(rows.getLong(3), rows.getInt(4)),
+                        rows.getLong(5));
+            } catch (RuntimeException invalid) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is invalid"));
+            }
+        }
+    }
+
+    private long killAgentAuthorityBudgets(long expectedEpoch) throws SQLException {
+        var replacements = new ArrayList<BudgetReplacement>();
+        long releasedTeamActive = 0;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                ExecutionKey key = new ExecutionKey(rows.getString(1), UUID.fromString(rows.getString(2)));
+                DurableAgentAuthorityBudget budget;
+                try {
+                    budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes(3));
+                } catch (RuntimeException invalid) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+                if (budget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                        && budget.controlEpoch() == expectedEpoch) {
+                    DurableAgentAuthorityBudget killed = AgentAuthorityBudgetFold.apply(key, budget,
+                            new AgentBudgetOperation.KillRoot(expectedEpoch), clock.instant());
+                    try {
+                        releasedTeamActive = Math.addExact(releasedTeamActive,
+                                budget.reserved().teamActive() - killed.reserved().teamActive());
+                    } catch (ArithmeticException overflow) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority release aggregate is exhausted"));
+                    }
+                    replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
+                }
+            }
+        }
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE agent_authority_budget SET aggregate = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            for (BudgetReplacement replacement : replacements) {
+                update.setBytes(1, replacement.aggregate());
+                update.setString(2, replacement.key().tenantId());
+                update.setString(3, replacement.key().processInstanceId().toString());
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+        return releasedTeamActive;
+    }
+
+    private record BudgetReplacement(ExecutionKey key, byte[] aggregate) { }
+
+    private void writeAgentAuthorityBudget(ExecutionKey key, ExecutionBatch batch,
+                                           ProcessInstance folded, Instant now) throws SQLException {
+        if (batch.agentBudgetOperations().isEmpty()) return;
+        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(key).orElse(null);
+        AgentAuthorityControl control = readAgentAuthorityControl();
+        for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+            requireAgentAuthorityControl(operation, control);
+            if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                var invocation = folded.traversals().values().stream()
+                        .flatMap(traversal -> traversal.invocations().values().stream())
+                        .filter(candidate -> candidate.invocationId().equals(register.binding().invocationId()))
+                        .findFirst().orElse(null);
+                if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                        || !invocation.parentInvocationIds()
+                                .equals(register.binding().causalParentInvocationIds())) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent grant binding does not name the post-fold invocation"));
+                }
+            }
+            try {
+                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+            } catch (IllegalArgumentException | IllegalStateException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+        }
+        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        if (encoded.length > config.maxPayloadBytes()) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length, config.maxPayloadBytes()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO agent_authority_budget (tenant_id, process_instance_id, aggregate) "
+                        + "VALUES (?, ?, ?) ON CONFLICT(tenant_id, process_instance_id) "
+                        + "DO UPDATE SET aggregate = excluded.aggregate")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            statement.setBytes(3, encoded);
+            statement.executeUpdate();
+        }
+    }
+
+    private static void requireAgentAuthorityControl(AgentBudgetOperation operation,
+                                                      AgentAuthorityControl control) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (control.state() != AgentAuthorityControlState.ACTIVE
+                || control.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "agent authority control is not active for this epoch"));
+        }
+    }
+
     private void insertToolApproval(DurableToolApproval approval, int position) throws SQLException {
         ToolApprovalRegistration request = approval.request();
         try (PreparedStatement statement = connection.prepareStatement(
@@ -2660,6 +2880,220 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     rows.getString("continuation_digest"));
             return new DurableToolApproval(key, request,
                     ToolApprovalStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            return inReadTransaction(key, () -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                                + "AND p.pause_id = ?")) {
+                    bindItem(statement, key, pauseId);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readExecutionPause(rows)) : Optional.empty();
+                    }
+                }
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return inReadTransaction(key, () -> {
+                var pauses = new ArrayList<DurableExecutionPause>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                                + "ORDER BY p.position")) {
+                    statement.setString(1, key.tenantId());
+                    statement.setString(2, key.processInstanceId().toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) pauses.add(readExecutionPause(rows));
+                    }
+                }
+                return List.copyOf(pauses);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            return inReadTransaction(null, () -> {
+                try (PreparedStatement statement = connection.prepareStatement(
+                        EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.traversal_id = ? "
+                                + "AND p.status = 'HELD'")) {
+                    statement.setString(1, tenantId);
+                    statement.setString(2, traversalId.toString());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        return rows.next() ? Optional.of(readExecutionPause(rows)) : Optional.empty();
+                    }
+                }
+            });
+        });
+    }
+
+    private void writeExecutionPauses(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                      GraphVersionPin pin, long revision) throws SQLException {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            DurableExecutionPause existing = readExecutionPause(key, registration.pauseId());
+            if (existing != null) {
+                if (!existing.request().equals(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                            + " is already committed with a different hold"));
+                }
+                continue;
+            }
+            // Refused here rather than left to the partial unique index, so the caller is told which
+            // hold already owns the traversal instead of reading a constraint name.
+            DurableExecutionPause held = readHeldExecutionPause(key.tenantId(), registration.traversalId());
+            if (held != null) {
+                throw failure(ExecutionStoreFailure.invalid("traversal " + registration.traversalId()
+                        + " is already held by " + held.request().pauseId()));
+            }
+            insertExecutionPause(DurableExecutionPause.held(key, registration, revision),
+                    nextExecutionPausePosition(key));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = readExecutionPause(key, transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            updateExecutionPause(current.apply(transition, revision));
+        }
+    }
+
+    private void insertExecutionPause(DurableExecutionPause pause, int position) throws SQLException {
+        ExecutionPauseRegistration request = pause.request();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_pause (tenant_id, process_instance_id, pause_id, position, "
+                        + "traversal_id, after_invocation_id, node_id, command_directive, command_name, "
+                        + "requester_request_id, requester_subject, requester_principal_type, "
+                        + "requester_issuer, graph_version_pin, continuation_version, continuation, "
+                        + "continuation_digest, status, actor, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, pause.key().tenantId());
+            statement.setString(2, pause.key().processInstanceId().toString());
+            statement.setString(3, request.pauseId().toString());
+            statement.setInt(4, position);
+            statement.setString(5, request.traversalId().toString());
+            statement.setString(6, request.afterInvocationId().toString());
+            statement.setString(7, request.nodeId());
+            statement.setString(8, request.commandDirective());
+            statement.setString(9, request.commandName());
+            statement.setString(10, request.requester().requestId());
+            statement.setString(11, request.requester().subject());
+            statement.setString(12, request.requester().principalType().name());
+            statement.setString(13, request.requester().issuer());
+            statement.setString(14, request.graphVersionPin().reference());
+            statement.setInt(15, request.continuationVersion());
+            statement.setBytes(16, request.continuation());
+            statement.setString(17, request.continuationDigest());
+            statement.setString(18, pause.status().name());
+            statement.setString(19, pause.actor());
+            statement.setLong(20, pause.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateExecutionPause(DurableExecutionPause pause) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE execution_pause SET status = ?, actor = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND pause_id = ?")) {
+            statement.setString(1, pause.status().name());
+            statement.setString(2, pause.actor());
+            statement.setLong(3, pause.revision());
+            statement.setString(4, pause.key().tenantId());
+            statement.setString(5, pause.key().processInstanceId().toString());
+            statement.setString(6, pause.request().pauseId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private int nextExecutionPausePosition(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM execution_pause "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableExecutionPause readExecutionPause(ExecutionKey key, UUID pauseId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                        + "AND p.pause_id = ?")) {
+            bindItem(statement, key, pauseId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readExecutionPause(rows) : null;
+            }
+        }
+    }
+
+    private DurableExecutionPause readHeldExecutionPause(String tenantId, UUID traversalId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                EXECUTION_PAUSE_COLUMNS + " WHERE p.tenant_id = ? AND p.traversal_id = ? "
+                        + "AND p.status = 'HELD'")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, traversalId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readExecutionPause(rows) : null;
+            }
+        }
+    }
+
+    private DurableExecutionPause readExecutionPause(ResultSet rows) throws SQLException {
+        var key = new ExecutionKey(rows.getString("tenant_id"),
+                UUID.fromString(rows.getString("process_instance_id")));
+        try {
+            var request = new ExecutionPauseRegistration(
+                    UUID.fromString(rows.getString("pause_id")),
+                    UUID.fromString(rows.getString("traversal_id")),
+                    UUID.fromString(rows.getString("after_invocation_id")),
+                    rows.getString("node_id"), rows.getString("command_directive"),
+                    rows.getString("command_name"),
+                    new ai.ravenroot.api.security.SecurityContext(
+                            rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            ai.ravenroot.api.security.PrincipalType.valueOf(
+                                    rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"));
+            return new DurableExecutionPause(key, request,
+                    ExecutionPauseStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getLong("revision"));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));

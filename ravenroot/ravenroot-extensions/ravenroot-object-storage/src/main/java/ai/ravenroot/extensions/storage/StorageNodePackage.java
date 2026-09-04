@@ -11,12 +11,17 @@ public final class StorageNodePackage implements NodePackage {
 
     public StorageNodePackage() {
         StorageRuntime runtime = new StorageRuntime(new EnvironmentStorageProfileResolver());
-        behaviors = List.of(new ObjectGetNodeBehavior(runtime), new ObjectPutNodeBehavior(runtime));
+        behaviors = behaviors(runtime);
     }
 
     StorageNodePackage(StorageProfileResolver profiles) {
         StorageRuntime runtime = new StorageRuntime(profiles);
-        behaviors = List.of(new ObjectGetNodeBehavior(runtime), new ObjectPutNodeBehavior(runtime));
+        behaviors = behaviors(runtime);
+    }
+
+    private static List<NodeBehavior> behaviors(StorageRuntime runtime) {
+        return List.of(new ObjectGetNodeBehavior(runtime), new ObjectPutNodeBehavior(runtime),
+                new ObjectListNodeBehavior(runtime), new ObjectDeleteNodeBehavior(runtime));
     }
 
     @Override public String id() { return "ai.ravenroot.extensions.storage"; }

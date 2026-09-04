@@ -61,11 +61,12 @@ records bounded source-kind/digest provenance for each of those inputs; it never
 content in the provenance record.
 
 **A model request is not authority.** In addition to `OUTBOUND_HTTP`, the `agent` behavior requires
-the `TOOL_AUTHORIZATION` package capability. The runtime parses and canonicalizes each requested
+the `TOOL_AUTHORIZATION` and `AGENT_RESOURCES` package capabilities. The runtime parses and canonicalizes each requested
 argument object under fixed bounds, evaluates the deployment's tool policy with the trusted tenant
 identity immediately before the effect, and emits correlated payload-free audit records. Missing or
-malformed authorization denies by default. `REQUIRE_APPROVAL` is a no-effect refusal in this release;
-approval redemption belongs to the approval lifecycle.
+malformed authorization denies by default. `REQUIRE_APPROVAL` durably parks the run with its tool
+reservation held; a valid one-time decision either releases it without effect or dispatches the exact
+stored call through the approval recovery lifecycle.
 
 **A tool answers; a budget terminates.** An `agent` tool never fails the node: a wrong argument, an
 invented tool name or a broken tool comes back as a tool *result* the model can read and correct. A

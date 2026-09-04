@@ -88,6 +88,56 @@ public enum ExecutionEventType {
     /** A fan-in join timed out or lost too many branches to reach its quorum (CORE-03). */
     JOIN_FAILED,
 
+    /**
+     * An operator's pause took effect: this traversal is holding and will not begin another node
+     * until it is resumed.
+     *
+     * <h4>Published for the transition, never for the repeat</h4>
+     * <p>Only the call that actually installed the hold publishes this. A second pause over a
+     * traversal that is already holding changes nothing and publishes nothing, which is what keeps
+     * this event countable: one {@code EXECUTION_PAUSED} means one traversal stopped dispatching,
+     * not one operator pressed a button. The command's own answer still distinguishes the repeat --
+     * see {@code PauseResult.Outcome.ALREADY_PAUSED} -- because a caller needs to know its request
+     * was redundant even though nobody else needs an event for it.</p>
+     *
+     * <h4>What it is for, and what was wrong without it</h4>
+     * <p>A pause reported its result only to the caller that issued it. To everyone else the
+     * execution went quiet: it stayed listed as running, it stopped publishing node events, and
+     * those two facts together are also the exact signature of a traversal whose behavior has
+     * deadlocked. A second operator, or the same operator reconnecting, could not tell a deliberate
+     * hold from a stall, and the two call for opposite responses.</p>
+     *
+     * <h4>It cannot appear before {@link #EXECUTION_STARTED} or after a terminal event</h4>
+     * <p>A traversal becomes pausable when it is admitted, which is before the runtime has the
+     * identity every event is published under. A pause accepted in that window is announced once the
+     * traversal starts, immediately after {@link #EXECUTION_STARTED}, rather than published with an
+     * identity that does not exist yet. At the other end, a traversal that has begun closing refuses
+     * a new hold, so no pause can be published between the last dispatch and
+     * {@link #EXECUTION_COMPLETED} or {@link #EXECUTION_FAILED}.</p>
+     *
+     * <p>The event carries no node, no payload and no caller-supplied text: a hold is a fact about
+     * the traversal, and there is nothing about it that needs a diagnostic.</p>
+     */
+    EXECUTION_PAUSED,
+
+    /**
+     * A holding traversal was released and is dispatching again from the hop it held at.
+     *
+     * <h4>It pairs with {@link #EXECUTION_PAUSED}, and only with a published one</h4>
+     * <p>Emitted only where a resume removed a hold that this stream has already announced. Three
+     * other paths remove the same hold and none of them publishes this: cancelling a paused
+     * traversal, the traversal's own completion, and the runner's shutdown. Each of those ends the
+     * traversal, so a {@code EXECUTION_RESUMED} on any of them would tell an observer the execution
+     * went back to running immediately before it stopped forever -- a transition that never
+     * happened. A resume that finds nothing holding publishes nothing and answers
+     * {@code ResumeResult.Outcome.NOT_PAUSED} to its caller instead.</p>
+     *
+     * <p>It says the hold is gone and the parked hop has been handed a thread, not that the hop has
+     * run. The next node announces itself with its own {@link #NODE_STARTED}, exactly as it would
+     * have without the pause.</p>
+     */
+    EXECUTION_RESUMED,
+
     /** The execution reached its normal terminal result. */
     EXECUTION_COMPLETED,
     /** The execution reached a failed terminal result. */

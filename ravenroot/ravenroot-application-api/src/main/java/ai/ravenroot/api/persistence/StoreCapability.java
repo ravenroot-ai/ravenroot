@@ -65,8 +65,29 @@ public enum StoreCapability {
     /** Exact tool approvals can be registered and transitioned atomically with execution state. */
     TOOL_APPROVALS,
 
+    /** Process-rooted agent grants and reservations share the execution batch transaction. */
+    AGENT_AUTHORITY_BUDGETS,
+
     /** First-class human tasks can be registered, transitioned and listed atomically. */
     HUMAN_TASKS,
+
+    /**
+     * Operator holds on a traversal can be committed, read back and settled atomically with
+     * execution state.
+     *
+     * <p>Declaring it asserts what makes a hold survive a restart: the hold, its paired handler and
+     * the {@code WAITING} transitions beside them commit together or none of them does. An adapter
+     * that wrote the hold outside the transaction would produce the two states this capability
+     * exists to rule out — a traversal recorded as waiting that nothing is holding, so nothing can
+     * ever release it, and a hold over a traversal still recorded as running, which a recovery sweep
+     * would treat as ordinary interrupted work.</p>
+     *
+     * <p>Separate from {@link #DURABLE_HANDLERS} even though a hold always registers one: a handler
+     * carries no continuation by contract, so an adapter can support handlers in full and still have
+     * nowhere to put the bounded state a held traversal needs in order to be continued. A caller
+     * must be able to ask about the second without inferring it from the first.</p>
+     */
+    EXECUTION_PAUSES,
 
     /**
      * The journal can be compacted on demand, discarding the payloads of records that are both

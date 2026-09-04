@@ -317,6 +317,9 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
+    /** Installed only by the packaged composition when durable agent authority is enabled. */
+    private ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentAuthorityControl;
+    private ai.ravenroot.api.application.ExecutionControlAuditSink agentAuthorityControlAudit;
     /**
      * Injectable: the narrower constructors below default to the stdout
      * {@link StructuredGraphMlRejectionLogger}/{@code StructuredPayloadRejectionLogger}, but
@@ -687,6 +690,7 @@ public final class RavenrootServer implements AutoCloseable {
                 java.util.Objects.requireNonNull(artifactAudit, "artifactAudit"), artifactDualControl,
                 AuthorizedRavenrootApplication.DEFAULT_EXECUTION_OWNERSHIP_LIMIT,
                 java.util.Objects.requireNonNull(controlAudit, "controlAudit"));
+        this.agentAuthorityControlAudit = controlAudit;
         this.authenticator = java.util.Objects.requireNonNull(authenticator, "authenticator");
         this.httpSecurity = java.util.Objects.requireNonNull(httpSecurity, "httpSecurity");
         this.clock = java.util.Objects.requireNonNull(clock, "clock");
@@ -720,6 +724,7 @@ public final class RavenrootServer implements AutoCloseable {
         server.createContext("/ready", publicContext(this::ready));
         apiContext("/v1/status", this::status);
         apiContext("/v1/runtime", this::runtime);
+        apiContext("/v1/agent-authority", this::agentAuthorityControl);
         apiContext("/v1/node-types", this::nodeTypes);
         apiContext("/v1/human-tasks", this::humanTasks);
         apiContext("/v1/program-languages", this::programLanguages);
@@ -973,6 +978,24 @@ public final class RavenrootServer implements AutoCloseable {
         if (humanTasks != null) throw new IllegalStateException("human tasks are already installed");
         humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
         humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
+    }
+
+    /** Installs the authenticated store-global agent-authority control before listener start. */
+    synchronized void installAgentAuthorityControl(
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService control) {
+        if (started.get()) throw new IllegalStateException("agent authority control must be installed before start");
+        if (agentAuthorityControl != null) {
+            throw new IllegalStateException("agent authority control is already installed");
+        }
+        agentAuthorityControl = java.util.Objects.requireNonNull(control, "control");
+    }
+
+    /** Test seam that observes the same sanitized control events as the production audit trail. */
+    synchronized void installAgentAuthorityControl(
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService control,
+            ai.ravenroot.api.application.ExecutionControlAuditSink audit) {
+        installAgentAuthorityControl(control);
+        agentAuthorityControlAudit = java.util.Objects.requireNonNull(audit, "audit");
     }
 
     public int port() {
@@ -1565,6 +1588,51 @@ public final class RavenrootServer implements AutoCloseable {
                 .collect(java.util.stream.Collectors.joining(","));
         json(exchange, 200, "{\"activeExecutions\":" + snapshot.activeExecutions()
                 + ",\"activeNodeInstances\":{" + nodes + "}}");
+    }
+
+    private void agentAuthorityControl(HttpExchange exchange) throws IOException {
+        if (!method(exchange, "POST")) return;
+        String suffix = exchange.getRequestURI().getPath().substring("/v1/agent-authority".length());
+        if (agentAuthorityControl == null
+                || !("/trip".equals(suffix) || "/reset".equals(suffix))) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        authorizedApplication.authorizeAgentAuthorityControl(context);
+        boolean trip = "/trip".equals(suffix);
+        String action = trip ? "agent-authority-trip" : "agent-authority-reset";
+        auditAgentAuthorityControl(context, action,
+                ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition.ATTEMPT, "", true);
+        long epoch;
+        String state = trip ? "KILLED" : "ACTIVE";
+        try {
+            epoch = trip ? agentAuthorityControl.trip(context) : agentAuthorityControl.reset(context);
+        } catch (RuntimeException failure) {
+            auditAgentAuthorityControl(context, action,
+                    ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition.FAILED, "", false);
+            throw failure;
+        }
+        auditAgentAuthorityControl(context, action,
+                ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition.SUCCEEDED, state, false);
+        json(exchange, 200, "{\"state\":\"" + state + "\",\"epoch\":" + epoch + "}");
+    }
+
+    private void auditAgentAuthorityControl(
+            ai.ravenroot.api.security.RequestContext context, String action,
+            ai.ravenroot.api.application.ExecutionControlAuditEvent.Disposition disposition,
+            String detail, boolean required) {
+        var event = new ai.ravenroot.api.application.ExecutionControlAuditEvent(
+                clock.instant(), context.requestId(), context.subject(), context.tenantId(), action,
+                "agent-authority", "global", disposition, detail);
+        try {
+            agentAuthorityControlAudit.record(event);
+        } catch (RuntimeException unavailable) {
+            if (required) {
+                throw new ai.ravenroot.api.security.AuthorizationDeniedException(
+                        "agent authority control audit unavailable");
+            }
+        }
     }
 
     private void nodeTypes(HttpExchange exchange) throws IOException {
@@ -3010,12 +3078,19 @@ public final class RavenrootServer implements AutoCloseable {
         json(exchange, 200, body);
     }
 
+    /**
+     * {@code paused} is emitted on every row, including when it is {@code false}, for the reason
+     * {@code defaultedNodes} is always emitted on a result: a field that appears only when it is true
+     * cannot distinguish "this execution is not holding" from "this server does not report holds",
+     * and a client that cannot tell those apart has to assume the worse of the two on every row.
+     */
     private static String liveExecutionJson(ai.ravenroot.api.application.LiveExecution execution) {
         return "{\"processInstanceId\":\"" + execution.processInstanceId()
                 + "\",\"traversalId\":\"" + execution.traversalId()
                 + "\",\"executionId\":\"" + execution.executionId()
                 + "\",\"graphVersion\":\"" + escape(execution.graphVersion())
-                + "\",\"startedAt\":\"" + execution.startedAt() + "\"}";
+                + "\",\"startedAt\":\"" + execution.startedAt()
+                + "\",\"paused\":" + execution.paused() + "}";
     }
 
     /** Query parameters {@link #listProcessInventory} recognises; anything else is refused rather
@@ -3288,7 +3363,11 @@ public final class RavenrootServer implements AutoCloseable {
                 .append("\",\"traversalId\":\"").append(outcome.traversalId())
                 .append("\",\"executionId\":\"").append(outcome.executionId())
                 .append("\",\"status\":\"").append(outcome.status())
-                .append("\",\"degraded\":").append(outcome.degraded())
+                // Beside status rather than inside it: status stays the durable lifecycle value a
+                // consumer already switches over, and this qualifies it. Always present, for the
+                // reason degraded and handledFailure are always present.
+                .append("\",\"paused\":").append(outcome.paused())
+                .append(",\"degraded\":").append(outcome.degraded())
                 .append(",\"handledFailure\":").append(outcome.handledFailure())
                 .append(",\"visitedNodes\":").append(stringArrayJson(outcome.visitedNodes()))
                 .append(",\"defaultedNodes\":").append(stringArrayJson(outcome.defaultedNodes()))

@@ -19,8 +19,8 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | Method and path | Result |
 |---|---|
 | `POST /v1/executions?mode=test\|run` | HTTP 202 plus execution ID |
-| `GET /v1/executions/live` | Current non-terminal executions, from process-local runtime state |
-| `GET /v1/executions/{id}` | State or terminal result |
+| `GET /v1/executions/live` | Current non-terminal executions, from process-local runtime state; each row's `paused` field distinguishes a deliberate hold from an ordinary running execution |
+| `GET /v1/executions/{id}` | State or terminal result; `paused` distinguishes a held execution from an ordinary running one, always `false` once terminal |
 | `GET /v1/executions/inventory` | One page of the tenant's durable process inventory, read from storage and surviving a restart. Three optional query parameters are named exactly like the field each response row carries: `status`, `ownerWorkerId`, `deploymentId`. Three describe the page instead: `includeTerminal` (excluded by default) has no response counterpart, `limit` is bounded by `maxPageSize`, and `cursor` takes a previous page's `nextCursor`. A parameter outside that set is refused as `400 INVALID_REQUEST`, and so is a recognised name carrying a blank value, rather than either being silently dropped. The response always carries `retainedFrom` and `maxPageSize` (this deployment's declared page-size bound). `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
 | `GET /v1/executions/{id}/traversals` | The durable inventory's traversals for one process instance, alongside the same tenant's `retainedFrom` that the inventory listing carries. **`{id}` here is a `processInstanceId`, not the execution/traversal ID every other `/v1/executions` route below takes** — see the callout after this table. `404 UNKNOWN_PROCESS_INSTANCE` when the instance is absent, belongs to another tenant, or aged past its terminal-retention window; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
 | `POST /v1/executions/{id}/cancel` | Cancellation request |

@@ -61,6 +61,43 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 
 Allowed hosts and allowed agent tools are operator allowlists. Empty or absent privileged configuration does not expand access.
 
+## Agent authority and budgets
+
+The packaged server composes finite process-rooted agent accounting whenever its execution store
+advertises `AGENT_AUTHORITY_BUDGETS`. The shipped rate card is explicit and conservative rather than
+treating unknown pricing as free. Operators can pin a different finite policy with these variables:
+
+| Variable family | Shipped default |
+|---|---|
+| `RAVENROOT_AGENT_RUNTIME_INSTANCE`, `RAVENROOT_AGENT_POLICY_VERSION` | `ravenroot-server`, `server-finite-v1` |
+| `RAVENROOT_AGENT_RATE_CARD_VERSION`, `RAVENROOT_AGENT_COST_CURRENCY` | `builtin-conservative-v1`, `USD` |
+| `RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS` | `3600` |
+| `RAVENROOT_AGENT_MAX_TURNS`, `MAX_INPUT_TOKENS`, `MAX_OUTPUT_TOKENS` | `1024`, `20000000`, `2000000` |
+| `RAVENROOT_AGENT_MAX_ELAPSED_MILLIS`, `MAX_COST_MICROS`, `MAX_TOOL_CALLS` | `3600000`, `100000000`, `4096` |
+| `RAVENROOT_AGENT_MAX_DELEGATION_DEPTH`, `MAX_TEAM_CUMULATIVE`, `MAX_TEAM_ACTIVE` | `8`, `64`, `16` |
+| `RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN`, `MAX_OUTPUT_TOKENS_PER_TURN` | `128000`, `32000` |
+| `RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS`, `OUTPUT_TOKEN_RATE_MICROS` | `10`, `30` |
+| `RAVENROOT_AGENT_DATA_SCOPES` | empty |
+| `RAVENROOT_AGENT_AUTHORITY_SCOPES` | `runtime:delegate` |
+
+All numeric maxima are positive integers; rates are non-negative integers, so an explicit zero is a
+known free rate. Currency is an uppercase three-letter code. Scope variables are bounded comma-separated
+opaque tokens. Omitting `runtime:delegate` disables child delegation without disabling top-level agents.
+
+The runtime kill service is available only through authenticated `POST /v1/agent-authority/trip` and
+`POST /v1/agent-authority/reset`. It requires a `PLATFORM_ADMIN` with the
+`ravenroot.agent.authority.control` scope and applies to the store-global control domain across
+tenants; the request tenant is audit identity, not target selection. Trip atomically advances the
+durable epoch, refuses new grant/reservation/dispatch operations, releases held work, and records
+already-dispatched work as indeterminate. Reset advances the epoch again but never revives an old
+grant or suspended approval permit. An ordinary server restart at an unchanged control epoch preserves
+a compatible suspended approval and its exact reservation; policy or rate-card drift fails closed.
+
+When OpenTelemetry is enabled, agent accounting publishes numeric aggregate counters labeled only by
+the fixed budget-dimension and outcome enums. Tenant, principal, process, traversal, invocation, node,
+provider, profile, scope, prompt, arguments, credential, endpoint, and checkpoint values are never
+metric labels.
+
 ## Secret handling
 
 API keys and tokens never belong in GraphML. Credential POST writes secret material to the configured backend and returns a server-minted reference; reads return metadata, never the secret value.

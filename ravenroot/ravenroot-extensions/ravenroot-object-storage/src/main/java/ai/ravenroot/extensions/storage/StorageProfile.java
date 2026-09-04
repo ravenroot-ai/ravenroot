@@ -15,7 +15,7 @@ public record StorageProfile(
         int maxObjectBytes, int timeoutMs, int maxConcurrency, int maxRequestsPerSecond) {
 
     public enum AddressingStyle { PATH, VIRTUAL_HOSTED }
-    public enum Operation { GET, PUT }
+    public enum Operation { GET, PUT, LIST, DELETE, DELETE_VERSION }
     public static final int HARD_MAX_OBJECT_BYTES = 16 * 1024 * 1024;
 
     public StorageProfile {
@@ -28,6 +28,10 @@ public record StorageProfile(
         signingBindingId = token(signingBindingId, "signingBindingId", 256);
         allowedOperations = Set.copyOf(Objects.requireNonNull(allowedOperations, "allowedOperations"));
         if (allowedOperations.isEmpty()) throw new IllegalArgumentException("allowedOperations is empty");
+        if (allowedOperations.contains(Operation.DELETE_VERSION)
+                && !allowedOperations.contains(Operation.DELETE)) {
+            throw new IllegalArgumentException("version delete requires delete authority");
+        }
         if (allowedContentTypes == null || allowedContentTypes.size() > 32) {
             throw new IllegalArgumentException("allowedContentTypes is invalid");
         }

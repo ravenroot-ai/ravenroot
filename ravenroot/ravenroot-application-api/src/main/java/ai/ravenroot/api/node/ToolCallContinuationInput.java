@@ -8,7 +8,17 @@ import java.util.UUID;
 
 /** Exact server-minted input to a trusted node package's durable tool-call continuation. */
 public final class ToolCallContinuationInput {
-    public enum Decision { APPROVED, DENIED, EXPIRED, CANCELLED }
+    /** Exact durable decision being resumed. */
+    public enum Decision {
+        /** Approval granted; the effect may execute once after redemption. */
+        APPROVED,
+        /** Approval denied; continuation must produce no effect. */
+        DENIED,
+        /** Approval expired; continuation must produce no effect. */
+        EXPIRED,
+        /** Approval cancelled; continuation must produce no effect. */
+        CANCELLED
+    }
 
     private final NodeMessage message;
     private final UUID approvalId;
@@ -23,6 +33,21 @@ public final class ToolCallContinuationInput {
     private final byte[] checkpoint;
     private final String checkpointDigest;
 
+    /**
+     * Creates an exact immutable continuation input.
+     * @param message trusted re-entry invocation message
+     * @param approvalId stored approval identifier
+     * @param originalTraversalId traversal that requested the tool call
+     * @param originalInvocationId invocation that requested the tool call
+     * @param originalAttemptId attempt that requested the tool call
+     * @param tool canonical tool name
+     * @param canonicalArguments canonical immutable argument bytes
+     * @param argumentsDigest SHA-256 binding for the arguments
+     * @param decision exact stored decision
+     * @param version checkpoint format version
+     * @param checkpoint bounded checkpoint bytes
+     * @param checkpointDigest SHA-256 binding for the checkpoint
+     */
     public ToolCallContinuationInput(NodeMessage message, UUID approvalId,
                                      UUID originalTraversalId, UUID originalInvocationId,
                                      UUID originalAttemptId, String tool, byte[] canonicalArguments,
@@ -43,17 +68,65 @@ public final class ToolCallContinuationInput {
         this.checkpointDigest = requireText(checkpointDigest, "checkpointDigest");
     }
 
+    /**
+     * Returns the trusted re-entry message.
+     * @return trusted re-entry invocation message
+     */
     public NodeMessage message() { return message; }
+    /**
+     * Returns the approval identity.
+     * @return stored approval identifier
+     */
     public UUID approvalId() { return approvalId; }
+    /**
+     * Returns the original traversal identity.
+     * @return traversal that requested the tool call
+     */
     public UUID originalTraversalId() { return originalTraversalId; }
+    /**
+     * Returns the original invocation identity.
+     * @return invocation that requested the tool call
+     */
     public UUID originalInvocationId() { return originalInvocationId; }
+    /**
+     * Returns the original attempt identity.
+     * @return attempt that requested the tool call
+     */
     public UUID originalAttemptId() { return originalAttemptId; }
+    /**
+     * Returns the tool name.
+     * @return canonical tool name
+     */
     public String tool() { return tool; }
+    /**
+     * Returns the canonical arguments.
+     * @return defensive copy of canonical argument bytes
+     */
     public byte[] canonicalArguments() { return canonicalArguments.clone(); }
+    /**
+     * Returns the argument digest.
+     * @return SHA-256 argument binding
+     */
     public String argumentsDigest() { return argumentsDigest; }
+    /**
+     * Returns the durable decision.
+     * @return exact stored decision
+     */
     public Decision decision() { return decision; }
+    /**
+     * Returns the checkpoint version.
+     * @return checkpoint format version
+     */
     public int version() { return version; }
+    /**
+     * Returns the checkpoint.
+     * @return defensive copy of checkpoint bytes
+     */
     public byte[] checkpoint() { return checkpoint.clone(); }
+    /**
+     * Returns the checkpoint digest.
+     * @return SHA-256 checkpoint binding
+     */
     public String checkpointDigest() { return checkpointDigest; }
 
     @Override public boolean equals(Object other) {

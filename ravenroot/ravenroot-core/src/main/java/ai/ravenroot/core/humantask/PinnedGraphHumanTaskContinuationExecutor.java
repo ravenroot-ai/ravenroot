@@ -53,6 +53,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     private final String workerId;
     private final Duration leaseTtl;
     private final GraphExecutionLimits executionLimits;
+    private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     private final Map<PendingWork.HandlerTrigger, ExecutionRecorder> awaitingAcknowledgement
             = new ConcurrentHashMap<>();
 
@@ -65,7 +66,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     ExecutionIdentitySource identities,
                                                     String workerId, Duration leaseTtl) {
         this(definitions, executions, tasks, null, engine, behaviors, monitor, identities,
-                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS);
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, null);
     }
 
     /**
@@ -85,7 +86,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     ExecutionIdentitySource identities,
                                                     String workerId, Duration leaseTtl) {
         this(definitions, executions, tasks, approvals, engine, behaviors, monitor, identities,
-                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS);
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, null);
     }
 
     /** Full production composition with both decision services and operator graph limits. */
@@ -99,6 +100,39 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     ExecutionIdentitySource identities,
                                                     String workerId, Duration leaseTtl,
                                                     GraphExecutionLimits executionLimits) {
+        this(definitions, executions, tasks, approvals, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, executionLimits, null);
+    }
+
+    /** Creates a continuation executor with durable decisions and finite agent resources. */
+    public PinnedGraphHumanTaskContinuationExecutor(GraphDefinitionStore definitions,
+                                                    ExecutionStore executions,
+                                                    HumanTaskService tasks,
+                                                    ToolApprovalService approvals,
+                                                    ExecutionEngine engine,
+                                                    BehaviorRegistry behaviors,
+                                                    ExecutionMonitor monitor,
+                                                    ExecutionIdentitySource identities,
+                                                    String workerId, Duration leaseTtl,
+                                                    ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                            agentBudgets) {
+        this(definitions, executions, tasks, approvals, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, GraphExecutionLimits.DEFAULTS, agentBudgets);
+    }
+
+    /** Full production composition with decisions, graph limits, and finite agent resources. */
+    public PinnedGraphHumanTaskContinuationExecutor(GraphDefinitionStore definitions,
+                                                    ExecutionStore executions,
+                                                    HumanTaskService tasks,
+                                                    ToolApprovalService approvals,
+                                                    ExecutionEngine engine,
+                                                    BehaviorRegistry behaviors,
+                                                    ExecutionMonitor monitor,
+                                                    ExecutionIdentitySource identities,
+                                                    String workerId, Duration leaseTtl,
+                                                    GraphExecutionLimits executionLimits,
+                                                    ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                            agentBudgets) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
@@ -110,6 +144,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
         this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
+        this.agentBudgets = agentBudgets;
     }
 
     @Override
@@ -141,26 +176,59 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                             task.request().continuation());
             Prepared prepared = prepare(task);
             GraphManager manager = prepared.manager();
-            long revision = executions.load(claim.key()).toCompletableFuture().join().revision();
-            ExecutionRecorder recorder = ExecutionRecorder.resumeClaimed(
-                    executions, claim, workerId, leaseTtl, revision);
-            var runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                    GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
+            long revision;
+            try {
+                revision = executions.load(claim.key()).toCompletableFuture().join().revision();
+            } catch (RuntimeException setupFailure) {
+                setupFailure = cleanup(setupFailure, manager::close);
+                throw setupFailure;
+            }
+            ExecutionRecorder recorder;
+            try {
+                recorder = ExecutionRecorder.resumeClaimed(
+                        executions, claim, workerId, leaseTtl, revision);
+            } catch (RuntimeException setupFailure) {
+                setupFailure = cleanup(setupFailure, manager::close);
+                throw setupFailure;
+            }
+            GraphRunner runner;
+            try {
+                runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
+                        GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
+            } catch (RuntimeException setupFailure) {
+                setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
+                setupFailure = cleanup(setupFailure, manager::close);
+                throw setupFailure;
+            }
             AutoCloseable binding;
             try {
                 binding = bindLive(task.key(), recorder, runner::continuationBudget);
             } catch (RuntimeException failure) {
-                runner.close();
-                recorder.detachForAcknowledgement();
-                manager.close();
+                failure = cleanup(failure, runner::close);
+                failure = cleanup(failure, recorder::detachForAcknowledgement);
+                failure = cleanup(failure, manager::close);
                 throw failure;
             }
-            CompletionStage<Void> result = runner.executeAfterHumanTask(task.request().requester(),
-                    task.key().processInstanceId(), claim.traversalId(), task.request().nodeId(),
-                    task.request().graphVersionPin().reference(), recorder, result(task, handler),
-                    checkpoint.budget());
+            CompletionStage<Void> result;
+            try {
+                result = runner.executeAfterHumanTask(task.request().requester(),
+                        task.key().processInstanceId(), claim.traversalId(), task.request().nodeId(),
+                        task.request().graphVersionPin().reference(), recorder, result(task, handler),
+                        checkpoint.budget());
+            } catch (RuntimeException setupFailure) {
+                setupFailure = cleanup(setupFailure, () -> close(binding));
+                setupFailure = cleanup(setupFailure, runner::close);
+                setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
+                setupFailure = cleanup(setupFailure, manager::close);
+                throw setupFailure;
+            }
             CompletionStage<Void> handoff = result.handle((ignored, failure) -> {
                 Throwable cause = unwrap(failure);
+                if (agentBudgets != null && (cause == null
+                        || !(cause instanceof DurableHumanTaskSuspension
+                        || cause instanceof DurableToolApprovalSuspension))) {
+                    agentBudgets.finishProcess(task.key(), failure == null);
+                }
                 if (cause == null || cause instanceof DurableHumanTaskSuspension
                         || cause instanceof DurableToolApprovalSuspension) return null;
                 throw new CompletionException(cause);
@@ -168,21 +236,26 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             // Pekko may complete on the node's actor-dispatcher thread. Runner shutdown waits for
             // that node, so cleanup must move off the completion thread to avoid waiting on itself.
             return handoff.whenCompleteAsync((ignored, failure) -> {
-                try {
-                    close(binding);
-                } finally {
-                    runner.close();
-                    recorder.detachForAcknowledgement();
-                    if (failure == null) {
+                RuntimeException cleanupFailure = null;
+                cleanupFailure = cleanup(cleanupFailure, () -> close(binding));
+                cleanupFailure = cleanup(cleanupFailure, runner::close);
+                cleanupFailure = cleanup(cleanupFailure, recorder::detachForAcknowledgement);
+                cleanupFailure = cleanup(cleanupFailure, manager::close);
+                if (failure == null && cleanupFailure == null) {
+                    try {
                         ExecutionRecorder existing = awaitingAcknowledgement.putIfAbsent(claim, recorder);
                         if (existing != null) {
                             recorder.close();
                             throw new IllegalStateException(
                                     "duplicate human-task continuation awaiting acknowledgement");
                         }
+                    } catch (RuntimeException mapFailure) {
+                        cleanupFailure = combine(cleanupFailure, mapFailure);
                     }
-                    manager.close();
+                } else {
+                    cleanupFailure = cleanup(cleanupFailure, recorder::close);
                 }
+                if (cleanupFailure != null) throw cleanupFailure;
             }, CLEANUP_EXECUTOR);
         } catch (CompletionException wrapped) {
             return CompletableFuture.failedFuture(wrapped.getCause());
@@ -240,24 +313,55 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         }
     }
 
+    private static RuntimeException cleanup(RuntimeException first, Runnable action) {
+        try {
+            action.run();
+            return first;
+        } catch (RuntimeException failure) {
+            return combine(first, failure);
+        }
+    }
+
+    private static RuntimeException combine(RuntimeException first, RuntimeException next) {
+        if (first == null) return next;
+        if (next != first) first.addSuppressed(next);
+        return first;
+    }
+
     private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder,
                                    java.util.function.Function<ai.ravenroot.api.execution.NodeMessage,
                                            ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot> budget) {
         AutoCloseable taskBinding = tasks.bindLive(key, recorder, budget);
-        if (approvals == null) return taskBinding;
+        AutoCloseable approvalBinding = null;
+        AutoCloseable budgetBinding = null;
         try {
-            AutoCloseable approvalBinding = approvals.bindLive(key, recorder, budget);
+            approvalBinding = approvals == null ? null : approvals.bindLive(key, recorder, budget);
+            budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(key, recorder);
+            AutoCloseable finalApprovalBinding = approvalBinding;
+            AutoCloseable finalBudgetBinding = budgetBinding;
             return () -> {
                 try {
-                    close(approvalBinding);
+                    if (finalBudgetBinding != null) close(finalBudgetBinding);
                 } finally {
-                    close(taskBinding);
+                    try {
+                        if (finalApprovalBinding != null) close(finalApprovalBinding);
+                    } finally {
+                        close(taskBinding);
+                    }
                 }
             };
         } catch (RuntimeException failure) {
             try {
-                close(taskBinding);
+                if (budgetBinding != null) close(budgetBinding);
             } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                if (approvalBinding != null) close(approvalBinding);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try { close(taskBinding); } catch (RuntimeException cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
             throw failure;

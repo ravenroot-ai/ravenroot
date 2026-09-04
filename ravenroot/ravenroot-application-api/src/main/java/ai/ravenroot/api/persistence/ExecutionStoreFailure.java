@@ -450,7 +450,13 @@ public sealed interface ExecutionStoreFailure {
         }
     }
 
-    /** A tool-approval transition conflicts with the first durable lifecycle winner. */
+    /**
+     * A tool-approval transition conflicts with the first durable lifecycle winner.
+     *
+     * @param approvalId target approval identity
+     * @param current currently committed status
+     * @param requested requested successor status
+     */
     record ToolApprovalNotResolvable(UUID approvalId, ToolApprovalStatus current,
                                      ToolApprovalStatus requested) implements ExecutionStoreFailure {
         @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
@@ -479,6 +485,23 @@ public sealed interface ExecutionStoreFailure {
             return "human task " + taskId + " is " + current + " at generation " + actualGeneration
                     + " and cannot transition to " + requested + " from expected generation "
                     + expectedGeneration;
+        }
+    }
+
+    /**
+     * An execution-pause transition conflicts with the first durable lifecycle winner.
+     *
+     * @param pauseId target hold identity.
+     * @param current currently committed status.
+     * @param requested requested successor status.
+     */
+    record ExecutionPauseNotResolvable(UUID pauseId, ExecutionPauseStatus current,
+                                       ExecutionPauseStatus requested) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "execution pause " + pauseId + " is " + current
+                    + " and cannot transition to " + requested;
         }
     }
 

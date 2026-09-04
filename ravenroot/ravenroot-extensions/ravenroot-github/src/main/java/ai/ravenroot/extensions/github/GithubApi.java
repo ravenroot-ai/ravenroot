@@ -84,9 +84,10 @@ final class GithubApi {
                 case CREDENTIAL_UNAVAILABLE -> GithubException.Code.AUTHENTICATION_FAILED;
                 case DESTINATION_FORBIDDEN, RESOLUTION_REFUSED, PROTOCOL_REFUSED, TLS_REFUSED -> GithubException.Code.FORBIDDEN;
                 case REQUEST_TOO_LARGE, RESPONSE_TOO_LARGE -> GithubException.Code.RESPONSE_INVALID;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> GithubException.Code.CAPACITY;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED -> GithubException.Code.CAPACITY;
                 case CANCELLED -> GithubException.Code.CANCELLED;
-                case DEADLINE_EXCEEDED, TRANSPORT_FAILED -> GithubException.Code.TRANSPORT;
+                case DEADLINE_EXCEEDED, TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        GithubException.Code.TRANSPORT;
             });
         }
         return new GithubException(GithubException.Code.TRANSPORT);

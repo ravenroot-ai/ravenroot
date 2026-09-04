@@ -160,6 +160,44 @@ public final class ExecutionMonitor {
     }
 
     /**
+     * Publishes a traversal's hold.
+     *
+     * <p>Deliberately touches neither counter this class keeps. {@code activeExecutions} is not
+     * decremented because a paused traversal <em>is</em> active: it holds its state, it is still
+     * listed live and it is still cancellable, and a gauge that dropped on a pause would report the
+     * runtime as quieter than it is at the exact moment an operator has parked work in it.
+     * {@code attemptStarts} is not discarded for the same reason it is discarded on a terminal event
+     * and not here: the attempt whose start it holds is still going to settle, and dropping its start
+     * would silently remove the processing duration from the node that was running when the pause
+     * arrived.</p>
+     *
+     * <p>The detail is a fixed, source-authored phrase in the same register as
+     * {@code "execution accepted"}. Nothing about a hold is caller-supplied, so there is nothing here
+     * that could carry operator text onto the event.</p>
+     *
+     * @param identity the traversal's publication identity, which is what makes this event
+     *                 attributable to the same tenant and request as every other event of this run
+     */
+    void executionPaused(ExecutionIdentity identity) {
+        publish(identity, ExecutionEventType.EXECUTION_PAUSED, null, 0, false, "execution paused");
+    }
+
+    /**
+     * Publishes a traversal's release, and says only what the release itself decided.
+     *
+     * <p>"Resumed" here means the hold is gone and the parked hop has been handed a thread, not that
+     * the hop has run: the runtime deliberately does not wait for it, so an event claiming the node
+     * had restarted would be a claim this call cannot make. The node announces itself with its own
+     * {@code NODE_STARTED}.</p>
+     *
+     * @param identity the traversal's publication identity, matching the {@code EXECUTION_PAUSED}
+     *                 this event pairs with
+     */
+    void executionResumed(ExecutionIdentity identity) {
+        publish(identity, ExecutionEventType.EXECUTION_RESUMED, null, 0, false, "execution resumed");
+    }
+
+    /**
      * @param liveInstances how many runtime instances of this node's actor are alive, measured by the
      *                      caller at the moment of the call. The monitor cannot derive this: the
      *                      instances live in {@code GraphRunner}'s {@code WorkerInstanceRegistry} for the

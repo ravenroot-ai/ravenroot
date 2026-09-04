@@ -4,6 +4,7 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
@@ -22,6 +23,14 @@ import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.InventoryCursor;
@@ -156,7 +165,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             // offset to repair and no rebuild that could invent work.
             StoreCapability.PROCESS_INVENTORY,
             StoreCapability.INVENTORY_RETENTION,
-            StoreCapability.TOOL_APPROVALS);
+            StoreCapability.TOOL_APPROVALS,
+            StoreCapability.HUMAN_TASKS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -164,6 +174,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
      */
     private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
     private static final String TOOL_APPROVAL_COLUMNS = "SELECT a.* FROM tool_approval a";
+    private static final String HUMAN_TASK_COLUMNS = "SELECT t.* FROM human_task t";
 
     /**
      * {@code ('WAITING', 'ESCALATED')} and {@code ('RESOLVED', 'DENIED', 'EXPIRED')}, derived from
@@ -384,6 +395,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // a wait -- and a re-entry -- atomic with the transitions beside it.
         writeHandlers(key, batch, folded, revision);
         writeToolApprovals(key, batch, folded, pin, revision, now);
+        writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
         // Inside the same transaction as the transition above, which is the entirety of the shared
         // transactional boundary the event journal promises. There is no publish step to crash
@@ -2651,6 +2663,294 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     rows.getLong("revision"));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable human tasks
+
+    @Override
+    public CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(taskId, "taskId");
+            return inReadTransaction(null, () ->
+                    Optional.ofNullable(readHumanTask(tenantId, taskId)));
+        });
+    }
+
+    @Override
+    public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            if (query.limit() < 1 || query.limit() > maxHumanTaskPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskPageSize()));
+            }
+            return inReadTransaction(null, () -> {
+                if (query.cursor().isPresent()
+                        && readHumanTask(tenantId, query.cursor().orElseThrow()) == null) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "human-task cursor does not belong to this tenant"));
+                }
+                var matching = new ArrayList<DurableHumanTask>();
+                String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ?"
+                        + (query.cursor().isPresent() ? " AND t.task_id > ?" : "")
+                        + " ORDER BY t.task_id";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, tenantId);
+                    if (query.cursor().isPresent()) {
+                        statement.setString(2, query.cursor().orElseThrow().toString());
+                    }
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            DurableHumanTask task = readHumanTask(rows);
+                            if (query.admits(task.status())) matching.add(task);
+                        }
+                    }
+                }
+                int end = Math.min(query.limit(), matching.size());
+                List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
+                Optional<UUID> next = matching.size() > end
+                        ? Optional.of(page.getLast().request().taskId()) : Optional.empty();
+                return new HumanTaskPage(page, next);
+            });
+        });
+    }
+
+    private void writeHumanTasks(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                 GraphVersionPin pin, long revision, Instant now) throws SQLException {
+        for (HumanTaskRegistration registration : batch.humanTasksToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "human task " + registration.taskId());
+            requireAttemptExists(folded, registration.traversalId(), registration.invocationId(),
+                    registration.attemptId(), "human task " + registration.taskId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task identity or graph pin does not match its execution"));
+            }
+            DurableHumanTask deduplicated = humanTaskByDeduplicationKey(
+                    key.tenantId(), registration.deduplicationKey());
+            if (deduplicated != null) {
+                if (!deduplicated.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                            + registration.deduplicationKey()
+                            + " already registers a different human task"));
+                }
+                continue;
+            }
+            if (registration.responseSchema().maxBytes() > maxPayloadBytes()) {
+                throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                        registration.responseSchema().maxBytes(), maxPayloadBytes()));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
+            }
+            if (registration.escalateAt().isPresent()
+                    && !now.isBefore(registration.escalateAt().orElseThrow())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task escalation must be after store time"));
+            }
+            if (readHumanTask(key.tenantId(), registration.taskId()) != null) {
+                throw failure(ExecutionStoreFailure.invalid("human task " + registration.taskId()
+                        + " is already registered under a different deduplication key"));
+            }
+            if (liveHumanTaskByCorrelationKey(key.tenantId(), registration.correlationKey()) != null) {
+                throw failure(ExecutionStoreFailure.invalid("correlation key "
+                        + registration.correlationKey() + " already identifies a live human task"));
+            }
+            insertHumanTask(DurableHumanTask.waiting(key, registration, revision));
+        }
+        for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
+            DurableHumanTask current = readHumanTask(key.tenantId(), transition.taskId());
+            if (current == null || !current.key().equals(key)) {
+                throw failure(ExecutionStoreFailure.invalid("unknown human task " + transition.taskId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (transition.expectedGeneration() != current.generation()
+                    || !current.status().canTransitionTo(transition.next())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.EXPIRED && now.isBefore(current.request().expiresAt())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.ESCALATED
+                    && (current.request().escalateAt().isEmpty()
+                    || now.isBefore(current.request().escalateAt().orElseThrow())
+                    || !now.isBefore(current.request().expiresAt()))) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() != HumanTaskStatus.EXPIRED
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                        current.request().taskId(), current.status(), HumanTaskStatus.EXPIRED,
+                        transition.expectedGeneration(), current.generation()));
+            }
+            updateHumanTask(current.apply(transition, revision));
+        }
+    }
+
+    private ExecutionStoreException humanTaskConflict(DurableHumanTask current,
+                                                       HumanTaskTransition transition) {
+        return failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                current.request().taskId(), current.status(), transition.next(),
+                transition.expectedGeneration(), current.generation()));
+    }
+
+    private void insertHumanTask(DurableHumanTask task) throws SQLException {
+        HumanTaskRegistration request = task.request();
+        String columns = "tenant_id, process_instance_id, task_id, traversal_id, invocation_id, "
+                + "attempt_id, node_id, correlation_key, deduplication_key, title, description, "
+                + "response_content_type, response_schema, response_schema_version, response_kind, "
+                + "response_max_bytes, required_roles, required_scopes, requester_request_id, "
+                + "requester_subject, requester_principal_type, requester_issuer, graph_version_pin, "
+                + "escalate_at_epoch_second, escalate_at_nano, expires_at_epoch_second, expires_at_nano, "
+                + "resolved_outcome, denied_outcome, expired_outcome, cancelled_outcome, status, actor, "
+                + "generation, revision";
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(34) + "?)")) {
+            int index = 1;
+            statement.setString(index++, task.key().tenantId());
+            statement.setString(index++, task.key().processInstanceId().toString());
+            statement.setString(index++, request.taskId().toString());
+            statement.setString(index++, request.traversalId().toString());
+            statement.setString(index++, request.invocationId().toString());
+            statement.setString(index++, request.attemptId().toString());
+            statement.setString(index++, request.nodeId());
+            statement.setString(index++, request.correlationKey());
+            statement.setString(index++, request.deduplicationKey());
+            statement.setString(index++, request.metadata().title());
+            statement.setString(index++, request.metadata().description());
+            statement.setString(index++, request.responseSchema().contentType());
+            statement.setString(index++, request.responseSchema().schema());
+            statement.setString(index++, request.responseSchema().schemaVersion());
+            statement.setString(index++, request.responseSchema().kind().name());
+            statement.setInt(index++, request.responseSchema().maxBytes());
+            statement.setString(index++, joinTokens(request.responderRequirements().requiredRoles()));
+            statement.setString(index++, joinTokens(request.responderRequirements().requiredScopes()));
+            statement.setString(index++, request.requester().requestId());
+            statement.setString(index++, request.requester().subject());
+            statement.setString(index++, request.requester().principalType().name());
+            statement.setString(index++, request.requester().issuer());
+            statement.setString(index++, request.graphVersionPin().reference());
+            if (request.escalateAt().isPresent()) {
+                index = StoredInstant.bindValue(statement, index, request.escalateAt().orElseThrow());
+            } else {
+                statement.setNull(index++, java.sql.Types.BIGINT);
+                statement.setNull(index++, java.sql.Types.INTEGER);
+            }
+            index = StoredInstant.bindValue(statement, index, request.expiresAt());
+            statement.setString(index++, request.reentryMapping().resolvedOutcome());
+            statement.setString(index++, request.reentryMapping().deniedOutcome());
+            statement.setString(index++, request.reentryMapping().expiredOutcome());
+            statement.setString(index++, request.reentryMapping().cancelledOutcome());
+            statement.setString(index++, task.status().name());
+            statement.setString(index++, task.actor());
+            statement.setLong(index++, task.generation());
+            statement.setLong(index, task.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateHumanTask(DurableHumanTask task) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE human_task SET status = ?, actor = ?, generation = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND task_id = ?")) {
+            statement.setString(1, task.status().name());
+            statement.setString(2, task.actor());
+            statement.setLong(3, task.generation());
+            statement.setLong(4, task.revision());
+            statement.setString(5, task.key().tenantId());
+            statement.setString(6, task.request().taskId().toString());
+            statement.executeUpdate();
+        }
+    }
+
+    private DurableHumanTask readHumanTask(String tenantId, UUID taskId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ? AND t.task_id = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, taskId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHumanTask(rows) : null;
+            }
+        }
+    }
+
+    private DurableHumanTask humanTaskByDeduplicationKey(String tenantId, String deduplicationKey)
+            throws SQLException {
+        return readHumanTaskBy(tenantId, "deduplication_key", deduplicationKey, false);
+    }
+
+    private DurableHumanTask liveHumanTaskByCorrelationKey(String tenantId, String correlationKey)
+            throws SQLException {
+        return readHumanTaskBy(tenantId, "correlation_key", correlationKey, true);
+    }
+
+    private DurableHumanTask readHumanTaskBy(String tenantId, String column, String value, boolean liveOnly)
+            throws SQLException {
+        String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ? AND t." + column + " = ?"
+                + (liveOnly ? " AND t.status IN ('WAITING', 'ESCALATED')" : "");
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, value);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHumanTask(rows) : null;
+            }
+        }
+    }
+
+    private DurableHumanTask readHumanTask(ResultSet rows) throws SQLException {
+        var key = new ExecutionKey(rows.getString("tenant_id"),
+                UUID.fromString(rows.getString("process_instance_id")));
+        try {
+            long escalationSecond = rows.getLong("escalate_at_epoch_second");
+            boolean noEscalation = rows.wasNull();
+            Optional<Instant> escalation = noEscalation ? Optional.empty()
+                    : Optional.of(Instant.ofEpochSecond(escalationSecond,
+                            rows.getInt("escalate_at_nano")));
+            var request = new HumanTaskRegistration(
+                    UUID.fromString(rows.getString("task_id")),
+                    UUID.fromString(rows.getString("traversal_id")),
+                    UUID.fromString(rows.getString("invocation_id")),
+                    UUID.fromString(rows.getString("attempt_id")),
+                    rows.getString("node_id"), rows.getString("correlation_key"),
+                    rows.getString("deduplication_key"),
+                    new HumanTaskMetadata(rows.getString("title"), rows.getString("description")),
+                    new HumanTaskResponseSchema(rows.getString("response_content_type"),
+                            rows.getString("response_schema"), rows.getString("response_schema_version"),
+                            ai.ravenroot.api.payload.PayloadKind.valueOf(rows.getString("response_kind")),
+                            rows.getInt("response_max_bytes")),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    new ai.ravenroot.api.security.SecurityContext(
+                            rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            ai.ravenroot.api.security.PrincipalType.valueOf(
+                                    rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")), escalation,
+                    StoredInstant.read(rows, "expires_at"),
+                    new HumanTaskReentryMapping(rows.getString("resolved_outcome"),
+                            rows.getString("denied_outcome"), rows.getString("expired_outcome"),
+                            rows.getString("cancelled_outcome")));
+            return new DurableHumanTask(key, request,
+                    HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("generation"), rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    private void requireAttemptExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                      UUID attemptId, String what) {
+        var traversal = folded == null ? null : folded.traversals().get(traversalId);
+        var invocation = traversal == null ? null : traversal.invocations().get(invocationId);
+        if (invocation == null || invocation.attempts().stream()
+                .noneMatch(attempt -> attempt.attemptId().equals(attemptId))) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names attempt " + attemptId
+                    + ", which this batch neither found nor created"));
         }
     }
 

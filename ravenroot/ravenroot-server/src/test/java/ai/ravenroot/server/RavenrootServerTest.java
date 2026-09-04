@@ -181,6 +181,11 @@ class RavenrootServerTest {
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(200, catalog.statusCode());
             assertTrue(catalog.body().contains("\"behavior\":\"cel-transform\""));
+            assertTrue(catalog.body().contains("\"behavior\":\"human-task\""));
+            assertTrue(catalog.body().contains("\"displayName\":\"Human task\""));
+            assertTrue(catalog.body().contains("\"name\":\"title\""));
+            assertTrue(catalog.body().contains("\"name\":\"responseKind\""));
+            assertTrue(catalog.body().contains("\"fromProperty\":\"cancelledOutcome\""));
             // Asserted on the wire and not on the registry: this is the route an installation actually
             // reads, and the defect is that a
             // distribution offered two node types nobody installing it could arm. Both halves are

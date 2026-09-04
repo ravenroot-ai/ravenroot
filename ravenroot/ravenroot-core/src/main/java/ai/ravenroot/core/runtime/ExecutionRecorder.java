@@ -17,6 +17,8 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocationStatus;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
@@ -291,6 +293,58 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();
+    }
+
+    /** Atomically parks one invocation behind a first-class durable human task. */
+    public synchronized void suspendForHumanTask(HumanTaskRegistration task,
+                                                 HandlerRegistration handler,
+                                                 List<TimerSchedule> timers,
+                                                 EventEnvelope event) {
+        requireFence();
+        Objects.requireNonNull(task, "task");
+        Objects.requireNonNull(handler, "handler");
+        Objects.requireNonNull(timers, "timers");
+        if (!task.traversalId().equals(handler.traversalId())
+                || !task.invocationId().equals(handler.invocationId())
+                || !task.taskId().equals(handler.handlerId())) {
+            throw new IllegalArgumentException("human task and handler scope do not match");
+        }
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease)
+                .apply(new ExecutionTransition.AttemptTransitioned(task.traversalId(),
+                        task.invocationId(), task.attemptId(), NodeAttemptStatus.WAITING))
+                .apply(new ExecutionTransition.InvocationTransitioned(task.traversalId(),
+                        task.invocationId(), NodeInvocationStatus.WAITING))
+                .apply(new ExecutionTransition.TraversalTransitioned(task.traversalId(),
+                        TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .registerHumanTask(task)
+                .registerHandler(handler);
+        timers.forEach(batch::scheduleTimer);
+        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+            batch.publish(Objects.requireNonNull(event, "event"));
+        }
+        StoredProcessInstance applied = await(store.apply(batch.build()));
+        revision = applied.revision();
+    }
+
+    /** Confirms that a payload-free core signal names this exact durable waiting invocation. */
+    public synchronized boolean confirmsHumanTask(UUID taskId, NodeMessage message) {
+        if (!key.tenantId().equals(message.security().tenantId())
+                || !key.processInstanceId().equals(message.processInstanceId())) {
+            return false;
+        }
+        var task = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
+        if (task == null || !task.key().equals(key)
+                || (task.status() != HumanTaskStatus.WAITING
+                && task.status() != HumanTaskStatus.ESCALATED)) return false;
+        HumanTaskRegistration request = task.request();
+        return request.traversalId().equals(message.traversalId())
+                && request.invocationId().equals(message.invocationId())
+                && request.attemptId().equals(message.attemptId())
+                && request.nodeId().equals(message.nodeId())
+                && request.requester().equals(message.security());
     }
 
     /** Commits the exact redeemed effect outcome through this recorder's current claim fence. */

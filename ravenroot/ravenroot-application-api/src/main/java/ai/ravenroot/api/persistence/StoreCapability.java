@@ -65,6 +65,9 @@ public enum StoreCapability {
     /** Exact tool approvals can be registered and transitioned atomically with execution state. */
     TOOL_APPROVALS,
 
+    /** First-class human tasks can be registered, transitioned and listed atomically. */
+    HUMAN_TASKS,
+
     /**
      * The journal can be compacted on demand, discarding the payloads of records that are both
      * delivered to every destination and past their retention window.

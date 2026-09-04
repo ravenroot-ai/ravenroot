@@ -314,6 +314,9 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installed only by the packaged composition before start; absent hosts expose no approval authority. */
     private ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
     private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
+    /** Installed only when the execution store supports first-class durable human tasks. */
+    private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
+    private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
     /**
      * Injectable: the narrower constructors below default to the stdout
      * {@link StructuredGraphMlRejectionLogger}/{@code StructuredPayloadRejectionLogger}, but
@@ -718,6 +721,7 @@ public final class RavenrootServer implements AutoCloseable {
         apiContext("/v1/status", this::status);
         apiContext("/v1/runtime", this::runtime);
         apiContext("/v1/node-types", this::nodeTypes);
+        apiContext("/v1/human-tasks", this::humanTasks);
         apiContext("/v1/program-languages", this::programLanguages);
         apiContext("/v1/program-artifacts", this::programArtifacts);
         apiContext("/v1/graphs/inspect", this::inspectGraph);
@@ -960,6 +964,15 @@ public final class RavenrootServer implements AutoCloseable {
         if (toolApprovals != null) throw new IllegalStateException("tool approvals are already installed");
         toolApprovals = java.util.Objects.requireNonNull(approvals, "approvals");
         toolApprovalSweep = java.util.Objects.requireNonNull(sweep, "sweep");
+    }
+
+    /** Installs the transport-neutral human-task authority before listener start. */
+    synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
+                                        java.util.function.Consumer<String> sweep) {
+        if (started.get()) throw new IllegalStateException("human tasks must be installed before start");
+        if (humanTasks != null) throw new IllegalStateException("human tasks are already installed");
+        humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
+        humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
     }
 
     public int port() {
@@ -2395,6 +2408,139 @@ public final class RavenrootServer implements AutoCloseable {
                         + "\",\"approvalId\":\"" + approvalId + "\"" + resume + "}");
             }
         }
+    }
+
+    /** Bounded tenant inbox and generation-fenced decision adapter for durable human tasks. */
+    private void humanTasks(HttpExchange exchange) throws IOException {
+        ai.ravenroot.core.humantask.HumanTaskService service = humanTasks;
+        if (service == null) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        String suffix = exchange.getRequestURI().getPath().substring("/v1/human-tasks".length());
+        var context = AuthenticatedPrincipalAttribute.requestContext(exchange);
+        if (suffix.isEmpty() || "/".equals(suffix)) {
+            if (!method(exchange, "GET")) return;
+            var parameters = query(exchange);
+            int limit;
+            boolean includeTerminal;
+            java.util.Optional<java.util.UUID> cursor;
+            try {
+                limit = Integer.parseInt(parameters.getOrDefault("limit", "50"));
+                includeTerminal = Boolean.parseBoolean(parameters.getOrDefault("includeTerminal", "false"));
+                cursor = parameters.containsKey("cursor")
+                        ? java.util.Optional.of(java.util.UUID.fromString(parameters.get("cursor")))
+                        : java.util.Optional.empty();
+            } catch (IllegalArgumentException invalid) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+                return;
+            }
+            try {
+                var page = service.inbox(context, new ai.ravenroot.api.persistence.HumanTaskQuery(
+                        java.util.Set.of(), includeTerminal, cursor, limit));
+                json(exchange, 200, humanTaskPageJson(page));
+            } catch (IllegalArgumentException invalid) {
+                fail(exchange, ErrorCode.INVALID_REQUEST);
+            } catch (RuntimeException failure) {
+                fail(exchange, ErrorCode.INTERNAL_ERROR);
+            }
+            return;
+        }
+        String[] segments = suffix.substring(1).split("/", -1);
+        if (segments.length != 2 || segments[0].isBlank()
+                || !("resolve".equals(segments[1]) || "deny".equals(segments[1])
+                || "cancel".equals(segments[1]))) {
+            fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            return;
+        }
+        if (!method(exchange, "POST")) return;
+        java.util.UUID taskId;
+        long generation;
+        try {
+            taskId = java.util.UUID.fromString(segments[0]);
+            generation = Long.parseLong(query(exchange).get("generation"));
+            if (generation < 1) throw new IllegalArgumentException("generation");
+        } catch (RuntimeException invalid) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        ai.ravenroot.core.humantask.HumanTaskResult result;
+        try {
+            result = switch (segments[1]) {
+                case "resolve" -> service.resolve(context, taskId, generation,
+                        humanTaskResponse(exchange));
+                case "deny" -> service.deny(context, taskId, generation);
+                case "cancel" -> service.cancel(context, taskId, generation);
+                default -> throw new IllegalStateException("unreachable human-task operation");
+            };
+            if (result.resumeTraversalId() != null) humanTaskSweep.accept(context.tenantId());
+        } catch (HumanTaskBodyTooLarge tooLarge) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        } catch (RuntimeException failure) {
+            fail(exchange, ErrorCode.INTERNAL_ERROR);
+            return;
+        }
+        switch (result.code()) {
+            case NOT_FOUND, UNAVAILABLE -> fail(exchange, ErrorCode.UNKNOWN_RESOURCE);
+            case UNAUTHORIZED -> fail(exchange, ErrorCode.ACCESS_DENIED);
+            case PAYLOAD_REFUSED, STALE_GENERATION -> fail(exchange, ErrorCode.INVALID_REQUEST);
+            default -> {
+                String resume = result.resumeTraversalId() == null ? ""
+                        : ",\"resumeTraversalId\":\"" + result.resumeTraversalId() + "\"";
+                json(exchange, 200, "{\"outcome\":\""
+                        + result.code().name().toLowerCase(java.util.Locale.ROOT)
+                        + "\",\"taskId\":\"" + taskId + "\",\"generation\":"
+                        + result.task().generation() + resume + "}");
+            }
+        }
+    }
+
+    private ai.ravenroot.api.persistence.OpaquePayload humanTaskResponse(HttpExchange exchange)
+            throws IOException {
+        int limit = ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes();
+        byte[] body;
+        try (var input = exchange.getRequestBody()) {
+            body = input.readNBytes(limit + 1);
+        }
+        if (body.length > limit) throw new HumanTaskBodyTooLarge();
+        String contentType = exchange.getRequestHeaders().getFirst("Content-Type");
+        if (contentType == null || contentType.isBlank()) contentType = "application/octet-stream";
+        return ai.ravenroot.api.persistence.OpaquePayload.of(body, contentType);
+    }
+
+    private static String humanTaskPageJson(ai.ravenroot.api.persistence.HumanTaskPage page) {
+        var out = new StringBuilder("{\"items\":[");
+        boolean first = true;
+        for (var task : page.items()) {
+            if (!first) out.append(',');
+            first = false;
+            var request = task.request();
+            out.append("{\"taskId\":\"").append(task.request().taskId())
+                    .append("\",\"processInstanceId\":\"").append(task.key().processInstanceId())
+                    .append("\",\"nodeId\":\"").append(escape(request.nodeId()))
+                    .append("\",\"title\":\"").append(escape(request.metadata().title()))
+                    .append("\",\"description\":\"").append(escape(request.metadata().description()))
+                    .append("\",\"status\":\"").append(task.status().name())
+                    .append("\",\"generation\":").append(task.generation())
+                    .append(",\"responseSchema\":\"").append(escape(request.responseSchema().schema()))
+                    .append("\",\"responseSchemaVersion\":\"")
+                    .append(escape(request.responseSchema().schemaVersion()))
+                    .append("\",\"responseKind\":\"").append(request.responseSchema().kind())
+                    .append("\",\"maxResponseBytes\":").append(request.responseSchema().maxBytes())
+                    .append(",\"expiresAt\":\"").append(request.expiresAt()).append("\"");
+            request.escalateAt().ifPresent(value -> out.append(",\"escalateAt\":\"")
+                    .append(value).append("\""));
+            out.append('}');
+        }
+        out.append("],\"nextCursor\":");
+        if (page.nextCursor().isPresent()) out.append('"').append(page.nextCursor().orElseThrow()).append('"');
+        else out.append("null");
+        return out.append('}').toString();
+    }
+
+    private static final class HumanTaskBodyTooLarge extends RuntimeException {
+        private static final long serialVersionUID = 1L;
     }
 
     /**

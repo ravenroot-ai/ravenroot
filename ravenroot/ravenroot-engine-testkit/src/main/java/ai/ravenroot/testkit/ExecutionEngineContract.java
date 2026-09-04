@@ -1345,33 +1345,83 @@ public abstract class ExecutionEngineContract {
         assertTrue(refusal.getMessage().toLowerCase(java.util.Locale.ROOT).contains("clos"),
                 "a closed domain must refuse promptly and say so. Without asserting the reason this "
                         + "passes against an adapter that dropped its own check and merely timed out "
-                        + "talking to a dead guardian -- a mutation that survived the first version "
-                        + "of this test. It reported: " + refusal.getMessage());
+                        + "talking to a dead guardian -- a mutation this test's earlier shape once "
+                        + "let through. It reported: " + refusal.getMessage());
     }
 
     /**
-     * The property the operational cap depends on: domains close CONCURRENTLY, not in series.
+     * The property this engine's contribution to the shutdown budget depends on: domains close
+     * CONCURRENTLY, not in series. <b>This is an engine-level property only.</b> Whether it holds at
+     * the pod level -- across the deployments actually running on one pod -- is a separate question
+     * answered by how the pod's own shutdown sequence invokes {@code close()} on each deployment's
+     * domain, not by anything this test can see; see
+     * {@code ai.ravenroot.server.deployment.DeploymentCapConfiguration}'s Javadoc for that answer as it
+     * stands today (currently: it does not hold at the pod level -- deployments are closed one at a
+     * time -- and the shutdown budget is sized accordingly, not assumed independent of {@code M}).
      *
-     * <p>the deployment-admission contract defines the per-pod cap from a shutdown budget it states is independent of the
-     * number of active deployments. That independence is a claim about this behaviour: if domains
-     * closed in series the budget would grow with M and the configured cap would be wrong.
+     * <p><b>Proved by a barrier, not by a stopwatch.</b> An elapsed-time-ratio design -- comparing how
+     * long eight concurrent closes take against one -- is a known-bad shape for this property: nodes
+     * that stop instantly make eight serial closes as fast as one, so a mutation that makes closing
+     * strictly serial can survive such a comparison outright; it is a control that could not fail. Here
+     * every domain's node blocks inside its stop until all eight have arrived; if closes were
+     * serialised the second would never start, the barrier would never trip and this test would time
+     * out. No two elapsed times are ever compared against each other, so no machine speed can make it
+     * pass or fail for the wrong reason.
      *
-     * <p><b>Proved by a barrier, not by a stopwatch.</b> The first version of this test compared
-     * elapsed time for eight closes against one and asserted a ratio — and a mutation that made
-     * closing strictly serial SURVIVED it, because nodes that stop instantly make eight serial closes
-     * as fast as one. It was a control that could not fail. Here every domain's node blocks inside
-     * its stop until all eight have arrived; if closes were serialised the second would never start,
-     * the barrier would never trip and this test would time out. No clock is involved, so no machine
-     * speed can make it pass or fail for the wrong reason.
+     * <p><b>Diagnosis: why an earlier barrier-based shape of this test still passed under a mutation
+     * that serialises closing, and what the actual cause was — corrected after being disproved by
+     * measurement.</b> That shape issued all eight {@code close()} calls from a single calling thread,
+     * evaluated one at a time inside a single stream expression, and gave each blocked node's
+     * {@code onStop} a private 30-second timeout on {@code release}. A mutation that makes
+     * {@code close()} block its own caller until the domain has fully settled — indistinguishable from
+     * "domains close in series" when observed from outside — survived it, passing after 160.5 seconds
+     * instead of failing. <b>The private per-node timeout was NOT the cause: it was measured, not
+     * assumed.</b> Tripling it from 30s to 90s left the elapsed time exactly unchanged (160.5s either
+     * way), which a 30-second private escape firing eight times in sequence cannot produce. The actual
+     * escape is {@code SubtreeDomain.close()}'s own two-phase bound, unrelated to the test's node
+     * fixture: {@code settleAll(stop).orTimeout(10, SECONDS)} then, on that timeout,
+     * {@code settleAll(cancel).orTimeout(10, SECONDS)} -- {@code .orTimeout} resolves the domain's
+     * {@code close()} stage on its own clock regardless of whether the underlying node has actually
+     * settled, so a caller blocked inside one domain's {@code close()} is released by the ENGINE after
+     * about 20 seconds no matter how long the node fixture's own private wait is set to, as long as
+     * that private wait is not shorter. Eight of those in series, one after another because a single
+     * calling thread could only reach the next {@code close()} once the previous one returned, is
+     * 8 x ~20s = ~160s -- exactly what was measured. This is D, the same per-domain close bound this
+     * class's own {@link #closesDomainsConcurrentlyRatherThanInSeries()} measures and
+     * {@code DeploymentCapConfiguration} cites — a legitimate, load-bearing production safety bound
+     * (it is what keeps one wedged node from hanging its domain's close forever), not a test artifact,
+     * and not something this test should or can remove from the scenario while still using a node that
+     * blocks long enough to make arrival observable.
      *
-     * <p><b>UNPROVEN, and recorded as such.</b> A mutation that makes {@code close()} block
-     * until settled — which is what "domains close in series" looks like from a caller's side —
-     * survived this test. The mutation was verified to apply at the intended point, so the survival is
-     * real rather than a harness artifact, and the reason was not established before this increment
-     * landed. Treat this test as expressing an intent that is not yet demonstrated to be enforceable:
-     * it may be passing for a reason unrelated to what it asserts. Establishing that, or replacing it
-     * with a gate that provably fails, is outstanding work on the M-independence the deployment-admission contract's cap
-     * formula depends on.
+     * <p>The fix is therefore singular, not twofold: <b>independent callers.</b> Each domain's
+     * {@code close()} is now invoked from its own thread (a fixed pool sized to the domain count,
+     * released together off a {@link CyclicBarrier} so they are issued together), so a mutation that
+     * makes {@code close()} block its caller can only block that one thread — there is no shared
+     * calling thread left for it to serialise the other seven onto. {@link #blockingOnStop}'s own
+     * private timeout on {@code release} is unchanged from before this fix and is not what makes this
+     * test correct; it is a hygiene safety net (see its own Javadoc), and the {@code finally} block
+     * below that always fires {@code release.countDown()} — whether the assertion passed or failed — is
+     * a faster, deterministic version of that same hygiene, not a detection mechanism.
+     *
+     * <p><b>The bound also had to be tightened, not just the issuance.</b> Independent callers alone
+     * defeats a caller-blocking mutation, but a mutation that serialises the engine's OWN dispatch of
+     * domain closes — e.g. routing every domain's close body through one shared, width-{@code W}
+     * thread pool inside the adapter — is a different, more direct violation of "domains close
+     * concurrently", and is only caught if the wait below is short enough to notice it. With {@code W}
+     * threads serving {@code width} domains, batches of {@code W} close concurrently but each batch
+     * still pays the engine's own ~20-second (D) bound, so the total time for every domain to at least
+     * BEGIN closing is {@code (ceil(width / W) - 1) * D}. A wait of 30 seconds only ever detects
+     * {@code W <= 3} (2 batches, ({@literal 3-1}) x 20 = 40s > 30s already borderline; {@code W = 4}
+     * gives ({@literal 2-1}) x 20 = 20s, comfortably under 30s, and passes -- verified: a real mutation
+     * routing this engine's domain closes through a shared {@code newFixedThreadPool(4)} passes this
+     * test in ~20.4s at a 30-second wait). A 10-second wait detects every {@code W} from 1 up to
+     * {@code width - 1} (the narrowest escapable case, one extra batch, costs exactly D = ~20s, which
+     * is comfortably above 10s), while staying well above the sub-second time a genuinely concurrent
+     * close takes even under heavy machine load. {@code width} itself is fixed at 8 to match
+     * {@code DeploymentCapConfiguration.DEFAULT_MAX_ACTIVE_DEPLOYMENTS} — a shared pool sized to accept
+     * all 8 at once is indistinguishable from true per-domain concurrency for a pod actually running 8
+     * deployments, which is not a gap in this test, it is the operational bound this test exists to
+     * protect.
      */
     @Test
     final void closesDomainsConcurrentlyRatherThanInSeries() throws Exception {
@@ -1385,20 +1435,61 @@ public abstract class ExecutionEngineContract {
             domains.add(domain);
         }
 
-        var closes = domains.stream().map(ExecutionDomain::close)
-                .map(java.util.concurrent.CompletionStage::toCompletableFuture)
-                .toArray(java.util.concurrent.CompletableFuture[]::new);
+        // Every close() is issued from its own thread, released together off a barrier, so a mutation
+        // that makes close() block its caller cannot serialise issuance -- there is no single calling
+        // thread left for it to serialise onto.
+        var ready = new CyclicBarrier(width);
+        var pool = Executors.newFixedThreadPool(width);
+        try {
+            List<CompletableFuture<Void>> closes = new ArrayList<>();
+            for (ExecutionDomain domain : domains) {
+                closes.add(CompletableFuture.supplyAsync(() -> {
+                    try {
+                        ready.await(30, TimeUnit.SECONDS);
+                    } catch (Exception barrierFailure) {
+                        throw new RuntimeException("domain " + domain.name()
+                                + " never reached the issuance barrier", barrierFailure);
+                    }
+                    return domain.close();
+                }, pool).thenCompose(java.util.function.Function.identity()).toCompletableFuture());
+            }
 
-        assertTrue(arrived.await(30, TimeUnit.SECONDS),
-                "only " + (width - arrived.getCount()) + " of " + width + " domains began closing. "
-                        + "Domains are closing in series, so a pod's shutdown budget grows with the "
-                        + "number of active deployments and ADR 0021 D7's cap formula is not "
-                        + "M-independent");
-        release.countDown();
-        java.util.concurrent.CompletableFuture.allOf(closes).get(60, TimeUnit.SECONDS);
+            try {
+                // 10s, not 30s: short enough that even one extra serialised batch (~20s, this
+                // engine's own per-domain close bound D) is caught, long enough that a genuinely
+                // concurrent close -- sub-second, even under heavy machine load -- never comes close.
+                // See this method's own Javadoc for the discrimination-boundary arithmetic and the
+                // mutation that a 30-second wait let through.
+                assertTrue(arrived.await(10, TimeUnit.SECONDS),
+                        "only " + (width - arrived.getCount()) + " of " + width + " domains began "
+                                + "closing within 10 seconds. Domains are closing in series (or in "
+                                + "batches narrower than " + width + "), so a pod's shutdown budget "
+                                + "grows with the number of deployments closing concurrently on it, "
+                                + "which DeploymentCapConfiguration's shutdown-budget arithmetic must "
+                                + "account for");
+            } finally {
+                // Not required for detection (see this method's Javadoc): a faster, deterministic
+                // version of the hygiene blockingOnStop's own private timeout already provides.
+                release.countDown();
+            }
+
+            CompletableFuture.allOf(closes.toArray(CompletableFuture[]::new)).get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdown();
+        }
     }
 
-    /** A node whose stop blocks until every peer has also begun stopping. */
+    /**
+     * A node whose stop blocks until every peer has also begun stopping.
+     *
+     * <p>The private 30-second timeout on {@code release} is hygiene only -- a safety net so a bug in
+     * this test's own control flow cannot leak a thread blocked forever -- and is not what makes
+     * {@link #closesDomainsConcurrentlyRatherThanInSeries()} correct. That was tested directly: tripling
+     * it to 90 seconds changes nothing about whether or how fast that test catches a serialising
+     * mutation, because the actual escape a serialised close relies on is the production engine's own
+     * per-domain close bound (~20s), not this fixture's timeout, as long as this timeout is not shorter
+     * than that. See that method's own Javadoc for the full, measurement-corrected diagnosis.
+     */
     private static RavenNode blockingOnStop(java.util.concurrent.CountDownLatch arrived,
                                             java.util.concurrent.CountDownLatch release) {
         return new RavenNode() {

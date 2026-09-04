@@ -206,6 +206,7 @@ class ImapProfileRejectionDiagnosticsTest {
             causes.put("MAX_RESULTS_RANGE", with(MAX_RESULTS, "501"));
             causes.put("PREVIEW_CHARS_FORMAT", with(PREVIEW_CHARS, "some"));
             causes.put("PREVIEW_CHARS_RANGE", with(PREVIEW_CHARS, "65537"));
+            causes.put("RESERVED_DESTINATION", with(HOST, "127.0.0.1"));
 
             Set<String> observed = new LinkedHashSet<>();
             int scenario = 0;

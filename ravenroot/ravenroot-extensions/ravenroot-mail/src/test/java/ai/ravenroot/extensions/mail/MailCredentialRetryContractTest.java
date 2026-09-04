@@ -190,7 +190,8 @@ class MailCredentialRetryContractTest {
 
     private static NodeAction authenticated(int port, int retries, ai.ravenroot.api.security.CredentialResolver credentials) {
         return new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
-                tenant, name, "127.0.0.1", port, "STARTTLS", "smtp-user", "mail-primary", retries)))
+                tenant, name, "127.0.0.1", port, "STARTTLS", "smtp-user", "mail-primary", retries)),
+                SecretValue::copy, String::new, MailTestSupport.loopbackPolicy("127.0.0.1"))
                 .create(MailTestSupport.configuration(Map.of()));
     }
     private static NodeAction authenticated(int port, int retries,
@@ -199,7 +200,8 @@ class MailCredentialRetryContractTest {
                                             MailSendNodeBehavior.PasswordString passwordString) {
         return new MailSendNodeBehavior(credentials, (tenant, name) -> Optional.of(MailTestSupport.profile(
                 tenant, name, "127.0.0.1", port, "STARTTLS", "smtp-user", "mail-primary", retries)),
-                secretCopy, passwordString).create(MailTestSupport.configuration(Map.of()));
+                secretCopy, passwordString, MailTestSupport.loopbackPolicy("127.0.0.1"))
+                .create(MailTestSupport.configuration(Map.of()));
     }
     private static Map<?, ?> result(NodeAction action) {
         return (Map<?, ?>) action.handle(message()).toCompletableFuture().join().payload();

@@ -6,6 +6,7 @@ import ai.ravenroot.api.deployment.IngressReceipt;
 import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 
 import java.time.Clock;
@@ -34,6 +35,7 @@ final class AmqpConsumerSource implements InboundSource {
     private final Executor executor;
     private final IntConsumer reconnectBackoffObserver;
     private final DoubleSupplier reconnectJitter;
+    private final ReservedNetworkPolicy destinationPolicy;
     @SuppressWarnings("unused") private final Clock clock;
     private final Object lifecycle = new Object();
     private volatile State state = State.STOPPED;
@@ -54,12 +56,23 @@ final class AmqpConsumerSource implements InboundSource {
                        AmqpProfileResolver profiles, AmqpConsumerPolicyResolver policies,
                        AmqpConsumerProtocol protocol, Executor executor, Clock clock,
                        IntConsumer reconnectBackoffObserver, DoubleSupplier reconnectJitter) {
+        this(configuration, credentials, profiles, policies, protocol, executor, clock,
+                reconnectBackoffObserver, reconnectJitter,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+
+    AmqpConsumerSource(NodeConfiguration configuration, CredentialResolver credentials,
+                       AmqpProfileResolver profiles, AmqpConsumerPolicyResolver policies,
+                       AmqpConsumerProtocol protocol, Executor executor, Clock clock,
+                       IntConsumer reconnectBackoffObserver, DoubleSupplier reconnectJitter,
+                       ReservedNetworkPolicy destinationPolicy) {
         this.configuration = Objects.requireNonNull(configuration); this.credentials = Objects.requireNonNull(credentials);
         this.profiles = Objects.requireNonNull(profiles); this.policies = Objects.requireNonNull(policies);
         this.protocol = Objects.requireNonNull(protocol); this.executor = Objects.requireNonNull(executor);
         this.clock = Objects.requireNonNull(clock);
         this.reconnectBackoffObserver = Objects.requireNonNull(reconnectBackoffObserver);
         this.reconnectJitter = Objects.requireNonNull(reconnectJitter);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public CompletionStage<Void> start(InboundSourceContext context) {
@@ -307,6 +320,7 @@ final class AmqpConsumerSource implements InboundSource {
                     .orElseThrow(() -> new SourceFailure("amqp-profile-unavailable"));
             if (!profile.tenant().equals(tenant) || !profile.name().equals(name))
                 throw new SourceFailure("amqp-profile-unavailable");
+            destinationPolicy.requireAllowedLiteral(profile.host());
             return profile;
         }
         catch (SourceFailure failure) { throw failure; }

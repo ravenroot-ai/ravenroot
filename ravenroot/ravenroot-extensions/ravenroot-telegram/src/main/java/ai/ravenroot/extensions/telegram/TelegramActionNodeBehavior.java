@@ -65,6 +65,13 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
         this(kind, profiles, new TelegramBotApiClient(credentials, client, origin), controls);
     }
 
+    TelegramActionNodeBehavior(Kind kind, CredentialResolver credentials, TelegramProfileResolver profiles,
+                               HttpClient client, URI origin, TelegramRuntimeControls controls,
+                               ai.ravenroot.api.security.egress.ReservedNetworkPolicy destinationPolicy) {
+        this(kind, profiles, new TelegramBotApiClient(
+                credentials, ignored -> client, origin, destinationPolicy), controls);
+    }
+
     private TelegramActionNodeBehavior(Kind kind, TelegramProfileResolver profiles,
                                        TelegramBotApiClient botApi, TelegramRuntimeControls controls) {
         this.kind = java.util.Objects.requireNonNull(kind);
@@ -132,7 +139,7 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
             final Payload payload;
             final TelegramRuntimeControls.Admission admission;
             try {
-                settings = Settings.from(configuration, profiles, message.tenantId());
+                settings = Settings.from(configuration, profiles, botApi.destinationPolicy(), message.tenantId());
                 payload = Payload.from(kind, message.payload(), settings);
                 if (!settings.profile.allowsMethod(payload.method()))
                     throw TelegramSendNodeBehavior.invalid("Telegram action is not allowed by the bot profile");
@@ -246,8 +253,11 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
     }
 
     private record Settings(TelegramProfile profile, int requestTimeoutMs, int maxTextChars,
-                            int maxButtons, int maxConcurrency, int retries) {
-        static Settings from(NodeConfiguration configuration, TelegramProfileResolver resolver, String tenant) {
+                            int maxButtons, int maxConcurrency, int retries,
+                            ai.ravenroot.api.security.egress.ReservedNetworkPolicy destinationPolicy) {
+        static Settings from(NodeConfiguration configuration, TelegramProfileResolver resolver,
+                             ai.ravenroot.api.security.egress.ReservedNetworkPolicy destinationPolicy,
+                             String tenant) {
             String name = configuration.property("botProfile").orElseThrow(() -> new TelegramSendException(
                     TelegramSendException.Code.CONFIGURATION, "Telegram bot profile is required"));
             final TelegramProfile profile;
@@ -266,7 +276,7 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
                     tighten(configuration, "maxTextChars", profile.maxTextChars(), 1),
                     tighten(configuration, "maxButtons", profile.maxButtons(), 0),
                     tighten(configuration, "maxConcurrency", profile.maxConcurrency(), 1),
-                    tighten(configuration, "retries", profile.retries(), 0));
+                    tighten(configuration, "retries", profile.retries(), 0), destinationPolicy);
         }
 
         private static int tighten(NodeConfiguration configuration, String name, int ceiling, int minimum) {
@@ -320,7 +330,7 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
             if (cacheTime > 86_400)
                 throw TelegramSendNodeBehavior.invalid("Telegram callback cache time is invalid");
             String url = TelegramSendNodeBehavior.optionalString(map.get("url"), 2_048);
-            if (url != null) validateUrl(url, settings.profile);
+            if (url != null) validateUrl(url, settings.profile, settings.destinationPolicy);
             return new CallbackPayload(callbackId, text, showAlert, cacheTime, url, correlation(map));
         }
 
@@ -391,7 +401,8 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
             if (keyboardPresent && map.get("inlineKeyboard") == null)
                 throw TelegramSendNodeBehavior.invalid("Telegram keyboard is invalid");
             List<List<Map<String, Object>>> keyboard = keyboardPresent
-                    ? TelegramSendNodeBehavior.keyboard(map.get("inlineKeyboard"), settings.maxButtons, settings.profile)
+                    ? TelegramSendNodeBehavior.keyboard(map.get("inlineKeyboard"), settings.maxButtons,
+                            settings.profile, settings.destinationPolicy)
                     : List.of();
             return new EditPayload(editType, chat, messageId, inline, business, text, parseMode,
                     entities, keyboardPresent, keyboard, correlation(map));
@@ -451,12 +462,14 @@ final class TelegramActionNodeBehavior implements NodeBehavior {
         else { body.put("chat_id", chat); body.put("message_id", message); }
     }
 
-    private static void validateUrl(String value, TelegramProfile profile) {
+    private static void validateUrl(String value, TelegramProfile profile,
+                                    ai.ravenroot.api.security.egress.ReservedNetworkPolicy destinationPolicy) {
         final URI uri;
         try { uri = URI.create(value); }
         catch (RuntimeException malformed) { throw TelegramSendNodeBehavior.invalid("Telegram URL is invalid"); }
         if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
-                || !profile.allowsUrlHost(uri.getHost()))
+                || !profile.allowsUrlHost(uri.getHost())
+                || !TelegramSendNodeBehavior.literalDestinationAllowed(uri.getHost(), destinationPolicy))
             throw TelegramSendNodeBehavior.invalid("Telegram URL is not allowed");
     }
 

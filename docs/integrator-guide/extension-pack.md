@@ -40,6 +40,7 @@ The current reviewed membership is:
 |---|---|
 | `ravenroot-ai` | `ai.ravenroot.extensions.ai.AiNodePackage` |
 | `ravenroot-amqp091` | `ai.ravenroot.extensions.amqp091.AmqpNodePackage` |
+| `ravenroot-discord` | `ai.ravenroot.extensions.discord.DiscordNodePackage` |
 | `ravenroot-filesystem` | `ai.ravenroot.extensions.filesystem.FilesystemNodePackage` |
 | `ravenroot-git-workspace` | `ai.ravenroot.extensions.gitworkspace.GitWorkspaceNodePackage` |
 | `ravenroot-github` | `ai.ravenroot.extensions.github.GithubNodePackage` |

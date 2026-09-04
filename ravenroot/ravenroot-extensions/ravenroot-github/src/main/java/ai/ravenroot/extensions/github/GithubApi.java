@@ -134,12 +134,12 @@ final class GithubApi {
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private final AtomicReference<OutboundCall<?>> active = new AtomicReference<>();
         private final AtomicReference<GithubException> failure = new AtomicReference<>();
-        private final Runnable beforePublish;
+        private final Runnable betweenChecks;
         CallControl() { this(() -> { }); }
-        CallControl(Runnable beforePublish) { this.beforePublish = java.util.Objects.requireNonNull(beforePublish); }
+        CallControl(Runnable betweenChecks) { this.betweenChecks = java.util.Objects.requireNonNull(betweenChecks); }
         void attach(OutboundCall<?> call) {
-            check(); beforePublish.run(); active.set(call);
-            try { check(); }
+            active.set(java.util.Objects.requireNonNull(call));
+            try { check(); betweenChecks.run(); check(); }
             catch (RuntimeException stopped) {
                 active.compareAndSet(call, null);
                 try { call.cancel(); } catch (RuntimeException ignored) { }

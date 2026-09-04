@@ -387,6 +387,51 @@ class GithubActionBehaviorTest {
                 && request.destination().getPath().endsWith("/issues/7/comments")).count());
     }
 
+    @Test void transitionCommentReconciliationRateLimitIsDurableAndPreventsPrematureIo() {
+        Path path = directory.resolve("project-comment-rate-reconcile.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        Map<String, Object> input = new java.util.LinkedHashMap<>(project("comment-rate-reconcile"));
+        input.put("comment", Map.of("kind", "claim", "body", "Claim after uncertain response."));
+        var first = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8))
+                .reply(200, List.of()).reply(500, Map.of("message", "unknown"))
+                .reply(429, Map.of("retry-after", List.of("20")), Map.of("message", "limited"));
+        NodeResult ambiguous = new ProjectTransitionBehavior(new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock), clock))
+                .create(GithubTestSupport.node("project-transition"), first)
+                .handle(GithubTestSupport.message(Map.copyOf(input))).toCompletableFuture().join();
+        assertEquals("ambiguous", ambiguous.outcome());
+        assertEquals("RATE_LIMITED", GithubValues.object(ambiguous.payload()).get("reason"));
+        long retryAt = GithubValues.number(GithubValues.object(ambiguous.payload()).get("retryAtEpochMs"),
+                1, Long.MAX_VALUE);
+
+        clock.advance(10_000);
+        assertTrue(clock.millis() < retryAt);
+        var premature = new GithubTestSupport.HttpHarness();
+        NodeResult replay = new ProjectTransitionBehavior(new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock), clock))
+                .create(GithubTestSupport.node("project-transition"), premature)
+                .handle(GithubTestSupport.message(Map.copyOf(input))).toCompletableFuture().join();
+        assertEquals("ambiguous", replay.outcome());
+        assertTrue(premature.requests.isEmpty(), "ambiguous comment reconciliation ran before Retry-After");
+
+        clock.advance(20_000);
+        String marker = "<!-- ravenroot-project-transition:" + GithubValues.sha256("1234:ITEM_1:ISSUE_1:8:claim:"
+                + GithubValues.sha256("Claim after uncertain response.")).substring(0, 32) + " -->";
+        Map<String, Object> landed = Map.of("id", 78L,
+                "body", "Claim after uncertain response.\n\n" + marker,
+                "user", Map.of("login", "example-reviewer[bot]"));
+        var recovered = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8))
+                .reply(200, List.of(landed));
+        NodeResult completed = new ProjectTransitionBehavior(new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock), clock))
+                .create(GithubTestSupport.node("project-transition"), recovered)
+                .handle(GithubTestSupport.message(Map.copyOf(input))).toCompletableFuture().join();
+        assertEquals("continue", completed.outcome());
+        assertEquals(0, recovered.requests.stream().filter(request -> request.method().equals("POST")
+                && request.destination().getPath().endsWith("/comments")).count());
+    }
+
     @Test void staleReviewHeadProducesNoReviewMutation() {
         GithubNodePackage nodePackage = GithubTestSupport.nodePackage(directory.resolve("operations.db"));
         var http = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
@@ -801,6 +846,41 @@ class GithubActionBehaviorTest {
                 "github-workflow-watch", replayHttp).handle(GithubTestSupport.message(input)).toCompletableFuture();
         assertEquals(GithubException.Code.CANCELLED, githubFailure(replay).code());
         assertTrue(replayHttp.requests.isEmpty(), "observed cancellation must already be durable after reopen");
+    }
+
+    @Test @Timeout(5) void cancellationAfterWorkBeforePersistenceWinsAndReplaysDurably() throws Exception {
+        Path path = directory.resolve("cancel-persistence-boundary.db");
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var store = new SqliteGithubOperationStore(configuration.store());
+        var boundary = new java.util.concurrent.CountDownLatch(1);
+        AtomicBoolean persist = new AtomicBoolean();
+        GithubRuntime runtime = new GithubRuntime(configuration, store, java.time.Clock.systemUTC(), () -> {
+            boundary.countDown();
+            while (!persist.get()) Thread.onSpinWait();
+        });
+        GithubProfile profile = configuration.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        Map<String, Object> input = Map.of("request", "cancel-at-persistence");
+        long deadline = System.currentTimeMillis() + 5_000;
+        CompletableFuture<NodeResult> result = runtime.submit(GithubTestSupport.message(Map.of()),
+                new GithubTestSupport.HttpHarness(), profile, "persistence-race", "operation",
+                input, deadline, (api, operation, control) -> NodeResult.continueWith(Map.of(
+                        "status", "done", "generation", 0L, "attempts", 0L, "remoteId", "completed")))
+                .toCompletableFuture();
+        assertTrue(boundary.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        assertTrue(result.cancel(true));
+        persist.set(true);
+        assertEquals(GithubException.Code.CANCELLED, githubFailure(result).code());
+
+        AtomicBoolean repeated = new AtomicBoolean();
+        CompletableFuture<NodeResult> replay = new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store())).submit(GithubTestSupport.message(Map.of()),
+                new GithubTestSupport.HttpHarness(), profile, "persistence-race", "operation", input, deadline,
+                (api, operation, control) -> {
+                    repeated.set(true);
+                    return NodeResult.continueWith(Map.of());
+                }).toCompletableFuture();
+        assertEquals(GithubException.Code.CANCELLED, githubFailure(replay).code());
+        assertFalse(repeated.get());
     }
 
     @Test void releasePreparationIsReadOnlyAndTerminalResultReplaysAfterRestart() {

@@ -39,18 +39,42 @@ class GithubApiTest {
                 0, Long.MAX_VALUE));
     }
 
-    @Test void failureBetweenAttachCheckAndPublicationCancelsTheJustPublishedCall() {
+    @Test void failureBetweenPostPublicationChecksCancelsTheStartedCall() {
         GithubApi.CallControl[] holder = new GithubApi.CallControl[1];
         holder[0] = new GithubApi.CallControl(() -> holder[0].fail(
                 new GithubException(GithubException.Code.CAS_LOST)));
         AtomicBoolean cancelled = new AtomicBoolean();
-        OutboundCall<OutboundHttpResponse> call = new OutboundCall<>() {
-            @Override public CompletableFuture<OutboundHttpResponse> completion() { return new CompletableFuture<>(); }
-            @Override public boolean cancel() { cancelled.set(true); return true; }
-        };
+        OutboundCall<OutboundHttpResponse> call = cancellable(cancelled);
         GithubException failure = assertThrows(GithubException.class, () -> holder[0].attach(call));
         assertEquals(GithubException.Code.CAS_LOST, failure.code());
         assertTrue(cancelled.get());
+    }
+
+    @Test void cancellationBeforeFirstAttachCheckCancelsTheAlreadyStartedCall() {
+        GithubApi.CallControl control = new GithubApi.CallControl();
+        assertTrue(control.cancel());
+        AtomicBoolean cancelled = new AtomicBoolean();
+        GithubException failure = assertThrows(GithubException.class,
+                () -> control.attach(cancellable(cancelled)));
+        assertEquals(GithubException.Code.CANCELLED, failure.code());
+        assertTrue(cancelled.get());
+    }
+
+    @Test void failureBeforeFirstAttachCheckCancelsTheAlreadyStartedCall() {
+        GithubApi.CallControl control = new GithubApi.CallControl();
+        control.fail(new GithubException(GithubException.Code.CAS_LOST));
+        AtomicBoolean cancelled = new AtomicBoolean();
+        GithubException failure = assertThrows(GithubException.class,
+                () -> control.attach(cancellable(cancelled)));
+        assertEquals(GithubException.Code.CAS_LOST, failure.code());
+        assertTrue(cancelled.get());
+    }
+
+    private static OutboundCall<OutboundHttpResponse> cancellable(AtomicBoolean cancelled) {
+        return new OutboundCall<>() {
+            @Override public CompletableFuture<OutboundHttpResponse> completion() { return new CompletableFuture<>(); }
+            @Override public boolean cancel() { cancelled.set(true); return true; }
+        };
     }
 
     private static GithubApi.Response response(int status, Map<String, List<String>> headers) {

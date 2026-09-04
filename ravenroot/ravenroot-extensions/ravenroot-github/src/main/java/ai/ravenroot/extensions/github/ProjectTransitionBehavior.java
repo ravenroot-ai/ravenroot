@@ -232,6 +232,8 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         try {
             if (findComment(api, profile, snapshot.issueNumber, marker))
                 return result("continue", status, input, generation, attempts, "");
+        } catch (GithubProtocol.RateLimited limited) {
+            retryAt = Math.max(retryAt, limited.retryAt());
         } catch (RuntimeException ignored) { }
         return result("ambiguous", "ambiguous", input, generation, attempts,
                 retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);

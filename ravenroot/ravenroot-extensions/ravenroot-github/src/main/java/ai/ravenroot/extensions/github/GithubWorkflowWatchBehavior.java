@@ -104,8 +104,12 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
             if (isDone() || !cancelled.compareAndSet(false, true)) return false;
             ScheduledPoll pending = scheduled; if (pending != null) pending.cancel();
             CompletableFuture<NodeResult> running = active;
-            if (running != null && !running.isDone()) running.cancel(true);
-            else persistCancellation();
+            if (running != null && !running.isDone()) {
+                if (!running.cancel(true)) {
+                    cancelled.set(false);
+                    return false;
+                }
+            } else persistCancellation();
             return true;
         }
 

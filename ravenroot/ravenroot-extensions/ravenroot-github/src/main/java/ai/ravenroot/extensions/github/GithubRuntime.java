@@ -27,6 +27,7 @@ final class GithubRuntime {
     private volatile GithubConfiguration resolvedConfiguration;
     private volatile GithubOperationStore resolvedStore;
     private final Clock clock;
+    private final Runnable beforePersistence;
     private final ConcurrentHashMap<String, Gate> gates = new ConcurrentHashMap<>();
 
     GithubRuntime(GithubConfiguration configuration, GithubOperationStore store) {
@@ -34,15 +35,22 @@ final class GithubRuntime {
     }
 
     GithubRuntime(GithubConfiguration configuration, GithubOperationStore store, Clock clock) {
+        this(configuration, store, clock, () -> { });
+    }
+
+    GithubRuntime(GithubConfiguration configuration, GithubOperationStore store, Clock clock,
+                  Runnable beforePersistence) {
         this.resolver = () -> configuration;
         this.resolvedConfiguration = java.util.Objects.requireNonNull(configuration);
         this.resolvedStore = java.util.Objects.requireNonNull(store);
         this.clock = java.util.Objects.requireNonNull(clock);
+        this.beforePersistence = java.util.Objects.requireNonNull(beforePersistence);
     }
 
     GithubRuntime(java.util.function.Supplier<GithubConfiguration> resolver) {
         this.resolver = java.util.Objects.requireNonNull(resolver);
         this.clock = Clock.systemUTC();
+        this.beforePersistence = () -> { };
     }
 
     GithubConfiguration configuration() {
@@ -168,22 +176,38 @@ final class GithubRuntime {
                     return;
                 }
                 try {
-                    Map<String, Object> output = GithubValues.object(completed.payload());
-                    String state = state(completed.outcome(), output);
-                    byte[] serialized = GithubValues.jsonBytes(output);
-                    if (serialized.length > profile.maxResponseBytes()) throw GithubValues.invalid();
-                    String json = new String(serialized, StandardCharsets.UTF_8);
-                    String evidence = GithubValues.sha256(json);
-                    boolean terminal = !"WAITING".equals(state);
-                    long durableDeadline = output.get("retryAtEpochMs") instanceof Long retryAt
-                            ? Math.max(deadlineEpochMs, retryAt) : deadlineEpochMs;
-                    if (terminal) store.saveAndAudit(operation, state, number(output.get("generation")),
-                            number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
-                            evidence, json, state, reason(output), evidence);
-                    else store.saveWaitingAndAuditRelease(operation, number(output.get("generation")),
-                            number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
-                            evidence, json, reason(output), evidence);
+                    beforePersistence.run();
+                    NodeResult durableResult = completed;
+                    result.persist(() -> {
+                        Map<String, Object> output = GithubValues.object(durableResult.payload());
+                        String state = state(durableResult.outcome(), output);
+                        byte[] serialized = GithubValues.jsonBytes(output);
+                        if (serialized.length > profile.maxResponseBytes()) throw GithubValues.invalid();
+                        String json = new String(serialized, StandardCharsets.UTF_8);
+                        String evidence = GithubValues.sha256(json);
+                        boolean terminal = !"WAITING".equals(state);
+                        long durableDeadline = output.get("retryAtEpochMs") instanceof Long retryAt
+                                ? Math.max(deadlineEpochMs, retryAt) : deadlineEpochMs;
+                        if (terminal) store.saveAndAudit(operation, state, number(output.get("generation")),
+                                number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
+                                evidence, json, state, reason(output), evidence);
+                        else store.saveWaitingAndAuditRelease(operation, number(output.get("generation")),
+                                number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
+                                evidence, json, reason(output), evidence);
+                    });
                     relinquish.run(); result.complete(completed);
+                } catch (GithubException stopped) {
+                    if (stopped.code() == GithubException.Code.CANCELLED) {
+                        try { persistFailure(store, operation, deadlineEpochMs, kind, stopped);
+                            relinquish.run(); result.completeExceptionally(stopped); }
+                        catch (RuntimeException persistence) {
+                            relinquish.run(); result.completeExceptionally(
+                                    new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                        }
+                    } else {
+                        relinquish.run(); result.completeExceptionally(stopped.code() == GithubException.Code.CAS_LOST
+                                ? stopped : new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                    }
                 } catch (RuntimeException persistence) {
                     relinquish.run(); result.completeExceptionally(
                             new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
@@ -273,11 +297,17 @@ final class GithubRuntime {
 
     private static final class Task extends CompletableFuture<NodeResult> {
         private final GithubApi.CallControl control; private final AtomicBoolean cancellation = new AtomicBoolean();
+        private boolean persistenceStarted;
         private volatile Thread worker;
         Task(GithubApi.CallControl control) { this.control = control; }
         void worker(Thread worker) { this.worker = worker; if (cancellation.get()) worker.interrupt(); }
-        @Override public boolean cancel(boolean mayInterruptIfRunning) {
-            if (isDone() || !cancellation.compareAndSet(false, true)) return false;
+        synchronized void persist(Runnable persistence) {
+            control.check();
+            persistenceStarted = true;
+            persistence.run();
+        }
+        @Override public synchronized boolean cancel(boolean mayInterruptIfRunning) {
+            if (isDone() || persistenceStarted || !cancellation.compareAndSet(false, true)) return false;
             control.cancel(); Thread running = worker; if (running != null) running.interrupt();
             return true;
         }

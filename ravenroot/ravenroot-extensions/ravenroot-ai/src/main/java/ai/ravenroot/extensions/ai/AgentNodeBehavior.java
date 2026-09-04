@@ -576,8 +576,15 @@ public final class AgentNodeBehavior implements NodeBehavior {
             return CompletableFuture.failedFuture(invalid);
         }
         var result = new CompletableFuture<ToolCallContinuationResult>();
-        result.whenComplete((ignored, failure) -> {
+        Runnable cleanup = () -> {
             try { run.abort(); } finally { leases.forEach(Admission.Lease::close); }
+        };
+        result.whenComplete((continued, failure) -> {
+            if (failure != null) {
+                cleanup.run();
+            } else {
+                continued.nodeResult().whenComplete((ignored, continuationFailure) -> cleanup.run());
+            }
         });
         run.resume(input, checkpoint, result);
         return result;

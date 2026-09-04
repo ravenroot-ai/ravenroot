@@ -195,9 +195,11 @@ class PromptInjectionBoundaryTest {
                 ToolApprovalRegistration.digest(canonical), ToolCallContinuationInput.Decision.APPROVED,
                 1, stored, ToolApprovalRegistration.digest(stored));
         action.validate(input);
-        var resumed = action.resume(input).toCompletableFuture().get();
+        var resumed = action.resume(input).toCompletableFuture()
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
 
-        NodeResult resumedNode = resumed.nodeResult().toCompletableFuture().join();
+        NodeResult resumedNode = resumed.nodeResult().toCompletableFuture()
+                .get(5, java.util.concurrent.TimeUnit.SECONDS);
         assertEquals("resumed", resumedNode.payload());
         assertTrue(resumed.effectSucceeded());
         assertEquals("kept", resumedNode.attributes().get("trace"));

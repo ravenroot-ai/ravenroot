@@ -81,8 +81,6 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         } catch (ArithmeticException overflow) { throw new GithubException(GithubException.Code.INVALID_INPUT); }
         if (before.matches(input.toStatus, wantedAttempts, wantedGeneration))
             return finish(api, profile, input, before, wantedGeneration, wantedAttempts, "already-applied");
-        if (!before.matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)) return result(
-                "conflict", "cas-lost", input, before.generation, before.attempts, "CAS_LOST");
         String client = GithubValues.sha256(input.itemId + ":" + wantedGeneration + ":" + input.toStatus).substring(0, 32);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("project", profile.project().projectId()); variables.put("item", input.itemId);
@@ -92,6 +90,10 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         variables.put("generationField", profile.project().generationFieldId()); variables.put("generation", wantedGeneration);
         variables.put("client", client);
         boolean reconciling = operation.takeover() || "AMBIGUOUS".equals(operation.record().state());
+        if (reconciling && before.repairable(input, wantedAttempts))
+            return repairPrefix(api, profile, input, variables, before, wantedGeneration, wantedAttempts);
+        if (!before.matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)) return result(
+                "conflict", "cas-lost", input, before.generation, before.attempts, "CAS_LOST");
         Dispatch dispatch = update(api, variables);
         if (dispatch.uncertain && !reconciling) {
             Snapshot observed;
@@ -117,26 +119,34 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
                 input.expectedAttempts, "REMOTE_STATE_UNKNOWN", dispatch.retryAt);
         if (after.matches(input.toStatus, wantedAttempts, wantedGeneration))
             return finish(api, profile, input, after, wantedGeneration, wantedAttempts, "applied");
-        if ((dispatch.partial || reconciling) && after.repairable(input, wantedAttempts)) {
-            Dispatch repair = update(api, variables);
-            if (repair.uncertain) return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
-                    repair.retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", repair.retryAt);
-            Snapshot repaired;
-            try { repaired = safeSnapshot(api, profile, input.itemId); }
-            catch (GithubProtocol.RateLimited limited) {
-                return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
-                        "RATE_LIMITED", limited.retryAt());
-            }
-            if (repaired == null) return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
-                    "REMOTE_STATE_UNKNOWN");
-            if (repaired.matches(input.toStatus, wantedAttempts, wantedGeneration))
-                return finish(api, profile, input, repaired, wantedGeneration, wantedAttempts, "applied");
-            after = repaired;
-        }
+        if ((dispatch.partial || reconciling) && after.repairable(input, wantedAttempts))
+            return repairPrefix(api, profile, input, variables, after, wantedGeneration, wantedAttempts);
         if (after.generation != input.expectedGeneration || after.attempts != input.expectedAttempts
                 || !after.status.equals(input.fromStatus)) return result("conflict", "cas-lost", input,
                 after.generation, after.attempts, "CAS_LOST");
         return result("ambiguous", "ambiguous", input, after.generation, after.attempts, "REMOTE_STATE_UNKNOWN");
+    }
+
+    private static NodeResult repairPrefix(GithubApi api, GithubProfile profile, Input input,
+                                           Map<String, Object> variables, Snapshot observed,
+                                           long wantedGeneration, long wantedAttempts) {
+        Dispatch repair = update(api, variables);
+        if (repair.uncertain) return result("ambiguous", "ambiguous", input,
+                observed.generation, observed.attempts,
+                repair.retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", repair.retryAt);
+        Snapshot repaired;
+        try { repaired = safeSnapshot(api, profile, input.itemId); }
+        catch (GithubProtocol.RateLimited limited) {
+            return result("ambiguous", "ambiguous", input, observed.generation, observed.attempts,
+                    "RATE_LIMITED", limited.retryAt());
+        }
+        if (repaired == null) return result("ambiguous", "ambiguous", input,
+                observed.generation, observed.attempts, "REMOTE_STATE_UNKNOWN");
+        if (repaired.matches(input.toStatus, wantedAttempts, wantedGeneration))
+            return finish(api, profile, input, repaired, wantedGeneration, wantedAttempts, "applied");
+        if (repaired.repairable(input, wantedAttempts)) return result("ambiguous", "ambiguous", input,
+                repaired.generation, repaired.attempts, "REMOTE_STATE_UNKNOWN");
+        return result("conflict", "cas-lost", input, repaired.generation, repaired.attempts, "CAS_LOST");
     }
 
     private static Dispatch update(GithubApi api, Map<String, Object> variables) {

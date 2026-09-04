@@ -28,6 +28,7 @@ final class GithubRuntime {
     private volatile GithubOperationStore resolvedStore;
     private final Clock clock;
     private final Runnable beforePersistence;
+    private final Runnable afterOwnershipLossClaim;
     private final ConcurrentHashMap<String, Gate> gates = new ConcurrentHashMap<>();
 
     GithubRuntime(GithubConfiguration configuration, GithubOperationStore store) {
@@ -40,17 +41,24 @@ final class GithubRuntime {
 
     GithubRuntime(GithubConfiguration configuration, GithubOperationStore store, Clock clock,
                   Runnable beforePersistence) {
+        this(configuration, store, clock, beforePersistence, () -> { });
+    }
+
+    GithubRuntime(GithubConfiguration configuration, GithubOperationStore store, Clock clock,
+                  Runnable beforePersistence, Runnable afterOwnershipLossClaim) {
         this.resolver = () -> configuration;
         this.resolvedConfiguration = java.util.Objects.requireNonNull(configuration);
         this.resolvedStore = java.util.Objects.requireNonNull(store);
         this.clock = java.util.Objects.requireNonNull(clock);
         this.beforePersistence = java.util.Objects.requireNonNull(beforePersistence);
+        this.afterOwnershipLossClaim = java.util.Objects.requireNonNull(afterOwnershipLossClaim);
     }
 
     GithubRuntime(java.util.function.Supplier<GithubConfiguration> resolver) {
         this.resolver = java.util.Objects.requireNonNull(resolver);
         this.clock = Clock.systemUTC();
         this.beforePersistence = () -> { };
+        this.afterOwnershipLossClaim = () -> { };
     }
 
     GithubConfiguration configuration() {
@@ -155,6 +163,12 @@ final class GithubRuntime {
                     completed = retry(operation, limited.retryAt());
                 } catch (GithubException failure) {
                     if (failure.code() == GithubException.Code.CAS_LOST) {
+                        if (!result.claimOwnershipLoss()) {
+                            finishFailure(store, operation, deadlineEpochMs, kind, result, relinquish,
+                                    new GithubException(GithubException.Code.CANCELLED));
+                            return;
+                        }
+                        afterOwnershipLossClaim.run();
                         relinquish.run(); result.completeExceptionally(failure);
                         return;
                     }
@@ -195,6 +209,8 @@ final class GithubRuntime {
                                     new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
                         }
                     } else {
+                        if (stopped.code() == GithubException.Code.CAS_LOST)
+                            afterOwnershipLossClaim.run();
                         relinquish.run(); result.completeExceptionally(stopped.code() == GithubException.Code.CAS_LOST
                                 ? stopped : new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
                     }
@@ -317,9 +333,19 @@ final class GithubRuntime {
         Task(GithubApi.CallControl control) { this.control = control; }
         void worker(Thread worker) { this.worker = worker; if (cancellation.get()) worker.interrupt(); }
         synchronized void persist(Runnable persistence) {
-            control.check();
+            try { control.check(); }
+            catch (GithubException stopped) {
+                if (stopped.code() == GithubException.Code.CAS_LOST && !claimOwnershipLoss())
+                    throw new GithubException(GithubException.Code.CANCELLED);
+                throw stopped;
+            }
             persistenceStarted = true;
             persistence.run();
+        }
+        synchronized boolean claimOwnershipLoss() {
+            if (isDone() || cancellation.get()) return false;
+            persistenceStarted = true;
+            return true;
         }
         @Override public synchronized boolean cancel(boolean mayInterruptIfRunning) {
             if (isDone() || persistenceStarted || !cancellation.compareAndSet(false, true)) return false;

@@ -325,6 +325,69 @@ class GithubActionBehaviorTest {
         assertEquals(1, reopenedHttp.requests.size());
     }
 
+    @Test void projectReopenedAmbiguityRepairsEverySafeSerialPrefix() {
+        List<Map<String, Object>> prefixes = List.of(
+                snapshot("InProgress", 2, 7),
+                snapshot("InProgress", 3, 7));
+        for (int index = 0; index < prefixes.size(); index++) {
+            Path path = directory.resolve("project-reopened-prefix-" + index + ".db");
+            MutableClock clock = new MutableClock();
+            GithubConfiguration configuration = GithubTestSupport.configuration(path);
+            Map<String, Object> input = project("reopened-prefix-" + index);
+            var interrupted = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7))
+                    .reply(500, Map.of("message", "mutation outcome unavailable"))
+                    .reply(500, Map.of("message", "snapshot unavailable"));
+            NodeResult ambiguous = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "project-transition", interrupted).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("ambiguous", ambiguous.outcome());
+
+            clock.advance(30_000);
+            var reopened = new GithubTestSupport.HttpHarness().reply(200, prefixes.get(index))
+                    .reply(200, Map.of("data", Map.of("generation", Map.of("clientMutationId", "repair"))))
+                    .reply(200, snapshot("InProgress", 3, 8));
+            NodeResult completed = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "project-transition", reopened).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("continue", completed.outcome(), "prefix " + index);
+            assertEquals(3L, GithubValues.object(completed.payload()).get("attempts"));
+            assertEquals(8L, GithubValues.object(completed.payload()).get("generation"));
+            assertEquals(1, mutationRequests(reopened), "prefix " + index);
+        }
+    }
+
+    @Test void projectReopenedAmbiguityRejectsUnrelatedRemoteEditsWithoutRepairMutation() {
+        List<Map<String, Object>> conflicts = List.of(
+                snapshot("Done", 2, 7),
+                snapshot("InProgress", 4, 7),
+                snapshot("InProgress", 3, 9));
+        for (int index = 0; index < conflicts.size(); index++) {
+            Path path = directory.resolve("project-reopened-conflict-" + index + ".db");
+            MutableClock clock = new MutableClock();
+            GithubConfiguration configuration = GithubTestSupport.configuration(path);
+            Map<String, Object> input = project("reopened-conflict-" + index);
+            var interrupted = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7))
+                    .reply(500, Map.of("message", "mutation outcome unavailable"))
+                    .reply(500, Map.of("message", "snapshot unavailable"));
+            assertEquals("ambiguous", action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "project-transition", interrupted).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join().outcome());
+
+            clock.advance(30_000);
+            var reopened = new GithubTestSupport.HttpHarness().reply(200, conflicts.get(index));
+            NodeResult conflict = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "project-transition", reopened).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("conflict", conflict.outcome(), "conflict " + index);
+            assertEquals("CAS_LOST", GithubValues.object(conflict.payload()).get("reason"));
+            assertEquals(0, mutationRequests(reopened), "conflict " + index);
+        }
+    }
+
     @Test void projectOwnershipLossAfterSnapshotPreventsMutationDispatch() {
         Path path = directory.resolve("project-takeover.db");
         MutableClock clock = new MutableClock();
@@ -991,6 +1054,64 @@ class GithubActionBehaviorTest {
         }
     }
 
+    @Test @Timeout(5) void workSideOwnershipLossClaimsOutcomeBeforeCancellation() throws Exception {
+        Path path = directory.resolve("work-cas-lost-cancellation.db");
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var claimed = new java.util.concurrent.CountDownLatch(1);
+        AtomicBoolean release = new AtomicBoolean();
+        GithubRuntime runtime = new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store()), java.time.Clock.systemUTC(),
+                () -> { }, () -> {
+                    claimed.countDown();
+                    while (!release.get()) Thread.onSpinWait();
+                });
+        GithubProfile profile = configuration.profile(
+                GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        CompletableFuture<NodeResult> result = runtime.submit(GithubTestSupport.message(Map.of()),
+                new GithubTestSupport.HttpHarness(), profile, "work-cas-race", "operation",
+                Map.of("request", "work-cas-race"), System.currentTimeMillis() + 5_000,
+                (api, operation, control) -> { throw new GithubException(GithubException.Code.CAS_LOST); })
+                .toCompletableFuture();
+        assertTrue(claimed.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        assertFalse(result.cancel(true), "ownership loss must win before exceptional completion is visible");
+        release.set(true);
+        assertEquals(GithubException.Code.CAS_LOST, githubFailure(result).code());
+    }
+
+    @Test @Timeout(5) void persistenceCheckOwnershipLossClaimsOutcomeBeforeCancellation() throws Exception {
+        Path path = directory.resolve("persistence-cas-lost-cancellation.db");
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var beforeCheck = new java.util.concurrent.CountDownLatch(1);
+        var claimed = new java.util.concurrent.CountDownLatch(1);
+        AtomicBoolean enterCheck = new AtomicBoolean();
+        AtomicBoolean releaseClaim = new AtomicBoolean();
+        var controlReference = new java.util.concurrent.atomic.AtomicReference<GithubApi.CallControl>();
+        GithubRuntime runtime = new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store()), java.time.Clock.systemUTC(), () -> {
+                    beforeCheck.countDown();
+                    while (!enterCheck.get()) Thread.onSpinWait();
+                }, () -> {
+                    claimed.countDown();
+                    while (!releaseClaim.get()) Thread.onSpinWait();
+                });
+        GithubProfile profile = configuration.profile(
+                GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        CompletableFuture<NodeResult> result = runtime.submit(GithubTestSupport.message(Map.of()),
+                new GithubTestSupport.HttpHarness(), profile, "persist-cas-race", "operation",
+                Map.of("request", "persist-cas-race"), System.currentTimeMillis() + 5_000,
+                (api, operation, control) -> {
+                    controlReference.set(control);
+                    return NodeResult.continueWith(Map.of("status", "done"));
+                }).toCompletableFuture();
+        assertTrue(beforeCheck.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        controlReference.get().fail(new GithubException(GithubException.Code.CAS_LOST));
+        enterCheck.set(true);
+        assertTrue(claimed.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        assertFalse(result.cancel(true), "failed ownership check must claim the non-persistable outcome");
+        releaseClaim.set(true);
+        assertEquals(GithubException.Code.CAS_LOST, githubFailure(result).code());
+    }
+
     @Test void releasePreparationIsReadOnlyAndTerminalResultReplaysAfterRestart() {
         Path store = directory.resolve("operations.db");
         var http = releaseReplies();
@@ -1066,7 +1187,12 @@ class GithubActionBehaviorTest {
                 "content", Map.of("id", "ISSUE_1", "number", 7L,
                         "repository", Map.of("databaseId", repositoryId)),
                 "fieldValues", Map.of("pageInfo", Map.of("hasNextPage", hasNextPage), "nodes", List.of(
-                        Map.of("field", Map.of("id", "PVTSSF_status"), "optionId", status.equals("Todo") ? "todo-id" : "progress-id"),
+                        Map.of("field", Map.of("id", "PVTSSF_status"), "optionId", switch (status) {
+                            case "Todo" -> "todo-id";
+                            case "InProgress" -> "progress-id";
+                            case "Done" -> "done-id";
+                            default -> throw new IllegalArgumentException("unknown fixture status");
+                        }),
                         Map.of("field", Map.of("id", "PVTF_attempts"), "number", attempts),
                         Map.of("field", Map.of("id", "PVTF_generation"), "number", generation))))));
     }

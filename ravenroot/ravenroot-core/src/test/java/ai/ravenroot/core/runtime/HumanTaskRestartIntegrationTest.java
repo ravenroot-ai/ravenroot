@@ -20,10 +20,15 @@ import ai.ravenroot.api.persistence.CanonicalGraphMl;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionStoreException;
+import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphDefinitionReferences;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
+import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.OpaquePayload;
@@ -41,7 +46,9 @@ import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
+import ai.ravenroot.core.humantask.HumanTaskDefinition;
 import ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher;
+import ai.ravenroot.core.humantask.HumanTaskResult;
 import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
@@ -66,12 +73,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -184,6 +195,235 @@ class HumanTaskRestartIntegrationTest {
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] TERMINAL_RACE_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <graph id="human-terminal-race" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="race"><data key="kind">BEHAVIOR</data>
+                  <data key="behavior">terminal-race-human-task</data></node>
+                <node id="capture"><data key="kind">BEHAVIOR</data>
+                  <data key="behavior">capture</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-race" source="start" target="race"/>
+                <edge id="race-capture" source="race" target="capture"/>
+                <edge id="capture-end" source="capture" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] CHAINED_TERMINAL_RACE_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <key id="responseSchema" for="node" attr.name="responseSchema" attr.type="string"/>
+              <key id="responseSchemaVersion" for="node" attr.name="responseSchemaVersion" attr.type="string"/>
+              <key id="authorizedRoles" for="node" attr.name="authorizedRoles" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="human-chained-terminal-race" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="first">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">human-task</data>
+                  <data key="title">First decision</data>
+                  <data key="responseSchema">release.decision</data>
+                  <data key="responseSchemaVersion">1</data>
+                  <data key="authorizedRoles">APPROVER</data>
+                </node>
+                <node id="race"><data key="kind">BEHAVIOR</data>
+                  <data key="behavior">terminal-race-human-task</data></node>
+                <node id="capture"><data key="kind">BEHAVIOR</data>
+                  <data key="behavior">capture</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-first" source="start" target="first"/>
+                <edge id="first-race" source="first" target="race">
+                  <data key="edge-outcome">resolved</data>
+                </edge>
+                <edge id="race-capture" source="race" target="capture"/>
+                <edge id="capture-end" source="capture" target="end"/>
+              </graph>
+            </graphml>
+            """.getBytes(StandardCharsets.UTF_8);
+
+    @Test
+    void terminalDecisionBetweenInitialCommitAndVerificationRemainsASuspension(
+            @TempDir Path directory) throws Exception {
+        var clock = new MutableClock(NOW);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        var terminalized = new CountDownLatch(1);
+        var releaseSignal = new CountDownLatch(1);
+        var raceExecutions = new AtomicInteger();
+        var captures = new AtomicInteger();
+        try (var store = new SqliteExecutionStore(directory.resolve("initial-terminal-race.db"), clock);
+             var definitions = new SqliteGraphDefinitionStore(directory.resolve("initial-terminal-race.db"),
+                     clock, GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(TERMINAL_RACE_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            String pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, clock);
+            BehaviorRegistry behaviors = terminalRaceBehaviors(
+                    tasks, terminalized, releaseSignal, raceExecutions, captures);
+
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(TERMINAL_RACE_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "live-race", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder)) {
+                CompletableFuture<Throwable> execution = CompletableFuture.supplyAsync(() -> {
+                    try {
+                        runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                null, pin, null, null, recorder).toCompletableFuture().join();
+                        return null;
+                    } catch (CompletionException suspended) {
+                        return suspended.getCause();
+                    }
+                });
+                try {
+                    assertTrue(terminalized.await(10, TimeUnit.SECONDS),
+                            "the test behavior must settle after committing its suspension");
+                    var request = taskAt(tasks, "race").request();
+                    var registeredMessage = new ai.ravenroot.api.execution.NodeMessage(
+                            request.requester(), key.processInstanceId(), request.traversalId(),
+                            request.invocationId(), request.attemptId(), request.nodeId(), null, Map.of());
+                    assertTrue(recorder.confirmsHumanTask(request.taskId(), registeredMessage),
+                            "terminal lifecycle state must preserve the immutable suspension proof");
+                    var mismatchedMessage = new ai.ravenroot.api.execution.NodeMessage(
+                            request.requester(), key.processInstanceId(), request.traversalId(),
+                            request.invocationId(), UUID.randomUUID(), request.nodeId(), null, Map.of());
+                    assertFalse(recorder.confirmsHumanTask(request.taskId(), mismatchedMessage));
+                    assertFalse(recorder.confirmsHumanTask(UUID.randomUUID(), registeredMessage));
+                    ExecutionStoreException staleOwner = assertThrows(ExecutionStoreException.class,
+                            () -> recorder.record(List.of(new ExecutionTransition.ProcessTransitioned(
+                                    ProcessInstanceStatus.FAILED)), List.of()));
+                    assertInstanceOf(ExecutionStoreFailure.ConcurrencyConflict.class,
+                            staleOwner.failure(), "the obsolete invocation revision must not commit");
+                } finally {
+                    releaseSignal.countDown();
+                }
+                assertInstanceOf(DurableHumanTaskSuspension.class,
+                        execution.get(10, TimeUnit.SECONDS));
+            }
+
+            assertEquals(HumanTaskStatus.RESOLVED, taskAt(tasks, "race").status());
+            assertEquals(ProcessInstanceStatus.RUNNING,
+                    store.load(key).toCompletableFuture().join().state().status(),
+                    "a verified durable suspension must not fail the process");
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "recovery-race", TTL);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-race",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> firstSweep = recovery.sweepOnce();
+            assertEquals(1, dispatched(firstSweep));
+            assertEquals(1, raceExecutions.get());
+            assertEquals(1, captures.get(), "the fresh pinned continuation must proceed once");
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+
+            clock.now = NOW.plus(TTL).plusSeconds(1);
+            assertTrue(recovery.sweepOnce().isEmpty());
+            assertEquals(1, raceExecutions.get());
+            assertEquals(1, captures.get());
+        }
+    }
+
+    @Test
+    void terminalDecisionDuringChainedReentryAcknowledgesTheEarlierTriggerOnce(
+            @TempDir Path directory) throws Exception {
+        var clock = new MutableClock(NOW);
+        Path database = directory.resolve("chained-terminal-race.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        var terminalized = new CountDownLatch(1);
+        var releaseSignal = new CountDownLatch(1);
+        var raceExecutions = new AtomicInteger();
+        var captures = new AtomicInteger();
+        try (var store = new SqliteExecutionStore(database, clock);
+             var definitions = new SqliteGraphDefinitionStore(database, clock,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(CHAINED_TERMINAL_RACE_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            String pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, clock);
+            BehaviorRegistry behaviors = terminalRaceBehaviors(
+                    tasks, terminalized, releaseSignal, raceExecutions, captures);
+
+            try (var manager = GraphManager.readGraphMl(
+                    new ByteArrayInputStream(CHAINED_TERMINAL_RACE_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                 var recorder = ExecutionRecorder.open(store, key, "live-chain-race", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder)) {
+                assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                null, pin, null, null, recorder).toCompletableFuture()
+                                .get(10, TimeUnit.SECONDS));
+            }
+            DurableHumanTask first = taskAt(tasks, "first");
+            tasks.resolve(approver(), first.request().taskId(), first.generation(), response());
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "recovery-chain-race", TTL);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-chain-race",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            CompletableFuture<List<RecoveryOutcome>> firstRecovery = CompletableFuture.supplyAsync(
+                    recovery::sweepOnce);
+            try {
+                assertTrue(terminalized.await(10, TimeUnit.SECONDS),
+                        "the chained task must settle before its suspension is verified");
+                assertEquals(HumanTaskStatus.RESOLVED, taskAt(tasks, "race").status());
+                assertEquals(ProcessInstanceStatus.RUNNING,
+                        store.load(key).toCompletableFuture().join().state().status());
+            } finally {
+                releaseSignal.countDown();
+            }
+            List<RecoveryOutcome> firstOutcomes = firstRecovery.get(10, TimeUnit.SECONDS);
+            assertEquals(1, dispatched(firstOutcomes));
+            assertTrue(firstOutcomes.stream().filter(RecoveryOutcome.HandlerDispatched.class::isInstance)
+                    .map(RecoveryOutcome.HandlerDispatched.class::cast)
+                    .allMatch(outcome -> outcome.workItemId().equals(first.request().taskId())));
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty(),
+                    "acknowledging the first trigger must release its continuation lease");
+
+            DurableHumanTask second = taskAt(tasks, "race");
+            List<RecoveryOutcome> secondOutcomes = recovery.sweepOnce();
+            assertEquals(1, dispatched(secondOutcomes));
+            assertTrue(secondOutcomes.stream().filter(RecoveryOutcome.HandlerDispatched.class::isInstance)
+                    .map(RecoveryOutcome.HandlerDispatched.class::cast)
+                    .allMatch(outcome -> outcome.workItemId().equals(second.request().taskId())));
+            assertEquals(1, captures.get());
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+
+            clock.now = NOW.plus(TTL).plusSeconds(1);
+            assertTrue(recovery.sweepOnce().isEmpty(),
+                    "neither acknowledged trigger may replay after its former lease expires");
+            assertEquals(1, raceExecutions.get());
+            assertEquals(1, captures.get());
+            assertEquals(2, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size());
+        }
+    }
 
     @Test
     void restartResumesPinnedGraphExactlyOnceWithoutRegisteringAnotherTask(@TempDir Path directory)
@@ -409,6 +649,58 @@ class HumanTaskRestartIntegrationTest {
                     "the acknowledged human-task trigger must not replay while the tool approval waits");
             assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
         }
+    }
+
+    private static BehaviorRegistry terminalRaceBehaviors(HumanTaskService tasks,
+                                                           CountDownLatch terminalized,
+                                                           CountDownLatch releaseSignal,
+                                                           AtomicInteger raceExecutions,
+                                                           AtomicInteger captures) {
+        return standard(tasks)
+                .register("terminal-race-human-task", message -> {
+                    raceExecutions.incrementAndGet();
+                    HumanTaskResult created = tasks.suspend(message, terminalRaceDefinition());
+                    if (created.code() != HumanTaskResult.Code.CREATED) {
+                        return CompletableFuture.failedFuture(new IllegalStateException(
+                                "race task was not created: " + created.code()));
+                    }
+                    HumanTaskResult resolved = tasks.resolve(approver(),
+                            created.task().request().taskId(), created.task().generation(), response());
+                    if (resolved.code() != HumanTaskResult.Code.RESOLVED) {
+                        return CompletableFuture.failedFuture(new IllegalStateException(
+                                "race task was not resolved: " + resolved.code()));
+                    }
+                    terminalized.countDown();
+                    try {
+                        if (!releaseSignal.await(10, TimeUnit.SECONDS)) {
+                            return CompletableFuture.failedFuture(new IllegalStateException(
+                                    "test did not release terminal suspension signal"));
+                        }
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        return CompletableFuture.failedFuture(interrupted);
+                    }
+                    return CompletableFuture.failedFuture(new DurableHumanTaskSuspension(
+                            created.task().request().taskId()));
+                })
+                .register("capture", message -> {
+                    captures.incrementAndGet();
+                    return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                });
+    }
+
+    private static HumanTaskDefinition terminalRaceDefinition() {
+        return new HumanTaskDefinition(
+                new HumanTaskMetadata("Terminal suspension race", "Bounded test metadata."),
+                new HumanTaskResponseSchema("application/vnd.ravenroot.payload+json",
+                        "release.decision", "1", ai.ravenroot.api.payload.PayloadKind.MAP, 4096),
+                HandlerAuthorization.ofRoles(Role.APPROVER.name()), java.util.Optional.empty(),
+                Duration.ofHours(1),
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+    }
+
+    private static long dispatched(List<RecoveryOutcome> outcomes) {
+        return outcomes.stream().filter(RecoveryOutcome.HandlerDispatched.class::isInstance).count();
     }
 
     private static BehaviorRegistry standard(HumanTaskService tasks) {

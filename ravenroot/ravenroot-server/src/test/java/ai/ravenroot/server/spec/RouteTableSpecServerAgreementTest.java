@@ -61,6 +61,7 @@ class RouteTableSpecServerAgreementTest {
         assertTrue(humanInbox.contains("\"name\": \"status\""), humanInbox);
         assertTrue(humanInbox.contains("\"name\": \"includeTerminal\""), humanInbox);
         assertTrue(humanInbox.contains("#/components/schemas/HumanTaskInboxPage"), humanInbox);
+        assertTrue(generatedNow.contains("\"responseContentType\""), generatedNow);
         String humanDecision = pathEntry(generatedNow, "/v1/human-tasks/{taskId}/{decision}");
         assertTrue(humanDecision.contains("\"name\": \"generation\""), humanDecision);
         assertTrue(humanDecision.contains("\"required\": true"), humanDecision);

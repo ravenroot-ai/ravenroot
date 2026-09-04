@@ -66,7 +66,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HumanTaskRouteTest {
     private static final Instant NOW = Instant.parse("2026-01-01T00:00:00Z");
-    private static final String CONTENT_TYPE = "application/vnd.ravenroot.payload+json";
+    private static final String CONTENT_TYPE = "application/vnd.acme.release-decision+json";
 
     @TempDir
     Path directory;
@@ -93,6 +93,8 @@ class HumanTaskRouteTest {
                 assertEquals(200, inbox.statusCode(), inbox.body());
                 assertTrue(inbox.body().contains(fixture.taskId().toString()), inbox.body());
                 assertTrue(inbox.body().contains("Approve release"), inbox.body());
+                assertTrue(inbox.body().contains("\"responseContentType\":\"" + CONTENT_TYPE + "\""),
+                        inbox.body());
                 assertFalse(inbox.body().contains("not copied"), inbox.body());
                 assertTrue(get(server, "tenant-a", "?status=RESOLVED&includeTerminal=true")
                         .body().contains("\"items\":[]"));

@@ -16,9 +16,7 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
-import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
-import ai.ravenroot.api.persistence.HumanTaskStatus;
 import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocationStatus;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
@@ -329,16 +327,20 @@ public final class ExecutionRecorder implements AutoCloseable {
         revision = applied.revision();
     }
 
-    /** Confirms that a payload-free core signal names this exact durable waiting invocation. */
+    /**
+     * Confirms that a payload-free core signal names this exact durably registered invocation.
+     *
+     * <p>The task's lifecycle is deliberately not part of this proof. A responder can settle the
+     * task after its registration commits but before the runner observes the suspension signal. The
+     * immutable registration remains the authority in that legal interleaving.</p>
+     */
     public synchronized boolean confirmsHumanTask(UUID taskId, NodeMessage message) {
         if (!key.tenantId().equals(message.security().tenantId())
                 || !key.processInstanceId().equals(message.processInstanceId())) {
             return false;
         }
         var task = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
-        if (task == null || !task.key().equals(key)
-                || (task.status() != HumanTaskStatus.WAITING
-                && task.status() != HumanTaskStatus.ESCALATED)) return false;
+        if (task == null || !task.key().equals(key)) return false;
         HumanTaskRegistration request = task.request();
         return request.traversalId().equals(message.traversalId())
                 && request.invocationId().equals(message.invocationId())
@@ -382,14 +384,17 @@ public final class ExecutionRecorder implements AutoCloseable {
         }
     }
 
-    /** Confirms that a core signal names the exact invocation this recorder durably suspended. */
+    /**
+     * Confirms that a core signal names the exact invocation this recorder durably registered.
+     * Later approval lifecycle transitions do not invalidate that immutable proof.
+     */
     public synchronized boolean confirmsToolApproval(UUID approvalId, NodeMessage message) {
         if (!key.tenantId().equals(message.security().tenantId())
                 || !key.processInstanceId().equals(message.processInstanceId())) {
             return false;
         }
         DurableToolApproval approval = await(store.loadToolApproval(key, approvalId)).orElse(null);
-        if (approval == null || approval.status() != ToolApprovalStatus.PENDING) return false;
+        if (approval == null) return false;
         ToolApprovalRegistration request = approval.request();
         return request.traversalId().equals(message.traversalId())
                 && request.invocationId().equals(message.invocationId())

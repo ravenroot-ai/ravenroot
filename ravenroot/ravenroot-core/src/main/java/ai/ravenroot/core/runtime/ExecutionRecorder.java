@@ -4,6 +4,8 @@ import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
@@ -328,6 +330,76 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /**
+     * Commits one durable operator hold through this recorder's live fence.
+     *
+     * <p>The hold and the two {@code WAITING} transitions are one batch, which is what
+     * {@link StoreCapability#EXECUTION_PAUSES} asserts and what stops a restart from finding either
+     * half without the other.</p>
+     *
+     * <p>The traversal moves to {@code WAITING} and that is not bookkeeping: the aggregate refuses
+     * to add an invocation to a traversal that is not {@code RUNNING}, so from this commit onward no
+     * node of this traversal can be recorded as started by <em>any</em> process until something
+     * transitions it back. Only {@link #settleExecutionPause} does. The runtime gate stops the next
+     * hop in the process that took the hold; this stops every hop in every other process, including
+     * the one that starts after a restart.</p>
+     *
+     * <p>Nothing claimable is written. A hold produces no {@link ai.ravenroot.api.persistence.PendingWork}
+     * of any kind and leaves no {@code SCHEDULED} or {@code RUNNING} attempt behind, so a recovery
+     * sweep has nothing to return for a held traversal — which is why recovery leaves it held
+     * without needing a rule that says so.</p>
+     *
+     * @param pause the hold to commit, carrying its bounded continuation.
+     */
+    public synchronized void commitExecutionPause(ExecutionPauseRegistration pause) {
+        requireFence();
+        Objects.requireNonNull(pause, "pause");
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease)
+                .apply(new ExecutionTransition.TraversalTransitioned(pause.traversalId(),
+                        TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .registerExecutionPause(pause);
+        StoredProcessInstance applied = await(store.apply(batch.build()));
+        revision = applied.revision();
+    }
+
+    /**
+     * Settles one durable hold and puts its traversal back into the state its outcome calls for.
+     *
+     * <p>One batch, because the two are one decision. A settlement that committed without the
+     * traversal transition would leave a traversal nothing holds and nothing may add an invocation
+     * to — permanently stuck in exactly the way a durable hold exists to prevent — and a transition
+     * without the settlement would leave a running traversal every reader still reports as held.</p>
+     *
+     * @param transition the settlement to apply.
+     * @param traversalId the held traversal.
+     * @param traversalStatus the state the traversal moves to, or {@code null} when the caller's own
+     *                        teardown is about to write the traversal's end and a transition here
+     *                        would be the first of two, leaving the second illegal.
+     * @param processStatus the state the process instance moves to, under the same rule.
+     */
+    public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
+                                                  TraversalStatus traversalStatus,
+                                                  ProcessInstanceStatus processStatus) {
+        requireFence();
+        Objects.requireNonNull(transition, "transition");
+        Objects.requireNonNull(traversalId, "traversalId");
+        var batch = ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .fencedBy(lease)
+                .applyExecutionPause(transition);
+        if (traversalStatus != null) {
+            batch.apply(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus));
+        }
+        if (processStatus != null) {
+            batch.apply(new ExecutionTransition.ProcessTransitioned(processStatus));
+        }
+        StoredProcessInstance applied = await(store.apply(batch.build()));
+        revision = applied.revision();
+    }
+
+    /**
      * Confirms that a payload-free core signal names this exact durably registered invocation.
      *
      * <p>The task's lifecycle is deliberately not part of this proof. A responder can settle the
@@ -435,6 +507,20 @@ public final class ExecutionRecorder implements AutoCloseable {
     /** The revision the instance is at after the last successful write. */
     public synchronized long revision() {
         return revision;
+    }
+
+    /**
+     * Whether the composed store can hold a traversal durably.
+     *
+     * <p>Read rather than assumed for the reason {@link #supportsJournal()} is read: an adapter that
+     * has not implemented holds rejects the whole batch, which would take the traversal's own
+     * transitions down with it. A store that cannot hold durably simply keeps #130's process-local
+     * hold, which is a weaker guarantee and not a broken one.</p>
+     *
+     * @return whether {@link StoreCapability#EXECUTION_PAUSES} is declared.
+     */
+    public boolean supportsExecutionPauses() {
+        return store.supports(StoreCapability.EXECUTION_PAUSES);
     }
 
     /**

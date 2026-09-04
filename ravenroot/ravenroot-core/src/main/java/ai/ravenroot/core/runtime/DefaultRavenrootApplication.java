@@ -131,6 +131,18 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * renewal period, and short enough that a crashed worker's instances become recoverable promptly.
      */
     private final java.time.Duration executionLeaseTtl = java.time.Duration.ofSeconds(30);
+    /**
+     * Reads and settles holds that outlived the process that took them, or {@code null} when this
+     * deployment composes no store that keeps them.
+     *
+     * <p>Built once and lazily, because it needs both stores and the runtime, and every constructor
+     * that composes neither store must keep working exactly as it did. A deployment without it is
+     * not degraded — it is #130's deployment, whose holds are process-local and say so.</p>
+     */
+    private final java.util.concurrent.atomic.AtomicReference<
+            ai.ravenroot.core.pause.DurableExecutionPauseService> durablePauses =
+            new java.util.concurrent.atomic.AtomicReference<>();
+
     private final ConcurrentHashMap<UUID, ActiveExecution> activeExecutions = new ConcurrentHashMap<>();
 
     /**
@@ -1350,6 +1362,103 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     /**
+     * Answers the hold question from this process first and from durable state second.
+     *
+     * <p>The order is the whole of it. A traversal this process is running is authoritative about
+     * its own hold — the gate is here — and the durable row is one commit behind it by construction,
+     * because the commit happens at the gate. A traversal this process is <em>not</em> running has
+     * no process-local answer at all, and that is exactly the traversal a restart leaves behind. So
+     * neither source is a fallback for the other: each answers the case the other cannot.</p>
+     */
+    @Override
+    public boolean executionPaused(String tenantId, UUID traversalId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(traversalId, "traversalId");
+        ActiveExecution active = activeExecutions.get(traversalId);
+        if (active != null) {
+            return heldHere(tenantId, traversalId);
+        }
+        var pauses = durablePauses();
+        return pauses != null && pauses.held(tenantId, traversalId).isPresent();
+    }
+
+    /**
+     * The hold this process is keeping, asked without consulting the store.
+     *
+     * <p>Separate from {@link #executionPaused(String, UUID)} because the two are asked by callers
+     * with different tolerances. A control call has to know whether a traversal is held anywhere,
+     * and an unreadable store is an answer it must not be given quietly — so that path lets the
+     * failure out. A result read has an outcome in hand already and only needs the qualifier, so
+     * making it depend on the store would turn a storage fault into a failed read of a result the
+     * process is holding in memory.</p>
+     */
+    private boolean heldHere(String tenantId, UUID traversalId) {
+        ActiveExecution active = activeExecutions.get(traversalId);
+        return active != null && tenantId.equals(active.tenantId) && active.runner.isPaused(traversalId);
+    }
+
+    /**
+     * Releases a hold this process is keeping, or continues a traversal held durably elsewhere.
+     *
+     * <p>The live path is #130's and is unchanged: the gate is removed and the parked hop continues
+     * with the payload it was carrying, losing nothing. The durable path rebuilds the runtime from
+     * the pinned graph and continues from the committed boundary, which is the strictly weaker thing
+     * that is possible when the process that held it is gone.</p>
+     *
+     * <p>The continuation is deliberately not waited on. A resume answers whether the traversal was
+     * released, not whether it has finished — the same contract the live path has had since #130,
+     * and the reason a control endpoint's thread is not charged for graph work.</p>
+     */
+    @Override
+    public boolean resumeTraversal(String tenantId, UUID traversalId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(traversalId, "traversalId");
+        ActiveExecution active = activeExecutions.get(traversalId);
+        if (active != null) {
+            return tenantId.equals(active.tenantId) && active.runner.resumeTraversal(traversalId);
+        }
+        var pauses = durablePauses();
+        return pauses != null && pauses.resume(tenantId, traversalId, "tenant:" + tenantId).isPresent();
+    }
+
+    /**
+     * Cancels a live traversal, or gives up a hold no process is keeping.
+     *
+     * <p>A held traversal that outlived its process is still cancellable, and settling it is what
+     * keeps a restart's inventory honest: without this the row would stay {@code WAITING} behind a
+     * hold nobody can ever release, which is the stranded state this whole mechanism exists to make
+     * impossible.</p>
+     */
+    @Override
+    public boolean cancelTraversal(String tenantId, UUID traversalId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        java.util.Objects.requireNonNull(traversalId, "traversalId");
+        ActiveExecution active = activeExecutions.get(traversalId);
+        if (active != null) {
+            return tenantId.equals(active.tenantId) && cancelTraversal(traversalId);
+        }
+        var pauses = durablePauses();
+        return pauses != null && pauses.cancel(tenantId, traversalId, "tenant:" + tenantId);
+    }
+
+    /**
+     * The durable hold service, built on first use, or {@code null} when this deployment cannot keep
+     * holds.
+     *
+     * @return the service, or {@code null} when either store is absent or holds are unsupported
+     */
+    private ai.ravenroot.core.pause.DurableExecutionPauseService durablePauses() {
+        if (executionStore == null || graphDefinitionStore == null
+                || !executionStore.supports(ai.ravenroot.api.persistence.StoreCapability.EXECUTION_PAUSES)) {
+            return null;
+        }
+        return durablePauses.updateAndGet(existing -> existing != null ? existing
+                : new ai.ravenroot.core.pause.DurableExecutionPauseService(graphDefinitionStore,
+                        executionStore, engine, behaviors, monitor, identitySource, workerId,
+                        executionLeaseTtl));
+    }
+
+    /**
      * Reads live executions straight out of {@link #activeExecutions} -- the same map
      * {@link #cancelTraversal} mutates and {@link #startGraphMl} populates -- rather than from any
      * projection of published events. A traversal whose behavior has deadlocked stops publishing
@@ -1507,8 +1616,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // it was copied there. Only a Found outcome can carry it: an Expired tombstone reports a
         // terminal status, and a terminal outcome is never paused -- the record's own constructor
         // enforces that, so this line cannot manufacture the combination either.
+        // Tenant-scoped, and deliberately the process-local half of the answer. A Found outcome is
+        // one this process is holding: if its traversal is still running here the runner is the
+        // authority on its hold, and if it is not, the outcome is terminal and a terminal outcome is
+        // never paused. Consulting the store would add nothing this read needs and would make it
+        // fail when the store does. After a restart a held traversal is found through the durable
+        // inventory and the control surface rather than here; this registry is process-local.
         if (lookup instanceof ai.ravenroot.api.application.ExecutionLookup.Found found
-                && executionPaused(executionId)) {
+                && heldHere(tenantId, executionId)) {
             return new ai.ravenroot.api.application.ExecutionLookup.Found(found.outcome().withPaused(true));
         }
         return lookup;

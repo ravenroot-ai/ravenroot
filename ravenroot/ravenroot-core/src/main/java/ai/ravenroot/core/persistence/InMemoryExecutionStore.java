@@ -7,6 +7,7 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
@@ -41,6 +42,9 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
@@ -229,7 +233,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
                 StoreCapability.DURABLE_HANDLERS,
                 StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
-                StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS);
+                StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
+                StoreCapability.EXECUTION_PAUSES);
     }
 
     @Override
@@ -365,6 +370,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.humanTasks);
                 applyHumanTaskWrites(key, batch, folded, pin, humanTasks, revision, now);
 
+                var executionPauses = existing == null
+                        ? new LinkedHashMap<UUID, DurableExecutionPause>()
+                        : new LinkedHashMap<>(existing.executionPauses);
+                applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
@@ -372,6 +382,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         handlers,
                         approvals,
                         humanTasks,
+                        executionPauses,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -1377,6 +1388,104 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
     }
 
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty()
+                        : Optional.ofNullable(entry.executionPauses.get(pauseId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.executionPauses.values());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    for (DurableExecutionPause pause : entry.executionPauses.values()) {
+                        if (pause.status() == ExecutionPauseStatus.HELD
+                                && traversalId.equals(pause.request().traversalId())) {
+                            return Optional.of(pause);
+                        }
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    /**
+     * Folds this batch's hold writes after the aggregate, for the reason handler writes fold after
+     * it: a hold names the invocation it sits behind, and that invocation may have been completed by
+     * this same batch.
+     */
+    private void applyExecutionPauseWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                           GraphVersionPin pin,
+                                           Map<UUID, DurableExecutionPause> pauses, long revision) {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            DurableExecutionPause existing = pauses.get(registration.pauseId());
+            if (existing != null) {
+                if (!existing.request().equals(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                            + " is already committed with a different hold"));
+                }
+                continue;
+            }
+            // At most one live hold per traversal, which is what makes findHeldExecutionPause a
+            // deterministic single answer for a resume that presents only a traversal id.
+            for (DurableExecutionPause other : pauses.values()) {
+                if (other.status() == ExecutionPauseStatus.HELD
+                        && other.request().traversalId().equals(registration.traversalId())) {
+                    throw failure(ExecutionStoreFailure.invalid("traversal "
+                            + registration.traversalId() + " is already held by " + other.request().pauseId()));
+                }
+            }
+            pauses.put(registration.pauseId(), DurableExecutionPause.held(key, registration, revision));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = pauses.get(transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            pauses.put(transition.pauseId(), current.apply(transition, revision));
+        }
+    }
+
     // ---------------------------------------------------------------- durable human tasks
 
     @Override
@@ -2231,6 +2340,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableToolApproval> approvals;
         /** First-class human tasks retained in registration order within this instance. */
         private final Map<UUID, DurableHumanTask> humanTasks;
+        /** Operator holds retained in commit order within this instance. */
+        private final Map<UUID, DurableExecutionPause> executionPauses;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -2244,6 +2355,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                       Map<UUID, DurableHandler> handlers,
                       Map<UUID, DurableToolApproval> approvals,
                       Map<UUID, DurableHumanTask> humanTasks,
+                      Map<UUID, DurableExecutionPause> executionPauses,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -2257,6 +2369,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.handlers = handlers;
             this.approvals = approvals;
             this.humanTasks = humanTasks;
+            this.executionPauses = executionPauses;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;

@@ -286,9 +286,10 @@ public interface CliBackend {
      * {@code bypassedNodes} alone does not -- a node with a plain single {@code continue} edge and
      * one with a branch point behind only custom outcomes are indistinguishable in that list, and only this
      * field tells them apart.</p>
-     * @param paused whether a pause is currently held on this execution -- process-local and never
-     *               durable, so a restart forgets it, and never {@code true} once {@code status} is
-     *               terminal. Mirrors {@code ExecutionOutcome#paused()}; see that method's own Javadoc
+     * @param paused whether a pause is currently held on this execution, read live rather than
+     *               stored, and never {@code true} once {@code status} is terminal. A hold taken at a
+     *               boundary the runtime can write down survives a restart; one taken anywhere else
+     *               does not. Mirrors {@code ExecutionOutcome#paused()}; see that method's own Javadoc
      *               for why this qualifies {@code status} instead of becoming a value of it.
      */
     record ResultView(String executionId, String status, boolean paused, boolean degraded, List<String> visitedNodes,
@@ -309,9 +310,12 @@ public interface CliBackend {
      * whatever the wire sent on the remote one) rather than parsed back into an {@code Instant} --
      * this interface has no reason to commit to that type, and every caller so far only prints it.
      * @param paused whether a pause is currently held on this traversal, so that it will not begin
-     *               another node until it is resumed. Process-local and never durable -- a restart
-     *               forgets it. {@code false} for an ordinary running traversal and for one that has
-     *               never been paused.
+     *               another node until it is resumed. This listing is process-local, so a traversal
+     *               held before a restart is not in it at all -- not because the hold was lost, but
+     *               because no traversal of a process that is gone is live here. A hold taken at a
+     *               boundary the runtime can write down outlives its process and stays resumable and
+     *               cancellable. {@code false} for an ordinary running traversal and for one that
+     *               has never been paused.
      */
     record LiveView(String processInstanceId, String traversalId, String executionId, String graphVersion,
                      String startedAt, boolean paused) {

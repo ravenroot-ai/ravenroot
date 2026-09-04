@@ -94,10 +94,11 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
  * Compatibility constructor preserving the canonical shape before pauses were observable.
  *
  * <p>Reports {@code paused == false}, and every producer of a stored outcome uses this shape on
- * purpose. A pause is live, process-local state that changes after an outcome has been recorded, so
- * a copy of it stored beside the outcome would be a second source of truth that goes stale the
- * moment it is written. The live value is applied on the way out, with
- * {@link #withPaused(boolean)}.</p>
+ * purpose. Whether a hold is in place changes after an outcome has been recorded, so a copy of it
+ * stored beside the outcome would be a second source of truth that goes stale the moment it is
+ * written — and that holds whether or not the hold itself is durable, because the question here is
+ * where the answer is read from rather than how long the hold lives. The live value is applied on
+ * the way out, with {@link #withPaused(boolean)}.</p>
  * @param processInstanceId durable process that contains this traversal
  * @param traversalId caller-facing traversal identity
  * @param status lifecycle state at the time the outcome was observed
@@ -242,11 +243,24 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
      * <h4>Why this is not a {@link ProcessInstanceStatus} value</h4>
      * <p>{@code ProcessInstanceStatus} is the durable lifecycle vocabulary: it is persisted, the
      * durable process inventory queries it, and its {@code canTransitionTo} rules are a state machine
-     * other components rely on. A pause is none of those things. It is held in the process that owns
-     * the traversal, it is written to no store, and a restart forgets it. A durable status that a
-     * restart silently drops would be a claim this system cannot keep, so the pause qualifies the
-     * status instead of becoming one. A consumer switching over {@code status} therefore keeps
-     * working unchanged, and one that cares about holds reads this as well.</p>
+     * other components rely on. A hold is not a member of that vocabulary, and two reasons keep it
+     * out that have nothing to do with whether it is written down.</p>
+     *
+     * <p>First, {@code ProcessInstanceStatus} is per <em>process instance</em> while a hold is per
+     * <em>traversal</em>, and one instance can carry several traversals — an instance-level
+     * {@code PAUSED} could not say which of them is held. Second, a hold is orthogonal to what the
+     * traversal is doing: a durably held traversal is stored as {@code WAITING}, the same value
+     * every other durable wait writes, and the hold record beside it says which wait it is. A status
+     * value would make a deliberate hold indistinguishable from a wait on a human task or a tool
+     * approval. A consumer switching over {@code status} therefore keeps working unchanged, and one
+     * that cares about holds reads this as well.</p>
+     *
+     * <p><strong>A hold can outlive the process that took it.</strong> One taken at a boundary the
+     * runtime can write down is reported after a restart by
+     * {@link RavenrootApplication#executionPaused(String, java.util.UUID)} and stays resumable and
+     * cancellable; one taken anywhere else is not, and is gone with its process. This field is read
+     * from whichever of the two applies, so it never claims a hold that is not in place — but it is
+     * not itself the answer to "will this survive a restart", and it should not be read as one.</p>
      *
      * <p><strong>Always {@code false} on a terminal outcome</strong>, enforced by this record's own
      * constructor rather than by whichever caller builds one.</p>

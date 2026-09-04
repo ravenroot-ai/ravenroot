@@ -506,6 +506,58 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Whether this traversal is held, asked with a tenant so a hold that outlived the process that
+     * took it can be answered from durable state.
+     *
+     * <p>{@link #executionPaused(UUID)} can only answer for holds this process is keeping, because a
+     * traversal id alone does not identify a tenant and a durable read has to be tenant-scoped or it
+     * is a cross-tenant existence oracle. That is exactly the question a restart makes impossible to
+     * answer: the traversal was held by a process that no longer exists, so no process-local
+     * bookkeeping has it. This overload is how a deployment that persists holds reports one anyway,
+     * and every implementation that does not simply answers what the process knows.</p>
+     *
+     * <p>The default therefore delegates and loses nothing: an implementation with no durable holds
+     * has exactly one answer to give and gives it under either signature.</p>
+     *
+     * @param tenantId authenticated tenant boundary; a traversal of another tenant is not held here.
+     * @param traversalId the traversal to ask about.
+     * @return whether the traversal is currently held.
+     */
+    default boolean executionPaused(String tenantId, UUID traversalId) {
+        return executionPaused(traversalId);
+    }
+
+    /**
+     * Releases a hold, asked with a tenant so a hold that outlived its process can be released.
+     *
+     * <p>The counterpart of {@link #executionPaused(String, UUID)} and additive for the same reason.
+     * A deployment that persists holds continues the traversal from the boundary its hold committed;
+     * one that does not answers exactly as {@link #resumeTraversal(UUID)} does.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param traversalId the traversal to release.
+     * @return whether a hold was found and released.
+     */
+    default boolean resumeTraversal(String tenantId, UUID traversalId) {
+        return resumeTraversal(traversalId);
+    }
+
+    /**
+     * Cancels a traversal, asked with a tenant so a durably held one can be cancelled.
+     *
+     * <p>Additive for the reason the two above are. A held traversal that no process is running is
+     * still cancellable, and that is the difference between a hold an operator can decide about and
+     * one that has stranded work.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param traversalId the traversal to cancel.
+     * @return whether the traversal was found and cancelled.
+     */
+    default boolean cancelTraversal(String tenantId, UUID traversalId) {
+        return cancelTraversal(traversalId);
+    }
+
+    /**
  * Whether a hold is currently in place on the traversal identified by {@code traversalId}.
  *
  * <p>The read counterpart of {@link #pauseTraversal}, and the authority behind the {@code paused}

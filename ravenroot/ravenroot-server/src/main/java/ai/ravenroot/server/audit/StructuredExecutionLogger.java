@@ -15,9 +15,9 @@ import java.util.function.Consumer;
  *
  * <h2>Everything this line carries that the SSE frame does not</h2>
  * <p>Kept as a list rather than a sentence, because it used to say "exactly one respect" and had
- * silently become three. Each entry is a deliberate divergence with its own reason, and
- * {@code StructuredExecutionLoggerTest} asserts the set so the next addition cannot slip in
- * unrecorded:</p>
+ * silently become ten. Each entry is a deliberate divergence with its own reason, and
+ * {@code StructuredExecutionLoggerTest} asserts the set in both directions so the next addition to
+ * either serialiser cannot slip in unrecorded:</p>
  * <ul>
  *   <li>{@code tenantId} and {@code requestId} — so an operator can join an execution to the
  *       authorization decision that permitted it. The SSE frame carries neither, so a browser client
@@ -29,6 +29,17 @@ import java.util.function.Consumer;
  *       written once, at the moment it was true, and has no replay to disagree with.</li>
  *   <li>{@code connectorAttempts} — the same argument, for retries a connector performed inside one
  *       orchestration attempt.</li>
+ *   <li>{@code event} — the constant log-record discriminator {@code ravenroot.execution}, which
+ *       lets an operator select these lines out of the server's other structured output. An SSE
+ *       stream is already scoped to executions by its route, so the frame needs no discriminator.</li>
+ *   <li>{@code detail} — the operator-facing text. The SSE frame carries the author-facing
+ *       {@code message}, {@code description} and their redaction and truncation flags instead,
+ *       because the two audiences are told different things about the same event.</li>
+ *   <li>{@code joinWaitDuration}, {@code nodeCatalogKey}, {@code deploymentId} and
+ *       {@code workloadId} — operational correlation an operator needs to attribute a line to a
+ *       deployment, a workload and a catalogued node. They are absent from the SSE frame for the
+ *       same reason as tenant naming: an author's browser client is not told how the server is
+ *       deployed.</li>
  * </ul>
  *
  * <p>{@code publicReason} is carried by both and is not a divergence.</p>

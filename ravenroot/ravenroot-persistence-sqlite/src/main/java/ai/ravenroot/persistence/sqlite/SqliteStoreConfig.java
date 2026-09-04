@@ -20,10 +20,16 @@ import java.util.Objects;
  * @param maxLeaseTtl     the bound published by {@link SqliteExecutionStore#maxLeaseTtl()}
  * @param maxPayloadBytes the bound published by {@link SqliteExecutionStore#maxPayloadBytes()}
  * @param maxClockSkew    the budget published by {@link SqliteExecutionStore#maxClockSkew()}
+ * @param journalRetention the window published by {@link SqliteExecutionStore#journalRetention()}
+ * @param maxInventoryPageSize the bound published by
+ *                        {@link SqliteExecutionStore#maxInventoryPageSize()}
+ * @param terminalRetention the window published by
+ *                        {@link SqliteExecutionStore#terminalRetention()}
  */
 public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTimeout,
                                 Duration maxLeaseTtl, int maxPayloadBytes, Duration maxClockSkew,
-                                Duration journalRetention) {
+                                Duration journalRetention, int maxInventoryPageSize,
+                                Duration terminalRetention) {
 
     /**
      * How far SQLite flushes on commit.
@@ -71,7 +77,7 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public static SqliteStoreConfig defaults() {
         return new SqliteStoreConfig(SynchronousMode.FULL, Duration.ofSeconds(5), Duration.ofMinutes(5),
-                1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24));
+                1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7));
     }
 
     public SqliteStoreConfig {
@@ -95,16 +101,67 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
         if (journalRetention.isZero() || journalRetention.isNegative()) {
             throw new IllegalArgumentException("journalRetention must be positive");
         }
+        if (maxInventoryPageSize < 1) {
+            throw new IllegalArgumentException("maxInventoryPageSize must be positive");
+        }
+        Objects.requireNonNull(terminalRetention, "terminalRetention");
+        if (terminalRetention.isZero() || terminalRetention.isNegative()) {
+            throw new IllegalArgumentException("terminalRetention must be positive");
+        }
+        if (terminalRetention.compareTo(journalRetention) < 0) {
+            // A terminal instance pruned while its own events are still readable would leave the
+            // journal naming a process instance the inventory can no longer describe, and a consumer
+            // replaying those events would resolve every one of them to "never existed". The
+            // inventory row is the cheaper of the two to keep, so it outlives the events rather than
+            // the other way round.
+            throw new IllegalArgumentException("terminalRetention " + terminalRetention
+                    + " cannot be shorter than journalRetention " + journalRetention
+                    + ": events would outlive the instance they name");
+        }
     }
 
     public SqliteStoreConfig withSynchronousMode(SynchronousMode mode) {
         return new SqliteStoreConfig(mode, busyTimeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
-                journalRetention);
+                journalRetention, maxInventoryPageSize, terminalRetention);
     }
 
     public SqliteStoreConfig withBusyTimeout(Duration timeout) {
         return new SqliteStoreConfig(synchronousMode, timeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
-                journalRetention);
+                journalRetention, maxInventoryPageSize, terminalRetention);
+    }
+
+    /**
+     * How long a terminal process instance stays discoverable before
+     * {@link SqliteExecutionStore#purgeExpiredProcessInstances(String)} may remove it.
+     *
+     * <p>Seven days by default. The number is chosen against two constraints rather than picked for
+     * roundness. It must span a weekend plus a working day, because an execution that fails late on a
+     * Friday has to still be discoverable when somebody looks on Monday morning — a 24- or 48-hour
+     * window makes the commonest investigation impossible for reasons of the calendar. And it must be
+     * at least {@link #journalRetention()}, which the canonical constructor enforces, so a terminal
+     * instance is never pruned while its own events are still readable.</p>
+     *
+     * <p>It is deployment configuration and not a product promise, exactly as journal retention is.
+     * Lowering it below the journal window is rejected rather than accepted and worked around,
+     * because the resulting dangling events would be discovered as a diagnosis failure months
+     * later.</p>
+     * @param retention how long terminal instances are retained.
+     * @return a copy of this configuration with the given terminal retention.
+     */
+    public SqliteStoreConfig withTerminalRetention(Duration retention) {
+        return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
+                maxClockSkew, journalRetention, maxInventoryPageSize, retention);
+    }
+
+    /**
+     * The largest inventory page this store will return, rejecting anything above it rather than
+     * clamping.
+     * @param maximum largest accepted page size.
+     * @return a copy of this configuration with the given page bound.
+     */
+    public SqliteStoreConfig withMaxInventoryPageSize(int maximum) {
+        return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
+                maxClockSkew, journalRetention, maximum, terminalRetention);
     }
 
     /**
@@ -117,6 +174,6 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withJournalRetention(Duration retention) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, retention);
+                maxClockSkew, retention, maxInventoryPageSize, terminalRetention);
     }
 }

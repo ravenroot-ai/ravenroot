@@ -203,6 +203,10 @@ class CredentialsCliTest {
             throw new IOException("unused");
         }
         @Override public List<LiveView> live() throws IOException { throw new IOException("unused"); }
+        @Override public InventoryListing inventory() throws IOException { throw new IOException("unused"); }
+        @Override public TraversalListing traversals(String processInstanceId) throws IOException {
+            throw new IOException("unused");
+        }
         @Override public CancelView cancel(String traversalId) throws IOException {
             throw new IOException("unused");
         }

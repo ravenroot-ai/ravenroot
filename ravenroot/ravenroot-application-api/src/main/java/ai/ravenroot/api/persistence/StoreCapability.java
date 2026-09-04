@@ -71,5 +71,39 @@ public enum StoreCapability {
      * additionally honour the replay floor. Splitting them keeps the second obligation from riding in
      * unannounced on the first.</p>
      */
-    JOURNAL_COMPACTION
+    JOURNAL_COMPACTION,
+
+    /**
+     * A durable, tenant-scoped inventory of process instances and their traversals can be listed with
+     * deterministic pagination and looked up directly, without any in-memory registry or event-stream
+     * completeness.
+     *
+     * <p>Declaring this asserts three things together, because a caller that gets two of them is worse
+     * off than one that gets none. First, the inventory is served from the same authoritative rows the
+     * lifecycle transitions write, so there is no projection that can lag, no offset to repair and no
+     * rebuild path that could invent successful work. Second, pagination is deterministic while new
+     * work is accepted: the sort key is immutable per row, so a row never moves between pages of an
+     * in-flight scan. Third, a key belonging to another tenant is indistinguishable from a missing
+     * one, so the inventory is not an existence oracle.</p>
+     *
+     * <p>Separate from {@link #DURABLE} because the two are independent claims: a non-durable adapter
+     * can serve a perfectly honest inventory of the state it currently holds, and it should, so that
+     * the conformance assertions for ordering, filtering and tenant isolation run against something
+     * rather than being skipped into invisibility.</p>
+     */
+    PROCESS_INVENTORY,
+
+    /**
+     * Terminal inventory rows are retained for a declared window and then removable on demand, with a
+     * per-tenant floor that says how far back the answer is still complete.
+     *
+     * <p>Separate from {@link #PROCESS_INVENTORY} for the reason {@link #JOURNAL_COMPACTION} is
+     * separate from {@link #EVENT_JOURNAL}: an adapter can honestly offer an inventory it never
+     * prunes — correct, and eventually a disk incident — while an adapter that prunes takes on the
+     * further obligation to publish the floor. Without the floor, a caller that fails to find an
+     * instance cannot tell "never existed" from "expired by policy", and those two demand opposite
+     * actions. Splitting the capabilities keeps the second obligation from riding in unannounced on
+     * the first.</p>
+     */
+    INVENTORY_RETENTION
 }

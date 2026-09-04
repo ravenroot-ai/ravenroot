@@ -43,6 +43,14 @@ profile's object-byte, time, or concurrency ceilings where the operation exposes
 and retry count are bounded by shipped limits. Graph data cannot replace the profile's origin, bucket,
 root prefix, signing binding or operation allowlist.
 
+Every storage request carries the effective byte ceiling and remaining total deadline into the
+managed HTTP boundary. Object reads accept only the profile's media allowlist, list responses accept
+XML, and mutation responses remain opaque; all storage operations require identity encoding so an
+endpoint cannot introduce an unbudgeted decompression layer. Cancellation is registered before
+handoff and stops any later list retry. The managed response carries the effective operator output
+ceiling back to storage, which intersects it again with the operation's derived canonical-result
+ceiling before returning a node result.
+
 Keys and prefixes are strict UTF-8 relative paths. Empty/dot segments, controls, backslashes,
 literal `%`, query/fragment syntax and paths over 1024 UTF-8 bytes are refused before managed HTTP,
 which prevents traversal and single/double-decoding ambiguity. The core independently enforces the
@@ -69,7 +77,9 @@ stable across process restart; it is not a cryptographic integrity or authentici
 cursor contents still cannot replace the fixed bucket or effective prefix. Results contain only
 relative keys and the requested safe fields. XML parsing is
 streaming, rejects DTDs/entities and foreign namespaces, and is bounded by profile response bytes,
-page count, nesting depth and field length.
+page count, nesting depth and field length. The raw-object limit remains distinct from the derived
+canonical-result limit: GET checks exact base64 plus fixed metadata before allocating the base64
+string, and all four behaviors validate the completed result payload against that finite ceiling.
 
 `object.delete.v1` has `version` and an optional bounded `versionId`. A version identifier is accepted
 only when the profile also grants `delete_version`. The extension issues exactly one DELETE (never a

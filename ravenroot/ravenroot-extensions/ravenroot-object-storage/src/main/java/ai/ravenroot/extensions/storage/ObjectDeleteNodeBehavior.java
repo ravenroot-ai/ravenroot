@@ -74,7 +74,8 @@ public final class ObjectDeleteNodeBehavior implements NodeBehavior {
                     }
                     URI destination = StorageUri.deleteDestination(profile, key, versionId);
                     StorageRuntime.Request request = new StorageRuntime.Request(destination, "DELETE", Map.of(),
-                            new byte[0], timeout, Math.min(profile.maxObjectBytes(), 64 * 1024), 0,
+                            new byte[0], timeout, Math.min(profile.maxObjectBytes(), 64 * 1024),
+                            StorageRuntime.projectedOutputLimit(Math.min(profile.maxObjectBytes(), 64 * 1024)), 0,
                             StorageRuntime.Semantics.MUTATION,
                             ObjectDeleteNodeBehavior::project);
                     return runtime.execute(message, cancellation, services, profile, gate, request);

@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.openapi.client;
 
+import ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -296,6 +297,17 @@ final class OpenApiCallPlan {
 
         boolean accepts(int status) {
             return responses.containsKey(Integer.toString(status)) || responses.containsKey("default");
+        }
+
+        OutboundHttpRepresentationPolicy representationPolicy() {
+            if (responses.containsKey("default")) return OutboundHttpRepresentationPolicy.ALL_STATUSES;
+            Set<Integer> statuses = responses.entrySet().stream()
+                    .filter(entry -> entry.getValue() != null)
+                    .map(Map.Entry::getKey)
+                    .map(Integer::parseInt)
+                    .filter(status -> status < 200 || status >= 300)
+                    .collect(java.util.stream.Collectors.toUnmodifiableSet());
+            return new OutboundHttpRepresentationPolicy(false, statuses);
         }
 
         Schema response(int status) {

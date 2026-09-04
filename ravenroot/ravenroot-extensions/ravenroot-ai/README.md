@@ -48,6 +48,12 @@ deliberately not `CREDENTIAL_RESOLUTION`; the agent additionally requires `TOOL_
 profile names an `OutboundCredentialBinding`; the runtime resolves it and places it on the request.
 There is no code path here that could return a secret.
 
+Each model and MCP request also carries immutable per-operation external-I/O limits. The managed
+runtime intersects them with operator policy, validates JSON media type, bounds encoded wire bytes,
+single-member gzip expansion, decoded bytes, and projected output separately, and applies the model
+profile's total deadline. Engine cancellation is registered before the call starts and is propagated
+to the active managed HTTP call; a late cancellation cannot start a model run.
+
 **A skill's body is not in the prompt until it is asked for.** An untrusted author turn lists a declared
 skill's name and description; `LoadSkillTool` hands the body over when the model calls for it, once
 per run. That is the whole difference between a skill and more text in `instructions` — an unused

@@ -39,6 +39,11 @@ class GithubActionBehaviorTest {
         Map<String, Object> variables = GithubValues.object(update.get("variables"));
         assertEquals(3L, variables.get("attempts"));
         assertEquals(8L, variables.get("generation"));
+        assertTrue(http.requests.stream().allMatch(request ->
+                request.limits().maximumEncodedResponseBytes() == 1_048_576
+                        && request.limits().acceptedMediaTypes().equals(
+                        Set.of("application/json", "application/vnd.github+json"))
+                        && request.limits().acceptedContentEncodings().equals(Set.of("identity", "gzip"))));
     }
 
     @Test void projectClaimRejectsAttemptsOverflowBeforeAnyOutboundCall() {

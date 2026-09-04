@@ -275,6 +275,7 @@ class AiBundleEndToEndTest {
                 .allowOrigin("http", endpoint.host(), endpoint.port())
                 .allowOrigin("http", mcp.host(), mcp.port())
                 .allowHttpMethod("POST")
+                .allowResponseHeader("content-type")
                 .byteLimits(1024 * 1024, 1024 * 1024, 1024)
                 .concurrencyLimits(4, 2)
                 .maximumDeadline(Duration.ofSeconds(10));

@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
@@ -67,6 +68,39 @@ class AgentMcpToolsTest {
                 beta.receivedMethods());
         assertEquals(List.of(LoadSkillTool.NAME, "alpha__search", "beta__lookup"),
                 toolNamesOf(http.chatBodies().get(0)));
+    }
+
+    @Test
+    @DisplayName("a narrower managed output ceiling rejects tools expanded by safe schema synthesis")
+    void managedOutputCeilingSurvivesMcpToolsProjection() {
+        var emptySchema = Map.of("type", "object", "properties", Map.of());
+        var remoteProjection = List.of("one", "two", "three", "four").stream()
+                .map(name -> Map.of("name", name, "description", "tool " + name,
+                        "inputSchema", emptySchema))
+                .toList();
+        long operatorCeiling = PayloadLimits.DEFAULTS.enforceAndMeasure(remoteProjection);
+        var exposedProjection = List.of("one", "two", "three", "four").stream()
+                .map(name -> Map.of("name", "alpha__" + name, "description", "tool " + name,
+                        "parameters", emptySchema))
+                .toList();
+        assertTrue(PayloadLimits.DEFAULTS.enforceAndMeasure(exposedProjection) > operatorCeiling,
+                "server-name prefixing must be the expansion that crosses the operator ceiling");
+        var alpha = new McpDouble("alpha", "one", "two", "three", "four").omittingSchemas();
+        var probe = new McpDouble("alpha", "one", "two", "three", "four").omittingSchemas();
+        assertTrue(probe.respond(McpProtocol.listTools(3)).body().length <= operatorCeiling,
+                "the wire envelope itself must fit so this exercises post-parse projection");
+        var http = new AiTestSupport.RoutedHttp(CHAT)
+                .mcpOutputLimit(operatorCeiling)
+                .chatting(AiTestSupport.answers("must not be called"))
+                .serving(ALPHA, alpha);
+
+        AgentException refusal = failureOf(agent(http, "alpha",
+                AiTestSupport.mcpProfile("alpha", ALPHA, "one", "two", "three", "four")));
+
+        assertEquals(AgentException.Code.MCP_RESPONSE_TOO_LARGE, refusal.code());
+        assertEquals(List.of("initialize", "notifications/initialized", "tools/list"),
+                alpha.receivedMethods());
+        assertEquals(0, http.chatCalls(), "an over-authority catalogue never reaches model state");
     }
 
     @Test
@@ -540,6 +574,44 @@ class AgentMcpToolsTest {
     }
 
     @Test
+    void engineCancellationSignalCancelsTheActiveModelCallBeforeAnyLaterToolEffect() {
+        var alpha = new McpDouble("alpha", "search");
+        var http = new AiTestSupport.RoutedHttp(CHAT).chattingForever().serving(ALPHA, alpha);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
+                AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
+        var cancellation = new TestCancellation();
+        var stage = behavior.create(configuration("alpha"), http)
+                .handle(AiTestSupport.message("a payload"), cancellation).toCompletableFuture();
+
+        cancellation.cancel();
+        http.releaseChat(AiTestSupport.asksFor("call-1", "alpha__search"));
+
+        assertTrue(stage.isCompletedExceptionally());
+        assertEquals(List.of(Boolean.TRUE), http.cancelled());
+        assertEquals(1, http.chatCalls());
+        assertEquals(List.of(), alpha.calledTools());
+        assertEquals(0, behavior.admissionEntries());
+        assertEquals(0, behavior.mcpAdmissionEntries());
+    }
+
+    @Test
+    void alreadyCancelledEngineSignalStartsNoDiscoveryOrModelTransport() {
+        var alpha = new McpDouble("alpha", "search");
+        var http = new AiTestSupport.RoutedHttp(CHAT).chattingForever().serving(ALPHA, alpha);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(CHAT)),
+                AiTestSupport.resolvingMcp(AiTestSupport.mcpProfile("alpha", ALPHA, "search")));
+        var cancellation = new TestCancellation();
+        cancellation.cancel();
+
+        var stage = behavior.create(configuration("alpha"), http)
+                .handle(AiTestSupport.message("a payload"), cancellation).toCompletableFuture();
+
+        assertTrue(stage.isCompletedExceptionally());
+        assertEquals(0, http.chatCalls());
+        assertEquals(List.of(), alpha.receivedMethods());
+    }
+
+    @Test
     @DisplayName("a cancelled run stops even when the call cannot be cancelled and the answer arrives")
     void aCancelledRunStopsEvenWhenTheCallCannotBeCancelled() {
         // Cancelling the in-flight call is the easy half and is not always available: a response
@@ -750,6 +822,16 @@ class AgentMcpToolsTest {
             cause = cause.getCause();
         }
         return assertInstanceOf(AgentException.class, cause);
+    }
+
+    private static final class TestCancellation implements CancellationSignal {
+        private final List<Runnable> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private volatile boolean cancelled;
+        @Override public boolean cancelled() { return cancelled; }
+        @Override public void onCancel(Runnable listener) {
+            if (cancelled) listener.run(); else listeners.add(listener);
+        }
+        void cancel() { cancelled = true; listeners.forEach(Runnable::run); }
     }
 
     private static List<String> toolNamesOf(byte[] body) {

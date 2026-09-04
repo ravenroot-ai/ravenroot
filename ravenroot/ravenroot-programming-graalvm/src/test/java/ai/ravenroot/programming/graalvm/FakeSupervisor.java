@@ -28,6 +28,8 @@ final class FakeSupervisor implements SandboxSupervisorLauncher {
      */
     volatile int realSubprocessSpawns;
     volatile boolean reaped, block;
+    volatile java.util.concurrent.CountDownLatch launchEntered;
+    volatile java.util.concurrent.CountDownLatch releaseLaunch;
     /**
      * Opt-in stalls for the adapter's <b>two bounded waits</b> — the request write and the wait on
      * worker diagnostics — which require direct coverage in addition to explicit deadline checks.
@@ -111,6 +113,14 @@ final class FakeSupervisor implements SandboxSupervisorLauncher {
     public SandboxSupervisorSession launch(SandboxPolicy policy) {
         launches++;
         this.policy = policy;
+        if (launchEntered != null) launchEntered.countDown();
+        if (releaseLaunch != null) {
+            try { releaseLaunch.await(); }
+            catch (InterruptedException interrupted) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("test launch barrier interrupted", interrupted);
+            }
+        }
         return new Session();
     }
 

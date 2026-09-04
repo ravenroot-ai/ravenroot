@@ -208,6 +208,17 @@ export function createWorkspace() {
       activeId = neighbour ? neighbour.id : null;
       return removed;
     },
+
+    // Removes one captured set without exposing intermediate activation changes to a renderer.
+    // Callers perform their owner-specific teardown first, then project `workspace.active` once.
+    closeMany(ids) {
+      const removed = [];
+      for (const id of ids) {
+        const document_ = workspace.close(id);
+        if (document_) removed.push(document_);
+      }
+      return removed;
+    },
   };
 
   return workspace;

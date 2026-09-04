@@ -189,6 +189,11 @@ import {
   hasUnsavedWork,
 } from './workspace.js';
 import {
+  captureDocumentCloseSnapshot,
+  classifyDocumentCloseTargets,
+  resolveDocumentCloseSnapshot,
+} from './document-close-plan.js';
+import {
   PANE_MIN_WIDTH,
   PANE_HEADER_HEIGHT,
   SPLITTER_KEY_STEP,
@@ -1662,6 +1667,7 @@ window.ravenroot = {
   activateDocument,
   closeDocument,
   requestCloseDocument,
+  requestCloseAllDocuments,
   documents: () => {
     captureActiveDocument();
     return workspace.documents;
@@ -2441,9 +2447,7 @@ function activateDocument(id) {
   return workspace.activeId;
 }
 
-function closeDocument(id) {
-  const target = workspace.find(id);
-  if (!target) return false;
+function teardownDocument(target) {
   if (dragSnapshot?.owner === target) cancelNodeMoveGesture();
   if (edgeGestureSession?.owner === target) cancelEdgeGesture({ clearMessage: true });
   retireProgramReadiness(target);
@@ -2452,7 +2456,6 @@ function closeDocument(id) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
-  captureActiveDocument();
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
   destroyDocumentRenderer(target, 'closed');
@@ -2462,26 +2465,51 @@ function closeDocument(id) {
   detachExecution(target);
   if (target.cy) releaseCanvasZoomBridge(target.cy);
   target.cy?.destroy();
-  const targetIndex = workspace.documents.indexOf(target);
-  if (workspaceLayout.mode !== 'grid') {
-    const axis = workspaceLayout.mode === 'horizontal' ? 'columnShares' : 'rowShares';
-    const remaining = workspaceLayout[axis].filter((_, index) => index !== targetIndex);
-    const total = remaining.reduce((sum, value) => sum + value, 0);
-    workspaceLayout[axis] = total > 0 ? remaining.map(value => value / total) : [1];
-  }
-  // The pane goes with the document, and takes its canvas with it. Removing a pane does not move
-  // any other pane, so no surviving canvas is re-parented by a close.
   if (target.container) paneSeedObserver.unobserve(target.container);
   target.programReadiness?.overlay?.remove();
   target.pane?.remove();
   target.container = null;
   target.pane = null;
   paneRenderedSize.delete(target.id);
-  workspace.close(id);
+}
+
+function removeClosedDocumentShares(targets) {
+  if (workspaceLayout.mode !== 'grid') {
+    const axis = workspaceLayout.mode === 'horizontal' ? 'columnShares' : 'rowShares';
+    const closing = new Set(targets);
+    const remaining = workspaceLayout[axis].filter((_, index) =>
+      !closing.has(workspace.documents[index]));
+    const total = remaining.reduce((sum, value) => sum + value, 0);
+    workspaceLayout[axis] = total > 0 ? remaining.map(value => value / total) : [1];
+  }
+}
+
+function projectWorkspaceAfterDocumentClose() {
   applyActiveDocument();
   syncPaneLayout();
   reconcileActiveRenderModeRenderer();
   syncActiveDocumentChrome();
+}
+
+function closeDocument(id) {
+  const target = workspace.find(id);
+  if (!target) return false;
+  captureActiveDocument();
+  removeClosedDocumentShares([target]);
+  teardownDocument(target);
+  workspace.close(id);
+  projectWorkspaceAfterDocumentClose();
+  return true;
+}
+
+function closeDocumentSnapshot(snapshot) {
+  captureActiveDocument();
+  const targets = resolveDocumentCloseSnapshot(workspace, snapshot);
+  if (!targets.length) return false;
+  removeClosedDocumentShares(targets);
+  targets.forEach(teardownDocument);
+  workspace.closeMany(targets.map(target => target.id));
+  projectWorkspaceAfterDocumentClose();
   return true;
 }
 
@@ -7817,7 +7845,7 @@ function showAddEdgeForm({ skipDraftGuard = false } = {}) {
   renderEdgeForm(createEdge(id, graphData.nodes[0].id, graphData.nodes[1].id), true);
 }
 
-function downloadDocument(id) {
+function prepareDocumentDownload(id) {
   const target = workspace.find(id);
   // A freshly opened active document lives in the working view until the first capture. Saving is
   // itself a capture boundary, so write that view back before asking the record what it contains.
@@ -7825,7 +7853,7 @@ function downloadDocument(id) {
   if (!target?.graph || target.graph.format === 'graphify') {
     if (id === workspace.activeId) showInspectorMessage(
       'Only Ravenroot workflow documents can be exported as executable GraphML.');
-    return false;
+    return null;
   }
   if (id === workspace.activeId) {
     syncGraphPositions();
@@ -7834,24 +7862,46 @@ function downloadDocument(id) {
     syncGraphPositionsFromCy(target.graph, target.cy);
   }
   const xml = serializeGraphML(target.graph);
-  const blob = new Blob([xml], { type: 'application/graphml+xml;charset=utf-8' });
+  return {
+    target,
+    xml,
+    filename: target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`,
+  };
+}
+
+function dispatchDocumentDownload(prepared) {
+  const blob = new Blob([prepared.xml], { type: 'application/graphml+xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = prepared.filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function markDocumentDownloaded(prepared, { announce = true } = {}) {
+  const { target } = prepared;
   // Exporting GraphML is the only persistence this editor has, so it is the save point: the undo
   // stack keeps its depth and the document becomes clean at its current position.
   target.history.markSaved();
-  if (id === workspace.activeId) {
+  if (target.id === workspace.activeId) {
     editHistory.markSaved();
     updateHistoryUi();
-    addActivityMessage('editor', `Saved ${anchor.download}`, 'completed');
+    if (announce) addActivityMessage('editor', `Saved ${prepared.filename}`, 'completed');
   } else {
     syncPaneHeaders();
     syncDocumentSwitcher();
   }
+}
+
+function downloadDocument(id) {
+  const prepared = prepareDocumentDownload(id);
+  if (!prepared) return false;
+  dispatchDocumentDownload(prepared);
+  markDocumentDownloaded(prepared);
   return true;
 }
 
@@ -11899,6 +11949,233 @@ function requestCloseDocument(id, origin = document.activeElement) {
   });
 }
 
+let pendingCloseAllDocuments = null;
+
+function closeAllDocumentsDialog() {
+  return document.getElementById('close-all-documents-dialog');
+}
+
+function closeAllDescription(oneKey, manyKey, count) {
+  return uiText(count === 1 ? oneKey : manyKey, { count });
+}
+
+function renderCloseAllList(documents, kind) {
+  const list = document.getElementById('close-all-documents-list');
+  list.replaceChildren(...documents.map(document_ => {
+    const item = document.createElement('li');
+    if (kind === 'sessions') {
+      const count = document_.sourceSession.sourceCount;
+      item.textContent = uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
+        name: document_.displayName,
+        count,
+      });
+    } else {
+      item.textContent = document_.displayName;
+    }
+    return item;
+  }));
+}
+
+function renderCloseAllActions(actions) {
+  const host = document.getElementById('close-all-documents-actions');
+  host.replaceChildren(...actions.map(({ action, label, kind = '' }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn${kind ? ` ${kind}` : ''}`;
+    button.dataset.closeAllAction = action;
+    button.textContent = label;
+    return button;
+  }));
+}
+
+function showCloseAllStep(step, targets) {
+  const dialog = closeAllDocumentsDialog();
+  const title = document.getElementById('close-all-documents-title');
+  const description = document.getElementById('close-all-documents-description');
+  const status = document.getElementById('close-all-documents-status');
+  dialog.removeAttribute('aria-busy');
+  status.textContent = '';
+  delete status.dataset.state;
+  if (step === 'dirty') {
+    title.textContent = uiText('closeAll.dirty.title');
+    description.textContent = closeAllDescription(
+      'closeAll.dirty.description.one', 'closeAll.dirty.description.many', targets.length);
+    renderCloseAllList(targets, 'dirty');
+    renderCloseAllActions([
+      { action: 'save', label: uiText('closeAll.dirty.save'), kind: 'primary' },
+      { action: 'discard', label: uiText('closeAll.dirty.discard'), kind: 'danger' },
+      { action: 'cancel', label: uiText('closeAll.cancel') },
+    ]);
+  } else {
+    title.textContent = uiText('closeAll.sessions.title');
+    description.textContent = closeAllDescription(
+      'closeAll.sessions.description.one', 'closeAll.sessions.description.many', targets.length);
+    renderCloseAllList(targets, 'sessions');
+    renderCloseAllActions([
+      { action: 'stop', label: uiText('closeAll.sessions.stop'), kind: 'danger' },
+      { action: 'keep', label: uiText('closeAll.sessions.keep') },
+      { action: 'cancel', label: uiText('closeAll.cancel') },
+    ]);
+  }
+  if (!dialog.open) dialog.showModal();
+  dialog.querySelector('[data-close-all-action="cancel"]')?.focus();
+}
+
+function showCloseAllWorking() {
+  const dialog = closeAllDocumentsDialog();
+  dialog.setAttribute('aria-busy', 'true');
+  document.getElementById('close-all-documents-title').textContent = uiText('closeAll.working.title');
+  document.getElementById('close-all-documents-description').textContent =
+    uiText('closeAll.working.description');
+  document.getElementById('close-all-documents-list').replaceChildren();
+  document.getElementById('close-all-documents-status').textContent = '';
+  renderCloseAllActions([]);
+}
+
+function showCloseAllFailure(stage) {
+  const dialog = closeAllDocumentsDialog();
+  dialog.removeAttribute('aria-busy');
+  document.getElementById('close-all-documents-title').textContent = uiText('closeAll.failure.title');
+  document.getElementById('close-all-documents-description').textContent =
+    uiText('closeAll.failure.description');
+  document.getElementById('close-all-documents-list').replaceChildren();
+  const status = document.getElementById('close-all-documents-status');
+  status.dataset.state = 'error';
+  status.textContent = uiText(stage === 'stop' ? 'closeAll.failure.stop' : 'closeAll.failure.save');
+  renderCloseAllActions([
+    { action: 'retry', label: uiText('closeAll.retry'), kind: 'primary' },
+    { action: 'cancel', label: uiText('closeAll.cancel') },
+  ]);
+  dialog.querySelector('[data-close-all-action="retry"]')?.focus();
+}
+
+function focusAfterCloseAll() {
+  const newDocument = document.getElementById('btn-new');
+  const target = workspace.size
+    ? document.getElementById('document-switcher')
+    : (newDocument?.getClientRects().length ? newDocument : menuTrigger('file'));
+  target?.focus();
+}
+
+function cancelCloseAllDocuments() {
+  const pending = pendingCloseAllDocuments;
+  if (!pending) return false;
+  pending.cancelled = true;
+  pendingCloseAllDocuments = null;
+  const dialog = closeAllDocumentsDialog();
+  if (dialog.open) dialog.close('cancel');
+  const focusTarget = pending.origin?.isConnected ? pending.origin : menuTrigger('view');
+  focusTarget?.focus();
+  return true;
+}
+
+function finishCloseAllDocuments(snapshot) {
+  const dialog = closeAllDocumentsDialog();
+  pendingCloseAllDocuments = null;
+  if (dialog.open) dialog.close('closed');
+  closeDocumentSwitcher();
+  closeDocumentSnapshot(snapshot);
+  focusAfterCloseAll();
+}
+
+async function commitCloseAllDocuments() {
+  const pending = pendingCloseAllDocuments;
+  if (!pending || pending.committing) return false;
+  const targets = resolveDocumentCloseSnapshot(workspace, pending.snapshot);
+  if (!targets.length) {
+    finishCloseAllDocuments(pending.snapshot);
+    return true;
+  }
+  const classified = classifyDocumentCloseTargets(targets);
+  if (classified.dirty.length && !pending.dirtyChoice) {
+    showCloseAllStep('dirty', classified.dirty);
+    return true;
+  }
+  if (classified.activeSessions.length && !pending.sessionChoice) {
+    showCloseAllStep('sessions', classified.activeSessions);
+    return true;
+  }
+
+  pending.committing = true;
+  showCloseAllWorking();
+  let stage = 'save';
+  try {
+    const prepared = pending.dirtyChoice === 'save'
+      ? classified.dirty.map(document_ => {
+        const download = prepareDocumentDownload(document_.id);
+        if (!download) throw new Error('Document download preparation failed.');
+        return download;
+      })
+      : [];
+
+    if (pending.sessionChoice === 'stop') {
+      stage = 'stop';
+      for (const owner of classified.activeSessions) {
+        if (!resolveDocumentCloseSnapshot(workspace, pending.snapshot).includes(owner)) continue;
+        const stopped = sourceSessionIsActive(owner.sourceSession)
+          ? await stopActiveSourceSession(owner) : true;
+        if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
+        if (!stopped) {
+          throw new Error('Source session did not stop.');
+        }
+      }
+    }
+
+    stage = 'save';
+    if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
+    const liveTargets = new Set(resolveDocumentCloseSnapshot(workspace, pending.snapshot));
+    const liveDownloads = prepared.filter(item => liveTargets.has(item.target));
+    liveDownloads.forEach(dispatchDocumentDownload);
+    liveDownloads.forEach(item => markDocumentDownloaded(item, { announce: false }));
+    finishCloseAllDocuments(pending.snapshot);
+    return true;
+  } catch {
+    pending.committing = false;
+    showCloseAllFailure(stage);
+    return false;
+  }
+}
+
+function beginCloseAllDocuments(snapshot, origin) {
+  const targets = resolveDocumentCloseSnapshot(workspace, snapshot);
+  if (!targets.length) return false;
+  pendingCloseAllDocuments = {
+    snapshot,
+    origin,
+    dirtyChoice: null,
+    sessionChoice: null,
+    committing: false,
+  };
+  const { dirty, activeSessions } = classifyDocumentCloseTargets(targets);
+  if (dirty.length) return showCloseAllStep('dirty', dirty) || true;
+  if (activeSessions.length) return showCloseAllStep('sessions', activeSessions) || true;
+  finishCloseAllDocuments(snapshot);
+  return true;
+}
+
+function requestCloseAllDocuments(origin = document.activeElement) {
+  captureActiveDocument();
+  const snapshot = captureDocumentCloseSnapshot(workspace.documents);
+  if (!snapshot.length || pendingCloseAllDocuments) return false;
+  const begin = () => beginCloseAllDocuments(snapshot, origin);
+  return runAfterInspectorDraft(begin, { deferredAction: begin, deferredResult: true });
+}
+
+function handleCloseAllDocumentsAction(action) {
+  const pending = pendingCloseAllDocuments;
+  if (!pending || pending.committing) return false;
+  if (action === 'cancel') return cancelCloseAllDocuments();
+  if (action === 'retry') {
+    void commitCloseAllDocuments();
+    return true;
+  }
+  if (action === 'save' || action === 'discard') pending.dirtyChoice = action;
+  else if (action === 'stop' || action === 'keep') pending.sessionChoice = action;
+  else return false;
+  void commitCloseAllDocuments();
+  return true;
+}
+
 /**
  * Closing is never Stop, and that difference has to reach the operator as a real
  * choice, not merely a code comment on {@link closeDocument}. A document with an active local
@@ -11956,7 +12233,10 @@ function closeActiveDeploymentDialog(outcome) {
     // matching `stopActiveSourceSession`'s own token discipline: closing first would abort the poll
     // controller closeDocument itself owns, but the stop request it kicks off here is unaffected by
     // that abort (see `sourceSessionCleanupIsCurrent`, which does not depend on the pollController).
-    void stopActiveSourceSession(target).finally(() => completeCloseDocument(pending.documentId));
+    void stopActiveSourceSession(target).then(stopped => {
+      if (stopped) completeCloseDocument(pending.documentId);
+      else if (pending.origin?.isConnected) pending.origin.focus();
+    });
     return;
   }
   // outcome === 'close': detach observation only, the exact contract closeDocument's own comment
@@ -11986,6 +12266,8 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   zoomIn: () => zoomBy(1.2),
   zoomOut: () => zoomBy(0.8),
   openDocumentSwitcher: () => openDocumentSwitcher(),
+  closeAllDocuments: (_context, invocation) => requestCloseAllDocuments(
+    invocation.control?.closest('#application-menu') ? menuTrigger('view') : invocation.control),
   openPanels: () => openPanelsIndex(document.querySelector('.rail-index')),
   toggleLeftPanels: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'left', !panelLayout.zones.left.collapsed)),
   toggleRightInspector: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'right', !panelLayout.zones.right.collapsed)),
@@ -12017,6 +12299,7 @@ function commandContext() {
   const selectedNodes = cy?.nodes(':selected');
   return {
     hasDocument: Boolean(workspace.active && graphData),
+    hasOpenDocuments: workspace.size > 0,
     editable: Boolean(graphData && graphData.format !== 'graphify'),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
@@ -12124,7 +12407,8 @@ function renderApplicationMenu(name) {
 function openApplicationMenu(name, { focus = true } = {}) {
   const dialog = document.getElementById('unsaved-document-dialog');
   const activeDeploymentDialog = document.getElementById('active-deployment-dialog');
-  if (dialog.open || activeDeploymentDialog.open) return false;
+  const closeAllDialog = closeAllDocumentsDialog();
+  if (dialog.open || activeDeploymentDialog.open || closeAllDialog.open) return false;
   closePopovers({ applicationMenu: false });
   const trigger = menuTrigger(name);
   const popup = document.getElementById('application-menu');
@@ -12326,6 +12610,11 @@ document.addEventListener('click', event => {
   const inspectorUnsavedAction = event.target.closest('[data-inspector-unsaved-action]');
   if (inspectorUnsavedAction) {
     completeInspectorTransition(inspectorUnsavedAction.dataset.inspectorUnsavedAction);
+    return;
+  }
+  const closeAllAction = event.target.closest('[data-close-all-action]');
+  if (closeAllAction) {
+    handleCloseAllDocumentsAction(closeAllAction.dataset.closeAllAction);
     return;
   }
   const unsavedAction = event.target.closest('[data-unsaved-action]');
@@ -12672,6 +12961,13 @@ document.getElementById('unsaved-document-dialog').addEventListener('keydown', e
 document.getElementById('unsaved-document-dialog').addEventListener('cancel', event => {
   event.preventDefault();
   closeUnsavedDocumentDialog('cancel');
+});
+document.getElementById('close-all-documents-dialog').addEventListener('keydown', event => {
+  event.stopPropagation();
+});
+document.getElementById('close-all-documents-dialog').addEventListener('cancel', event => {
+  event.preventDefault();
+  cancelCloseAllDocuments();
 });
 // Same containment as the unsaved-changes dialog above, for the same reason -- Escape must
 // resolve this modal's own cancel action, not fall through to canvas or global shortcuts behind it.

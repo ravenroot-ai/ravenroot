@@ -67,6 +67,8 @@ final class GithubApi {
             Thread.currentThread().interrupt(); call.cancel(); throw new GithubException(GithubException.Code.CANCELLED);
         } catch (TimeoutException timeout) {
             call.cancel(); throw new GithubException(GithubException.Code.TRANSPORT);
+        } catch (CancellationException cancelled) {
+            control.check(); throw new GithubException(GithubException.Code.CANCELLED);
         } catch (ExecutionException failure) { throw sanitize(failure.getCause()); }
         finally { control.detach(call); }
     }
@@ -132,7 +134,18 @@ final class GithubApi {
         private final AtomicBoolean cancelled = new AtomicBoolean();
         private final AtomicReference<OutboundCall<?>> active = new AtomicReference<>();
         private final AtomicReference<GithubException> failure = new AtomicReference<>();
-        void attach(OutboundCall<?> call) { check(); active.set(call); if (cancelled.get()) call.cancel(); }
+        private final Runnable beforePublish;
+        CallControl() { this(() -> { }); }
+        CallControl(Runnable beforePublish) { this.beforePublish = java.util.Objects.requireNonNull(beforePublish); }
+        void attach(OutboundCall<?> call) {
+            check(); beforePublish.run(); active.set(call);
+            try { check(); }
+            catch (RuntimeException stopped) {
+                active.compareAndSet(call, null);
+                try { call.cancel(); } catch (RuntimeException ignored) { }
+                throw stopped;
+            }
+        }
         void detach(OutboundCall<?> call) { active.compareAndSet(call, null); }
         void check() {
             GithubException failed = failure.get(); if (failed != null) throw failed;

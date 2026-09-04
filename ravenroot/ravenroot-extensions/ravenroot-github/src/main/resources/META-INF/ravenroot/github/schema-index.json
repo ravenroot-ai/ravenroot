@@ -2,10 +2,25 @@
   "version": "ravenroot.github.schemas.v1",
   "mediaType": "application/schema+json",
   "schemas": {
-    "github-events-source": "META-INF/ravenroot/github/schemas/github-events-source.v1.schema.json",
-    "project-transition": "META-INF/ravenroot/github/schemas/project-transition.v1.schema.json",
-    "github-app-review": "META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json",
-    "github-workflow-watch": "META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json",
-    "release-prepare": "META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json"
+    "github-events-source": {
+      "event": "META-INF/ravenroot/github/schemas/github-events-source.v1.schema.json#/$defs/event",
+      "receipt": "META-INF/ravenroot/github/schemas/github-events-source.v1.schema.json#/$defs/receipt"
+    },
+    "project-transition": {
+      "input": "META-INF/ravenroot/github/schemas/project-transition.v1.schema.json#/$defs/input",
+      "output": "META-INF/ravenroot/github/schemas/project-transition.v1.schema.json#/$defs/output"
+    },
+    "github-app-review": {
+      "input": "META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json#/$defs/input",
+      "output": "META-INF/ravenroot/github/schemas/github-app-review.v1.schema.json#/$defs/output"
+    },
+    "github-workflow-watch": {
+      "input": "META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json#/$defs/input",
+      "output": "META-INF/ravenroot/github/schemas/github-workflow-watch.v1.schema.json#/$defs/output"
+    },
+    "release-prepare": {
+      "input": "META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json#/$defs/input",
+      "output": "META-INF/ravenroot/github/schemas/release-prepare.v1.schema.json#/$defs/output"
+    }
   }
 }

@@ -56,9 +56,12 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         final GithubProfile profile;
         try { input = Input.parse(message.payload()); profile = runtime.requireProfile(message.tenantId(), profileName); input.authorize(profile.project()); }
         catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
+        if (input.transition().equals(profile.project().claimTransition())
+                && input.expectedAttempts == Integer.MAX_VALUE)
+            return CompletableFuture.failedFuture(new GithubException(GithubException.Code.INVALID_INPUT));
         long deadline = System.currentTimeMillis() + profile.timeoutMs();
         Map<String, Object> canonical = input.canonical();
-        String key = profile.repositoryId() + ":" + input.itemId;
+        String key = profile.repositoryId() + ":" + GithubValues.keyDigest("project-item", input.itemId);
         try {
             return runtime.submit(message, services, profile, BEHAVIOR, key, canonical, deadline,
                     GithubOperationStore.BeginPolicy.project(input.expectedGeneration, profile.timeoutMs()),
@@ -69,8 +72,13 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
     private static NodeResult transition(GithubApi api, GithubProfile profile, Input input,
                                          GithubOperationStore.Lease operation) {
         Snapshot before = snapshot(api, profile, input.itemId);
-        long wantedAttempts = input.expectedAttempts + (input.transition().equals(profile.project().claimTransition()) ? 1 : 0);
-        long wantedGeneration = input.expectedGeneration + 1;
+        long wantedAttempts;
+        long wantedGeneration;
+        try {
+            wantedAttempts = input.transition().equals(profile.project().claimTransition())
+                    ? Math.addExact(input.expectedAttempts, 1) : input.expectedAttempts;
+            wantedGeneration = Math.addExact(input.expectedGeneration, 1);
+        } catch (ArithmeticException overflow) { throw new GithubException(GithubException.Code.INVALID_INPUT); }
         if (before.matches(input.toStatus, wantedAttempts, wantedGeneration))
             return finish(api, profile, input, before, wantedGeneration, wantedAttempts, "already-applied");
         if (!before.matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)) return result(
@@ -86,7 +94,12 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         boolean reconciling = operation.takeover() || "AMBIGUOUS".equals(operation.record().state());
         Dispatch dispatch = update(api, variables);
         if (dispatch.uncertain && !reconciling) {
-            Snapshot observed = safeSnapshot(api, profile, input.itemId);
+            Snapshot observed;
+            try { observed = safeSnapshot(api, profile, input.itemId); }
+            catch (GithubProtocol.RateLimited limited) {
+                return result("ambiguous", "ambiguous", input, input.expectedGeneration,
+                        input.expectedAttempts, "RATE_LIMITED", limited.retryAt());
+            }
             if (observed != null && observed.matches(input.toStatus, wantedAttempts, wantedGeneration))
                 return finish(api, profile, input, observed, wantedGeneration, wantedAttempts, "applied");
             return result("ambiguous", "ambiguous", input,
@@ -94,7 +107,12 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
                     observed == null ? input.expectedAttempts : observed.attempts,
                     dispatch.retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", dispatch.retryAt);
         }
-        Snapshot after = safeSnapshot(api, profile, input.itemId);
+        Snapshot after;
+        try { after = safeSnapshot(api, profile, input.itemId); }
+        catch (GithubProtocol.RateLimited limited) {
+            return result("ambiguous", "ambiguous", input, input.expectedGeneration,
+                    input.expectedAttempts, "RATE_LIMITED", limited.retryAt());
+        }
         if (after == null) return result("ambiguous", "ambiguous", input, input.expectedGeneration,
                 input.expectedAttempts, "REMOTE_STATE_UNKNOWN", dispatch.retryAt);
         if (after.matches(input.toStatus, wantedAttempts, wantedGeneration))
@@ -103,7 +121,12 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
             Dispatch repair = update(api, variables);
             if (repair.uncertain) return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
                     repair.retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", repair.retryAt);
-            Snapshot repaired = safeSnapshot(api, profile, input.itemId);
+            Snapshot repaired;
+            try { repaired = safeSnapshot(api, profile, input.itemId); }
+            catch (GithubProtocol.RateLimited limited) {
+                return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
+                        "RATE_LIMITED", limited.retryAt());
+            }
             if (repaired == null) return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
                     "REMOTE_STATE_UNKNOWN");
             if (repaired.matches(input.toStatus, wantedAttempts, wantedGeneration))

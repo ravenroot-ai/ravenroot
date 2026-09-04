@@ -69,6 +69,8 @@ Input `github.project-transition.v1` supplies an item ID, expected status, targe
 generation, expected Attempts value, and correlation ID. The profile fixes the Project, field IDs,
 status-option IDs, allowed transitions, and the one claim transition that increments Attempts.
 Claims write `expectedAttempts + 1`; all other transitions preserve the exact expected value.
+`expectedAttempts` is bounded to `0..2147483647`; a claim at the upper bound is rejected before
+any provider request, so the absolute increment cannot overflow the published contract.
 Writes are absolute, recorded as durable intent, and followed by a complete remote reread. Replay of
 the exact desired status/Attempts/generation is `already-applied`; a lost generation or mixed remote
 state is `conflict`/`CAS_LOST` and is never overwritten.
@@ -120,7 +122,9 @@ same run. The exact-SHA query is bounded to 100 results and fails closed if GitH
 Outcomes are `continue` only when every required run
 completed with `success`, `failed` for a terminal non-success conclusion, and `timeout` for deadline
 or poll exhaustion. Missing runs remain pending. `Retry-After` and rate-limit reset are honored
-within the absolute deadline, and cancellation aborts the active managed HTTP call and further polls.
+within the absolute deadline. Cancellation aborts the active managed HTTP call and further polls;
+the returned stage does not expose cancellation completion until the `CANCELLED` result and its
+required audit evidence are durable, so immediate restart replays cancellation instead of work.
 
 ### `release-prepare`
 
@@ -144,6 +148,10 @@ authorization and publication workflows.
 `store.path` names an operator-owned SQLite file. Schema migration is forward-only. Every operation
 is partitioned by tenant/profile/kind/key, content-bound by SHA-256, and protected by an expiring
 single-writer lease renewed before and after managed I/O and by a bounded-operation heartbeat.
+Operation keys contain only structural provider identifiers plus domain-separated SHA-256 digests
+of caller-controlled correlation and item values; raw correlation IDs are not stored as operation or
+audit keys. Terminal saves and nonterminal `WAITING` saves each atomically include required audit
+evidence; a `WAITING` transaction also releases its writer lease atomically.
 Terminal success, failure, cancellation, stale, conflict, and timeout outputs are ownerless and
 replay deterministically for the same request digest. A subsequent Project request may replace a
 non-ambiguous terminal row only when its expected generation equals the ledger's stored observed
@@ -162,8 +170,11 @@ authority.
 
 All GitHub calls recognize `429`, `403` with `Retry-After`, and `403` with
 `X-RateLimit-Remaining: 0`. Provider reset times are clamped to a short positive minimum and a
-five-minute maximum; operation deadlines, poll counts, response bounds, cancellation, and profile
-concurrency remain authoritative.
+five-minute maximum. A limit observed before dispatching an effect is durably `WAITING`; restart
+before its recorded `retryAtEpochMs` replays that result without an outbound call. A limit observed
+while reconciling a possibly dispatched mutation is durably `AMBIGUOUS` with the same retry bound;
+later recovery reconciles provider state before any further effect. Operation deadlines, poll
+counts, response bounds, cancellation, and profile concurrency remain authoritative.
 
 ## Configuration and limits
 
@@ -250,7 +261,10 @@ The current Node SDK `NodeTypeDescriptor` exposes behavior identity, properties,
 execution flags, but has no machine-readable input/output payload-schema fields. This bundle instead
 publishes its versioned JSON Schema 2020-12 resources in the JAR. Consumers discover them from the
 stable index `META-INF/ravenroot/github/schema-index.json`; the index maps exactly the five behavior
-identifiers to schemas containing the applicable input, output, event, and receipt definitions.
+identifiers and their applicable `input`, `output`, `event`, and `receipt` contracts to explicit
+resource fragment URIs. Consumers validate against the indexed fragment URI rather than the schema
+document root. Action outputs accept either the behavior result fragment or the shared durable
+rate-retry result selected by that behavior's indexed `output` fragment.
 
 ## Recovery declaration
 

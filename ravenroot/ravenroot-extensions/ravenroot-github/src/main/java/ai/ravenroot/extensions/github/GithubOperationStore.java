@@ -11,6 +11,9 @@ interface GithubOperationStore extends AutoCloseable {
     void saveAndAudit(Lease lease, String state, long generation, long attempts, long deadlineEpochMs,
                       String remoteId, String detailDigest, String resultJson,
                       String disposition, String reason, String evidenceDigest);
+    void saveWaitingAndAuditRelease(Lease lease, long generation, long attempts, long deadlineEpochMs,
+                                    String remoteId, String detailDigest, String resultJson,
+                                    String reason, String evidenceDigest);
     void renew(Lease lease);
     void release(Lease lease);
     void audit(Lease lease, String disposition, String reason, String evidenceDigest);

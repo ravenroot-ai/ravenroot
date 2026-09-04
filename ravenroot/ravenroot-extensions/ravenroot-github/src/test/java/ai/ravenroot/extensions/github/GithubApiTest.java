@@ -1,10 +1,14 @@
 package ai.ravenroot.extensions.github;
 
+import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -33,6 +37,20 @@ class GithubApiTest {
         assertThrows(GithubException.class, () -> GithubValues.number(Double.POSITIVE_INFINITY, 0, 10));
         assertThrows(GithubException.class, () -> GithubValues.number(9_007_199_254_740_992d,
                 0, Long.MAX_VALUE));
+    }
+
+    @Test void failureBetweenAttachCheckAndPublicationCancelsTheJustPublishedCall() {
+        GithubApi.CallControl[] holder = new GithubApi.CallControl[1];
+        holder[0] = new GithubApi.CallControl(() -> holder[0].fail(
+                new GithubException(GithubException.Code.CAS_LOST)));
+        AtomicBoolean cancelled = new AtomicBoolean();
+        OutboundCall<OutboundHttpResponse> call = new OutboundCall<>() {
+            @Override public CompletableFuture<OutboundHttpResponse> completion() { return new CompletableFuture<>(); }
+            @Override public boolean cancel() { cancelled.set(true); return true; }
+        };
+        GithubException failure = assertThrows(GithubException.class, () -> holder[0].attach(call));
+        assertEquals(GithubException.Code.CAS_LOST, failure.code());
+        assertTrue(cancelled.get());
     }
 
     private static GithubApi.Response response(int status, Map<String, List<String>> headers) {

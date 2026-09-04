@@ -100,6 +100,9 @@ final class GithubValues {
     }
 
     static String sha256(String value) { return sha256(value.getBytes(StandardCharsets.UTF_8)); }
+    static String keyDigest(String domain, String value) {
+        return sha256("ravenroot-github-operation-key-v1\u0000" + domain + "\u0000" + value);
+    }
 
     static List<Map<String, Object>> objectList(Object value, int maximum) {
         List<Object> source = list(value);

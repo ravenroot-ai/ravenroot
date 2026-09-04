@@ -3,6 +3,10 @@ package ai.ravenroot.extensions.github;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.payload.PayloadJson;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.networknt.schema.JsonSchemaFactory;
+import com.networknt.schema.SpecVersion;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -66,15 +70,58 @@ class GithubBoundaryTest {
         Map<String, Object> schemas = GithubValues.object(index.get("schemas"));
         assertEquals(Set.of("github-events-source", "project-transition", "github-app-review",
                 "github-workflow-watch", "release-prepare"), schemas.keySet());
+        ObjectMapper mapper = new ObjectMapper();
+        JsonSchemaFactory factory = JsonSchemaFactory.getInstance(SpecVersion.VersionFlag.V202012);
+        Map<String, Map<String, Object>> valid = validSchemaPayloads();
         for (Map.Entry<String, Object> entry : schemas.entrySet()) {
-            String resource = GithubValues.string(entry.getValue(), 256);
-            try (var stream = loader.getResourceAsStream(resource)) {
-                assertNotNull(stream, entry.getKey());
-                Map<String, Object> schema = GithubValues.object(
-                        PayloadJson.read(stream.readAllBytes(), GithubValues.LIMITS).toJava());
-                assertEquals("https://json-schema.org/draft/2020-12/schema", schema.get("$schema"));
-                assertTrue(schema.containsKey("$defs"), entry.getKey());
+            Map<String, Object> contracts = GithubValues.object(entry.getValue());
+            assertEquals(valid.get(entry.getKey()).keySet(), contracts.keySet());
+            for (Map.Entry<String, Object> contract : contracts.entrySet()) {
+                String uri = GithubValues.string(contract.getValue(), 300);
+                String[] parts = uri.split("#", 2);
+                assertEquals("/$defs/" + contract.getKey(), parts[1]);
+                try (var stream = loader.getResourceAsStream(parts[0])) {
+                    assertNotNull(stream, entry.getKey() + ":" + contract.getKey());
+                    var document = mapper.readTree(stream);
+                    ObjectNode operative = mapper.createObjectNode();
+                    operative.put("$schema", "https://json-schema.org/draft/2020-12/schema");
+                    operative.set("$defs", document.get("$defs"));
+                    operative.put("$ref", "#/$defs/" + contract.getKey());
+                    var schema = factory.getSchema(operative);
+                    assertTrue(schema.validate(mapper.valueToTree(valid.get(entry.getKey()).get(contract.getKey())))
+                            .isEmpty(), entry.getKey() + ":" + contract.getKey());
+                    assertFalse(schema.validate(mapper.valueToTree(Map.of("unexpected", true))).isEmpty(),
+                            entry.getKey() + ":" + contract.getKey());
+                }
             }
         }
+    }
+
+    private static Map<String, Map<String, Object>> validSchemaPayloads() {
+        String sha = GithubTestSupport.SHA;
+        Map<String, Object> retry = Map.of("version", "github.operation.retry.v1", "status", "waiting",
+                "reason", "RATE_LIMITED", "retryAtEpochMs", 1L, "generation", 0L, "attempts", 0L,
+                "remoteId", "");
+        return Map.of(
+                "github-events-source", Map.of(
+                        "event", Map.of("version", "github.event.v1", "event", "workflow_run", "action", "completed",
+                                "deliveryId", "delivery-1", "repositoryId", 1L, "installationId", 2L,
+                                "body", Map.of()),
+                        "receipt", Map.of("version", "github.event.receipt.v1", "deliveryId", "delivery-1",
+                                "receipt", "committed")),
+                "project-transition", Map.of(
+                        "input", Map.of("version", "github.project-transition.v1", "itemId", "ITEM_1",
+                                "fromStatus", "Todo", "toStatus", "Doing", "expectedGeneration", 1L,
+                                "expectedAttempts", 0L, "correlationId", "correlation"), "output", retry),
+                "github-app-review", Map.of(
+                        "input", Map.of("version", "github.app-review.v1", "pullNumber", 1L, "commit", sha,
+                                "verdict", "APPROVE", "body", "Approved", "correlationId", "correlation"),
+                        "output", retry),
+                "github-workflow-watch", Map.of(
+                        "input", Map.of("version", "github.workflow-watch.v1", "commit", sha,
+                                "deadlineEpochMs", 1L, "correlationId", "correlation"), "output", retry),
+                "release-prepare", Map.of(
+                        "input", Map.of("version", "github.release-prepare.v1", "commit", sha,
+                                "releaseKind", "minor", "correlationId", "correlation"), "output", retry));
     }
 }

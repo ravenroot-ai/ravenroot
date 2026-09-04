@@ -6,6 +6,7 @@ import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.payload.PayloadJson;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -25,16 +26,23 @@ final class GithubRuntime {
     private final java.util.function.Supplier<GithubConfiguration> resolver;
     private volatile GithubConfiguration resolvedConfiguration;
     private volatile GithubOperationStore resolvedStore;
+    private final Clock clock;
     private final ConcurrentHashMap<String, Gate> gates = new ConcurrentHashMap<>();
 
     GithubRuntime(GithubConfiguration configuration, GithubOperationStore store) {
+        this(configuration, store, Clock.systemUTC());
+    }
+
+    GithubRuntime(GithubConfiguration configuration, GithubOperationStore store, Clock clock) {
         this.resolver = () -> configuration;
         this.resolvedConfiguration = java.util.Objects.requireNonNull(configuration);
         this.resolvedStore = java.util.Objects.requireNonNull(store);
+        this.clock = java.util.Objects.requireNonNull(clock);
     }
 
     GithubRuntime(java.util.function.Supplier<GithubConfiguration> resolver) {
         this.resolver = java.util.Objects.requireNonNull(resolver);
+        this.clock = Clock.systemUTC();
     }
 
     GithubConfiguration configuration() {
@@ -71,6 +79,22 @@ final class GithubRuntime {
     CompletionStage<NodeResult> submit(NodeMessage message, NodePackageServices services, GithubProfile profile,
                                        String kind, String key, Map<String, Object> canonicalInput,
                                        long deadlineEpochMs, GithubOperationStore.BeginPolicy beginPolicy, Work work) {
+        return submit(message, services, profile, kind, key, canonicalInput, deadlineEpochMs, beginPolicy, true, work);
+    }
+
+    CompletionStage<NodeResult> cancelDurably(NodeMessage message, NodePackageServices services, GithubProfile profile,
+                                               String kind, String key, Map<String, Object> canonicalInput,
+                                               long deadlineEpochMs) {
+        return submit(message, services, profile, kind, key, canonicalInput, deadlineEpochMs,
+                GithubOperationStore.BeginPolicy.ordinary(), false,
+                (api, operation, control) -> { throw new GithubException(GithubException.Code.CANCELLED); });
+    }
+
+    private CompletionStage<NodeResult> submit(NodeMessage message, NodePackageServices services,
+                                                GithubProfile profile, String kind, String key,
+                                                Map<String, Object> canonicalInput, long deadlineEpochMs,
+                                                GithubOperationStore.BeginPolicy beginPolicy,
+                                                boolean honorRetryDeadline, Work work) {
         String requestDigest = GithubValues.sha256(GithubValues.jsonBytes(canonicalInput));
         GithubOperationStore store = store();
         GithubOperationStore.Lease operation = store.begin(message.tenantId(), profile.name(), kind, key,
@@ -88,6 +112,16 @@ final class GithubRuntime {
                 }
             }
             return CompletableFuture.completedFuture(new NodeResult(outcome(operation.record().state()), value, Map.of()));
+        }
+        final NodeResult delayed;
+        try { delayed = honorRetryDeadline ? delayedRetry(operation) : null; }
+        catch (RuntimeException invalidDurableResult) {
+            store.release(operation);
+            return CompletableFuture.failedFuture(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+        }
+        if (delayed != null) {
+            store.release(operation);
+            return CompletableFuture.completedFuture(delayed);
         }
         Gate gate = gates.compute(profile.tenantId() + "\u0000" + profile.name(), (ignored, current) ->
                 current == null ? new Gate(profile.maxConcurrency()) : current.retain(profile.maxConcurrency()));
@@ -109,6 +143,8 @@ final class GithubRuntime {
                 try {
                     completed = work.run(new GithubApi(services, message, profile, control,
                             () -> { control.check(); store.renew(operation); control.check(); }), operation, control);
+                } catch (GithubProtocol.RateLimited limited) {
+                    completed = retry(operation, limited.retryAt());
                 } catch (GithubException failure) {
                     if (failure.code() == GithubException.Code.CAS_LOST) {
                         relinquish.run(); result.completeExceptionally(failure);
@@ -144,12 +180,9 @@ final class GithubRuntime {
                     if (terminal) store.saveAndAudit(operation, state, number(output.get("generation")),
                             number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
                             evidence, json, state, reason(output), evidence);
-                    else {
-                        store.save(operation, state, number(output.get("generation")), number(output.get("attempts")),
-                                durableDeadline, optional(output.get("remoteId")), evidence, json, false);
-                        store.audit(operation, state, reason(output), evidence);
-                        store.release(operation);
-                    }
+                    else store.saveWaitingAndAuditRelease(operation, number(output.get("generation")),
+                            number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
+                            evidence, json, reason(output), evidence);
                     relinquish.run(); result.complete(completed);
                 } catch (RuntimeException persistence) {
                     relinquish.run(); result.completeExceptionally(
@@ -165,6 +198,22 @@ final class GithubRuntime {
     GithubOperationStore.DeliveryDecision bindDelivery(String tenant, String profile, String delivery,
                                                         String bindingDigest) {
         return store().bindDelivery(tenant, profile, delivery, bindingDigest);
+    }
+
+    private NodeResult delayedRetry(GithubOperationStore.Lease operation) {
+        if (!"WAITING".equals(operation.record().state()) || operation.record().resultJson().isEmpty()) return null;
+        Map<String, Object> value = GithubValues.object(PayloadJson.read(
+                operation.record().resultJson().getBytes(StandardCharsets.UTF_8), GithubValues.LIMITS).toJava());
+        Object raw = value.get("retryAtEpochMs");
+        if (!(raw instanceof Long retryAt) || retryAt <= clock.millis()) return null;
+        return new NodeResult("continue", value, Map.of());
+    }
+
+    private static NodeResult retry(GithubOperationStore.Lease operation, long retryAt) {
+        return new NodeResult("continue", Map.of("version", "github.operation.retry.v1", "status", "waiting",
+                "reason", "RATE_LIMITED", "retryAtEpochMs", retryAt,
+                "generation", operation.record().generation(), "attempts", operation.record().attempts(),
+                "remoteId", operation.record().remoteId()), Map.of());
     }
 
     private static void persistFailure(GithubOperationStore store, GithubOperationStore.Lease operation,
@@ -230,7 +279,7 @@ final class GithubRuntime {
         @Override public boolean cancel(boolean mayInterruptIfRunning) {
             if (isDone() || !cancellation.compareAndSet(false, true)) return false;
             control.cancel(); Thread running = worker; if (running != null) running.interrupt();
-            return completeExceptionally(new GithubException(GithubException.Code.CANCELLED));
+            return true;
         }
     }
 

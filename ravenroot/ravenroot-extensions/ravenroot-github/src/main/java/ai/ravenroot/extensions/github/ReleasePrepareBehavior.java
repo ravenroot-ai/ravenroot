@@ -46,7 +46,8 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
             if (!profile.release().allowedKinds().contains(input.kind)) throw new GithubException(GithubException.Code.FORBIDDEN);
         } catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
         long deadline = System.currentTimeMillis() + profile.timeoutMs();
-        String key = input.commit + ":" + input.kind + ":" + input.correlationId;
+        String key = input.commit + ":" + input.kind + ":"
+                + GithubValues.keyDigest("release-correlation", input.correlationId);
         try { return runtime.submit(message, services, profile, BEHAVIOR, key, input.canonical(), deadline,
                 (api, operation, control) -> prepare(api, profile, input)); }
         catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
@@ -180,11 +181,15 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
             return new Semver(Long.parseLong(match.group(1)), Long.parseLong(match.group(2)),
                     Long.parseLong(match.group(3)), match.group(4) == null ? "" : "-" + match.group(4));
         }
-        Semver bump(String kind) { return switch (kind) {
-            case "major" -> new Semver(major + 1, 0, 0, suffix);
-            case "minor" -> new Semver(major, minor + 1, 0, suffix);
-            case "patch" -> new Semver(major, minor, patch + 1, suffix);
-            case "none" -> this; default -> throw GithubValues.invalid(); };
+        Semver bump(String kind) {
+            try { return switch (kind) {
+                case "major" -> new Semver(Math.addExact(major, 1), 0, 0, suffix);
+                case "minor" -> new Semver(major, Math.addExact(minor, 1), 0, suffix);
+                case "patch" -> new Semver(major, minor, Math.addExact(patch, 1), suffix);
+                case "none" -> this; default -> throw GithubValues.invalid(); };
+            } catch (ArithmeticException overflow) {
+                throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+            }
         }
         String text() { return major + "." + minor + "." + patch + suffix; }
     }

@@ -79,11 +79,11 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         void schedule(long delayMs) {
             if (!isDone()) scheduled = scheduler.schedule(this::poll, Math.max(0, delayMs));
         }
-        private void poll() {
+        private synchronized void poll() {
             if (isDone()) return;
             try {
                 active = runtime.submit(message, services, profile, BEHAVIOR,
-                        input.commit + ":" + input.correlationId, input.canonical(), input.deadlineEpochMs,
+                        operationKey(input), input.canonical(), input.deadlineEpochMs,
                         (api, operation, control) -> pollOnce(api, profile, input, operation)).toCompletableFuture();
             } catch (RuntimeException failure) { completeExceptionally(sanitize(failure)); return; }
             if (cancelled.get()) active.cancel(true);
@@ -100,23 +100,26 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
                 schedule(Math.max(0, retryAt - clock.millis()));
             });
         }
-        @Override public boolean cancel(boolean mayInterruptIfRunning) {
-            if (!cancelled.compareAndSet(false, true)) return false;
-            boolean changed = super.cancel(mayInterruptIfRunning);
+        @Override public synchronized boolean cancel(boolean mayInterruptIfRunning) {
+            if (isDone() || !cancelled.compareAndSet(false, true)) return false;
             ScheduledPoll pending = scheduled; if (pending != null) pending.cancel();
             CompletableFuture<NodeResult> running = active;
             if (running != null && !running.isDone()) running.cancel(true);
             else persistCancellation();
-            return changed;
+            return true;
         }
 
         private void persistCancellation() {
             try {
-                runtime.submit(message, services, profile, BEHAVIOR,
-                        input.commit + ":" + input.correlationId, input.canonical(), input.deadlineEpochMs,
-                        (api, operation, control) -> { throw new GithubException(GithubException.Code.CANCELLED); });
-            } catch (RuntimeException ignored) {
-                // A concurrently starting poll owns the lease and observes cancelled immediately after submission.
+                runtime.cancelDurably(message, services, profile, BEHAVIOR, operationKey(input),
+                        input.canonical(), input.deadlineEpochMs).whenComplete((ignored, failure) -> {
+                    Throwable cause = failure instanceof CompletionException && failure.getCause() != null
+                            ? failure.getCause() : failure;
+                    completeExceptionally(cause == null
+                            ? new GithubException(GithubException.Code.CANCELLED) : cause);
+                });
+            } catch (RuntimeException failure) {
+                completeExceptionally(sanitize(failure));
             }
         }
     }
@@ -220,6 +223,9 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         if (runs.stream().allMatch(run -> "completed".equals(run.status) && "success".equals(run.conclusion)))
             return new Evaluation("continue");
         return new Evaluation("waiting");
+    }
+    private static String operationKey(Input input) {
+        return input.commit + ":" + GithubValues.keyDigest("workflow-correlation", input.correlationId);
     }
 
     private static NodeResult result(String outcome, String status, Input input, List<Run> runs, int polls,

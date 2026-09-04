@@ -179,6 +179,25 @@ class GithubOperationStoreTest {
         assertEquals("RUNNING", retained.state());
     }
 
+    @Test void waitingSaveAuditAndReleaseRollBackTogetherWhenAuditFails() throws Exception {
+        Path path = directory.resolve("waiting-atomic.db");
+        var store = new SqliteGithubOperationStore(new GithubConfiguration.StorePolicy(path, 10, 24, 1_000));
+        var lease = store.begin("tenant-a", "profile", "watch", "atomic", DIGEST, 123,
+                GithubOperationStore.BeginPolicy.ordinary());
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("CREATE TRIGGER reject_waiting_audit BEFORE INSERT ON github_operation_audit "
+                    + "BEGIN SELECT RAISE(ABORT, 'injected'); END");
+        }
+        assertEquals(GithubException.Code.DURABILITY_UNAVAILABLE, assertThrows(GithubException.class,
+                () -> store.saveWaitingAndAuditRelease(lease, 0, 1, 500, "remote", DIGEST,
+                        "{\"status\":\"waiting\"}", "RATE_LIMITED", DIGEST)).code());
+        GithubOperationStore.Record retained = store.find("tenant-a", "profile", "watch", "atomic").orElseThrow();
+        assertEquals("RUNNING", retained.state());
+        assertFalse(retained.owned(), "lease release must roll back with the WAITING row and audit insert");
+        store.release(lease);
+    }
+
     private static final class MutableClock extends Clock {
         private long millis = 1_000_000;
         void advance(long amount) { millis += amount; }

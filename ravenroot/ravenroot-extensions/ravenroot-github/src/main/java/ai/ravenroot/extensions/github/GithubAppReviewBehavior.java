@@ -36,7 +36,8 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         try { input = Input.parse(message.payload()); profile = runtime.requireProfile(message.tenantId(), profileName); }
         catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
         long deadline = System.currentTimeMillis() + profile.timeoutMs();
-        String key = input.pullNumber + ":" + input.commit + ":" + input.correlationId;
+        String key = input.pullNumber + ":" + input.commit + ":"
+                + GithubValues.keyDigest("review-correlation", input.correlationId);
         try { return runtime.submit(message, services, profile, BEHAVIOR, key, input.canonical(), deadline,
                 GithubOperationStore.BeginPolicy.forAmbiguousReconciliation(profile.timeoutMs()),
                 (api, operation, control) -> review(api, profile, input, operation)); }
@@ -58,9 +59,10 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                 }
                 return result("stale", "stale", input, existing.id, "STALE_HEAD");
             }
-            if (!"PENDING".equals(existing.state)) return result("continue", "already-recorded", input,
-                    existing.id, "");
-            return submitPending(api, profile, input, existing.id, marker);
+            if ("PENDING".equals(existing.state)) return submitPending(api, profile, input, existing.id, marker);
+            if (expectedState(input.verdict).equals(existing.state)) return result("continue", "already-recorded",
+                    input, existing.id, "");
+            return result("conflict", "conflict", input, existing.id, "REVIEW_STATE_CONFLICT");
         }
         if (!input.commit.equals(head(api, profile, input.pullNumber))) return result("stale", "stale", input, 0, "STALE_HEAD");
         final Map<String, Object> draft;
@@ -85,7 +87,12 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         } catch (RuntimeException invalid) {
             return reconcileDraftUncertainty(api, profile, input, marker, 0);
         }
-        if (!input.commit.equals(head(api, profile, input.pullNumber))) {
+        final boolean draftHeadCurrent;
+        try { draftHeadCurrent = input.commit.equals(head(api, profile, input.pullNumber)); }
+        catch (GithubProtocol.RateLimited limited) {
+            return result("ambiguous", "ambiguous", input, reviewId, "RATE_LIMITED", limited.retryAt());
+        }
+        if (!draftHeadCurrent) {
             try { GithubProtocol.requireSuccess(api.delete(path(profile, input.pullNumber, "/reviews/" + reviewId))); }
             catch (RuntimeException ignored) { }
             return result("stale", "stale", input, reviewId, "STALE_HEAD");
@@ -118,7 +125,11 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         } catch (RuntimeException invalid) {
             return reconcileSubmitUncertainty(api, profile, input, reviewId, marker, 0);
         }
-        String currentHead = head(api, profile, input.pullNumber);
+        final String currentHead;
+        try { currentHead = head(api, profile, input.pullNumber); }
+        catch (GithubProtocol.RateLimited limited) {
+            return result("ambiguous", "ambiguous", input, reviewId, "RATE_LIMITED", limited.retryAt());
+        }
         if (!input.commit.equals(currentHead)) return result("stale", "stale", input, reviewId, "STALE_HEAD");
         return result("continue", "submitted", input, reviewId, "");
     }
@@ -133,10 +144,14 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                         return result("stale", "stale", input, existing.id, "STALE_HEAD");
                     return submitPending(api, profile, input, existing.id, marker);
                 }
+                if (!expectedState(input.verdict).equals(existing.state))
+                    return result("conflict", "conflict", input, existing.id, "REVIEW_STATE_CONFLICT");
                 boolean current = input.commit.equals(head(api, profile, input.pullNumber));
-                return result(current ? "continue" : "stale", current ? "already-recorded" : "stale",
-                        input, existing.id, current ? "" : "STALE_HEAD");
+                return result(current ? "continue" : "stale", current ? "already-recorded" : "stale", input,
+                        existing.id, current ? "" : "STALE_HEAD");
             }
+        } catch (GithubProtocol.RateLimited limited) {
+            retryAt = Math.max(retryAt, limited.retryAt());
         } catch (RuntimeException ignored) { }
         return result("ambiguous", "ambiguous", input, 0,
                 retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);
@@ -147,10 +162,14 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         try {
             Existing existing = findExisting(api, profile, input, marker);
             if (existing != null && !"PENDING".equals(existing.state)) {
+                if (!expectedState(input.verdict).equals(existing.state))
+                    return result("conflict", "conflict", input, existing.id, "REVIEW_STATE_CONFLICT");
                 boolean current = input.commit.equals(head(api, profile, input.pullNumber));
                 return result(current ? "continue" : "stale", current ? "submitted" : "stale", input,
                         existing.id, current ? "" : "STALE_HEAD");
             }
+        } catch (GithubProtocol.RateLimited limited) {
+            retryAt = Math.max(retryAt, limited.retryAt());
         } catch (RuntimeException ignored) { }
         return result("ambiguous", "ambiguous", input, reviewId,
                 retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);
@@ -164,10 +183,8 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                 Map<String, Object> review = GithubValues.object(raw);
                 if (!profile.reviewerLogin().equals(login(review)) || !input.commit.equals(review.get("commit_id"))) continue;
                 Object body = review.get("body"); if (!(body instanceof String text) || !text.contains(marker)) continue;
-                String state = review.get("state") instanceof String value ? value : "";
-                if (state.equals("PENDING") || state.equals(expectedState(input.verdict))) {
-                    return new Existing(GithubValues.number(review.get("id"), 1, Long.MAX_VALUE), input.commit, state);
-                }
+                String state = GithubValues.string(review.get("state"), 64);
+                return new Existing(GithubValues.number(review.get("id"), 1, Long.MAX_VALUE), input.commit, state);
             }
             if (reviews.size() < 100) return null;
         }

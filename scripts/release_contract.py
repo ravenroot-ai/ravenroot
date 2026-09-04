@@ -74,6 +74,17 @@ def parse_tag(tag: str) -> ReleaseVersion:
     return ReleaseVersion.parse(tag[1:])
 
 
+def validate_event(event_name: str, ref_type: str, ref_name: str, requested_tag: str) -> dict[str, str]:
+    if event_name not in {"push", "workflow_dispatch"}:
+        raise ReleaseContractError(f"{event_name!r} is not an authorized release event")
+    if ref_type != "tag":
+        raise ReleaseContractError("release publication requires an existing tag ref")
+    if requested_tag != ref_name:
+        raise ReleaseContractError("the requested recovery tag differs from the workflow tag ref")
+    parse_tag(ref_name)
+    return {"tag": ref_name}
+
+
 def expected_next(previous: ReleaseVersion, intent: str) -> ReleaseVersion:
     if intent == "patch":
         return ReleaseVersion(previous.major, previous.minor, previous.patch + 1, previous.prerelease)
@@ -273,6 +284,11 @@ def parser() -> argparse.ArgumentParser:
     tag_authorization = commands.add_parser("validate-tag-authorization")
     tag_authorization.add_argument("--tag", required=True)
     tag_authorization.add_argument("--prs-json", type=Path, required=True)
+    event = commands.add_parser("validate-event")
+    event.add_argument("--event-name", required=True)
+    event.add_argument("--ref-type", required=True)
+    event.add_argument("--ref-name", required=True)
+    event.add_argument("--requested-tag", required=True)
     return result
 
 
@@ -285,8 +301,15 @@ def main() -> int:
             )
         elif arguments.command == "validate-tag":
             values = validate_tag(arguments.tag, arguments.main_ref)
-        else:
+        elif arguments.command == "validate-tag-authorization":
             values = validate_tag_authorization(arguments.tag, arguments.prs_json)
+        else:
+            values = validate_event(
+                arguments.event_name,
+                arguments.ref_type,
+                arguments.ref_name,
+                arguments.requested_tag,
+            )
     except (ReleaseContractError, json.JSONDecodeError, subprocess.CalledProcessError) as exc:
         print(f"Release contract failed: {exc}", file=sys.stderr)
         return 1

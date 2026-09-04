@@ -47,7 +47,7 @@ describe('human-task catalog controls', () => {
       ],
     };
     const host = document.createElement('form');
-    host.innerHTML = renderer()(descriptor, {});
+    host.innerHTML = renderer()(descriptor, {}, { documentId: 'doc-1', nodeId: 'task-1' });
 
     const title = host.querySelector('[data-catalog-property="title"]');
     const description = host.querySelector('[data-catalog-property="description"]');
@@ -55,13 +55,22 @@ describe('human-task catalog controls', () => {
     const expiry = host.querySelector('[data-catalog-property="expiresAfterSeconds"]');
     expect(title.tagName).toBe('INPUT');
     expect(title.required).toBe(true);
-    expect(title.getAttribute('aria-label')).toBe('Title');
     expect(description.tagName).toBe('TEXTAREA');
-    expect(description.getAttribute('aria-label')).toBe('Description');
     expect(kind.tagName).toBe('SELECT');
-    expect(kind.getAttribute('aria-label')).toBe('Response kind');
     expect([...kind.options].map(option => option.value)).toEqual(['SCALAR', 'LIST', 'MAP']);
     expect(expiry.type).toBe('number');
-    expect(expiry.getAttribute('aria-label')).toBe('Expire after (seconds)');
+    const controls = [title, description, kind, expiry];
+    expect(new Set(controls.map(control => control.id)).size).toBe(controls.length);
+    for (const control of controls) {
+      expect(control.id).not.toBe('');
+      expect(control.getAttribute('aria-label')).toBeNull();
+      expect(control.labels).toHaveLength(1);
+      expect(control.labels[0].htmlFor).toBe(control.id);
+    }
+    expect(title.labels[0].textContent.trim()).toBe('Title *');
+    expect(title.labels[0].querySelector('[aria-hidden="true"]')).not.toBeNull();
+    expect(description.labels[0].textContent.trim()).toBe('Description');
+    expect(kind.labels[0].textContent.trim()).toBe('Response kind');
+    expect(expiry.labels[0].textContent.trim()).toBe('Expire after (seconds)');
   });
 });

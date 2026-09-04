@@ -5144,6 +5144,7 @@ function renderNodeForm(model, creating) {
   contextualHelp.dismiss();
   const descriptor = catalogDescriptor(model.behavior);
   const catalogEditorDescriptor = programCatalogEditorDescriptor(descriptor);
+  const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
   // behavior property (see NodeRuntimeNatureProperty's javadoc) — it has its own dedicated control
@@ -5193,7 +5194,8 @@ function renderNodeForm(model, creating) {
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
       <div id="node-max-concurrency-section">${maxConcurrencyFieldHtml(descriptor, model)}</div>
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
-      <div id="catalog-properties">${catalogPropertyFieldsHtml(catalogEditorDescriptor, model.properties || {})}</div>
+      <div id="catalog-properties">${catalogPropertyFieldsHtml(
+        catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
@@ -5225,7 +5227,7 @@ function renderNodeForm(model, creating) {
     // the nature control is, and against the CURRENT form state rather than the loaded model.
     renderBypassSection(form, model);
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      programCatalogEditorDescriptor(selected), {});
+      programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
     bindProgramWorkspace(form, model);
   });
@@ -5244,7 +5246,7 @@ function renderNodeForm(model, creating) {
   // handler, which would otherwise have to re-bind itself on every change.
   document.getElementById('catalog-properties')?.addEventListener('change', event => {
     if (!catalogEditorDescriptor || !event.target.closest('[data-catalog-property]')) return;
-    refreshConditionalCatalogProperties(catalogEditorDescriptor);
+    refreshConditionalCatalogProperties(catalogEditorDescriptor, catalogFieldOwner);
   });
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -5356,8 +5358,23 @@ function refreshSecretReferenceChoices() {
   });
 }
 
-function catalogPropertyFieldsHtml(descriptor, values) {
+function catalogPropertyFieldsHtml(descriptor, values, owner) {
   if (!descriptor?.properties?.length) return '';
+  // Code-point tokens and a separator that cannot occur inside one encoded component keep the
+  // document/node/property tuple reversible and collision-free without exposing a document name.
+  const idPart = raw => {
+    const points = Array.from(String(raw ?? ''), character => character.codePointAt(0).toString(16));
+    return points.length ? points.join('-') : 'empty';
+  };
+  const fieldIdsFor = propertyName => {
+    const identity = [owner?.documentId, owner?.nodeId, propertyName].map(idPart).join('--');
+    const base = `catalog-property-${identity}`;
+    return { control: `${base}-control`, hint: `${base}-hint`, state: `${base}-state` };
+  };
+  const describedByAttribute = (...ids) => {
+    const describedBy = [...new Set(ids.flat().filter(Boolean))].join(' ');
+    return describedBy ? ` aria-describedby="${escapeAttribute(describedBy)}"` : '';
+  };
   // Every sibling's CURRENTLY DISPLAYED value, resolved with the exact same fallback each
   // field's own control uses below — so a condition reads the same value the user actually sees in
   // the referenced sibling, never a stale or differently-defaulted one. Computed once, up front,
@@ -5367,7 +5384,7 @@ function catalogPropertyFieldsHtml(descriptor, values) {
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
     const title = property.displayName || property.name;
-    const accessibleName = ` aria-label="${escapeAttribute(title)}"`;
+    const fieldIds = fieldIdsFor(property.name);
     // `adapterBinding` (always paired with `required` — see
     // NodePropertyDescriptor#adapterBinding) names a property whose EMPTY value does not make the
     // graph invalid, it makes the node UNCONFIGURED: the server admits it and the node refuses only
@@ -5400,8 +5417,6 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     const requiredNow = isPropertyRequiredNow(property, resolvedValues);
     const nativeRequired = requiredNow && visible && !adapterBound;
     const unconfigured = adapterBound && adapterIdOf(value) === '';
-    const stateId = `catalog-state-${escapeAttribute(property.name)}`;
-    const describedBy = unconfigured ? ` aria-describedby="${stateId}"` : '';
     // A closed-choice property whose descriptor declares NO default has three states, not two
     // — each allowed value, plus "the author has not declared this" — and a `<select>` built only
     // from `allowedValues` can represent two of them. HTML then picks the first option as the
@@ -5473,6 +5488,59 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // telling a document that declares nothing at all apart from a document that declares a non-empty
     // value the allowed values do not recognise -- `mismatchedOption` needs exactly that second case.
     const present = values[property.name] != null;
+    // The sentence follows the control. It used to end "never paste a secret" because the
+    // control was a text box that would have taken one; the control now cannot, so the hint says
+    // where the choices come from and what the document actually stores instead.
+    const secretHint = property.type === 'SECRET_REFERENCE'
+      ? ' The list holds the credentials you have stored. The value itself is entered in the'
+        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
+      : '';
+    // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
+    // still be prompted to fill the property in. What changes is only whether the browser blocks
+    // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
+    // state so "not configured yet" cannot be mistaken for "required and missing".
+    const fieldClass = unconfigured ? 'editor-field full catalog-property catalog-property--unconfigured' : 'editor-field full catalog-property';
+    // Scoped to the properties each sentence is about: every other property keeps its exact
+    // pre-existing description text (no inserted punctuation), so properties outside this state are
+    // unchanged. `appendSentence` is the same joining rule used inline.
+    const baseText = (property.description || '') + secretHint;
+    const appendSentence = (text, sentence) =>
+      text.trim().replace(/[.!?]?$/, text.trim() ? '. ' : '') + sentence;
+    let helpText = baseText;
+    let stateText = '';
+    if (unconfigured) {
+      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
+      // For a node that invokes a MODEL provider, the UI also states where the thing it is
+      // waiting for is declared. Without this the sentence above tells an author their node will
+      // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
+      // failed run. This editor has no Model providers panel, so the sentence names
+      // the plugin bundle that supplies the node type; see `PROVIDER_CONFIG_POINTER` for why it is
+      // rewritten rather than dropped.
+      //
+      // Gated on the catalog's declared capabilities, never on the behavior name and never on
+      // `adapterBinding` alone: that flag is a plain boolean meaning "names a deployment-configured
+      // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
+      // and configure a model provider would be a confident instruction to the wrong place. See
+      // `invokesModelProvider`, which reads the same capability set the runtime reads.
+      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
+    }
+    // Stated unconditionally for the shape, not only while the value happens to be undeclared.
+    // The hint is rendered once and is not re-rendered on a plain value change (only
+    // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
+    // sentence phrased as "this is currently undeclared" would go stale in the DOM the moment the
+    // author picked a value. Phrased as what the option MEANS, it stays true in every state. It says
+    // nothing about what any particular behavior does with the absence — that belongs to the
+    // property's own `description`, which the catalog owns.
+    if (undeclarable) {
+      helpText = appendSentence(helpText,
+        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+    }
+    const hintText = helpText.trim();
+    const describedBy = describedByAttribute(
+      stateText ? fieldIds.state : null,
+      hintText ? fieldIds.hint : null,
+    );
+    const accessibility = ` id="${fieldIds.control}"${describedBy}`;
     let control;
     if (property.allowedValues?.length) {
       const declared = property.allowedValues.some(option => String(option) === String(value));
@@ -5524,7 +5592,7 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // a GENUINELY absent value (nothing declared, or a declared empty string -- see `present`'s own
       // comment) still renders "Not declared" FIRST with `value=""` and selected, so it is still the
       // HTML placeholder label option and `required` still stops the save until the author decides.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
         `<option value="${escapeAttribute(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
     } else if (property.type === 'SECRET_REFERENCE') {
       // CHOOSE, NEVER TYPE.
@@ -5545,9 +5613,9 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // omission: a control that degrades to an input when the list is empty degrades exactly when
       // an author is most likely to reach for the secret instead. What the two degraded states do
       // instead is PRESERVE, never invent — see the two options below.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
     } else if (property.type === 'TEXT' || property.type === 'CEL_EXPRESSION') {
-      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
+      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
     } else if (property.type === 'BOOLEAN') {
       // Same defect as the closed-choice branch above, muter -- `String(value) !== 'true'` is
       // true for ANY value that is not the exact string "true", so a stored value that merely FAILED
@@ -5569,58 +5637,11 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibleName}${describedBy}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
-      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${accessibleName}${describedBy} ${nativeRequired ? 'required' : ''}>`;
-    }
-    // The sentence follows the control. It used to end "never paste a secret" because the
-    // control was a text box that would have taken one; the control now cannot, so the hint says
-    // where the choices come from and what the document actually stores instead.
-    const secretHint = property.type === 'SECRET_REFERENCE'
-      ? ' The list holds the credentials you have stored. The value itself is entered in the'
-        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
-      : '';
-    // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
-    // still be prompted to fill the property in. What changes is only whether the browser blocks
-    // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
-    // state so "not configured yet" cannot be mistaken for "required and missing".
-    const fieldClass = unconfigured ? 'editor-field full catalog-property catalog-property--unconfigured' : 'editor-field full catalog-property';
-    // Scoped to the properties each sentence is about: every other property keeps its exact
-    // pre-existing description text (no inserted punctuation), so properties outside this state are
-    // unchanged. `appendSentence` is the same joining rule used inline.
-    const baseText = (property.description || '') + secretHint;
-    const appendSentence = (text, sentence) =>
-      text.trim().replace(/[.!?]?$/, text.trim() ? '. ' : '') + sentence;
-    let helpText = baseText;
-    let stateText = '';
-    if (unconfigured) {
-      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
-      // For a node that invokes a MODEL provider, the UI also states where the thing it is
-      // waiting for is declared. Without this the sentence above tells an author their node will
-      // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
-      // failed run. This editor has no Model providers panel, so the sentence names
-      // the plugin bundle that supplies the node type; see `PROVIDER_CONFIG_POINTER` for why it is
-      // rewritten rather than dropped.
-      //
-      // Gated on the catalog's declared capabilities, never on the behavior name and never on
-      // `adapterBinding` alone: that flag is a plain boolean meaning "names a deployment-configured
-      // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
-      // and configure a model provider would be a confident instruction to the wrong place. See
-      // `invokesModelProvider`, which reads the same capability set the runtime reads.
-      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
-    }
-    // Stated unconditionally for the shape, not only while the value happens to be undeclared.
-    // The hint is rendered once and is not re-rendered on a plain value change (only
-    // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
-    // sentence phrased as "this is currently undeclared" would go stale in the DOM the moment the
-    // author picked a value. Phrased as what the option MEANS, it stays true in every state. It says
-    // nothing about what any particular behavior does with the absence — that belongs to the
-    // property's own `description`, which the catalog owns.
-    if (undeclarable) {
-      helpText = appendSentence(helpText,
-        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${accessibility} ${nativeRequired ? 'required' : ''}>`;
     }
     // `hidden`, never omitted from the render. `readCatalogPropertyEditor` collects every
     // `[data-catalog-property]` control that EXISTS in the form regardless of `hidden` — submit
@@ -5630,10 +5651,14 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // accessibility tree and Tab order, and out of native constraint validation — see
     // `.catalog-property[hidden]` in styles.css for why the CSS side of this needs its own rule
     // rather than relying on the attribute alone.
-    const state = stateText ? `<small id="${stateId}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
+    const hint = hintText
+      ? `<small id="${fieldIds.hint}" class="catalog-property-hint visually-hidden">${escapeHtml(hintText)}</small>` : '';
+    const state = stateText
+      ? `<small id="${fieldIds.state}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
     return `<div class="${fieldClass}" ${visible ? '' : 'hidden'}>
-      <div class="editor-label-row"><label>${escapeHtml(title)}${requiredNow ? ' *' : ''}</label>
-        ${contextualHelpButtonHtml(title, helpText)}</div>${control}${state}</div>`;
+      <div class="editor-label-row"><label for="${fieldIds.control}">${escapeHtml(title)}${requiredNow
+        ? ' <span aria-hidden="true">*</span>' : ''}</label>
+        ${contextualHelpButtonHtml(title, helpText)}</div>${control}${hint}${state}</div>`;
   }).join('');
   return `<div class="editor-section-title"><span>${escapeHtml(descriptor.displayName)} properties</span></div><div class="editor-grid">${fields}</div>`;
 }
@@ -5706,7 +5731,7 @@ function describeConditionalChanges(before, after) {
  * a mode is a status change, not an error, so it must not interrupt (`aria-live="assertive"` would);
  * and a second live region would just be two channels racing to describe one piece of UI.
  */
-function refreshConditionalCatalogProperties(descriptor) {
+function refreshConditionalCatalogProperties(descriptor, owner = {}) {
   const container = document.getElementById('catalog-properties');
   if (!container) return;
   const activeProperty = document.activeElement?.dataset?.catalogProperty;
@@ -5731,7 +5756,7 @@ function refreshConditionalCatalogProperties(descriptor) {
     state.visible !== after[index].visible || state.requiredNow !== after[index].requiredNow);
   if (!changed) return;
   contextualHelp.dismiss();
-  container.innerHTML = catalogPropertyFieldsHtml(descriptor, currentValues);
+  container.innerHTML = catalogPropertyFieldsHtml(descriptor, currentValues, owner);
   if (activeProperty) {
     container.querySelector(`[data-catalog-property="${escapeAttribute(activeProperty)}"]`)?.focus();
   }

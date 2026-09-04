@@ -1034,6 +1034,12 @@ public final class GraphRunner implements AutoCloseable {
                 state, identity, coordinator, IterationContext.EMPTY)
                 .handle((ignored, failure) -> {
                     Throwable outcome = unwrap(failure);
+                    // Human-task re-entry dispatches the same retrying successor trees as the two
+                    // entry paths above. Seal before cancelling and before release wakes a pause
+                    // gate, so no abandoned retry can commit or dispatch through this discarded
+                    // re-entry state.
+                    state.beginClosing();
+                    cancelBackoffs(traversalId);
                     try {
                         if (failure == null) {
                             state.executionCompleted();

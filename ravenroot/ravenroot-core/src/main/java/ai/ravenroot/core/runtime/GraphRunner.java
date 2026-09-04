@@ -909,20 +909,9 @@ public final class GraphRunner implements AutoCloseable {
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         monitor.executionStarted(identity);
-        // The identity reaches the control record AFTER the start event and never before it. A pause
-        // landing between the two takes the same lock, finds no identity yet, and leaves its hold for
-        // the block below to announce -- so EXECUTION_PAUSED can never precede EXECUTION_STARTED.
-        // Setting the identity first would open exactly that window.
-        var executionControl = controlFor(traversalId);
-        synchronized (executionControl) {
-            executionControl.identity = identity;
-            // A hold accepted during the startup window has been waiting for an identity to be
-            // published under. This is that moment, and it is strictly after the start event.
-            PauseHold pending = pausedTraversals.get(traversalId);
-            if (pending != null) {
-                announceLocked(executionControl, pending);
-            }
-        }
+        // Strictly after the start event, and never before it -- see #beginPublishing for why the
+        // ordering is what stops EXECUTION_PAUSED from preceding EXECUTION_STARTED.
+        beginPublishing(traversalId, identity, coordinator);
         // Nodes no path can reach are dead before anything runs, and a join waiting on one of them
         // would wait for the life of the process. Reported alongside the first dispatch rather than
         // before it, so a join proven impossible fails the traversal instead of being a verdict with
@@ -1057,16 +1046,8 @@ public final class GraphRunner implements AutoCloseable {
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         state.reentryStarted();
         monitor.executionStarted(identity);
-        // See the identical block in #execute: the identity reaches the control record after the start
-        // event, so a hold taken in the startup window is announced after it and never before it.
-        var reentryControl = controlFor(traversalId);
-        synchronized (reentryControl) {
-            reentryControl.identity = identity;
-            PauseHold pending = pausedTraversals.get(traversalId);
-            if (pending != null) {
-                announceLocked(reentryControl, pending);
-            }
-        }
+        // The second entry path, wired exactly as #execute is.
+        beginPublishing(traversalId, identity, coordinator);
         UUID invocationId = identitySource.nextNodeInvocationId();
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
@@ -1185,19 +1166,10 @@ public final class GraphRunner implements AutoCloseable {
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         state.reentryStarted();
         monitor.executionStarted(identity);
-        // The third entry path, wired exactly as #execute and #executeFrom are. A traversal resumed
-        // after a human task is as pausable as any other -- it is a live traversal with its own hop
-        // sequence -- so leaving it out would make it the one path where a hold is real but silent:
-        // held in `pausedTraversals`, reported by `isPaused`, and announced by nothing, because the
-        // identity every event is published under would never reach its control record.
-        var humanTaskControl = controlFor(traversalId);
-        synchronized (humanTaskControl) {
-            humanTaskControl.identity = identity;
-            PauseHold pending = pausedTraversals.get(traversalId);
-            if (pending != null) {
-                announceLocked(humanTaskControl, pending);
-            }
-        }
+        // The third entry path. A traversal resumed after a human task is as pausable as any other --
+        // it is a live traversal with its own hop sequence -- so leaving it out would make it the one
+        // path where a hold is real but silent.
+        beginPublishing(traversalId, identity, coordinator);
         UUID invocationId = identitySource.nextNodeInvocationId();
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
@@ -1332,18 +1304,9 @@ public final class GraphRunner implements AutoCloseable {
         }
         activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
         monitor.executionStarted(identity);
-        // The fourth entry path, wired exactly as the three above are, and for the same reason: a
-        // continued traversal is as pausable as any other, and a hold taken in the window between
-        // this method being called and the identity reaching the control record has to be announced
-        // after the start event rather than before it.
-        var pauseControl = controlFor(traversalId);
-        synchronized (pauseControl) {
-            pauseControl.identity = identity;
-            PauseHold pending = pausedTraversals.get(traversalId);
-            if (pending != null) {
-                announceLocked(pauseControl, pending);
-            }
-        }
+        // The fourth entry path. A traversal continued from a durable hold is as pausable as any
+        // other, including by a second hold taken while this method is still running.
+        beginPublishing(traversalId, identity, coordinator);
         return dispatch(node, after.nodeId(), payload, attributes, Set.of(afterInvocationId), command,
                 state.traversalAcceptedEventId(), state, identity, coordinator, IterationContext.EMPTY,
                 resumedHop)
@@ -1581,6 +1544,19 @@ public final class GraphRunner implements AutoCloseable {
             if (pausedTraversals.putIfAbsent(traversalId, hold) != null) {
                 return false;
             }
+            // A timed join measures active execution, so the hold stops its clock here rather than
+            // letting an operator's deliberate freeze spend a budget the traversal is not allowed to
+            // use. Inside the monitor, and on the same side of it as the decision itself: a resume
+            // racing this call must not be able to re-arm a deadline between the hold being
+            // installed and its deadlines being stopped.
+            //
+            // Absent during the startup window, and correctly so -- nothing is armed before a
+            // coordinator exists, and #beginPublishing tells the one that appears afterwards that it
+            // is born held.
+            JoinCoordinator coordinator = coordinators.get(traversalId);
+            if (coordinator != null) {
+                coordinator.suspendTimeouts();
+            }
             announceLocked(control, hold);
             return true;
         }
@@ -1701,6 +1677,64 @@ public final class GraphRunner implements AutoCloseable {
      */
     private TraversalControl controlFor(UUID traversalId) {
         return traversalControls.computeIfAbsent(traversalId, id -> new TraversalControl());
+    }
+
+    /**
+     * Gives a traversal the identity its events are published under, and settles anything a hold
+     * taken before it existed has been waiting for.
+     *
+     * <h2>Why the identity is set here and not earlier</h2>
+     * <p>The identity reaches the control record <strong>after</strong> the start event and never
+     * before it. A pause landing between the two takes this same monitor, finds no identity yet, and
+     * leaves its hold for this method to announce — so {@code EXECUTION_PAUSED} can never precede
+     * {@code EXECUTION_STARTED}. Setting the identity before publishing the start event would open
+     * exactly that window.</p>
+     *
+     * <h2>Why the four entry paths share it</h2>
+     * <p>Each of the four ways a traversal can start on this runner reached this same sequence, and
+     * each held a copy of it. The copies were identical and stayed identical for as long as nothing
+     * was added to them; a hold taken in the startup window now has to suspend the traversal's join
+     * deadlines as well as be announced, and a rule that has to be written in four places is a rule
+     * three of them can quietly stop enforcing. It is one method so that a fifth entry path gets the
+     * behaviour by calling it rather than by remembering it.</p>
+     *
+     * <h2>The startup window is a real state for join deadlines, not only for events</h2>
+     * <p>A hold can be installed before the coordinator exists — before
+     * {@code coordinators.putIfAbsent} — and {@link #pauseTraversal} then has nothing to suspend and
+     * suspends nothing. Nothing is armed at that moment either, so the {@code suspendTimeouts} call
+     * below cancels no timer. What it does is tell the coordinator it is <em>born held</em>, so that
+     * a branch reaching a fan-in later in this same entry path records its budget instead of arming
+     * a live deadline against a traversal an operator has already frozen.</p>
+     *
+     * <p><strong>That is reachable now, on two of this method's four callers, and not a precaution
+     * against a future one.</strong> {@link #executeFrom} and {@link #executeAfterHumanTask} do not
+     * re-enter through {@link #run}: they synthesise the re-entered node's completion and call
+     * {@code dispatchSuccessors} directly. A successor that is a fan-in is therefore reached through
+     * {@code dispatch} and {@code JoinCoordinator.arrive} <em>without passing the pause gate at
+     * all</em> — the gate only guards a hop that is about to start a node, and a branch entering a
+     * join is handed to the join instead of starting one. So on a human-task or tool-approval
+     * re-entry whose next node is a timed join, the hold installed before this method ran is the only
+     * thing standing between an operator's freeze and a running deadline, and this line is what makes
+     * it stand. {@code aHoldTakenBeforeAHumanTaskReEntryHoldsTheJoinItReEntersInto} constructs
+     * exactly that, and fails with a live deadline on a paused traversal if this call is removed.</p>
+     *
+     * <p>{@link #execute} is the caller for which it is redundant rather than the rule: its first hop
+     * is the start node's own dispatch, which does park on the gate, so no branch of it can reach a
+     * fan-in during the window. The rule is stated once here for all four rather than four times with
+     * two of them omitted.</p>
+     */
+    private void beginPublishing(UUID traversalId, ExecutionMonitor.ExecutionIdentity identity,
+                                 JoinCoordinator coordinator) {
+        TraversalControl control = controlFor(traversalId);
+        synchronized (control) {
+            control.identity = identity;
+            PauseHold pending = pausedTraversals.get(traversalId);
+            if (pending == null) {
+                return;
+            }
+            announceLocked(control, pending);
+            coordinator.suspendTimeouts();
+        }
     }
 
     /**
@@ -2051,6 +2085,34 @@ public final class GraphRunner implements AutoCloseable {
             // observer can be shown -- it would be the release of a pause they were never told about.
             if (reason == GateReleaseReason.RESUMED && hold.announced) {
                 monitor.executionResumed(control.identity);
+            }
+            if (reason == GateReleaseReason.RESUMED) {
+                // Only a resume re-arms. ENDED and SHUTDOWN deliberately re-arm nothing: the
+                // teardown that follows either of them calls JoinCoordinator#terminate, which
+                // cancels every deadline, and handing a join a fresh deadline on the way to a
+                // terminal state is how a settled join acquires a task that outlives it.
+                //
+                // Inside the monitor, ahead of the gate, and for the same reason the durable
+                // settlement above is: the two admissible orders for a pause and a resume of one
+                // traversal are the ones this lock allows, and re-arming outside it would let a
+                // second hold install itself between the removal and the re-arm -- leaving a
+                // deadline running against a traversal that is holding, which is the whole defect.
+                //
+                // This calls Scheduler#schedule under the monitor, as the settlement above calls the
+                // store under it. The monitor is per traversal, is taken by control operations only,
+                // and serialises no graph work, so the cost is bounded to this traversal's own
+                // control calls. Note what is NOT relied on: Scheduler's contract does not forbid an
+                // implementation that runs a zero-delay task inline on the calling thread, and the
+                // budget re-armed here can legitimately be zero. Such a task would run the timeout
+                // path under this monitor and re-enter these lines through the coordinator -- which
+                // is safe, because an intrinsic monitor is reentrant and JoinCoordinator#onTimeout
+                // takes only its own locks. It is called out because it is the one path on which a
+                // scheduler implementation, rather than this class, decides what runs here. Both
+                // bundled engines dispatch to an executor, so nothing runs inline today.
+                JoinCoordinator coordinator = coordinators.get(traversalId);
+                if (coordinator != null) {
+                    coordinator.resumeTimeouts();
+                }
             }
         }
         // Completed outside the lock: this hands a thread to the parked hop, and that hop's work must
@@ -4144,6 +4206,17 @@ public final class GraphRunner implements AutoCloseable {
      */
     int residentActorCount() {
         return residentRefs.size();
+    }
+
+    /**
+     * Join deadlines suspended by an operator hold across every in-flight traversal. Diagnostics.
+     *
+     * <p>Deliberately not part of {@link #liveJoinTimeoutCount()}: a suspended deadline has no
+     * scheduled task, so it must not be counted as one — that count is what "no scheduled task
+     * remains" is measured against, and a hold has to be able to satisfy it too.</p>
+     */
+    int suspendedJoinTimeoutCount() {
+        return coordinators.values().stream().mapToInt(JoinCoordinator::suspendedTimeoutCount).sum();
     }
 
     /** Scheduled join timeouts that are still live across every in-flight traversal. Diagnostics. */

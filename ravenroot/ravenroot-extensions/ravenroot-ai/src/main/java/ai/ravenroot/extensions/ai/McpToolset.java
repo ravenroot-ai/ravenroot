@@ -66,6 +66,7 @@ final class McpToolset {
     private static List<AgentTool> add(List<AgentTool> collected, McpSession session) {
         McpProfile profile = session.profile();
         var byExposedName = new LinkedHashMap<String, AgentTool>();
+        var projected = new ArrayList<Map<String, Object>>();
         for (AgentTool existing : collected) {
             byExposedName.put(existing.name(), existing);
         }
@@ -83,7 +84,14 @@ final class McpToolset {
                 throw new McpRefusal(McpRefusal.Reason.EXPOSED_NAME_COLLISION);
             }
             byExposedName.put(exposed, new McpTool(session, tool, exposed));
+            projected.add(Map.of("name", exposed, "description", tool.description(),
+                    "parameters", tool.schema().toJava()));
         }
+        // tools/list is bounded once as a JSON-RPC response and again here after the projection that
+        // actually reaches agent state. Prefixing the server name and synthesizing a safe schema may
+        // expand a small wire response; neither transformation receives authority to exceed the
+        // managed response ceiling.
+        McpProtocol.requireProjection(projected, session.announcedMaximumOutputBytes());
         return new ArrayList<>(byExposedName.values());
     }
 

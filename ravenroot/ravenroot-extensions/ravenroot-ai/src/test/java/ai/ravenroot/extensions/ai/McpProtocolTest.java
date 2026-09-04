@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -151,6 +152,39 @@ class McpProtocolTest {
         // An empty tool message reads to a model as a call that succeeded and returned nothing, which
         // is a different fact from the one the server stated.
         assertFalse(text.isEmpty());
+    }
+
+    @Test
+    @DisplayName("a non-text notice is checked after its small wire value expands")
+    void synthesizedToolContentCannotWidenTheManagedOutputCeiling() {
+        var result = (PayloadValue.MapValue) McpProtocol.readResult(
+                bytes("{\"jsonrpc\":\"2.0\",\"result\":{\"content\":[{}]}}"),
+                "application/json", 4096);
+        String projected = McpProtocol.readToolContent(result);
+        int exact = PayloadLimits.DEFAULTS.enforceAndMeasure(projected);
+
+        assertEquals(projected, McpProtocol.readToolContent(result, exact));
+        assertEquals(McpRefusal.Reason.SERVER_RESPONSE_TOO_LARGE,
+                assertThrows(McpRefusal.class,
+                        () -> McpProtocol.readToolContent(result, exact - 1L)).reason());
+    }
+
+    @Test
+    @DisplayName("a missing tool schema is checked after the client synthesizes its safe schema")
+    void synthesizedToolSchemaCannotWidenTheManagedOutputCeiling() {
+        var result = McpProtocol.readResult(bytes("{\"jsonrpc\":\"2.0\",\"result\":{\"tools\":["
+                        + "{\"name\":\"search\",\"description\":\"finds things\"}]}}"),
+                "application/json", 4096);
+        List<McpProtocol.Announced> projected = McpProtocol.readTools(result);
+        var measurable = projected.stream().map(tool -> Map.of(
+                "name", tool.name(), "description", tool.description(),
+                "inputSchema", tool.schema().toJava())).toList();
+        int exact = PayloadLimits.DEFAULTS.enforceAndMeasure(measurable);
+
+        assertEquals(projected, McpProtocol.readTools(result, exact));
+        assertEquals(McpRefusal.Reason.SERVER_RESPONSE_TOO_LARGE,
+                assertThrows(McpRefusal.class,
+                        () -> McpProtocol.readTools(result, exact - 1L)).reason());
     }
 
     @Test

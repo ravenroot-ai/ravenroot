@@ -86,7 +86,8 @@ public final class ObjectListNodeBehavior implements NodeBehavior {
                     }
                     URI destination = StorageUri.listDestination(profile, prefix, maximum, providerCursor);
                     StorageRuntime.Request request = new StorageRuntime.Request(destination, "GET", Map.of(),
-                            new byte[0], timeout, profile.maxObjectBytes(), retries,
+                            new byte[0], timeout, profile.maxObjectBytes(),
+                            StorageRuntime.projectedOutputLimit(profile.maxObjectBytes()), retries,
                             StorageRuntime.Semantics.RETRYABLE_READ,
                             response -> StorageListXml.project(profile, message.tenantId(), prefix, maximum,
                                     projection, response));

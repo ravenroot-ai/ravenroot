@@ -813,9 +813,28 @@ public final class GraphRunner implements AutoCloseable {
                 // do anyway, so it is the one place that sees it — and a traversal with an abandoned
                 // branch is reported as that branch's join failure rather than as a success with no
                 // result and an end node that never ran.
-                .thenCompose(error -> release(traversalId, coordinator)
-                        .handle((done, cleanupError) -> error != null ? error
-                                : cleanupError != null ? cleanupError : coordinator.abandonedBranchFailure()))
+                .thenCompose(error -> {
+                    // The outcome is decided here, and everything below is teardown. Both lines run
+                    // BEFORE that teardown, and the ordering is load-bearing on both counts.
+                    //
+                    // Sealing first, because `release` frees this traversal's pause gate on its way
+                    // past -- and a retry parked on that gate would otherwise be handed a thread
+                    // while the traversal is still recorded as running, commit RUNNING, and dispatch
+                    // a node into a traversal that was already over. `release`'s own note that "a
+                    // gate found here has no hop waiting on it" was true before retries existed and
+                    // is not any more.
+                    //
+                    // Cancelling the backoffs second, so a branch still asleep ends now rather than
+                    // sleeping out a wait whose dispatch is already refused. Without it the traversal
+                    // is reported failed to its caller while a thread of it is still scheduled to try
+                    // the node again, and only close() would have ended that.
+                    state.beginClosing();
+                    cancelBackoffs(traversalId);
+                    return release(traversalId, coordinator)
+                            .handle((done, cleanupError) -> error != null ? error
+                                    : cleanupError != null ? cleanupError
+                                            : coordinator.abandonedBranchFailure());
+                })
                 .thenCompose(error -> {
                     Throwable outcome = error;
                     if (outcome == null) {
@@ -855,8 +874,11 @@ public final class GraphRunner implements AutoCloseable {
         cancelledTraversals.remove(traversalId);
         traversalAdmission.release(traversalId);
         // ON_CALLER: this runs on the traversal's own completion path, not on anyone's request
-        // thread, and a gate found here has no hop waiting on it in the ordinary case -- the
-        // traversal reached its end, so nothing is parked before its next hop.
+        // thread. A gate found here USED TO have no hop waiting on it -- the traversal had reached
+        // its end, so nothing was parked before its next hop. A retry breaks that: it parks on this
+        // gate after its backoff, so releasing here can hand a thread to work the traversal no
+        // longer wants. That is why the caller seals the traversal before reaching this line; the
+        // released retry then finds its RUNNING commit refused and stops, instead of dispatching.
         releasePauseGate(traversalId, GateRelease.ON_CALLER);
         CompletionStage<Void> joins = coordinator.terminate().exceptionally(ignored -> null);
         CompletionStage<Void> actors = releaseTraversalInstances(traversalId);
@@ -1444,7 +1466,8 @@ public final class GraphRunner implements AutoCloseable {
                                 // retries does not start reporting failures it does not report today.
                                 monitor.nodeRetryScheduled(identity, node.id(), invocationId, attemptId,
                                         retry.nextOrdinal(), retry.delay(), classificationToken(retry),
-                                        connectorAttempts, liveInstances(node.id(), definition.nature()));
+                                        error, connectorAttempts,
+                                        liveInstances(node.id(), definition.nature()));
                                 return NodeOutcome.retrying(nextAttempt, retry.delay(), committed.eventId());
                             }
                             // The traversal ended while this branch was failing. Fall through to the
@@ -1742,23 +1765,28 @@ public final class GraphRunner implements AutoCloseable {
                             node.id());
                     return traversalAdmission.acquire(admissionKey, definition.maxConcurrency())
                             .thenCompose(lease -> {
-                                // A traversal that ended while this retry waited can no longer record
-                                // the RUNNING transition, and sending without it would break the one
-                                // ordering recovery rests on: a SCHEDULED attempt means "provably
-                                // never started". Dispatching anyway would leave an effect that a
-                                // later sweep is entitled to repeat.
-                                if (state.terminated()) {
+                                // The RUNNING commit is the gate, and its refusal is read rather than
+                                // anticipated. Asking `terminated()` first and then committing was two
+                                // acquisitions of this aggregate's monitor with a gap between them,
+                                // and a fan-out closes that gap without any crash: branch A's backoff
+                                // expires and finds the traversal live, branch B fails hard and ends
+                                // it, and A then dispatched a node whose RUNNING transition had
+                                // already been refused. The effect ran while the attempt stayed
+                                // SCHEDULED in the store -- which is exactly the state recovery reads
+                                // as "provably never started" and is entitled to dispatch again. So
+                                // the effect ran twice, with no crash anywhere in the story.
+                                ExecutionState.RetryCommit started = state.retryStarted(invocationId,
+                                        next.attemptId(), outcome.retryCausedBy());
+                                if (started == null) {
                                     lease.close();
                                     return CompletableFuture.<Void>failedFuture(
                                             new TraversalCancelledException(identity.traversalId(),
                                                     node.id()));
                                 }
-                                UUID retryStartedEventId = state.retryStarted(invocationId,
-                                        next.attemptId(), outcome.retryCausedBy());
                                 return deliverAttempt(node, payload, attributes, parentInvocationIds,
                                         command, state, identity, coordinator, iteration, definition,
                                         lease, invocationId, next.attemptId(), next.ordinal(),
-                                        retryStartedEventId);
+                                        started.eventId());
                             });
                 });
     }
@@ -2986,6 +3014,23 @@ public final class GraphRunner implements AutoCloseable {
         return coordinators.size();
     }
 
+    /**
+     * Retry backoffs this traversal is still waiting out. Diagnostics.
+     *
+     * <p>Exposed so a test can assert that a traversal which has <em>ended</em> holds none, which is
+     * the difference between a retry that was stopped and one that is merely destined to be refused
+     * whenever its timer eventually elapses. Nothing in the store distinguishes those two, and the
+     * node's entry count cannot either until the wait is over — which for a long backoff is exactly
+     * the wait the test must not take.</p>
+     *
+     * @param traversalId the traversal to inspect
+     * @return how many of its branches are asleep in a backoff, zero when none are
+     */
+    int pendingBackoffCount(UUID traversalId) {
+        Set<BackoffWait> waits = backoffWaits.get(traversalId);
+        return waits == null ? 0 : waits.size();
+    }
+
     /** Branches parked across every in-flight traversal's joins on this runner. Diagnostics only. */
     int liveParkedBranchCount() {
         return coordinators.values().stream().mapToInt(JoinCoordinator::liveParkedBranchCount).sum();
@@ -3490,6 +3535,24 @@ public final class GraphRunner implements AutoCloseable {
         private boolean terminal;
 
         /**
+         * Set the moment this traversal's outcome is decided, before any of its teardown runs.
+         *
+         * <p>{@link #terminal} is set at the <em>end</em> of that teardown, and the gap between the
+         * two is not empty: {@code release} frees the pause gate on its way past, so a retry parked
+         * there is handed a thread while the traversal is still recorded as running. It would then
+         * find {@code terminal} false, commit {@code RUNNING}, and dispatch a node into a traversal
+         * that was already over — its result unrecordable, its effect real.</p>
+         *
+         * <p>So the two flags answer two different questions and both are needed. {@code terminal}
+         * is "this traversal's end is written"; this is "this traversal has stopped accepting new
+         * work". Only the retry paths read it, because they are the only ones that can start
+         * something new after the outcome is decided — every ordinary hop is a successor of a node
+         * that has not settled yet, and a traversal whose outcome is decided has none of those left.
+         * </p>
+         */
+        private boolean closing;
+
+        /**
          * @param causedBy the journalled event that triggered this dispatch — the predecessor's
          *                 completion, the traversal-accepted event for the start node, or the
          *                 join-satisfying arrival's completion for a fan-in. Never {@code null} while
@@ -3715,7 +3778,7 @@ public final class GraphRunner implements AutoCloseable {
          */
         private synchronized RetryCommit retryScheduled(UUID invocationId, UUID failedAttemptId,
                                                         NodeAttempt nextAttempt, UUID startedEventId) {
-            if (terminal) {
+            if (closing || terminal) {
                 return null;
             }
             var transitions = List.<ExecutionTransition>of(
@@ -3755,14 +3818,24 @@ public final class GraphRunner implements AutoCloseable {
          * decided" into "a retry was dispatched, outcome unknown", which is the distinction recovery
          * reads to decide between dispatching freely and parking.</p>
          *
+         * <h4>Its refusal is the dispatch gate, so it must be unambiguous</h4>
+         * <p>Returns {@code null} — and nothing else does — when the traversal ended first, under the
+         * same lock the terminal transition takes. The caller <strong>must not</strong> dispatch on
+         * that answer: an attempt whose {@code RUNNING} transition was refused stays {@code SCHEDULED}
+         * in the store, and {@code SCHEDULED} is precisely what recovery reads as "provably never
+         * started" and is entitled to dispatch again. Sending anyway therefore runs the effect twice,
+         * with no crash involved. The wrapper exists for the reason {@link RetryCommit} gives: a bare
+         * event identity is legitimately {@code null} whenever nothing is journalling, so it cannot
+         * carry a refusal.</p>
+         *
          * @param invocationId the invocation the retry belongs to
          * @param attemptId    the scheduled attempt being dispatched
          * @param causedBy     the retry event that scheduled this attempt
-         * @return the identity of this start, for its own settlement to name as cause, or
-         *         {@code null} when nothing was journalled
+         * @return the commit, whose event identity may itself be {@code null} when nothing is
+         *         journalling, or {@code null} when the traversal ended and nothing was written
          */
-        private synchronized UUID retryStarted(UUID invocationId, UUID attemptId, UUID causedBy) {
-            if (terminal) {
+        private synchronized RetryCommit retryStarted(UUID invocationId, UUID attemptId, UUID causedBy) {
+            if (closing || terminal) {
                 return null;
             }
             var transitions = List.<ExecutionTransition>of(
@@ -3772,7 +3845,7 @@ public final class GraphRunner implements AutoCloseable {
             record(transitions, events(ExecutionEventType.NODE_STARTED, startedEventId, causedBy,
                     invocationId, attemptId));
             lifecycle = fold(lifecycle, transitions);
-            return startedEventId;
+            return new RetryCommit(startedEventId);
         }
 
         /**
@@ -3823,16 +3896,13 @@ public final class GraphRunner implements AutoCloseable {
         }
 
         /**
-         * Whether this traversal has already recorded a terminal status.
+         * Records that the outcome is decided and no further attempt may be dispatched.
          *
-         * <p>Read by the retry decision, and it must be read rather than inferred: the three guards
-         * that consult {@link #terminal} return {@code null} both when the traversal is over and when
-         * nothing is journalling, so a {@code null} event identity cannot stand in for this answer.
-         * {@code synchronized} for the reason every writer of the field is — the branch asking may
-         * not be the thread that set it.</p>
+         * <p>Idempotent and one-way. Called before teardown rather than after it, which is the whole
+         * point: see {@link #closing}.</p>
          */
-        private synchronized boolean terminated() {
-            return terminal;
+        private synchronized void beginClosing() {
+            closing = true;
         }
 
         private synchronized void executionFailed() {

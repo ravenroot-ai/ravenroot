@@ -47,8 +47,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -292,6 +294,253 @@ class OrchestrationRetryTest {
         }
     }
 
+    /**
+     * A traversal that ends while a retry is in backoff must not deliver that retry.
+     *
+     * <h2>No crash anywhere in this story, and that is the point</h2>
+     * <p>Two branches. {@code a} fails retryably and commits attempt two, then waits. {@code b} then
+     * fails with nothing to route to, which ends the traversal. When {@code a}'s wait expires, its
+     * {@code RUNNING} transition can no longer be recorded — the aggregate refuses every attempt
+     * transition on a terminal traversal.</p>
+     *
+     * <p>Dispatching anyway is the defect this pins, and the harm is not "an unrecorded attempt". It
+     * is a <strong>duplicated external effect</strong>: the node would run, while its attempt stayed
+     * {@code SCHEDULED} in the store — and {@code SCHEDULED} is exactly what a recovery sweep reads
+     * as "provably effect-free" and is entitled to dispatch. The two halves of that are each already
+     * demonstrated elsewhere in this file and in {@code OrchestrationRetryRestartRecoveryTest}; this
+     * test closes the gap between them.</p>
+     *
+     * <p>So the assertion is on the node's own entry count, not on the store: whether the attempt was
+     * recorded is beside the point if the effect happened.</p>
+     */
+    @Test
+    @DisplayName("a traversal that ends during a backoff never delivers the retry it had scheduled")
+    void aRetryIsNotDeliveredIntoATraversalThatEndedWhileItWaited() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var retryingEntries = new AtomicInteger();
+        var siblingMayFail = new CountDownLatch(1);
+        var behaviors = new BehaviorRegistry()
+                .register("a", message -> {
+                    retryingEntries.incrementAndGet();
+                    return CompletableFuture.failedFuture(new RetryableBlip());
+                })
+                .register("b", message -> {
+                    awaitLatch(siblingMayFail);
+                    // No failure route and no retry policy on this node: the branch dies, and with it
+                    // the traversal.
+                    return CompletableFuture.failedFuture(new IllegalStateException("hard failure"));
+                });
+
+        var security = TestIdentities.of(TENANT, "alice");
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        var key = new ExecutionKey(TENANT, processInstanceId);
+        var joins = new InMemoryJoinStore();
+        // A second is far longer than the latch countdown plus one store write that separates the
+        // commit from the traversal's end, so the ordering the test needs is not a coin flip.
+        try (var manager = GraphManager.from(fanOutGraph(Duration.ofSeconds(1)));
+             var runner = new GraphRunner(manager, engine, behaviors, monitor,
+                     ExecutionIdentitySource.randomUuids(), joins, Clock.systemUTC())) {
+            long revision = createRunningInstance(store, key, traversalId, manager.start().id());
+            try (var recorder = ExecutionRecorder.open(store, key, "test-worker", TTL, revision)) {
+                var execution = runner.execute(security, processInstanceId, traversalId, "payload",
+                        GRAPH_VERSION, null, null, recorder).toCompletableFuture();
+                awaitAttemptCount(store, key, "a", 2);
+                assertEquals(1, retryingEntries.get(), "the fixture must retry exactly once so far");
+
+                siblingMayFail.countDown();
+                assertThrows(ExecutionException.class,
+                        () -> execution.get(BOUND_MILLIS, TimeUnit.MILLISECONDS),
+                        "the sibling's failure must end the traversal");
+
+                // Well past the backoff, with the recorder still open -- so a delivery would be
+                // refused by the terminal traversal and by nothing else.
+                Thread.sleep(2_000);
+                assertEquals(1, retryingEntries.get(),
+                        "the retry was delivered into a traversal that had already ended: its "
+                                + "RUNNING transition is refused, so the attempt stays SCHEDULED "
+                                + "while the effect runs -- and a recovery sweep reads SCHEDULED as "
+                                + "'provably never started' and runs it a second time");
+                assertEquals(NodeAttemptStatus.SCHEDULED,
+                        invocationOf(store, key, "a").attempts().get(1).status(),
+                        "the fixture is only meaningful while the attempt is one a sweep would claim");
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("closing the runner during a backoff stops the retry promptly rather than after the wait")
+    void graphShutdownDuringTheBackoffStopsTheRetryPromptly() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var entries = new AtomicInteger();
+        var behaviors = new BehaviorRegistry().register("work", message -> {
+            entries.incrementAndGet();
+            return CompletableFuture.failedFuture(new RetryableBlip());
+        });
+
+        var security = TestIdentities.of(TENANT, "alice");
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        var key = new ExecutionKey(TENANT, processInstanceId);
+        var joins = new InMemoryJoinStore();
+        // Ten minutes. Any outcome at all inside the bound below is therefore proof of promptness
+        // rather than of patience -- a shutdown that merely let the timer elapse could not finish.
+        var manager = GraphManager.from(retryingGraph(5, Duration.ofMinutes(10)));
+        var runner = new GraphRunner(manager, engine, behaviors, monitor,
+                ExecutionIdentitySource.randomUuids(), joins, Clock.systemUTC());
+        long revision = createRunningInstance(store, key, traversalId, manager.start().id());
+        try (var recorder = ExecutionRecorder.open(store, key, "test-worker", TTL, revision)) {
+            var execution = runner.execute(security, processInstanceId, traversalId, "payload",
+                    GRAPH_VERSION, null, null, recorder).toCompletableFuture();
+            awaitSecondAttemptCommitted(store, key);
+
+            long startedAt = System.nanoTime();
+            runner.close();
+            assertThrows(ExecutionException.class,
+                    () -> execution.get(BOUND_MILLIS, TimeUnit.MILLISECONDS),
+                    "shutdown must end the traversal instead of leaving it asleep on a timer");
+            Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+            assertTrue(elapsed.compareTo(Duration.ofMinutes(1)) < 0,
+                    "shutdown waited on the backoff rather than ending it: " + elapsed);
+            assertEquals(1, entries.get(), "no further attempt may be dispatched into a closing runner");
+        } finally {
+            manager.close();
+        }
+    }
+
+    @Test
+    @DisplayName("a join timeout that ends the traversal during a backoff stops the retry at once")
+    void aTraversalTimeoutDuringTheBackoffStopsTheRetry() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var retryingEntries = new AtomicInteger();
+        var behaviors = new BehaviorRegistry()
+                .register("b0", message -> {
+                    retryingEntries.incrementAndGet();
+                    return CompletableFuture.failedFuture(new RetryableBlip());
+                })
+                .register("b1", message -> CompletableFuture.completedFuture(
+                        NodeResult.continueWith("arrived")));
+
+        var security = TestIdentities.of(TENANT, "alice");
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        var key = new ExecutionKey(TENANT, processInstanceId);
+        var joins = new InMemoryJoinStore();
+        // The join's deadline is fired by hand rather than waited for, exactly as the join suite
+        // drives every other timeout: the point of the test is the ORDER of two events, and a
+        // wall-clock race between them would prove whichever the machine happened to run first.
+        // The backoff is half an hour, so nothing here can pass by outlasting it.
+        try (var manager = GraphManager.from(timedJoinGraph("PT30S", Duration.ofMinutes(30)));
+             var runner = new GraphRunner(manager, engine, behaviors, monitor,
+                     ExecutionIdentitySource.randomUuids(), joins, Clock.systemUTC())) {
+            long revision = createRunningInstance(store, key, traversalId, manager.start().id());
+            try (var recorder = ExecutionRecorder.open(store, key, "test-worker", TTL, revision)) {
+                var execution = runner.execute(security, processInstanceId, traversalId, "payload",
+                        GRAPH_VERSION, null, null, recorder).toCompletableFuture();
+                awaitAttemptCount(store, key, "b0", 2);
+                assertEquals(1, retryingEntries.get(), "b0 is in backoff, not running");
+
+                assertEquals(1, engine.manualScheduler().fireAll(),
+                        "exactly one join timeout was scheduled, and this is it");
+
+                var thrown = assertThrows(ExecutionException.class,
+                        () -> execution.get(BOUND_MILLIS, TimeUnit.MILLISECONDS),
+                        "the join's deadline passed with b0 still outstanding, so the traversal fails");
+                assertInstanceOf(JoinFailureException.class, thrown.getCause());
+
+                // The wait was ENDED, not merely destined to be refused when it expired half an hour
+                // from now. Without that the traversal would be reported failed to its caller while a
+                // thread of it was still scheduled to try the node again.
+                assertEquals(0, runner.pendingBackoffCount(traversalId),
+                        "a traversal that has ended must hold no retry backoff");
+                assertEquals(1, retryingEntries.get(), "no attempt may be dispatched after the timeout");
+                assertEquals(NodeAttemptStatus.SCHEDULED,
+                        invocationOf(store, key, "b0").attempts().get(1).status(),
+                        "the decision stays durable and truthful: it was made, and then the traversal "
+                                + "ended before it could be acted on");
+            }
+        }
+    }
+
+    /**
+     * The guard itself: the {@code RUNNING} commit refuses, and the dispatch must obey the refusal.
+     *
+     * <h2>Why this fixture goes to such trouble to make the backoff registry useless</h2>
+     * <p>A traversal that ends now cancels every backoff it holds, so the ordinary path to this harm
+     * is closed one step earlier — which is why
+     * {@link #aRetryIsNotDeliveredIntoATraversalThatEndedWhileItWaited()} stays green even with the
+     * guard removed. That leaves the guard itself untested, and it is not redundant: the branch can
+     * be <em>past</em> the wait and inside the pause gate or the admission queue when the traversal
+     * ends, where there is no registered wait to cancel. This test puts it exactly there.</p>
+     *
+     * <p>The backoff is zero, so nothing is ever registered — {@link GraphRunner#pendingBackoffCount}
+     * is asserted to be zero, which is the fixture's own proof that the cancellation path could not
+     * have produced the result. The branch is instead held on a pause gate while a sibling ends the
+     * traversal, and is then released into a traversal that is already terminal.</p>
+     */
+    @Test
+    @DisplayName("a retry released into an already-ended traversal is refused by the RUNNING commit")
+    void aRefusedRunningCommitAbortsTheDispatchRatherThanBeingDiscarded() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var retryingEntries = new AtomicInteger();
+        var runnerRef = new java.util.concurrent.atomic.AtomicReference<GraphRunner>();
+        var siblingRunning = new CountDownLatch(1);
+        var siblingMayFail = new CountDownLatch(1);
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        var behaviors = new BehaviorRegistry()
+                .register("a", message -> {
+                    if (retryingEntries.incrementAndGet() == 1) {
+                        // Installed only once the sibling is provably past its own gate check, so the
+                        // pause holds the retry and nothing else.
+                        awaitLatch(siblingRunning);
+                        runnerRef.get().pauseTraversal(traversalId);
+                        return CompletableFuture.failedFuture(new RetryableBlip());
+                    }
+                    return CompletableFuture.completedFuture(NodeResult.continueWith("ran again"));
+                })
+                .register("b", message -> {
+                    siblingRunning.countDown();
+                    awaitLatch(siblingMayFail);
+                    return CompletableFuture.failedFuture(new IllegalStateException("hard failure"));
+                });
+
+        var security = TestIdentities.of(TENANT, "alice");
+        var key = new ExecutionKey(TENANT, processInstanceId);
+        var joins = new InMemoryJoinStore();
+        try (var manager = GraphManager.from(fanOutGraph(Duration.ZERO));
+             var runner = new GraphRunner(manager, engine, behaviors, monitor,
+                     ExecutionIdentitySource.randomUuids(), joins, Clock.systemUTC())) {
+            runnerRef.set(runner);
+            long revision = createRunningInstance(store, key, traversalId, manager.start().id());
+            try (var recorder = ExecutionRecorder.open(store, key, "test-worker", TTL, revision)) {
+                var execution = runner.execute(security, processInstanceId, traversalId, "payload",
+                        GRAPH_VERSION, null, null, recorder).toCompletableFuture();
+                awaitAttemptCount(store, key, "a", 2);
+                assertEquals(0, runner.pendingBackoffCount(traversalId),
+                        "a zero backoff registers no wait, so nothing here can be rescued by "
+                                + "cancelling one -- which is the whole point of this fixture");
+
+                siblingMayFail.countDown();
+                assertThrows(ExecutionException.class,
+                        () -> execution.get(BOUND_MILLIS, TimeUnit.MILLISECONDS));
+
+                // Released into a traversal that has already ended. The commit refuses; the dispatch
+                // must refuse with it.
+                // The gate is released by the traversal's own teardown, so the parked retry has
+                // already been handed a thread by the time this returns; resumeTraversal is called
+                // only to prove that, and its answer is not the assertion.
+                runner.resumeTraversal(traversalId);
+                Thread.sleep(500);
+                assertEquals(1, retryingEntries.get(),
+                        "the RUNNING commit was refused and the node was dispatched anyway: the "
+                                + "effect runs while the attempt stays SCHEDULED, and a recovery "
+                                + "sweep reads SCHEDULED as 'provably never started' and runs it "
+                                + "a second time");
+            }
+        }
+    }
+
     // ------------------------------------------------------------- crash safety, from outside
 
     @Test
@@ -386,6 +635,37 @@ class OrchestrationRetryTest {
                 "a structural node reports nothing rather than claiming a single attempt");
     }
 
+    @Test
+    @DisplayName("the failure that caused a retry survives on the retry event, for both readers")
+    void aRetriedAttemptsFailureIsStillRecorded() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var entries = new AtomicInteger();
+        var behaviors = new BehaviorRegistry().register("work", message ->
+                entries.incrementAndGet() == 1
+                        ? CompletableFuture.failedFuture(new RetryableBlip())
+                        : CompletableFuture.completedFuture(NodeResult.continueWith("ok")));
+
+        run(retryingGraph(3, Duration.ofMillis(1)), behaviors, store, false);
+
+        ExecutionEvent retry = eventsOf(ExecutionEventType.NODE_RETRY_SCHEDULED, "work").get(0);
+        assertTrue(retry.detail().contains("RetryableBlip"),
+                "the failure's class must be on the event: NODE_RETRY_SCHEDULED replaces NODE_FAILED "
+                        + "for this attempt, so it is the only record the attempt gets. Without it a "
+                        + "node that fails twice and then succeeds leaves no trace of what went "
+                        + "wrong, and the run looks untroubled. Got: " + retry.detail());
+        assertTrue(retry.detail().contains("transient"),
+                "the failure's message too, exactly as NODE_FAILED carries it: " + retry.detail());
+        assertTrue(retry.detail().startsWith("retrying as attempt 2 after"),
+                "the retry facts lead, so a long exception message cannot push them past the "
+                        + "detail bound: " + retry.detail());
+        assertNotNull(retry.authorMessage(),
+                "the author diagnostics view and the SSE frame read authorMessage, and it is nulled "
+                        + "for every type outside the failure set -- so omitting this type there "
+                        + "would delete the diagnostic from the surfaces an operator actually reads");
+        assertTrue(retry.authorMessage().value().contains("transient"),
+                "got: " + retry.authorMessage().value());
+    }
+
     // ------------------------------------------------------------------ no policy, no change
 
     @Test
@@ -466,6 +746,34 @@ class OrchestrationRetryTest {
                 GraphEdge.to("work", "end")));
     }
 
+    /**
+     * Two branches into a join that needs both, where {@code b0} retries and can never arrive in time.
+     *
+     * @param joinTimeout ISO-8601 deadline the join waits for its quorum before failing the traversal
+     * @param backoff     {@code b0}'s retry wait, deliberately far longer than {@code joinTimeout}
+     */
+    private static GraphDefinition timedJoinGraph(String joinTimeout, Duration backoff) {
+        var joinProperties = new java.util.LinkedHashMap<String, Object>();
+        joinProperties.put(JoinSpec.QUORUM_PROPERTY, "2");
+        joinProperties.put(JoinSpec.TIMEOUT_PROPERTY, joinTimeout);
+        return new GraphDefinition(List.of(
+                GraphNode.start("start"),
+                new GraphNode("b0", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "b0", Map.of(
+                        NodeRetryProperty.MAX_ATTEMPTS, "3",
+                        NodeRetryProperty.INITIAL_BACKOFF, String.valueOf(backoff.toMillis()),
+                        NodeRetryProperty.BACKOFF_MULTIPLIER, "1.0",
+                        NodeRetryProperty.MAX_BACKOFF, String.valueOf(backoff.toMillis()),
+                        NodeRetryProperty.RETRY_ON, RetryableBlip.class.getSimpleName())),
+                GraphNode.behavior("b1", "b1"),
+                new GraphNode("join", ai.ravenroot.core.graph.NodeKind.PASSTHROUGH, null, joinProperties),
+                GraphNode.error("error"), GraphNode.end("end")), List.of(
+                GraphEdge.to("start", "b0"),
+                GraphEdge.to("start", "b1"),
+                GraphEdge.to("b0", "join"),
+                GraphEdge.to("b1", "join"),
+                GraphEdge.to("join", "end")));
+    }
+
     private static GraphDefinition plainGraph() {
         return new GraphDefinition(List.of(
                 GraphNode.start("start"),
@@ -509,14 +817,21 @@ class OrchestrationRetryTest {
      */
     private static void awaitSecondAttemptCommitted(ExecutionStore store, ExecutionKey key)
             throws InterruptedException {
+        awaitAttemptCount(store, key, "work", 2);
+    }
+
+    private static void awaitAttemptCount(ExecutionStore store, ExecutionKey key, String nodeId,
+                                          int expected) throws InterruptedException {
         long deadline = System.nanoTime() + Duration.ofMillis(BOUND_MILLIS).toNanos();
         while (System.nanoTime() < deadline) {
-            if (workInvocation(store, key) != null && workInvocation(store, key).attempts().size() == 2) {
+            NodeInvocation invocation = invocationOf(store, key, nodeId);
+            if (invocation != null && invocation.attempts().size() == expected) {
                 return;
             }
             Thread.sleep(5);
         }
-        throw new AssertionError("the retry was never committed within " + BOUND_MILLIS + "ms");
+        throw new AssertionError("node '" + nodeId + "' never reached " + expected
+                + " attempts within " + BOUND_MILLIS + "ms");
     }
 
     private static long createRunningInstance(ExecutionStore store, ExecutionKey key, UUID traversalId,
@@ -541,14 +856,54 @@ class OrchestrationRetryTest {
     }
 
     private static NodeInvocation workInvocation(ExecutionStore store, ExecutionKey key) {
+        return invocationOf(store, key, "work");
+    }
+
+    private static NodeInvocation invocationOf(ExecutionStore store, ExecutionKey key, String nodeId) {
         for (Traversal traversal : await(store.load(key)).state().traversals().values()) {
             for (NodeInvocation invocation : traversal.invocations().values()) {
-                if ("work".equals(invocation.nodeId())) {
+                if (nodeId.equals(invocation.nodeId())) {
                     return invocation;
                 }
             }
         }
         return null;
+    }
+
+    /** Blocks a node's own thread on a latch, converting the interrupt into a node failure. */
+    private static void awaitLatch(CountDownLatch latch) {
+        try {
+            if (!latch.await(BOUND_MILLIS, TimeUnit.MILLISECONDS)) {
+                throw new IllegalStateException("the fixture's latch never opened");
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException(interrupted);
+        }
+    }
+
+    /**
+     * Two branches from one start: {@code a} retries, {@code b} kills the traversal.
+     *
+     * <p>{@code b} has no retry policy and no failure route, so its failure ends the traversal rather
+     * than being routed anywhere — which is precisely the condition {@code a}'s pending retry then
+     * meets.</p>
+     */
+    private static GraphDefinition fanOutGraph(Duration backoff) {
+        return new GraphDefinition(List.of(
+                GraphNode.start("start"),
+                new GraphNode("a", ai.ravenroot.core.graph.NodeKind.BEHAVIOR, "a", Map.of(
+                        NodeRetryProperty.MAX_ATTEMPTS, "3",
+                        NodeRetryProperty.INITIAL_BACKOFF, String.valueOf(backoff.toMillis()),
+                        NodeRetryProperty.BACKOFF_MULTIPLIER, "1.0",
+                        NodeRetryProperty.MAX_BACKOFF, String.valueOf(backoff.toMillis()),
+                        NodeRetryProperty.RETRY_ON, RetryableBlip.class.getSimpleName())),
+                GraphNode.behavior("b", "b"),
+                GraphNode.error("error"), GraphNode.end("end")), List.of(
+                GraphEdge.to("start", "a"),
+                GraphEdge.to("start", "b"),
+                GraphEdge.to("a", "end"),
+                GraphEdge.to("b", "end")));
     }
 
     private List<ExecutionEvent> eventsOf(ExecutionEventType type, String nodeId) {

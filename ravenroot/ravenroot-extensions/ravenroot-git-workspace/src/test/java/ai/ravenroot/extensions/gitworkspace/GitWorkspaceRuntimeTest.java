@@ -37,7 +37,7 @@ class GitWorkspaceRuntimeTest {
                 """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
         TestCancellation cancellation = new TestCancellation();
@@ -86,7 +86,7 @@ class GitWorkspaceRuntimeTest {
                 """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "deadline", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(3), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
         var future = runtime.submit(profile, new TestCancellation(), control -> {
@@ -116,7 +116,7 @@ class GitWorkspaceRuntimeTest {
                 """);
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "orphan", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/", git,
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceRuntime runtime = new GitWorkspaceRuntime(System::nanoTime);
 

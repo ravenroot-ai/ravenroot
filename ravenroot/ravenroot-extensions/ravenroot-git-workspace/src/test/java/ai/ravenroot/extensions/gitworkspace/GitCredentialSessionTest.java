@@ -39,7 +39,7 @@ class GitCredentialSessionTest {
         Path gitExecutable = GitWorkspaceTestSupport.discoveredExecutable(temporary, "git");
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 "https://example.invalid/org/repository.git", "refs/heads/dev", "refs/heads/issues/",
-                gitExecutable, GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1",
+                gitExecutable, GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1",
                 "credential-ref", "git-user", Duration.ofSeconds(8), 1,
                 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);

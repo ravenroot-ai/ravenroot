@@ -35,7 +35,7 @@ final class GitWorkspaceTestSupport {
         remote = temporary.resolve("remote.git");
         source = Files.createDirectory(temporary.resolve("source"));
         git = discoveredExecutable(temporary, "git");
-        shell = realExecutable(Path.of("/bin/sh"));
+        shell = discoveredExecutable(temporary, "bash");
         run(temporary, git.toString(), "init", "--bare", "--initial-branch=dev", remote.toString());
         run(source, git.toString(), "init", "--initial-branch=dev");
         run(source, git.toString(), "config", "user.name", "Test");

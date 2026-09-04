@@ -82,4 +82,26 @@ class GitWorkspaceContractTest {
         assertEquals(shell, profile.processShellExecutable());
         assertEquals(git, profile.gitExecutable());
     }
+
+    @Test
+    void runtimeFixtureShellProvidesAnIsolatedProcessGroup() throws Exception {
+        Path shell = GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash");
+        assertTrue(shell.isAbsolute());
+        assertTrue(Files.isRegularFile(shell, LinkOption.NOFOLLOW_LINKS));
+        assertTrue(Files.isExecutable(shell));
+        assertFalse(Files.isSymbolicLink(shell));
+
+        String result = GitWorkspaceTestSupport.run(temporary, shell.toString(), "-c", """
+                set -m || exit 125
+                exec 3>&1
+                exec 1>/dev/null 2>/dev/null
+                sleep 30 &
+                leader=$!
+                kill -0 -"$leader" 2>/dev/null || exit 125
+                kill -KILL -"$leader" 2>/dev/null || exit 125
+                wait "$leader" 2>/dev/null || :
+                printf 'isolated\\n' >&3
+                """);
+        assertEquals("isolated", result.trim());
+    }
 }

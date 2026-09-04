@@ -66,7 +66,7 @@ class GitWorkspaceSecurityTest {
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "profile", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
                 GitWorkspaceTestSupport.realExecutable(executable),
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(5), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
@@ -110,7 +110,7 @@ class GitWorkspaceSecurityTest {
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "flood", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
                 GitWorkspaceTestSupport.realExecutable(executable),
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
@@ -150,7 +150,7 @@ class GitWorkspaceSecurityTest {
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "swap", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
                 GitWorkspaceTestSupport.realExecutable(executable),
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(
@@ -188,7 +188,7 @@ class GitWorkspaceSecurityTest {
         GitWorkspaceProfile profile = new GitWorkspaceProfile("tenant", "utf8", root,
                 remote.toRealPath().toUri().toASCIIString(), "refs/heads/dev", "refs/heads/issues/",
                 GitWorkspaceTestSupport.realExecutable(executable),
-                GitWorkspaceTestSupport.realExecutable(Path.of("/bin/sh")), "sha1", null, null,
+                GitWorkspaceTestSupport.discoveredExecutable(temporary, "bash"), "sha1", null, null,
                 Duration.ofSeconds(8), 1, 64 * 1024, 10);
         GitWorkspaceStore store = new GitWorkspaceStore(profile);
         GitWorkspaceRuntime.Control control = new GitWorkspaceRuntime.Control(

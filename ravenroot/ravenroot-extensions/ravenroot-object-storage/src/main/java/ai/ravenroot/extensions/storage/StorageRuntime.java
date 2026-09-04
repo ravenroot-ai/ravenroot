@@ -9,6 +9,7 @@ import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.node.service.OutboundHttpSigning;
 
+import java.net.URI;
 import java.nio.ByteBuffer;
 import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
@@ -27,6 +28,7 @@ import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 final class StorageRuntime {
     private static final Set<NodePackageServiceException.Reason> UNCERTAIN = Set.of(
@@ -40,8 +42,17 @@ final class StorageRuntime {
 
     CompletionStage<NodeResult> execute(NodeMessage message, NodePackageServices services, StorageSettings settings,
                                         Semaphore actionGate, byte[] body, Map<String, List<String>> headers) {
-        StorageAdmission.Result admitted = admission.acquire(message.tenantId() + "\u0000" + settings.profile().name(),
-                settings.profile().maxConcurrency(), settings.profile().maxRequestsPerSecond(), System.nanoTime());
+        boolean put = settings.operation() == StorageProfile.Operation.PUT;
+        return execute(message, services, settings.profile(), actionGate, new Request(settings.destination(),
+                settings.operation().name(), headers, body, settings.timeoutMs(), settings.maxBytes(), 0,
+                put ? Semantics.MUTATION : Semantics.READ,
+                response -> project(settings, body, response)));
+    }
+
+    CompletionStage<NodeResult> execute(NodeMessage message, NodePackageServices services, StorageProfile profile,
+                                        Semaphore actionGate, Request request) {
+        StorageAdmission.Result admitted = admission.acquire(message.tenantId() + "\u0000" + profile.name(),
+                profile.maxConcurrency(), profile.maxRequestsPerSecond(), System.nanoTime());
         if (admitted.refusal() != null) {
             return CompletableFuture.failedFuture(StorageException.of(admitted.refusal() == StorageAdmission.Refusal.RATE
                     ? StorageException.Code.RATE_LIMITED : StorageException.Code.CAPACITY_UNAVAILABLE));
@@ -50,33 +61,141 @@ final class StorageRuntime {
             admitted.lease().close();
             return CompletableFuture.failedFuture(StorageException.of(StorageException.Code.CAPACITY_UNAVAILABLE));
         }
-        OutboundCall<OutboundHttpResponse> call;
-        try {
-            call = services.outboundHttp().execute(message, new OutboundHttpRequest(settings.destination(),
-                    settings.operation().name(), headers, body, Duration.ofMillis(settings.timeoutMs()), null,
-                    new OutboundHttpSigning(settings.profile().signingBindingId())));
-        } catch (RuntimeException failure) {
-            actionGate.release(); admitted.lease().close();
-            return CompletableFuture.failedFuture(map(failure, false));
-        }
-        boolean put = settings.operation() == StorageProfile.Operation.PUT;
-        OutcomeFuture outcome = new OutcomeFuture(call, put);
-        call.completion().whenComplete((response, failure) -> {
-            NodeResult projected = null;
-            RuntimeException terminal = null;
-            try {
-                if (failure != null) terminal = map(failure, put);
-                else projected = project(settings, body, response);
-            } catch (RuntimeException invalid) {
-                terminal = invalid instanceof StorageException ? invalid
-                        : StorageException.of(StorageException.Code.RESPONSE_INVALID);
-            } finally {
-                actionGate.release(); admitted.lease().close();
-            }
-            if (terminal != null) outcome.completeExceptionally(terminal);
-            else outcome.complete(projected);
+        OutcomeFuture outcome = new OutcomeFuture(request.semantics().ambiguous);
+        outcome.whenComplete((ignored, failure) -> {
+            actionGate.release();
+            admitted.lease().close();
         });
+        long now = System.nanoTime();
+        long timeoutNanos = Duration.ofMillis(request.timeoutMs()).toNanos();
+        long deadline = now > Long.MAX_VALUE - timeoutNanos ? Long.MAX_VALUE : now + timeoutNanos;
+        new Attempt(message, services, profile, request, outcome, deadline, admitted.lease()).start(0);
         return outcome;
+    }
+
+    @FunctionalInterface
+    interface ResponseProjector { NodeResult project(OutboundHttpResponse response); }
+
+    enum Semantics {
+        READ(false, false), RETRYABLE_READ(false, true), MUTATION(true, false);
+        final boolean ambiguous;
+        final boolean retryable;
+        Semantics(boolean ambiguous, boolean retryable) {
+            this.ambiguous = ambiguous;
+            this.retryable = retryable;
+        }
+    }
+
+    record Request(URI destination, String method, Map<String, List<String>> headers, byte[] body,
+                   int timeoutMs, int maxResponseBytes, int retries, Semantics semantics,
+                   ResponseProjector projector) {
+        Request {
+            java.util.Objects.requireNonNull(destination);
+            java.util.Objects.requireNonNull(method);
+            headers = Map.copyOf(headers);
+            body = body.clone();
+            if (timeoutMs < 1 || maxResponseBytes < 0 || retries < 0 || retries > 3) {
+                throw StorageException.of(StorageException.Code.CONFIGURATION);
+            }
+            java.util.Objects.requireNonNull(semantics);
+            java.util.Objects.requireNonNull(projector);
+        }
+        @Override public byte[] body() { return body.clone(); }
+    }
+
+    private static final class Attempt {
+        private final NodeMessage message;
+        private final NodePackageServices services;
+        private final StorageProfile profile;
+        private final Request request;
+        private final OutcomeFuture outcome;
+        private final long deadline;
+        private final StorageAdmission.Lease admission;
+
+        Attempt(NodeMessage message, NodePackageServices services, StorageProfile profile, Request request,
+                OutcomeFuture outcome, long deadline, StorageAdmission.Lease admission) {
+            this.message = message;
+            this.services = services;
+            this.profile = profile;
+            this.request = request;
+            this.outcome = outcome;
+            this.deadline = deadline;
+            this.admission = admission;
+        }
+
+        void start(int number) {
+            if (outcome.isDone()) return;
+            long remaining = deadline - System.nanoTime();
+            if (remaining <= 0) {
+                outcome.completeExceptionally(StorageException.of(request.semantics().ambiguous
+                        ? StorageException.Code.AMBIGUOUS : StorageException.Code.DEADLINE_EXCEEDED));
+                return;
+            }
+            OutboundCall<OutboundHttpResponse> call;
+            try {
+                call = services.outboundHttp().execute(message, new OutboundHttpRequest(request.destination(),
+                        request.method(), request.headers(), request.body(), Duration.ofNanos(remaining), null,
+                        new OutboundHttpSigning(profile.signingBindingId())));
+            } catch (RuntimeException failure) {
+                failed(number, failure);
+                return;
+            }
+            if (!outcome.install(call)) return;
+            call.completion().whenComplete((response, failure) -> {
+                outcome.clear(call);
+                if (outcome.isDone()) return;
+                if (failure != null) {
+                    failed(number, failure);
+                    return;
+                }
+                try {
+                    if (response.body().length > request.maxResponseBytes()) {
+                        throw StorageException.of(StorageException.Code.RESPONSE_TOO_LARGE);
+                    }
+                    if (canRetry(number) && retryableStatus(response.statusCode())) {
+                        retry(number);
+                        return;
+                    }
+                    outcome.complete(request.projector().project(response));
+                } catch (RuntimeException invalid) {
+                    outcome.completeExceptionally(invalid instanceof StorageException ? invalid
+                            : StorageException.of(StorageException.Code.RESPONSE_INVALID));
+                }
+            });
+        }
+
+        private void failed(int number, Throwable failure) {
+            if (canRetry(number) && retryable(failure) && deadline - System.nanoTime() > 0) {
+                retry(number);
+            } else {
+                outcome.completeExceptionally(map(failure, request.semantics().ambiguous));
+            }
+        }
+
+        private boolean canRetry(int number) {
+            return request.semantics().retryable && request.retries() > number;
+        }
+
+        private void retry(int number) {
+            if (!admission.retry(System.nanoTime())) {
+                outcome.completeExceptionally(StorageException.of(StorageException.Code.RATE_LIMITED));
+            } else {
+                start(number + 1);
+            }
+        }
+
+        private static boolean retryable(Throwable raw) {
+            Throwable failure = raw;
+            while ((failure instanceof CompletionException
+                    || failure instanceof java.util.concurrent.ExecutionException)
+                    && failure.getCause() != null) failure = failure.getCause();
+            return failure instanceof NodePackageServiceException service
+                    && service.reason() == NodePackageServiceException.Reason.TRANSPORT_FAILED;
+        }
+
+        private static boolean retryableStatus(int status) {
+            return status == 500 || status == 502 || status == 503 || status == 504;
+        }
     }
 
     int admissionEntries() { return admission.size(); }
@@ -183,13 +302,27 @@ final class StorageRuntime {
     }
 
     private static final class OutcomeFuture extends CompletableFuture<NodeResult> {
-        private final OutboundCall<?> call;
+        private final AtomicReference<OutboundCall<?>> call = new AtomicReference<>();
         private final boolean ambiguous;
         private final AtomicBoolean cancellation = new AtomicBoolean();
-        OutcomeFuture(OutboundCall<?> call, boolean ambiguous) { this.call = call; this.ambiguous = ambiguous; }
+        OutcomeFuture(boolean ambiguous) { this.ambiguous = ambiguous; }
+        boolean install(OutboundCall<?> current) {
+            if (isDone() || cancellation.get()) {
+                current.cancel();
+                return false;
+            }
+            call.set(current);
+            if ((isDone() || cancellation.get()) && call.compareAndSet(current, null)) {
+                current.cancel();
+                return false;
+            }
+            return true;
+        }
+        void clear(OutboundCall<?> current) { call.compareAndSet(current, null); }
         @Override public boolean cancel(boolean mayInterruptIfRunning) {
             if (isDone() || !cancellation.compareAndSet(false, true)) return false;
-            call.cancel();
+            OutboundCall<?> active = call.getAndSet(null);
+            if (active != null) active.cancel();
             completeExceptionally(StorageException.of(ambiguous ? StorageException.Code.AMBIGUOUS
                     : StorageException.Code.DEADLINE_EXCEEDED));
             return true;

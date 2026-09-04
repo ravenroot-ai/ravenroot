@@ -101,6 +101,8 @@ public final class DiscordSendNodeBehavior implements NodeBehavior {
         private NodeResult send(NodeMessage message, Settings settings, Payload payload, String rateKey,
                                 AtomicBoolean cancelled, AtomicReference<OutboundCall<OutboundHttpResponse>> active) {
             RequestBody body = payload.body();
+            if (body.bytes.length > settings.profile.maxRequestBytes())
+                throw new DiscordException(DiscordException.Code.INVALID_INPUT);
             long deadline = runtime.clock.millis() + settings.timeoutMs;
             for (int attempt = 1; attempt <= settings.retries + 1; attempt++) {
                 if (cancelled.get()) throw new DiscordException(DiscordException.Code.CANCELLED);
@@ -110,7 +112,7 @@ public final class DiscordSendNodeBehavior implements NodeBehavior {
                         Map.of("accept", List.of("application/json"), "content-type", List.of(body.contentType),
                                 "user-agent", List.of("ravenroot-discord/1")), body.bytes,
                         Duration.ofMillis(remaining), settings.profile.credential(), null,
-                        ExternalIoLimits.compressedHttp(Math.max(1, body.bytes.length), settings.profile.maxResponseBytes(),
+                        ExternalIoLimits.compressedHttp(settings.profile.maxRequestBytes(), settings.profile.maxResponseBytes(),
                                 settings.profile.maxResponseBytes(), settings.profile.maxResponseBytes(), 100,
                                 Duration.ofMillis(remaining), Set.of("application/json")),
                         OutboundHttpRepresentationPolicy.SUCCESS_ONLY);

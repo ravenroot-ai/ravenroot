@@ -40,6 +40,9 @@ final class DiscordTestSupport {
     private static final String PUBLIC_KEY = "eb6fa3a04b766ee3ef693301641cc4f20870b87b0c9d077665ca1339106585b3";
 
     static DiscordConfiguration configuration(Path store) {
+        return configuration(store, 1_048_576);
+    }
+    static DiscordConfiguration configuration(Path store, int maximumRequestBytes) {
         var authority = new IngressAuthorityDeclaration(DiscordConfiguration.PACKAGE_ID, "main", "/managed/discord",
                 Set.of("discord:interactions"), 8, 32, 1_048_576, 65_536, Duration.ofMillis(2_500));
         var projection = new IngressRequestProjectionPolicy(DiscordConfiguration.PACKAGE_ID,
@@ -47,7 +50,7 @@ final class DiscordTestSupport {
         var profile = new DiscordProfile(TENANT, PROFILE, DiscordProfile.PRODUCTION_ORIGIN, APPLICATION,
                 java.util.HexFormat.of().parseHex(PUBLIC_KEY), Set.of(GUILD), Map.of(GUILD, Set.of(CHANNEL)),
                 Set.of("deploy"), "discord-bot", "discord-bot-token", "/interactions",
-                2_000, 1_048_576, 65_536, 2_000, 1_048_576, 4, 2, 20, 2, 300, 30);
+                2_000, maximumRequestBytes, 65_536, 2_000, 1_048_576, 4, 2, 20, 2, 300, 30);
         return new DiscordConfiguration(authority, projection,
                 new DiscordConfiguration.StorePolicy(store, 100, 24),
                 Map.of(TENANT + "\u0000" + PROFILE, profile));
@@ -55,6 +58,10 @@ final class DiscordTestSupport {
 
     static DiscordNodePackage nodePackage(Path store) {
         DiscordConfiguration config = configuration(store);
+        return new DiscordNodePackage(config, new SqliteDiscordDeliveryStore(config.store(), fixedClock()), fixedClock());
+    }
+    static DiscordNodePackage nodePackage(Path store, int maximumRequestBytes) {
+        DiscordConfiguration config = configuration(store, maximumRequestBytes);
         return new DiscordNodePackage(config, new SqliteDiscordDeliveryStore(config.store(), fixedClock()), fixedClock());
     }
     static Clock fixedClock() { return Clock.fixed(NOW, ZoneOffset.UTC); }

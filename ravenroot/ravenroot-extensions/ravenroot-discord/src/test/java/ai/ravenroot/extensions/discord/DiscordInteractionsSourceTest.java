@@ -38,6 +38,8 @@ class DiscordInteractionsSourceTest {
         assertEquals(401, invoke(route, malformed, DiscordTestSupport.signature(Long.toString(
                 DiscordTestSupport.NOW.minusSeconds(301).getEpochSecond()), malformed),
                 Long.toString(DiscordTestSupport.NOW.minusSeconds(301).getEpochSecond())).status());
+        String future = Long.toString(DiscordTestSupport.NOW.plusSeconds(31).getEpochSecond());
+        assertEquals(401, invoke(route, malformed, DiscordTestSupport.signature(future, malformed), future).status());
         assertEquals(0, ingress.offers.get());
     }
 

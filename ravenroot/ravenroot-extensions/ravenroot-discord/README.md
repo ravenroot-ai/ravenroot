@@ -158,8 +158,9 @@ credentials, or remote error text. Statuses include `sent`, `rate-limited`, `cap
 Every outbound request supplies explicit finite request, encoded-response, decoded-response,
 projected-output, decompression-ratio, deadline, and cancellation limits. The managed service
 intersects them with operator policy. Successful responses must be JSON; error bodies remain opaque
-and are never parsed or reported. The final result is checked against the effective operator output
-ceiling returned by the managed service.
+and are never parsed or reported. The complete encoded request, including multipart framing, must fit
+the operator profile's request ceiling before managed dispatch. The final result is checked against
+the effective operator output ceiling returned by the managed service.
 
 Local concurrency and per-second admission are partitioned by tenant/profile. A provider bucket
 reported exhausted by bounded `X-RateLimit-Remaining` and `X-RateLimit-Reset-After` headers blocks

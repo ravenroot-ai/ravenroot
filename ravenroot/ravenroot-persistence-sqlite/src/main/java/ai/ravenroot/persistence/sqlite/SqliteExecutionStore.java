@@ -591,9 +591,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
             return inReadTransaction(null, () -> {
                 Instant now = clock.instant();
                 var active = new ArrayList<LeaseHandle>();
-                String sql = "SELECT l.process_instance_id, l.worker_id, l.claimed_at_epoch_second, "
+                String sql = "SELECT l.process_instance_id, p.process_instance_id AS joined_process_id, "
+                        + "l.worker_id, l.claimed_at_epoch_second, "
                         + "l.claimed_at_nano, l.expires_at_epoch_second, l.expires_at_nano, p.fencing_token "
-                        + "FROM lease l JOIN process_instance p ON p.tenant_id = l.tenant_id "
+                        + "FROM lease l LEFT JOIN process_instance p ON p.tenant_id = l.tenant_id "
                         + "AND p.process_instance_id = l.process_instance_id "
                         + "WHERE l.tenant_id = ? AND " + StoredInstant.strictlyAfter("l.expires_at")
                         + " ORDER BY l.rowid";
@@ -602,8 +603,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     StoredInstant.bindComparison(statement, 2, now);
                     try (ResultSet rows = statement.executeQuery()) {
                         while (rows.next()) {
-                            var key = new ExecutionKey(tenantId,
-                                    UUID.fromString(rows.getString("process_instance_id")));
+                            var key = new ExecutionKey(tenantId, StoredUuid.required(rows, "lease",
+                                    "process_instance_id", tenantId));
+                            StoredUuid.requiredMatching(rows.getString("joined_process_id"),
+                                    "process_instance", "process_instance_id", key,
+                                    key.processInstanceId());
                             active.add(new LeaseHandle(key, rows.getString("worker_id"),
                                     rows.getLong("fencing_token"),
                                     StoredInstant.read(rows, "claimed_at"),
@@ -959,7 +963,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 more = true;
                                 break;
                             }
-                            page.add(readInventoryRow(tenantId, rows, now));
+                            page.add(readInventoryRow(tenantId, rows, now, null));
                         }
                     }
                 }
@@ -988,7 +992,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     statement.setString(2, key.processInstanceId().toString());
                     try (ResultSet rows = statement.executeQuery()) {
                         return rows.next()
-                                ? Optional.of(readInventoryRow(key.tenantId(), rows, now))
+                                ? Optional.of(readInventoryRow(key.tenantId(), rows, now, key))
                                 : Optional.<ProcessInventoryEntry>empty();
                     }
                 }
@@ -1031,7 +1035,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             TraversalStatus status = traversalStatusOf(key, rows.getString("status"));
                             int parked = rows.getInt("parked_count");
                             rowsOut.add(new TraversalInventoryEntry(key,
-                                    UUID.fromString(rows.getString("traversal_id")),
+                                    StoredUuid.required(rows, "traversal", "traversal_id", key),
                                     rows.getInt("position"), rows.getString("ingress_node_id"), status,
                                     InventoryDisposition.ofTraversal(status, leaseLive, parked > 0),
                                     rows.getInt("invocation_count"), parked));
@@ -1231,9 +1235,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
-    private ProcessInventoryEntry readInventoryRow(String tenantId, ResultSet rows, Instant now)
+    private ProcessInventoryEntry readInventoryRow(String tenantId, ResultSet rows, Instant now,
+                                                    ExecutionKey expectedKey)
             throws SQLException {
-        var key = new ExecutionKey(tenantId, UUID.fromString(rows.getString("process_instance_id")));
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "process_instance", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "process_instance", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
         ProcessInstanceStatus status = processStatusOf(key, rows.getString("status"));
         String worker = rows.getString("lease_worker_id");
         Instant leaseExpiresAt = worker == null ? null : nullableInstant(rows, "lease_expires_at");
@@ -2055,7 +2064,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(1, tenantId);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    keys.add(new ExecutionKey(tenantId, UUID.fromString(rows.getString(1))));
+                    keys.add(new ExecutionKey(tenantId, StoredUuid.required(rows, 1,
+                            "process_instance", "process_instance_id", tenantId)));
                 }
             }
         }
@@ -2090,10 +2100,12 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * dispatch outcome is known; it resumes through a timer or a trigger.</p>
      */
     private List<ScheduledAttempt> claimableAttempts(ExecutionKey key, Instant now) throws SQLException {
-        String sql = "SELECT i.traversal_id, a.invocation_id, a.attempt_id, a.ordinal, i.node_command "
-                + "FROM attempt a JOIN invocation i ON i.tenant_id = a.tenant_id "
+        String sql = "SELECT i.traversal_id, tr.traversal_id AS joined_traversal_id, "
+                + "a.invocation_id, i.invocation_id AS joined_invocation_id, "
+                + "a.attempt_id, a.ordinal, i.node_command "
+                + "FROM attempt a LEFT JOIN invocation i ON i.tenant_id = a.tenant_id "
                 + "AND i.process_instance_id = a.process_instance_id AND i.invocation_id = a.invocation_id "
-                + "JOIN traversal tr ON tr.tenant_id = i.tenant_id "
+                + "LEFT JOIN traversal tr ON tr.tenant_id = i.tenant_id "
                 + "AND tr.process_instance_id = i.process_instance_id AND tr.traversal_id = i.traversal_id "
                 + "WHERE a.tenant_id = ? AND a.process_instance_id = ? "
                 + "AND a.status IN ('SCHEDULED', 'RUNNING') "
@@ -2110,9 +2122,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(new ScheduledAttempt(UUID.fromString(rows.getString("traversal_id")),
-                            UUID.fromString(rows.getString("invocation_id")),
-                            UUID.fromString(rows.getString("attempt_id")), rows.getInt("ordinal"),
+                    UUID invocationId = StoredUuid.required(rows, "attempt", "invocation_id", key);
+                    StoredUuid.requiredMatching(rows.getString("joined_invocation_id"), "invocation",
+                            "invocation_id", key, invocationId);
+                    UUID traversalId = StoredUuid.required(rows, "invocation", "traversal_id", key);
+                    StoredUuid.requiredMatching(rows.getString("joined_traversal_id"), "traversal",
+                            "traversal_id", key, traversalId);
+                    ready.add(new ScheduledAttempt(traversalId,
+                            invocationId,
+                            StoredUuid.required(rows, "attempt", "attempt_id", key), rows.getInt("ordinal"),
                             ai.ravenroot.api.execution.NodeCommand.parse(rows.getString("node_command"))));
                 }
             }
@@ -2139,12 +2157,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, index, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    String traversalId = rows.getString("traversal_id");
-                    String invocationId = rows.getString("invocation_id");
-                    due.add(new TimerSchedule(UUID.fromString(rows.getString("timer_id")),
+                    due.add(new TimerSchedule(StoredUuid.required(rows, "timer", "timer_id", key),
                             StoredInstant.read(rows, "due_at"),
-                            traversalId == null ? null : UUID.fromString(traversalId),
-                            invocationId == null ? null : UUID.fromString(invocationId),
+                            StoredUuid.optional(rows, "timer", "traversal_id", key),
+                            StoredUuid.optional(rows, "timer", "invocation_id", key),
                             OpaquePayload.of(rows.getBytes("payload_bytes"),
                                     rows.getString("payload_content_type"))));
                 }
@@ -2251,7 +2267,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 + "AND h.handler_id = ?")) {
                     bindItem(statement, key, handlerId);
                     try (ResultSet rows = statement.executeQuery()) {
-                        return rows.next() ? Optional.of(readHandler(rows)) : Optional.<DurableHandler>empty();
+                        return rows.next() ? Optional.of(readHandler(rows, key, handlerId))
+                                : Optional.<DurableHandler>empty();
                     }
                 }
             });
@@ -2296,7 +2313,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     statement.setString(2, key.processInstanceId().toString());
                     try (ResultSet rows = statement.executeQuery()) {
                         while (rows.next()) {
-                            found.add(readHandler(rows));
+                            found.add(readHandler(rows, key, null));
                         }
                     }
                 }
@@ -2459,7 +2476,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? AND h.handler_id = ?")) {
             bindItem(statement, key, handlerId);
             try (ResultSet rows = statement.executeQuery()) {
-                return rows.next() ? readHandler(rows) : null;
+                return rows.next() ? readHandler(rows, key, handlerId) : null;
             }
         }
     }
@@ -2499,20 +2516,34 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * aggregate itself is revalidated on the way out.</p>
      */
     private DurableHandler readHandler(ResultSet rows) throws SQLException {
-        var key = new ExecutionKey(rows.getString("tenant_id"),
-                UUID.fromString(rows.getString("process_instance_id")));
-        String resumeTraversalId = rows.getString("resume_traversal_id");
+        return readHandler(rows, null, null);
+    }
+
+    private DurableHandler readHandler(ResultSet rows, ExecutionKey expectedKey, UUID expectedHandlerId)
+            throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "execution_handler", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "execution_handler", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
         try {
-            return new DurableHandler(UUID.fromString(rows.getString("handler_id")), key,
-                    rows.getString("name"), UUID.fromString(rows.getString("traversal_id")),
-                    UUID.fromString(rows.getString("invocation_id")), rows.getString("correlation_key"),
+            UUID handlerId = expectedHandlerId == null
+                    ? StoredUuid.required(rows, "execution_handler", "handler_id", key)
+                    : StoredUuid.requiredMatching(rows, "execution_handler", "handler_id", key,
+                            expectedHandlerId);
+            return new DurableHandler(handlerId, key,
+                    rows.getString("name"), StoredUuid.required(rows, "execution_handler",
+                            "traversal_id", key),
+                    StoredUuid.required(rows, "execution_handler", "invocation_id", key),
+                    rows.getString("correlation_key"),
                     rows.getString("deduplication_key"),
                     new HandlerPayloadSchema(rows.getString("schema_content_type"),
                             rows.getString("schema_ref"), rows.getInt("schema_max_bytes")),
                     new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
                             splitTokens(rows.getString("required_scopes"))),
                     HandlerStatus.valueOf(rows.getString("status")),
-                    resumeTraversalId == null ? null : UUID.fromString(resumeTraversalId),
+                    StoredUuid.optional(rows, "execution_handler", "resume_traversal_id", key),
                     rows.getString("actor"),
                     OpaquePayload.of(rows.getBytes("outcome_bytes"),
                             rows.getString("outcome_content_type")),
@@ -2552,7 +2583,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 + "AND a.approval_id = ?")) {
                     bindItem(statement, key, approvalId);
                     try (ResultSet rows = statement.executeQuery()) {
-                        return rows.next() ? Optional.of(readToolApproval(rows)) : Optional.empty();
+                        return rows.next() ? Optional.of(readToolApproval(rows, key, approvalId))
+                                : Optional.empty();
                     }
                 }
             });
@@ -2571,7 +2603,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     statement.setString(1, key.tenantId());
                     statement.setString(2, key.processInstanceId().toString());
                     try (ResultSet rows = statement.executeQuery()) {
-                        while (rows.next()) approvals.add(readToolApproval(rows));
+                        while (rows.next()) approvals.add(readToolApproval(rows, key, null));
                     }
                 }
                 return List.copyOf(approvals);
@@ -2677,7 +2709,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget");
              ResultSet rows = statement.executeQuery()) {
             while (rows.next()) {
-                ExecutionKey key = new ExecutionKey(rows.getString(1), UUID.fromString(rows.getString(2)));
+                String tenantId = rows.getString(1);
+                ExecutionKey key = new ExecutionKey(tenantId, StoredUuid.required(rows, 2,
+                        "agent_authority_budget", "process_instance_id", tenantId));
                 DurableAgentAuthorityBudget budget;
                 try {
                     budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes(3));
@@ -2848,21 +2882,34 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         + "AND a.approval_id = ?")) {
             bindItem(statement, key, approvalId);
             try (ResultSet rows = statement.executeQuery()) {
-                return rows.next() ? readToolApproval(rows) : null;
+                return rows.next() ? readToolApproval(rows, key, approvalId) : null;
             }
         }
     }
 
     private DurableToolApproval readToolApproval(ResultSet rows) throws SQLException {
-        var key = new ExecutionKey(rows.getString("tenant_id"),
-                UUID.fromString(rows.getString("process_instance_id")));
+        return readToolApproval(rows, null, null);
+    }
+
+    private DurableToolApproval readToolApproval(ResultSet rows, ExecutionKey expectedKey,
+                                                  UUID expectedApprovalId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "tool_approval", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "tool_approval", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
         try {
+            UUID approvalId = expectedApprovalId == null
+                    ? StoredUuid.required(rows, "tool_approval", "approval_id", key)
+                    : StoredUuid.requiredMatching(rows, "tool_approval", "approval_id", key,
+                            expectedApprovalId);
             var request = new ToolApprovalRegistration(
-                    UUID.fromString(rows.getString("approval_id")),
-                    UUID.fromString(rows.getString("traversal_id")),
-                    UUID.fromString(rows.getString("invocation_id")),
-                    UUID.fromString(rows.getString("attempt_id")),
-                    UUID.fromString(rows.getString("call_id")), rows.getString("node_id"),
+                    approvalId,
+                    StoredUuid.required(rows, "tool_approval", "traversal_id", key),
+                    StoredUuid.required(rows, "tool_approval", "invocation_id", key),
+                    StoredUuid.required(rows, "tool_approval", "attempt_id", key),
+                    StoredUuid.required(rows, "tool_approval", "call_id", key), rows.getString("node_id"),
                     rows.getString("tool"), rows.getBytes("canonical_arguments"),
                     rows.getString("arguments_digest"),
                     new ai.ravenroot.api.security.SecurityContext(
@@ -2900,7 +2947,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                 + "AND p.pause_id = ?")) {
                     bindItem(statement, key, pauseId);
                     try (ResultSet rows = statement.executeQuery()) {
-                        return rows.next() ? Optional.of(readExecutionPause(rows)) : Optional.empty();
+                        return rows.next() ? Optional.of(readExecutionPause(rows, key, pauseId))
+                                : Optional.empty();
                     }
                 }
             });
@@ -2919,7 +2967,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     statement.setString(1, key.tenantId());
                     statement.setString(2, key.processInstanceId().toString());
                     try (ResultSet rows = statement.executeQuery()) {
-                        while (rows.next()) pauses.add(readExecutionPause(rows));
+                        while (rows.next()) pauses.add(readExecutionPause(rows, key, null));
                     }
                 }
                 return List.copyOf(pauses);
@@ -3074,13 +3122,26 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     private DurableExecutionPause readExecutionPause(ResultSet rows) throws SQLException {
-        var key = new ExecutionKey(rows.getString("tenant_id"),
-                UUID.fromString(rows.getString("process_instance_id")));
+        return readExecutionPause(rows, null, null);
+    }
+
+    private DurableExecutionPause readExecutionPause(ResultSet rows, ExecutionKey expectedKey,
+                                                       UUID expectedPauseId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "execution_pause", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "execution_pause", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
         try {
+            UUID pauseId = expectedPauseId == null
+                    ? StoredUuid.required(rows, "execution_pause", "pause_id", key)
+                    : StoredUuid.requiredMatching(rows, "execution_pause", "pause_id", key,
+                            expectedPauseId);
             var request = new ExecutionPauseRegistration(
-                    UUID.fromString(rows.getString("pause_id")),
-                    UUID.fromString(rows.getString("traversal_id")),
-                    UUID.fromString(rows.getString("after_invocation_id")),
+                    pauseId,
+                    StoredUuid.required(rows, "execution_pause", "traversal_id", key),
+                    StoredUuid.required(rows, "execution_pause", "after_invocation_id", key),
                     rows.getString("node_id"), rows.getString("command_directive"),
                     rows.getString("command_name"),
                     new ai.ravenroot.api.security.SecurityContext(
@@ -3146,7 +3207,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     statement.setInt(parameter, query.limit() + 1);
                     try (ResultSet rows = statement.executeQuery()) {
                         while (rows.next()) {
-                            matching.add(readHumanTask(rows));
+                            matching.add(readHumanTask(rows, tenantId, null));
                         }
                     }
                 }
@@ -3317,7 +3378,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(1, tenantId);
             statement.setString(2, taskId.toString());
             try (ResultSet rows = statement.executeQuery()) {
-                return rows.next() ? readHumanTask(rows) : null;
+                return rows.next() ? readHumanTask(rows, tenantId, taskId) : null;
             }
         }
     }
@@ -3346,19 +3407,28 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     private DurableHumanTask readHumanTask(ResultSet rows) throws SQLException {
-        var key = new ExecutionKey(rows.getString("tenant_id"),
-                UUID.fromString(rows.getString("process_instance_id")));
+        return readHumanTask(rows, null, null);
+    }
+
+    private DurableHumanTask readHumanTask(ResultSet rows, String expectedTenantId, UUID expectedTaskId)
+            throws SQLException {
+        String tenantId = expectedTenantId == null ? rows.getString("tenant_id") : expectedTenantId;
+        var key = new ExecutionKey(tenantId, StoredUuid.required(rows, "human_task",
+                "process_instance_id", tenantId));
         try {
             long escalationSecond = rows.getLong("escalate_at_epoch_second");
             boolean noEscalation = rows.wasNull();
             Optional<Instant> escalation = noEscalation ? Optional.empty()
                     : Optional.of(Instant.ofEpochSecond(escalationSecond,
                             rows.getInt("escalate_at_nano")));
+            UUID taskId = expectedTaskId == null
+                    ? StoredUuid.required(rows, "human_task", "task_id", key)
+                    : StoredUuid.requiredMatching(rows, "human_task", "task_id", key, expectedTaskId);
             var request = new HumanTaskRegistration(
-                    UUID.fromString(rows.getString("task_id")),
-                    UUID.fromString(rows.getString("traversal_id")),
-                    UUID.fromString(rows.getString("invocation_id")),
-                    UUID.fromString(rows.getString("attempt_id")),
+                    taskId,
+                    StoredUuid.required(rows, "human_task", "traversal_id", key),
+                    StoredUuid.required(rows, "human_task", "invocation_id", key),
+                    StoredUuid.required(rows, "human_task", "attempt_id", key),
                     rows.getString("node_id"), rows.getString("correlation_key"),
                     rows.getString("deduplication_key"),
                     new HumanTaskMetadata(rows.getString("title"), rows.getString("description")),
@@ -3452,7 +3522,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoredInstant.bindComparison(statement, 3, now);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    ready.add(readHandler(rows));
+                    ready.add(readHandler(rows, key, null));
                 }
             }
         }
@@ -3630,24 +3700,25 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * it.</p>
      */
     private JournalRecord readJournalRecord(String tenantId, ResultSet rows) throws SQLException {
-        UUID instanceId = UUID.fromString(rows.getString("process_instance_id"));
+        UUID instanceId = StoredUuid.required(rows, "event_journal", "process_instance_id", tenantId);
+        var key = new ExecutionKey(tenantId, instanceId);
         var envelope = new EventEnvelope(
                 rows.getInt("envelope_version"),
-                UUID.fromString(rows.getString("event_id")),
+                StoredUuid.required(rows, "event_journal", "event_id", key),
                 tenantId,
                 rows.getString("event_type"),
                 instanceId,
-                UUID.fromString(rows.getString("traversal_id")),
-                uuidOrNull(rows.getString("invocation_id")),
-                uuidOrNull(rows.getString("attempt_id")),
-                uuidOrNull(rows.getString("causation_id")),
+                StoredUuid.required(rows, "event_journal", "traversal_id", key),
+                StoredUuid.optional(rows, "event_journal", "invocation_id", key),
+                StoredUuid.optional(rows, "event_journal", "attempt_id", key),
+                StoredUuid.optional(rows, "event_journal", "causation_id", key),
                 rows.getString("correlation_id"),
                 rows.getString("graph_version"),
                 StoredInstant.read(rows, "occurred_at"),
                 OpaquePayload.of(rows.getBytes("payload_bytes"), rows.getString("payload_content_type")),
                 EventDigest.of(rows.getBytes("digest")));
         if (!envelope.digestMatchesContent()) {
-            throw failure(new ExecutionStoreFailure.Corrupted(new ExecutionKey(tenantId, instanceId),
+            throw failure(new ExecutionStoreFailure.Corrupted(key,
                     "journal offset " + rows.getLong("journal_offset") + " carries digest "
                             + envelope.digest().hex() + ", which does not match its stored content"));
         }
@@ -3981,10 +4052,6 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private static String textOrNull(UUID value) {
         return value == null ? null : value.toString();
-    }
-
-    private static UUID uuidOrNull(String value) {
-        return value == null ? null : UUID.fromString(value);
     }
 
     /**

@@ -158,21 +158,11 @@ final class GithubRuntime {
                         relinquish.run(); result.completeExceptionally(failure);
                         return;
                     }
-                    try { persistFailure(store, operation, deadlineEpochMs, kind, failure);
-                        relinquish.run(); result.completeExceptionally(failure); }
-                    catch (RuntimeException persistence) {
-                        relinquish.run(); result.completeExceptionally(
-                                new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
-                    }
+                    finishFailure(store, operation, deadlineEpochMs, kind, result, relinquish, failure);
                     return;
                 } catch (RuntimeException failure) {
                     GithubException safe = new GithubException(GithubException.Code.RESPONSE_INVALID);
-                    try { persistFailure(store, operation, deadlineEpochMs, kind, safe);
-                        relinquish.run(); result.completeExceptionally(safe); }
-                    catch (RuntimeException persistence) {
-                        relinquish.run(); result.completeExceptionally(
-                                new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
-                    }
+                    finishFailure(store, operation, deadlineEpochMs, kind, result, relinquish, safe);
                     return;
                 }
                 try {
@@ -217,6 +207,31 @@ final class GithubRuntime {
             }
         });
         result.worker(worker); worker.start(); return result;
+    }
+
+    private void finishFailure(GithubOperationStore store, GithubOperationStore.Lease operation,
+                               long deadlineEpochMs, String kind, Task result, Runnable relinquish,
+                               GithubException intended) {
+        GithubException durable = intended;
+        try {
+            beforePersistence.run();
+            try {
+                result.persist(() -> persistFailure(store, operation, deadlineEpochMs, kind, intended));
+            } catch (GithubException stopped) {
+                if (stopped.code() != GithubException.Code.CANCELLED) throw stopped;
+                persistFailure(store, operation, deadlineEpochMs, kind, stopped);
+                durable = stopped;
+            }
+            relinquish.run();
+            result.completeExceptionally(durable);
+        } catch (GithubException persistence) {
+            relinquish.run();
+            result.completeExceptionally(persistence.code() == GithubException.Code.CAS_LOST
+                    ? persistence : new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+        } catch (RuntimeException persistence) {
+            relinquish.run();
+            result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+        }
     }
 
     GithubOperationStore.DeliveryDecision bindDelivery(String tenant, String profile, String delivery,

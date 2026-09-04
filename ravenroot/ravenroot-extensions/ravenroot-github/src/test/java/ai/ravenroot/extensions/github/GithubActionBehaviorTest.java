@@ -848,6 +848,75 @@ class GithubActionBehaviorTest {
         assertTrue(replayHttp.requests.isEmpty(), "observed cancellation must already be durable after reopen");
     }
 
+    @Test @Timeout(5) void workflowTerminalInnerCompletionWinsBeforeDelayedWrapperCallback() throws Exception {
+        Path path = directory.resolve("workflow-terminal-wrapper-race.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        GithubRuntime runtime = new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock), clock);
+        ManualScheduler scheduler = new ManualScheduler();
+        var callbackReached = new java.util.concurrent.CountDownLatch(1);
+        AtomicBoolean releaseCallback = new AtomicBoolean();
+        var http = new GithubTestSupport.HttpHarness().reply(200, Map.of("total_count", 2L,
+                "workflow_runs", List.of(run(1001, 11, 1, "completed", "success"),
+                        run(1002, 12, 1, "completed", "success"))));
+        Map<String, Object> input = Map.of("version", "github.workflow-watch.v1",
+                "commit", GithubTestSupport.SHA, "deadlineEpochMs", clock.millis() + 10_000,
+                "correlationId", "terminal-wrapper-race");
+        CompletableFuture<NodeResult> result = new GithubWorkflowWatchBehavior(runtime, clock, scheduler, () -> {
+            callbackReached.countDown();
+            while (!releaseCallback.get()) Thread.onSpinWait();
+        }, () -> { }).create(GithubTestSupport.node("github-workflow-watch"), http)
+                .handle(GithubTestSupport.message(input)).toCompletableFuture();
+        scheduler.take().run();
+        assertTrue(callbackReached.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        assertFalse(result.cancel(true), "durably terminal inner result must win wrapper cancellation");
+        releaseCallback.set(true);
+        assertEquals("continue", result.join().outcome());
+
+        ManualScheduler replayScheduler = new ManualScheduler();
+        var replayHttp = new GithubTestSupport.HttpHarness();
+        CompletableFuture<NodeResult> replay = new GithubWorkflowWatchBehavior(runtime, clock, replayScheduler)
+                .create(GithubTestSupport.node("github-workflow-watch"), replayHttp)
+                .handle(GithubTestSupport.message(input)).toCompletableFuture();
+        replayScheduler.take().run();
+        assertEquals("continue", replay.join().outcome());
+        assertTrue(replayHttp.requests.isEmpty());
+    }
+
+    @Test @Timeout(5) void workflowWaitingScheduleAndAcceptedCancellationAreLinearized() throws Exception {
+        Path path = directory.resolve("workflow-waiting-wrapper-race.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        GithubRuntime runtime = new GithubRuntime(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock), clock);
+        ManualScheduler scheduler = new ManualScheduler();
+        var scheduleBoundary = new java.util.concurrent.CountDownLatch(1);
+        AtomicBoolean releaseSchedule = new AtomicBoolean();
+        var http = new GithubTestSupport.HttpHarness().reply(200, Map.of("total_count", 1L,
+                "workflow_runs", List.of(run(1001, 11, 1, "completed", "success"))));
+        Map<String, Object> input = Map.of("version", "github.workflow-watch.v1",
+                "commit", GithubTestSupport.SHA, "deadlineEpochMs", clock.millis() + 10_000,
+                "correlationId", "waiting-wrapper-race");
+        CompletableFuture<NodeResult> result = new GithubWorkflowWatchBehavior(runtime, clock, scheduler,
+                () -> { }, () -> {
+                    scheduleBoundary.countDown();
+                    while (!releaseSchedule.get()) Thread.onSpinWait();
+                }).create(GithubTestSupport.node("github-workflow-watch"), http)
+                .handle(GithubTestSupport.message(input)).toCompletableFuture();
+        scheduler.take().run();
+        assertTrue(scheduleBoundary.await(2, java.util.concurrent.TimeUnit.SECONDS));
+        CompletableFuture<Boolean> cancellation = CompletableFuture.supplyAsync(() -> result.cancel(true));
+        assertFalse(cancellation.isDone(), "cancel must serialize behind the WAITING transition");
+        releaseSchedule.set(true);
+        assertTrue(cancellation.join());
+        assertEquals(GithubException.Code.CANCELLED, githubFailure(result).code());
+        ManualScheduler.Entry waitingPoll = scheduler.take();
+        assertTrue(waitingPoll.cancelled, "accepted cancellation must cancel the scheduled poll");
+        waitingPoll.run();
+        assertEquals(1, http.requests.size(), "no poll may run after accepted cancellation");
+    }
+
     @Test @Timeout(5) void cancellationAfterWorkBeforePersistenceWinsAndReplaysDurably() throws Exception {
         Path path = directory.resolve("cancel-persistence-boundary.db");
         GithubConfiguration configuration = GithubTestSupport.configuration(path);
@@ -881,6 +950,45 @@ class GithubActionBehaviorTest {
                 }).toCompletableFuture();
         assertEquals(GithubException.Code.CANCELLED, githubFailure(replay).code());
         assertFalse(repeated.get());
+    }
+
+    @Test @Timeout(5) void expectedAndUnexpectedFailuresLoseToCancellationAtPersistenceBoundary() throws Exception {
+        for (boolean expected : List.of(true, false)) {
+            Path path = directory.resolve("failure-persistence-boundary-" + expected + ".db");
+            GithubConfiguration configuration = GithubTestSupport.configuration(path);
+            var store = new SqliteGithubOperationStore(configuration.store());
+            var boundary = new java.util.concurrent.CountDownLatch(1);
+            AtomicBoolean persist = new AtomicBoolean();
+            GithubRuntime runtime = new GithubRuntime(configuration, store, java.time.Clock.systemUTC(), () -> {
+                boundary.countDown();
+                while (!persist.get()) Thread.onSpinWait();
+            });
+            GithubProfile profile = configuration.profile(
+                    GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+            Map<String, Object> input = Map.of("request", "failure-" + expected);
+            long deadline = System.currentTimeMillis() + 5_000;
+            CompletableFuture<NodeResult> result = runtime.submit(GithubTestSupport.message(Map.of()),
+                    new GithubTestSupport.HttpHarness(), profile, "failure-race", "operation",
+                    input, deadline, (api, operation, control) -> {
+                        if (expected) throw new GithubException(GithubException.Code.INVALID_INPUT);
+                        throw new IllegalStateException("untrusted failure");
+                    }).toCompletableFuture();
+            assertTrue(boundary.await(2, java.util.concurrent.TimeUnit.SECONDS));
+            assertTrue(result.cancel(true));
+            persist.set(true);
+            assertEquals(GithubException.Code.CANCELLED, githubFailure(result).code());
+
+            AtomicBoolean repeated = new AtomicBoolean();
+            CompletableFuture<NodeResult> replay = new GithubRuntime(configuration,
+                    new SqliteGithubOperationStore(configuration.store())).submit(
+                    GithubTestSupport.message(Map.of()), new GithubTestSupport.HttpHarness(), profile,
+                    "failure-race", "operation", input, deadline, (api, operation, control) -> {
+                        repeated.set(true);
+                        return NodeResult.continueWith(Map.of());
+                    }).toCompletableFuture();
+            assertEquals(GithubException.Code.CANCELLED, githubFailure(replay).code());
+            assertFalse(repeated.get());
+        }
     }
 
     @Test void releasePreparationIsReadOnlyAndTerminalResultReplaysAfterRestart() {

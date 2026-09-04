@@ -24,7 +24,6 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Persistent exact-commit workflow observation using one bounded lease and HTTP call per scheduled poll. */
 public final class GithubWorkflowWatchBehavior implements NodeBehavior {
@@ -35,6 +34,8 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
     private final GithubRuntime runtime;
     private final Clock clock;
     private final PollScheduler scheduler;
+    private final Runnable beforeInnerCompletion;
+    private final Runnable beforeWaitingSchedule;
 
     GithubWorkflowWatchBehavior(GithubRuntime runtime) {
         this(runtime, Clock.systemUTC(), (task, delay) -> {
@@ -43,7 +44,13 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         });
     }
     GithubWorkflowWatchBehavior(GithubRuntime runtime, Clock clock, PollScheduler scheduler) {
+        this(runtime, clock, scheduler, () -> { }, () -> { });
+    }
+    GithubWorkflowWatchBehavior(GithubRuntime runtime, Clock clock, PollScheduler scheduler,
+                                Runnable beforeInnerCompletion, Runnable beforeWaitingSchedule) {
         this.runtime = runtime; this.clock = clock; this.scheduler = scheduler;
+        this.beforeInnerCompletion = java.util.Objects.requireNonNull(beforeInnerCompletion);
+        this.beforeWaitingSchedule = java.util.Objects.requireNonNull(beforeWaitingSchedule);
     }
     @Override public Set<NodePackageCapability> requiredServices() { return Set.of(NodePackageCapability.OUTBOUND_HTTP); }
     @Override public NodeTypeDescriptor descriptor() { return GithubBehaviorDescriptors.descriptor(BEHAVIOR,
@@ -70,61 +77,84 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
     private final class WatchTask extends CompletableFuture<NodeResult> {
         private final NodeMessage message; private final NodePackageServices services;
         private final GithubProfile profile; private final Input input;
-        private final AtomicBoolean cancelled = new AtomicBoolean();
-        private volatile ScheduledPoll scheduled; private volatile CompletableFuture<NodeResult> active;
+        private boolean cancelled;
+        private boolean terminalReplayWon;
+        private ScheduledPoll scheduled; private CompletableFuture<NodeResult> active;
 
         WatchTask(NodeMessage message, NodePackageServices services, GithubProfile profile, Input input) {
             this.message = message; this.services = services; this.profile = profile; this.input = input;
         }
-        void schedule(long delayMs) {
-            if (!isDone()) scheduled = scheduler.schedule(this::poll, Math.max(0, delayMs));
+        synchronized void schedule(long delayMs) {
+            if (!isDone() && !cancelled)
+                scheduled = scheduler.schedule(this::poll, Math.max(0, delayMs));
         }
         private synchronized void poll() {
-            if (isDone()) return;
+            scheduled = null;
+            if (isDone() || cancelled) return;
             try {
                 active = runtime.submit(message, services, profile, BEHAVIOR,
                         operationKey(input), input.canonical(), input.deadlineEpochMs,
                         (api, operation, control) -> pollOnce(api, profile, input, operation)).toCompletableFuture();
             } catch (RuntimeException failure) { completeExceptionally(sanitize(failure)); return; }
-            if (cancelled.get()) active.cancel(true);
-            active.whenComplete((result, failure) -> {
-                if (isDone()) return;
-                if (failure != null) {
-                    Throwable cause = failure instanceof CompletionException && failure.getCause() != null
-                            ? failure.getCause() : failure;
-                    completeExceptionally(cause); return;
-                }
-                Map<String, Object> output = GithubValues.object(result.payload());
-                if (!"waiting".equals(output.get("status"))) { complete(result); return; }
-                long retryAt = GithubValues.number(output.get("retryAtEpochMs"), 1, Long.MAX_VALUE);
-                schedule(Math.max(0, retryAt - clock.millis()));
+            CompletableFuture<NodeResult> submitted = active;
+            submitted.whenComplete((result, failure) -> {
+                beforeInnerCompletion.run();
+                settle(submitted, result, failure);
             });
         }
         @Override public synchronized boolean cancel(boolean mayInterruptIfRunning) {
-            if (isDone() || !cancelled.compareAndSet(false, true)) return false;
-            ScheduledPoll pending = scheduled; if (pending != null) pending.cancel();
+            if (isDone() || cancelled) return false;
             CompletableFuture<NodeResult> running = active;
-            if (running != null && !running.isDone()) {
-                if (!running.cancel(true)) {
-                    cancelled.set(false);
-                    return false;
-                }
-            } else persistCancellation();
-            return true;
+            if (running != null && running.isDone()) settleCompleted(running);
+            if (isDone()) return false;
+            running = active;
+            if (running != null && !running.cancel(true)) {
+                if (running.isDone()) settleCompleted(running);
+                if (isDone() || active != null) return false;
+            }
+            cancelled = true;
+            ScheduledPoll pending = scheduled; if (pending != null) pending.cancel();
+            if (active == null) persistCancellation();
+            return !terminalReplayWon;
+        }
+
+        private void settleCompleted(CompletableFuture<NodeResult> completed) {
+            try { settle(completed, completed.join(), null); }
+            catch (CompletionException failure) { settle(completed, null, failure); }
+        }
+
+        private synchronized void settle(CompletableFuture<NodeResult> completed, NodeResult result,
+                                         Throwable failure) {
+            if (completed != active || isDone()) return;
+            active = null;
+            if (failure != null) {
+                Throwable cause = failure instanceof CompletionException && failure.getCause() != null
+                        ? failure.getCause() : failure;
+                completeExceptionally(cause); return;
+            }
+            Map<String, Object> output = GithubValues.object(result.payload());
+            if (!"waiting".equals(output.get("status"))) { complete(result); return; }
+            beforeWaitingSchedule.run();
+            if (cancelled) { persistCancellation(); return; }
+            long retryAt = GithubValues.number(output.get("retryAtEpochMs"), 1, Long.MAX_VALUE);
+            schedule(Math.max(0, retryAt - clock.millis()));
         }
 
         private void persistCancellation() {
             try {
                 runtime.cancelDurably(message, services, profile, BEHAVIOR, operationKey(input),
-                        input.canonical(), input.deadlineEpochMs).whenComplete((ignored, failure) -> {
-                    Throwable cause = failure instanceof CompletionException && failure.getCause() != null
-                            ? failure.getCause() : failure;
-                    completeExceptionally(cause == null
-                            ? new GithubException(GithubException.Code.CANCELLED) : cause);
-                });
+                        input.canonical(), input.deadlineEpochMs).whenComplete(this::settleCancellation);
             } catch (RuntimeException failure) {
                 completeExceptionally(sanitize(failure));
             }
+        }
+
+        private synchronized void settleCancellation(NodeResult replay, Throwable failure) {
+            if (isDone()) return;
+            if (failure == null) { terminalReplayWon = true; complete(replay); return; }
+            Throwable cause = failure instanceof CompletionException && failure.getCause() != null
+                    ? failure.getCause() : failure;
+            completeExceptionally(cause);
         }
     }
 

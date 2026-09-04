@@ -41,6 +41,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-distribution",
     "ravenroot-engine-testkit",
     "ravenroot-extensions",
+    "ravenroot-extensions-all",
     "ravenroot-filesystem",
     "ravenroot-git-workspace",
     "ravenroot-github",

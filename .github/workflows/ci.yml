@@ -221,6 +221,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_dependabot_routing
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
@@ -282,6 +283,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_dependabot_routing
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
@@ -393,6 +395,8 @@ jobs:
       - name: Run and locally install the complete backend unit and integration suite
         working-directory: ravenroot
         run: mvn -B --no-transfer-progress clean install
+      - name: Verify the published extension pack from a clean staged consumer
+        run: ./scripts/verify-extension-pack-consumer.sh
       - name: Verify out-of-reactor adapters, harness, and sample
         run: |
           # The harness consumes the OpenAI-compatible adapter. Install both

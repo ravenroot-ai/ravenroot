@@ -72,7 +72,8 @@ describe('Pane refit seeding source contract', () => {
 
     // Without this the observer holds a strong reference to every canvas ever closed, and the map
     // entry and the observation would be released at two different moments.
-    const closed = functionBody(APP_SOURCE, 'function closeDocument(id) {');
+    // Single and aggregate close share one owner teardown, so both must release the observation.
+    const closed = functionBody(APP_SOURCE, 'function teardownDocument(target) {');
     expect(closed).toContain('paneSeedObserver.unobserve(target.container);');
     expect(closed.indexOf('paneSeedObserver.unobserve(target.container);'))
       .toBeLessThan(closed.indexOf('target.container = null;'));

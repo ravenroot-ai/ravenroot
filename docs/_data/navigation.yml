@@ -51,6 +51,8 @@
       url: /integrator-guide/embed-protocol.html
     - title: Nodes, plugins, and adapters
       url: /integrator-guide/extensions-adapters.html
+    - title: First-party extension dependency pack
+      url: /integrator-guide/extension-pack.html
     - title: Model, agent, and program integration
       url: /integrator-guide/ai-programs.html
 

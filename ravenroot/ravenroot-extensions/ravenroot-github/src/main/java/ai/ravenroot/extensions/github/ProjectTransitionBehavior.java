@@ -295,9 +295,10 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
             return status.equals(expectedStatus) && attempts == expectedAttempts && generation == expectedGeneration;
         }
         boolean repairable(Input input, long wantedAttempts) {
-            return generation == input.expectedGeneration
-                    && (status.equals(input.fromStatus) || status.equals(input.toStatus))
-                    && (attempts == input.expectedAttempts || attempts == wantedAttempts);
+            if (generation != input.expectedGeneration) return false;
+            return matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)
+                    || (status.equals(input.toStatus)
+                    && (attempts == input.expectedAttempts || attempts == wantedAttempts));
         }
     }
     private record Dispatch(boolean uncertain, boolean partial, long retryAt) { }

@@ -361,6 +361,7 @@ class GithubActionBehaviorTest {
     @Test void projectReopenedAmbiguityRejectsUnrelatedRemoteEditsWithoutRepairMutation() {
         List<Map<String, Object>> conflicts = List.of(
                 snapshot("Done", 2, 7),
+                snapshot("Todo", 3, 7),
                 snapshot("InProgress", 4, 7),
                 snapshot("InProgress", 3, 9));
         for (int index = 0; index < conflicts.size(); index++) {
@@ -608,6 +609,54 @@ class GithubActionBehaviorTest {
         }
     }
 
+    @Test void postDraftHeadReadFailureReopensAndSubmitsOnlyTheDiscoveredDraft() {
+        for (String variant : List.of("transport", "http-500", "malformed-200", "rate-429")) {
+            Path path = directory.resolve("post-draft-head-" + variant + ".db");
+            MutableClock clock = new MutableClock();
+            GithubConfiguration configuration = GithubTestSupport.configuration(path);
+            String correlation = "post-draft-head-" + variant;
+            String marker = reviewMarker(correlation);
+            Map<String, Object> input = review(correlation);
+            var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                    .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(93, "PENDING", marker));
+            if (variant.equals("transport")) {
+                interrupted.pending = OutboundCall.failed(new IllegalStateException("transport unavailable"));
+                interrupted.pendingAtRequest = 5;
+            } else if (variant.equals("http-500")) interrupted.reply(500, Map.of("message", "head unavailable"));
+            else if (variant.equals("rate-429"))
+                interrupted.reply(429, Map.of("retry-after", List.of("2")), Map.of("message", "limited"));
+            else interrupted.reply(200, Map.of());
+            NodeResult ambiguous = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "github-app-review", interrupted).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("ambiguous", ambiguous.outcome(), variant);
+            assertEquals("93", GithubValues.object(ambiguous.payload()).get("remoteId"), variant);
+            assertEquals(variant.equals("rate-429") ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN",
+                    GithubValues.object(ambiguous.payload()).get("reason"), variant);
+            assertEquals(variant.equals("rate-429"),
+                    GithubValues.object(ambiguous.payload()).containsKey("retryAtEpochMs"), variant);
+            assertEquals(1, interrupted.requests.stream().filter(request -> request.method().equals("POST")).count());
+
+            clock.advance(30_000);
+            var reopened = new GithubTestSupport.HttpHarness().reply(200, repository())
+                    .reply(200, List.of(reviewObject(93, "PENDING", marker)))
+                    .reply(200, pull(GithubTestSupport.SHA))
+                    .reply(200, reviewObject(93, "APPROVED", marker))
+                    .reply(200, pull(GithubTestSupport.SHA));
+            NodeResult completed = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "github-app-review", reopened).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("continue", completed.outcome(), variant);
+            assertEquals("submitted", GithubValues.object(completed.payload()).get("status"), variant);
+            assertEquals(1, reopened.requests.stream().filter(request -> request.method().equals("POST")).count(),
+                    "restart may submit the discovered draft once but must not create another draft");
+            assertTrue(reopened.requests.stream().filter(request -> request.method().equals("POST"))
+                    .allMatch(request -> request.destination().getPath().endsWith("/reviews/93/events")), variant);
+        }
+    }
+
     @Test void lostSubmitResponseReconcilesLandedFormalReviewWithoutSecondSubmit() {
         String marker = reviewMarker("review-submit-lost");
         var http = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
@@ -640,6 +689,52 @@ class GithubActionBehaviorTest {
             assertEquals(2, http.requests.stream().filter(request -> request.method().equals("POST")).count(), variant);
             assertEquals(variant.equals("rate-429") ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN",
                     GithubValues.object(result.payload()).get("reason"), variant);
+        }
+    }
+
+    @Test void postSubmitHeadReadFailureReopensAndDetectsFormalReviewWithoutResubmission() {
+        for (String variant : List.of("transport", "http-500", "malformed-200", "rate-429")) {
+            Path path = directory.resolve("post-submit-head-" + variant + ".db");
+            MutableClock clock = new MutableClock();
+            GithubConfiguration configuration = GithubTestSupport.configuration(path);
+            String correlation = "post-submit-head-" + variant;
+            String marker = reviewMarker(correlation);
+            Map<String, Object> input = review(correlation);
+            var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                    .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(94, "PENDING", marker))
+                    .reply(200, pull(GithubTestSupport.SHA))
+                    .reply(200, reviewObject(94, "APPROVED", marker));
+            if (variant.equals("transport")) {
+                interrupted.pending = OutboundCall.failed(new IllegalStateException("transport unavailable"));
+                interrupted.pendingAtRequest = 7;
+            } else if (variant.equals("http-500")) interrupted.reply(500, Map.of("message", "head unavailable"));
+            else if (variant.equals("rate-429"))
+                interrupted.reply(429, Map.of("retry-after", List.of("2")), Map.of("message", "limited"));
+            else interrupted.reply(200, Map.of());
+            NodeResult ambiguous = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "github-app-review", interrupted).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("ambiguous", ambiguous.outcome(), variant);
+            assertEquals("94", GithubValues.object(ambiguous.payload()).get("remoteId"), variant);
+            assertEquals(variant.equals("rate-429") ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN",
+                    GithubValues.object(ambiguous.payload()).get("reason"), variant);
+            assertEquals(variant.equals("rate-429"),
+                    GithubValues.object(ambiguous.payload()).containsKey("retryAtEpochMs"), variant);
+            assertEquals(2, interrupted.requests.stream().filter(request -> request.method().equals("POST")).count());
+
+            clock.advance(30_000);
+            var reopened = new GithubTestSupport.HttpHarness().reply(200, repository())
+                    .reply(200, List.of(reviewObject(94, "APPROVED", marker)))
+                    .reply(200, pull(GithubTestSupport.SHA));
+            NodeResult completed = action(new GithubNodePackage(configuration,
+                            new SqliteGithubOperationStore(configuration.store(), clock)),
+                    "github-app-review", reopened).handle(GithubTestSupport.message(input))
+                    .toCompletableFuture().join();
+            assertEquals("continue", completed.outcome(), variant);
+            assertEquals("already-recorded", GithubValues.object(completed.payload()).get("status"), variant);
+            assertTrue(reopened.requests.stream().allMatch(request -> request.method().equals("GET")),
+                    "landed formal review must reconcile without another submit");
         }
     }
 
@@ -694,7 +789,9 @@ class GithubActionBehaviorTest {
         assertEquals(0, secondHttp.requests.stream().filter(request -> request.method().equals("POST")).count());
         blocked.complete(new OutboundHttpResponse(201, Map.of(),
                 GithubTestSupport.json(reviewObject(93, "PENDING", reviewMarker("live-takeover")))));
-        githubFailure(first); // join the first worker before TempDir cleanup
+        NodeResult interrupted = first.join(); // join the first worker before TempDir cleanup
+        assertEquals("ambiguous", interrupted.outcome());
+        assertEquals("93", GithubValues.object(interrupted.payload()).get("remoteId"));
     }
 
     @Test void workflowUsesExactShaAndNewestAttempts() {

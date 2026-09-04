@@ -91,6 +91,10 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         try { draftHeadCurrent = input.commit.equals(head(api, profile, input.pullNumber)); }
         catch (GithubProtocol.RateLimited limited) {
             return result("ambiguous", "ambiguous", input, reviewId, "RATE_LIMITED", limited.retryAt());
+        } catch (GithubException failure) {
+            if (uncertainRead(failure))
+                return result("ambiguous", "ambiguous", input, reviewId, "REMOTE_STATE_UNKNOWN");
+            throw failure;
         }
         if (!draftHeadCurrent) {
             try { GithubProtocol.requireSuccess(api.delete(path(profile, input.pullNumber, "/reviews/" + reviewId))); }
@@ -129,6 +133,10 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         try { currentHead = head(api, profile, input.pullNumber); }
         catch (GithubProtocol.RateLimited limited) {
             return result("ambiguous", "ambiguous", input, reviewId, "RATE_LIMITED", limited.retryAt());
+        } catch (GithubException failure) {
+            if (uncertainRead(failure))
+                return result("ambiguous", "ambiguous", input, reviewId, "REMOTE_STATE_UNKNOWN");
+            throw failure;
         }
         if (!input.commit.equals(currentHead)) return result("stale", "stale", input, reviewId, "STALE_HEAD");
         return result("continue", "submitted", input, reviewId, "");
@@ -192,15 +200,25 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
     }
 
     private static String head(GithubApi api, GithubProfile profile, long pull) {
-        Map<String, Object> pr = GithubProtocol.object(api.get(profile.repositoryPath() + "/pulls/" + pull));
-        Map<String, Object> baseRepo = GithubValues.object(GithubValues.object(pr.get("base")).get("repo"));
-        if (GithubValues.number(baseRepo.get("id"), 1, Long.MAX_VALUE) != profile.repositoryId())
-            throw new GithubException(GithubException.Code.FORBIDDEN);
-        return GithubValues.string(GithubValues.object(pr.get("head")).get("sha"), 40);
+        try {
+            Map<String, Object> pr = GithubProtocol.object(api.get(profile.repositoryPath() + "/pulls/" + pull));
+            Map<String, Object> baseRepo = GithubValues.object(GithubValues.object(pr.get("base")).get("repo"));
+            if (GithubValues.number(baseRepo.get("id"), 1, Long.MAX_VALUE) != profile.repositoryId())
+                throw new GithubException(GithubException.Code.FORBIDDEN);
+            return GithubValues.string(GithubValues.object(pr.get("head")).get("sha"), 40);
+        } catch (GithubException failure) {
+            if (failure.code() == GithubException.Code.INVALID_INPUT)
+                throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+            throw failure;
+        }
     }
 
     private static String login(Map<String, Object> review) {
         return GithubValues.string(GithubValues.object(review.get("user")).get("login"), 100);
+    }
+    private static boolean uncertainRead(GithubException failure) {
+        return failure.code() == GithubException.Code.TRANSPORT
+                || failure.code() == GithubException.Code.RESPONSE_INVALID;
     }
     private static void attestRepository(GithubApi api, GithubProfile profile) {
         Map<String, Object> repository = GithubProtocol.object(api.get("/repositories/" + profile.repositoryId()));

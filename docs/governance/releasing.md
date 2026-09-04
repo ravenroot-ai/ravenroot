@@ -152,7 +152,7 @@ coordinates:
 - the reusable `ravenroot-api-testkit`, `ravenroot-engine-testkit`, and
   `ravenroot-persistence-testkit` conformance artifacts;
 - the `ravenroot-extensions` parent, the dependency-bearing `ravenroot-extensions-all` pack, and the
-  `ravenroot-ai`, `ravenroot-amqp091`,
+  `ravenroot-ai`, `ravenroot-amqp091`, `ravenroot-discord`,
   `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-github`, `ravenroot-jdbc`,
   `ravenroot-kafka`, `ravenroot-mail`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,

@@ -488,14 +488,7 @@ final class DurablePausedExecutionRecoveryTest {
         }
     }
 
-    /**
-     * A payload the type model cannot represent takes the hold and writes nothing.
-     *
-     * <p>The alternative would be to write a lossy encoding, which produces the worst outcome this
-     * design has: a resume that continues silently with a different value than the hold withheld.
-     * The node returns a plain {@code Object}, which is what an in-process behaviour handing on an
-     * arbitrary Java value looks like.</p>
-     */
+    /** An unrepresentable node result fails before either durable or process-local routing. */
     @Test
     void aPayloadTheTypeModelCannotRepresentIsNotWrittenDown() throws Exception {
         var stores = new DurableStores();
@@ -508,19 +501,16 @@ final class DurablePausedExecutionRecoveryTest {
             running.pauseFromFirstNode(traversalId);
             submitter.start();
 
-            assertTrue(running.awaitPaused(BOUND), "the hold must be announced");
-            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertTrue(running.awaitTerminal(BOUND),
+                    "the graph payload boundary must fail before routing the opaque value");
             assertEquals(List.of("first"), running.effects(),
                     "the withheld node must not have run: " + running.effects());
             assertTrue(stores.heldPause(traversalId).isEmpty(),
-                    "a payload that cannot be represented has no encoding, and a lossy one would "
-                            + "resume with a value the hold never withheld");
-
-            assertTrue(running.application().resumeTraversal(TENANT, traversalId));
-            assertTrue(running.awaitTerminal(BOUND));
+                    "an opaque result must never become durable continuation data");
+            assertFalse(running.application().resumeTraversal(TENANT, traversalId),
+                    "a failed traversal must not retain a process-local hold");
             submitter.join(BOUND.toMillis());
-            assertEquals(List.of("first", "second"), running.effects(),
-                    "and the released hop still carries the real value, losing nothing");
+            assertEquals(List.of("first"), running.effects());
         }
     }
 

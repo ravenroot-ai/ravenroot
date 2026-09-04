@@ -233,12 +233,14 @@ public final class RavenrootServerMain {
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
+        var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(System.getenv());
         var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
-                executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks, agentBudgets);
+                executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets);
         final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
         if (toolApprovals == null && humanTasks == null) {
             approvalRecovery = null;
@@ -252,7 +254,7 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl(), agentBudgets);
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets);
                 dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
                         executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor));
             }
@@ -261,7 +263,7 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl(), agentBudgets);
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets);
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor));
             }
@@ -269,7 +271,8 @@ public final class RavenrootServerMain {
                     executionStore, recoveryConfiguration.tenantIds(), recoveryWorker,
                     recoveryConfiguration.batchLimit(), recoveryConfiguration.leaseTtl(),
                     ai.ravenroot.core.recovery.RepeatabilityDeclarations.NONE_DECLARED,
-                    new ai.ravenroot.core.recovery.CompositeRecoveryDispatcher(dispatchers));
+                    new ai.ravenroot.core.recovery.CompositeRecoveryDispatcher(dispatchers),
+                    graphExecutionLimits.maxRecoveryDeliveriesPerAttempt());
             approvalRecovery = new ai.ravenroot.server.approval.ToolApprovalRecoveryDriver(
                     recoveryService, recoveryConfiguration.interval());
         }

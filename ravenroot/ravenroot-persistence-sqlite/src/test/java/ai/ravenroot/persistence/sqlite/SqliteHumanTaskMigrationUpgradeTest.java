@@ -38,6 +38,9 @@ class SqliteHumanTaskMigrationUpgradeTest {
         try (Connection connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
             assertEquals(SqliteSchema.currentVersion(), SqliteSchema.migrate(connection, CLOCK));
             assertTrue(tableExists(connection, "human_task"));
+            assertTrue(columnExists(connection, "human_task", "continuation_version"));
+            assertTrue(columnExists(connection, "human_task", "continuation"));
+            assertTrue(columnExists(connection, "human_task", "continuation_digest"));
             assertEquals(1, indexCount(connection, "human_task_live_correlation"));
             assertEquals(1, historyRows(connection, humanTaskVersion));
             assertEquals(SqliteSchema.currentVersion(), SqliteSchema.migrate(connection, CLOCK));
@@ -62,6 +65,17 @@ class SqliteHumanTaskMigrationUpgradeTest {
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? rows.getInt(1) : 0;
             }
+        }
+    }
+
+    private static boolean columnExists(Connection connection, String table, String column)
+            throws Exception {
+        try (var statement = connection.createStatement();
+             ResultSet rows = statement.executeQuery("PRAGMA table_info(" + table + ")")) {
+            while (rows.next()) {
+                if (column.equals(rows.getString("name"))) return true;
+            }
+            return false;
         }
     }
 

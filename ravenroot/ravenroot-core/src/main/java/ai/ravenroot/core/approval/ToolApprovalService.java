@@ -38,6 +38,8 @@ import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.api.security.ToolInvocation;
 import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
+import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -68,7 +70,7 @@ public final class ToolApprovalService {
     private final ExecutionStore store;
     private final Clock clock;
     private final ToolApprovalBudgetHooks budgetHooks;
-    private final Map<ExecutionKey, ExecutionRecorder> liveRecorders = new ConcurrentHashMap<>();
+    private final Map<ExecutionKey, LiveBinding> liveRecorders = new ConcurrentHashMap<>();
     private volatile Set<String> recoverableTenants;
 
     public ToolApprovalService(ExecutionStore store, Clock clock) {
@@ -91,16 +93,24 @@ public final class ToolApprovalService {
      * The returned scope must be closed when the in-memory run tears down.
      */
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
+        return bindLive(key, recorder, null);
+    }
+
+    /** Binds the recorder plus the trusted graph-budget snapshot source used by production recovery. */
+    public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder,
+                                  java.util.function.Function<NodeMessage,
+                                          GraphExecutionBudgetSnapshot> budgetSnapshot) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(recorder, "recorder");
         if (!key.tenantId().equals(recorder.tenantId())
                 || !key.processInstanceId().equals(recorder.processInstanceId())) {
             throw new IllegalArgumentException("recorder belongs to a different execution");
         }
-        if (liveRecorders.putIfAbsent(key, recorder) != null) {
+        var binding = new LiveBinding(recorder, budgetSnapshot);
+        if (liveRecorders.putIfAbsent(key, binding) != null) {
             throw new IllegalStateException("a live recorder is already bound for this execution");
         }
-        return () -> liveRecorders.remove(key, recorder);
+        return () -> liveRecorders.remove(key, binding);
     }
 
     /** Production fail-closed tenant allowlist; embedders retain the unrestricted additive default. */
@@ -127,16 +137,24 @@ public final class ToolApprovalService {
         if (configured != null && !configured.contains(key.tenantId())) {
             return new ToolApprovalResult(ToolApprovalResult.Code.UNAVAILABLE, null, null);
         }
-        ExecutionRecorder recorder = liveRecorders.get(key);
-        if (recorder == null) {
+        LiveBinding binding = liveRecorders.get(key);
+        if (binding == null) {
             return new ToolApprovalResult(ToolApprovalResult.Code.UNAVAILABLE, null, null);
+        }
+        ExecutionRecorder recorder = binding.recorder();
+        int storedVersion = continuationVersion;
+        byte[] storedContinuation = continuation;
+        if (binding.budgetSnapshot() != null) {
+            storedContinuation = GraphExecutionContinuationCheckpoint.write(continuationVersion, continuation,
+                    binding.budgetSnapshot().apply(message));
+            storedVersion = GraphExecutionContinuationCheckpoint.VERSION;
         }
         var request = new ToolApprovalRegistration(approvalId, message.traversalId(),
                 message.invocationId(), message.attemptId(), callId, message.nodeId(), tool,
                 canonicalArguments, argumentsDigest, message.security(), recorder.graphVersionPin(),
                 settings.policyVersion(), clock.instant().plus(settings.timeToLive()),
-                settings.approverRequirements(), settings.requesterMayApprove(), continuationVersion,
-                continuation, ToolApprovalRegistration.digest(continuation));
+                settings.approverRequirements(), settings.requesterMayApprove(), storedVersion,
+                storedContinuation, ToolApprovalRegistration.digest(storedContinuation));
         StoredProcessInstance stored = load(key);
         OpaquePayload identity = approvalPayload(approvalId);
         recorder.suspendForToolApproval(request,
@@ -152,6 +170,10 @@ public final class ToolApprovalService {
         return new ToolApprovalResult(ToolApprovalResult.Code.CREATED,
                 await(store.loadToolApproval(key, approvalId)).orElseThrow(), null);
     }
+
+    private record LiveBinding(ExecutionRecorder recorder,
+                               java.util.function.Function<NodeMessage,
+                                       GraphExecutionBudgetSnapshot> budgetSnapshot) { }
 
     /** Atomically suspends the exact running invocation and records its approval, timer and handler. */
     ToolApprovalResult request(ExecutionKey key, ToolApprovalRegistration request,

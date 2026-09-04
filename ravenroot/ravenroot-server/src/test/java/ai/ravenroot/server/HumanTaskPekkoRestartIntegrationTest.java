@@ -119,7 +119,7 @@ class HumanTaskPekkoRestartIntegrationTest {
                          standard(tasks), new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                          GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "pekko-before", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 ExecutionException suspension = assertThrows(ExecutionException.class,
                         () -> runner.execute(requesterIdentity(), key.processInstanceId(), traversalId,
                                 null, pin, null, null, recorder).toCompletableFuture()

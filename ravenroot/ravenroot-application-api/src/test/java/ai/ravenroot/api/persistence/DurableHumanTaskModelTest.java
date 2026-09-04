@@ -55,6 +55,30 @@ class DurableHumanTaskModelTest {
     }
 
     @Test
+    void continuationIsBoundedContentBoundAndDefensivelyCopied() {
+        HumanTaskRegistration source = registration();
+        byte[] continuation = {1, 2, 3};
+        var registration = new HumanTaskRegistration(source.taskId(), source.traversalId(),
+                source.invocationId(), source.attemptId(), source.nodeId(), source.correlationKey(),
+                source.deduplicationKey(), source.metadata(), source.responseSchema(),
+                source.responderRequirements(), source.requester(), source.graphVersionPin(),
+                source.escalateAt(), source.expiresAt(), source.reentryMapping(), 2, continuation,
+                ToolApprovalRegistration.digest(continuation));
+
+        continuation[0] = 9;
+        assertEquals(1, registration.continuation()[0]);
+        byte[] returned = registration.continuation();
+        returned[1] = 9;
+        assertEquals(2, registration.continuation()[1]);
+        assertThrows(IllegalArgumentException.class, () -> new HumanTaskRegistration(
+                source.taskId(), source.traversalId(), source.invocationId(), source.attemptId(),
+                source.nodeId(), source.correlationKey(), source.deduplicationKey(), source.metadata(),
+                source.responseSchema(), source.responderRequirements(), source.requester(),
+                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping(),
+                2, new byte[] {1}, ToolApprovalRegistration.digest(new byte[] {2})));
+    }
+
+    @Test
     void escalationMustPrecedeExpiryAndOutcomeMappingRejectsLiveStates() {
         Instant expiry = Instant.parse("2026-01-02T00:00:00Z");
         HumanTaskRegistration source = registration();

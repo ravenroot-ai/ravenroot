@@ -214,6 +214,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * fail-closed rather than this class inventing a number the process-boundary design already owns.
      */
     private final int maxActiveDeployments;
+    private final GraphExecutionLimits graphExecutionLimits;
 
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor) {
         this(engine, monitor, BehaviorEnvironment.safeDefaults());
@@ -298,7 +299,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ExecutionIdentitySource identitySource, ExecutionStore executionStore,
                                        int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors) {
         this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
-                maxActiveDeployments, unknownBehaviors, null);
+                maxActiveDeployments, unknownBehaviors, null, null, null,
+                GraphExecutionLimits.DEFAULTS, null);
     }
 
     /**
@@ -326,9 +328,19 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ArtifactRegistry artifacts, ProgramRuntime programRuntime,
                                        ExecutionIdentitySource identitySource, ExecutionStore executionStore,
                                        int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       GraphExecutionLimits graphExecutionLimits) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, null, null, null, graphExecutionLimits, null);
+    }
+
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
                                        ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
         this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
-                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, null);
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, null, null,
+                GraphExecutionLimits.DEFAULTS, null);
     }
 
     /** Terminal composition including the optional durable tool-approval coordinator. */
@@ -339,7 +351,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
                                        ai.ravenroot.core.approval.ToolApprovalService toolApprovals) {
         this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
-                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, null, null);
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals,
+                null, GraphExecutionLimits.DEFAULTS, null);
     }
 
     /** Terminal composition including finite first-party agent resources. */
@@ -351,7 +364,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
-                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, null, agentBudgets);
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, null,
+                GraphExecutionLimits.DEFAULTS, agentBudgets);
     }
 
     /** Terminal composition including both durable external-decision coordinators. */
@@ -361,9 +375,37 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
                                        ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
                                        ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       GraphExecutionLimits graphExecutionLimits) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals,
+                null, graphExecutionLimits, null);
+    }
+
+    /** Terminal composition including both durable decisions and default graph limits. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
                                        ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
-                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks, null);
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals,
+                humanTasks, GraphExecutionLimits.DEFAULTS, null);
+    }
+
+    /** Full production composition including durable decisions and operator graph limits. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                graphExecutionLimits, null);
     }
 
     /** Terminal composition including durable decisions and finite first-party agent resources. */
@@ -375,9 +417,25 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
                                        ai.ravenroot.core.humantask.HumanTaskService humanTasks,
                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                GraphExecutionLimits.DEFAULTS, agentBudgets);
+    }
+
+    /** Full production composition with graph limits and finite agent resources. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.graphDefinitionStore = graphDefinitionStore;
         this.toolApprovals = toolApprovals;
+        this.graphExecutionLimits = java.util.Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
         this.humanTasks = humanTasks;
         this.agentBudgets = agentBudgets;
         this.engine = engine;
@@ -1061,7 +1119,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     @Override
     public GraphSummary inspectGraphMl(InputStream graphMl) {
-        try (var manager = GraphManager.readGraphMl(graphMl)) {
+        try (var manager = GraphManager.readGraphMl(graphMl, graphExecutionLimits.graphMl())) {
             long starts = manager.query(g -> g.V().has(GraphManager.KIND, NodeKind.START.name()).count().next());
             long ends = manager.query(g -> g.V().has(GraphManager.KIND, NodeKind.END.name()).count().next());
             return new GraphSummary(Math.toIntExact(manager.nodeCount()), Math.toIntExact(manager.edgeCount()),
@@ -1088,14 +1146,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(executionId, "executionId");
         java.util.Objects.requireNonNull(policy, "policy");
-        var document = GraphManager.readGraphMlDocument(graphMl);
+        var document = GraphManager.readGraphMlDocument(graphMl, graphExecutionLimits.graphMl());
         byte[] graphBytes = document.bytes();
         String graphVersion = sha256(graphBytes);
         var manager = document.manager();
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
-                    unknownBehaviors, policy);
+                    unknownBehaviors, policy, graphExecutionLimits);
         } catch (RuntimeException error) {
             manager.close();
             throw error;
@@ -1149,13 +1207,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             ExecutionRecorder recorder = openRecorder(security, processInstanceId, revision);
             approvalBinding = toolApprovals == null || recorder == null ? null
                     : toolApprovals.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder);
+                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
             budgetBinding = agentBudgets == null || recorder == null ? null
                     : agentBudgets.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
-                            security.tenantId(), processInstanceId), recorder);
+                            security.tenantId(), processInstanceId), recorder, runner::continuationBudget);
             execution = java.util.Objects.requireNonNull(
                     runner.execute(security, processInstanceId, traversalId, payload, graphVersion,
                             null, null, recorder),
@@ -1178,6 +1236,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
                         // The durable aggregate is WAITING. It is neither a failed result nor live
                         // in-memory work; the handler-trigger path creates the fresh traversal.
+                    } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
+                        executionResults.payloadFailed(resultKey, processInstanceId, rejected);
                     } else if (error != null || result == null) {
                         executionResults.failed(resultKey, processInstanceId);
                     } else {
@@ -1531,7 +1591,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return durablePauses.updateAndGet(existing -> existing != null ? existing
                 : new ai.ravenroot.core.pause.DurableExecutionPauseService(graphDefinitionStore,
                         executionStore, engine, behaviors, monitor, identitySource, workerId,
-                        executionLeaseTtl, agentBudgets));
+                        executionLeaseTtl, graphExecutionLimits, agentBudgets));
     }
 
     /**
@@ -1858,7 +1918,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, workerId, executionLeaseTtl,
                     ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
                             DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
-                    graphDefinitionStore, agentBudgets);
+                    graphDefinitionStore, graphExecutionLimits, agentBudgets);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });
@@ -2166,7 +2226,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * caller: it is fatal for a source session and legitimate for a deployment.</p>
      */
     private int inspectEffectiveSources(byte[] graphBytes) {
-        try (GraphManager manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graphBytes))) {
+        try (GraphManager manager = GraphManager.readGraphMl(new java.io.ByteArrayInputStream(graphBytes),
+                graphExecutionLimits.graphMl())) {
             var definition = manager.definition();
             new BehaviorPropertySchema(behaviors).validate(definition);
             new NodeRuntimeNatureValidator(behaviors).validate(definition);

@@ -214,6 +214,8 @@ public enum ErrorCode {
     GRAPHML_DOCUMENT_TOO_LARGE(413, "the GraphML document exceeds the configured byte limit"),
     /** Secure GraphML parsing exceeded a configured resource budget. */
     GRAPHML_RESOURCE_LIMIT(413, "the GraphML document exceeds a configured resource limit"),
+    /** A valid graph exceeds an operator-owned execution or amplification limit. */
+    GRAPH_EXECUTION_RESOURCE_LIMIT(413, "the graph exceeds a configured execution resource limit"),
     /** Secure XML parsing rejected a construct that could expand or access unsafe resources. */
     GRAPHML_UNSAFE_XML(400, "the GraphML document was refused by the secure parser"),
     /** GraphML bytes are not well-formed XML. */

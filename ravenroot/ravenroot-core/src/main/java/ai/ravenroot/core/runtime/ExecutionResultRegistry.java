@@ -67,6 +67,7 @@ public final class ExecutionResultRegistry {
     private final int maxResults;
     private final int maxTombstones;
     private final Map<Key, ExecutionOutcome> results = new LinkedHashMap<>();
+    private final Map<Key, ai.ravenroot.api.payload.PayloadException> payloadFailures = new LinkedHashMap<>();
     private final Map<Key, ProcessInstanceStatus> tombstones = new LinkedHashMap<>();
 
     public ExecutionResultRegistry() {
@@ -95,6 +96,7 @@ public final class ExecutionResultRegistry {
     public synchronized void started(Key key, UUID processInstanceId) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(processInstanceId, "processInstanceId");
+        payloadFailures.remove(key);
         put(key, new ExecutionOutcome(processInstanceId, key.executionId(), ProcessInstanceStatus.RUNNING,
                 null, Set.of(), Set.of()));
     }
@@ -119,6 +121,7 @@ public final class ExecutionResultRegistry {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(result, "result");
         results.remove(key);
+        payloadFailures.remove(key);
         put(key, new ExecutionOutcome(result.processInstanceId(), key.executionId(),
                 ProcessInstanceStatus.COMPLETED, result.payload(), result.visitedNodes(),
                 result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
@@ -137,13 +140,23 @@ public final class ExecutionResultRegistry {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(processInstanceId, "processInstanceId");
         results.remove(key);
+        payloadFailures.remove(key);
         put(key, new ExecutionOutcome(processInstanceId, key.executionId(), ProcessInstanceStatus.FAILED,
                 null, Set.of(), Set.of()));
+    }
+
+    /** Retains only the typed bounded payload refusal, never the rejected object or its text. */
+    public synchronized void payloadFailed(Key key, UUID processInstanceId,
+                                           ai.ravenroot.api.payload.PayloadException failure) {
+        failed(key, processInstanceId);
+        payloadFailures.put(key, Objects.requireNonNull(failure, "failure"));
     }
 
     /** The three-way answer defined by {@link ExecutionLookup}; never null, never an empty body. */
     public synchronized ExecutionLookup lookup(Key key) {
         Objects.requireNonNull(key, "key");
+        ai.ravenroot.api.payload.PayloadException payloadFailure = payloadFailures.get(key);
+        if (payloadFailure != null) throw payloadFailure;
         ExecutionOutcome outcome = results.get(key);
         if (outcome != null) {
             return new ExecutionLookup.Found(outcome);
@@ -171,6 +184,7 @@ public final class ExecutionResultRegistry {
         while (results.size() > maxResults) {
             var eldest = results.entrySet().iterator().next();
             results.remove(eldest.getKey());
+            payloadFailures.remove(eldest.getKey());
             entomb(eldest.getKey(), eldest.getValue().status());
         }
     }

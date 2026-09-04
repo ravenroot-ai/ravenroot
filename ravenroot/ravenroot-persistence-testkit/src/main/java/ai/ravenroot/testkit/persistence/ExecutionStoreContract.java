@@ -3139,7 +3139,8 @@ public abstract class ExecutionStoreContract {
                 template.responderRequirements(),
                 new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
                 template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
-                template.reentryMapping()));
+                template.reentryMapping(), template.continuationVersion(), template.continuation(),
+                template.continuationDigest()));
     }
 
     private HumanTaskRegistration humanTaskRegistration(ExecutionKey key, UUID taskId, UUID traversalId,
@@ -3154,7 +3155,8 @@ public abstract class ExecutionStoreContract {
                 new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
                 new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
                 clock().instant().plus(Duration.ofMinutes(5)),
-                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                2, new byte[] {1, 2, 3}, digest(new byte[] {1, 2, 3}));
     }
 
     private static HumanTaskRegistration copyHumanTask(HumanTaskRegistration source, UUID taskId,
@@ -3162,7 +3164,8 @@ public abstract class ExecutionStoreContract {
         return new HumanTaskRegistration(taskId, source.traversalId(), source.invocationId(),
                 source.attemptId(), source.nodeId(), correlationKey, deduplicationKey, source.metadata(),
                 source.responseSchema(), source.responderRequirements(), source.requester(),
-                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping());
+                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping(),
+                source.continuationVersion(), source.continuation(), source.continuationDigest());
     }
 
     private void transitionHumanTask(HumanTaskFixture fixture, HumanTaskTransition transition) {

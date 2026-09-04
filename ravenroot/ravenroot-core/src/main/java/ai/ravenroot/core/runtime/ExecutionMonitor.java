@@ -872,11 +872,28 @@ public final class ExecutionMonitor {
         if (error == null) {
             return null;
         }
+        GraphExecutionLimitException limited = executionLimitIn(error,
+                java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>()));
+        if (limited != null) {
+            return limited.reason().publicCode();
+        }
         Throwable current = error;
         while (current.getCause() != null) {
             current = current.getCause();
         }
         return current.getClass().getSimpleName();
+    }
+
+    private static GraphExecutionLimitException executionLimitIn(Throwable error, java.util.Set<Throwable> seen) {
+        if (error == null || !seen.add(error)) return null;
+        if (error instanceof GraphExecutionLimitException limited) return limited;
+        GraphExecutionLimitException caused = executionLimitIn(error.getCause(), seen);
+        if (caused != null) return caused;
+        for (Throwable suppressed : error.getSuppressed()) {
+            GraphExecutionLimitException nested = executionLimitIn(suppressed, seen);
+            if (nested != null) return nested;
+        }
+        return null;
     }
 
     private static String message(Throwable error) {

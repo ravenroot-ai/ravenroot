@@ -582,7 +582,7 @@ final class SqliteSchema {
                 "CREATE UNIQUE INDEX human_task_live_correlation ON human_task "
                         + "(tenant_id, correlation_key) WHERE status IN ('WAITING', 'ESCALATED')",
                 "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")),
-                // A hold is a child of its process instance and dies with it, like every other
+                 // A hold is a child of its process instance and dies with it, like every other
                 // durable decision record here. It carries its own continuation because a handler
                 // by contract carries none, and the continuation is the only reason a held
                 // traversal can be continued at all by a process that did not take the hold.
@@ -646,9 +646,14 @@ final class SqliteSchema {
                 "INSERT INTO agent_authority_control "
                         + "(singleton, state, epoch, changed_at_epoch_second, changed_at_nano) "
                         + "VALUES (1, 'ACTIVE', 0, 0, 0)")),
-                new SchemaMigration(13, "agent authority kill release aggregate", List.of(
-                "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
-                        + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")));
+                 new SchemaMigration(13, "agent authority kill release aggregate", List.of(
+                 "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
+                         + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")),
+                new SchemaMigration(14, "human-task graph continuation budget", List.of(
+                        "ALTER TABLE human_task ADD COLUMN continuation_version INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE human_task ADD COLUMN continuation BLOB NOT NULL DEFAULT X''",
+                        "ALTER TABLE human_task ADD COLUMN continuation_digest TEXT NOT NULL DEFAULT "
+                                + "'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'")));
     }
 
     static int currentVersion() {

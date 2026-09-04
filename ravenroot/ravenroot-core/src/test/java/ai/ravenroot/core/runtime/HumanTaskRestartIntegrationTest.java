@@ -124,6 +124,24 @@ class HumanTaskRestartIntegrationTest {
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] HUMAN_RETRY_GRAPH = new String(GRAPH, StandardCharsets.UTF_8)
+            .replace("<graph id=\"human-restart\"", "<key id=\"retry-max\" for=\"node\" "
+                    + "attr.name=\"retry.maxAttempts\" attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-initial\" for=\"node\" attr.name=\"retry.initialBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-multiplier\" for=\"node\" attr.name=\"retry.backoffMultiplier\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-ceiling\" for=\"node\" attr.name=\"retry.maxBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-on\" for=\"node\" attr.name=\"retry.retryOn\" "
+                    + "attr.type=\"string\"/>\n<graph id=\"human-restart\"")
+            .replace("<node id=\"capture\"><data key=\"kind\">BEHAVIOR</data><data key=\"behavior\">capture</data></node>", """
+                    <node id="capture"><data key="kind">BEHAVIOR</data><data key="behavior">capture</data>
+                      <data key="retry-max">2</data><data key="retry-initial">0</data>
+                      <data key="retry-multiplier">1.0</data><data key="retry-ceiling">0</data>
+                      <data key="retry-on">RetryableBlip</data>
+                    </node>""")
+            .getBytes(StandardCharsets.UTF_8);
     private static final byte[] CHAINED_GRAPH = """
             <?xml version="1.0" encoding="UTF-8"?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
@@ -279,7 +297,7 @@ class HumanTaskRestartIntegrationTest {
                          engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                          GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "live-race", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 CompletableFuture<Throwable> execution = CompletableFuture.supplyAsync(() -> {
                     try {
                         runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
@@ -372,7 +390,7 @@ class HumanTaskRestartIntegrationTest {
                          engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                          GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "live-chain-race", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 assertThrows(ExecutionException.class,
                         () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
                                 null, pin, null, null, recorder).toCompletableFuture()
@@ -451,7 +469,7 @@ class HumanTaskRestartIntegrationTest {
                          engine, behaviors, new ExecutionMonitor(),
                          ExecutionIdentitySource.randomUuids(), GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "live-worker", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 ExecutionException suspended = assertThrows(ExecutionException.class,
                         () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
                                 Map.of("private", "not materialized"), pin, null, null, recorder)
@@ -519,6 +537,90 @@ class HumanTaskRestartIntegrationTest {
     }
 
     @Test
+    void humanTaskRestartRestoresCumulativeGraphBudgetInsteadOfResettingIt(
+            @TempDir Path directory) throws Exception {
+        Path database = directory.resolve("human-task-budget-restart.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        String pin;
+        GraphExecutionLimits tight = limitsWithTraversalSteps(3);
+
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(HUMAN_RETRY_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK);
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(HUMAN_RETRY_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, standard(tasks), new ExecutionMonitor(),
+                         ExecutionIdentitySource.randomUuids(), GraphRunner.DEFAULT_SHUTDOWN_BOUND, tight);
+                 var recorder = ExecutionRecorder.open(store, key, "budget-before", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
+                assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                null, pin, null, null, recorder).toCompletableFuture()
+                                .get(10, TimeUnit.SECONDS));
+            }
+            DurableHumanTask task = onlyTask(tasks);
+            assertEquals(GraphExecutionContinuationCheckpoint.VERSION,
+                    task.request().continuationVersion());
+            var checkpoint = GraphExecutionContinuationCheckpoint.read(
+                    task.request().continuationVersion(), task.request().continuation());
+            assertEquals(2, checkpoint.budget().traversalSteps());
+            assertEquals(1, checkpoint.budget().inFlightHops());
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK)) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            DurableHumanTask task = onlyTask(tasks);
+            tasks.resolve(approver(), task.request().taskId(), task.generation(), response());
+        }
+
+        var captures = new AtomicInteger();
+        var recoveryEvents = new java.util.concurrent.CopyOnWriteArrayList<
+                ai.ravenroot.api.application.ExecutionEvent>();
+        try (var store = new SqliteExecutionStore(database, CLOCK);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK);
+            BehaviorRegistry behaviors = standard(tasks).register("capture", message -> {
+                captures.incrementAndGet();
+                return CompletableFuture.failedFuture(new RetryableBlip());
+            });
+            var recoveryMonitor = new ExecutionMonitor();
+            recoveryMonitor.subscribe(recoveryEvents::add);
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    null, engine, behaviors, recoveryMonitor, ExecutionIdentitySource.randomUuids(),
+                    "budget-after", TTL, tight);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "budget-after",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.Deferred.class::isInstance),
+                    outcomes::toString);
+            assertEquals(1, captures.get(),
+                    "the retry must be refused before a second send after restart");
+            assertEquals(ProcessInstanceStatus.FAILED,
+                    store.load(key).toCompletableFuture().join().state().status(),
+                    "the retry must consume the cumulative pre-restart step budget rather than reset it");
+            long retryEvents = recoveryEvents.stream()
+                    .filter(event -> event.type() == ai.ravenroot.api.application.ExecutionEventType
+                            .NODE_RETRY_SCHEDULED)
+                    .count();
+            assertEquals(0, retryEvents, "budget refusal must precede durable retry scheduling");
+        }
+    }
+
+    @Test
     void chainedHumanTaskAcknowledgesFirstTriggerAndDoesNotReplayAfterLeaseExpiry(
             @TempDir Path directory) throws Exception {
         var clock = new MutableClock(NOW);
@@ -544,7 +646,7 @@ class HumanTaskRestartIntegrationTest {
                          engine, behaviors, new ExecutionMonitor(),
                          ExecutionIdentitySource.randomUuids(), GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "live-worker", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 assertThrows(ExecutionException.class,
                         () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
                                 null, pin, null, null, recorder).toCompletableFuture()
@@ -622,7 +724,7 @@ class HumanTaskRestartIntegrationTest {
                          engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
                          GraphRunner.DEFAULT_SHUTDOWN_BOUND);
                  var recorder = ExecutionRecorder.open(store, key, "live-worker", TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 assertThrows(ExecutionException.class,
                         () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
                                 null, pin, null, null, recorder).toCompletableFuture()
@@ -641,9 +743,17 @@ class HumanTaskRestartIntegrationTest {
             List<RecoveryOutcome> outcomes = recovery.sweepOnce();
             assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
                     outcomes::toString);
-            assertEquals(1, store.toolApprovals(key).toCompletableFuture().join().size());
+            var nestedApprovals = store.toolApprovals(key).toCompletableFuture().join();
+            assertEquals(1, nestedApprovals.size());
             assertEquals(ai.ravenroot.api.persistence.ToolApprovalStatus.PENDING,
-                    store.toolApprovals(key).toCompletableFuture().join().getFirst().status());
+                    nestedApprovals.getFirst().status());
+            var nestedCheckpoint = GraphExecutionContinuationCheckpoint.read(
+                    nestedApprovals.getFirst().request().continuationVersion(),
+                    nestedApprovals.getFirst().request().continuation());
+            assertEquals(3, nestedCheckpoint.budget().traversalSteps(),
+                    "human-to-tool re-entry must retain both earlier steps and charge its successor");
+            assertEquals(2, nestedCheckpoint.budget().amplifiedDeliveries());
+            assertEquals(1, nestedCheckpoint.budget().inFlightHops());
             assertTrue(store.claimPendingWork(TENANT, "probe", 10, TTL)
                     .toCompletableFuture().join().isEmpty(),
                     "the acknowledged human-task trigger must not replay while the tool approval waits");
@@ -714,6 +824,15 @@ class HumanTaskRestartIntegrationTest {
                 manager.definition());
     }
 
+    private static GraphExecutionLimits limitsWithTraversalSteps(long maximum) {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        return new GraphExecutionLimits(defaults.graphMl(), defaults.payload(), defaults.maxFanOut(),
+                defaults.maxResidentActors(), defaults.maxLiveActorsPerTraversal(),
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(), maximum,
+                defaults.maxAmplifiedDeliveries(), defaults.maxCumulativePayloadBytes(),
+                defaults.maxRecoveryDeliveriesPerAttempt());
+    }
+
     private static long createRunning(SqliteExecutionStore store, ExecutionKey key, UUID traversalId,
                                       String pin) {
         var traversal = new Traversal(traversalId, "start", TraversalStatus.ACCEPTED, Map.of());
@@ -757,6 +876,12 @@ class HumanTaskRestartIntegrationTest {
     private static RequestContext approver() {
         return new RequestContext("approver-call", "approver", PrincipalType.USER, "issuer", TENANT,
                 Set.of(Role.APPROVER), Set.of());
+    }
+
+    private static final class RetryableBlip extends RuntimeException {
+        private RetryableBlip() {
+            super("retryable");
+        }
     }
 
     private static final class HumanToToolPackage implements NodePackage {

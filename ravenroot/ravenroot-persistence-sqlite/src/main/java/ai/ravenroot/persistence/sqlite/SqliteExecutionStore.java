@@ -3247,10 +3247,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "response_max_bytes, required_roles, required_scopes, requester_request_id, "
                 + "requester_subject, requester_principal_type, requester_issuer, graph_version_pin, "
                 + "escalate_at_epoch_second, escalate_at_nano, expires_at_epoch_second, expires_at_nano, "
-                + "resolved_outcome, denied_outcome, expired_outcome, cancelled_outcome, status, actor, "
-                + "generation, revision";
+                + "resolved_outcome, denied_outcome, expired_outcome, cancelled_outcome, "
+                + "continuation_version, continuation, continuation_digest, status, actor, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(34) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(37) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             statement.setString(index++, task.key().processInstanceId().toString());
@@ -3286,6 +3286,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(index++, request.reentryMapping().deniedOutcome());
             statement.setString(index++, request.reentryMapping().expiredOutcome());
             statement.setString(index++, request.reentryMapping().cancelledOutcome());
+            statement.setInt(index++, request.continuationVersion());
+            statement.setBytes(index++, request.continuation());
+            statement.setString(index++, request.continuationDigest());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
             statement.setLong(index++, task.generation());
@@ -3375,7 +3378,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     StoredInstant.read(rows, "expires_at"),
                     new HumanTaskReentryMapping(rows.getString("resolved_outcome"),
                             rows.getString("denied_outcome"), rows.getString("expired_outcome"),
-                            rows.getString("cancelled_outcome")));
+                            rows.getString("cancelled_outcome")),
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
                     rows.getLong("generation"), rows.getLong("revision"));

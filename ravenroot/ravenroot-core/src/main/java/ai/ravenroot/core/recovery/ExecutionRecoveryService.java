@@ -18,6 +18,7 @@ import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.catalog.AttemptRepeatability;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.core.runtime.GraphExecutionLimits;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -69,11 +70,21 @@ public final class ExecutionRecoveryService {
     private final Duration leaseTtl;
     private final RepeatabilityDeclarations declarations;
     private final RecoveryDispatcher dispatcher;
+    private final int maxRecoveryDeliveriesPerAttempt;
 
     public ExecutionRecoveryService(ExecutionStore store, List<String> tenantIds, String workerId,
                                     int batchLimit, Duration leaseTtl,
                                     RepeatabilityDeclarations declarations,
                                     RecoveryDispatcher dispatcher) {
+        this(store, tenantIds, workerId, batchLimit, leaseTtl, declarations, dispatcher,
+                GraphExecutionLimits.DEFAULTS.maxRecoveryDeliveriesPerAttempt());
+    }
+
+    public ExecutionRecoveryService(ExecutionStore store, List<String> tenantIds, String workerId,
+                                    int batchLimit, Duration leaseTtl,
+                                    RepeatabilityDeclarations declarations,
+                                    RecoveryDispatcher dispatcher,
+                                    int maxRecoveryDeliveriesPerAttempt) {
         this.store = Objects.requireNonNull(store, "store");
         this.tenantIds = List.copyOf(Objects.requireNonNull(tenantIds, "tenantIds"));
         this.workerId = Objects.requireNonNull(workerId, "workerId");
@@ -82,6 +93,11 @@ public final class ExecutionRecoveryService {
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
         this.declarations = declarations == null ? RepeatabilityDeclarations.NONE_DECLARED : declarations;
         this.dispatcher = dispatcher == null ? RecoveryDispatcher.NONE : dispatcher;
+        if (maxRecoveryDeliveriesPerAttempt < 1
+                || maxRecoveryDeliveriesPerAttempt > GraphExecutionLimits.HARD_MAX_RECOVERY_DELIVERIES) {
+            throw new IllegalArgumentException("maxRecoveryDeliveriesPerAttempt is outside supported bounds");
+        }
+        this.maxRecoveryDeliveriesPerAttempt = maxRecoveryDeliveriesPerAttempt;
     }
 
     /**
@@ -279,6 +295,10 @@ public final class ExecutionRecoveryService {
     private RecoveryOutcome resolveAmbiguity(PendingWork.AttemptDispatch item, StoredProcessInstance stored) {
         String nodeId = nodeIdOf(stored.state(), item);
         AttemptRepeatability declaration = declarationOf(nodeId);
+        if (item.deliveryAttempt() > maxRecoveryDeliveriesPerAttempt) {
+            String cause = "recovery delivery limit exceeded on delivery " + item.deliveryAttempt();
+            return park(item, stored, declaration, cause);
+        }
         if (declaration.authorisesReDispatch()) {
             if (!dispatcher.canDispatch(item)) {
                 return new RecoveryOutcome.Deferred(item.key(), item.workItemId(), "no dispatcher available");
@@ -293,6 +313,11 @@ public final class ExecutionRecoveryService {
         String cause = "dispatched with unknown outcome on delivery " + item.deliveryAttempt()
                 + "; node '" + nodeId + "' is " + declaration.name().toLowerCase(java.util.Locale.ROOT)
                 .replace('_', ' ');
+        return park(item, stored, declaration, cause);
+    }
+
+    private RecoveryOutcome park(PendingWork.AttemptDispatch item, StoredProcessInstance stored,
+                                 AttemptRepeatability declaration, String cause) {
         await(store.apply(ExecutionBatch.to(item.key())
                 .expecting(RevisionExpectation.exactly(stored.revision()))
                 .fencedBy(item.fencingToken())

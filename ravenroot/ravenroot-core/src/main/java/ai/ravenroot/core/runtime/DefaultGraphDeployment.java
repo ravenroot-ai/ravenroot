@@ -147,6 +147,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     private final RequestReplyIngress requestReply = new DeploymentRequestReplyView();
     private final RequestReplyLimits requestReplyLimits;
     private final Clock clock;
+    private final GraphExecutionLimits graphExecutionLimits;
     /** Node ids currently reporting degraded, via {@link InboundSourceContext#reportDegraded}. */
     private final Set<String> degradedSources = ConcurrentHashMap.newKeySet();
 
@@ -176,6 +177,16 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 DEFAULT_INBOX_RETENTION);
     }
 
+    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           GraphExecutionLimits graphExecutionLimits) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
+                DEFAULT_INBOX_RETENTION, "ravenroot-" + UUID.randomUUID(), Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), null,
+                graphExecutionLimits, null);
+    }
+
     /**
      * Composes a deployment that carries a definition store but records nothing durably.
      *
@@ -203,7 +214,18 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
                 DEFAULT_INBOX_RETENTION, "ravenroot-" + UUID.randomUUID(), Duration.ofSeconds(30),
                 RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), graphDefinitionStore,
-                null);
+                GraphExecutionLimits.DEFAULTS, null);
+    }
+
+    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
+                DEFAULT_INBOX_RETENTION, "ravenroot-" + UUID.randomUUID(), Duration.ofSeconds(30),
+                RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), graphDefinitionStore,
+                graphExecutionLimits, null);
     }
 
     /**
@@ -308,7 +330,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                                   ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
                 executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
-                Clock.systemUTC(), graphDefinitionStore, null);
+                Clock.systemUTC(), graphDefinitionStore, GraphExecutionLimits.DEFAULTS, null);
     }
 
     /**
@@ -338,7 +360,22 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                                   ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
                 executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
-                Clock.systemUTC(), graphDefinitionStore, agentBudgets);
+                Clock.systemUTC(), graphDefinitionStore, GraphExecutionLimits.DEFAULTS, agentBudgets);
+    }
+
+    /** Full production composition with graph limits and finite first-party agent resources. */
+    public DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                                  ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                                  byte[] graphMl, int ingressBufferCapacity,
+                                  ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                                  Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                                  RequestReplyLimits requestReplyLimits,
+                                  ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                  GraphExecutionLimits graphExecutionLimits,
+                                  ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                Clock.systemUTC(), graphDefinitionStore, graphExecutionLimits, agentBudgets);
     }
 
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
@@ -348,19 +385,19 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            ai.ravenroot.api.persistence.ExecutionStore executionStore,
                            Duration inboxRetention, String workerId, Duration executionLeaseTtl,
                            RequestReplyLimits requestReplyLimits, Clock clock) {
-        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
-                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
-                null, null);
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, executionStore,
+                inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock, null,
+                GraphExecutionLimits.DEFAULTS, null);
     }
 
-    /** The terminal constructor, and the only one that assigns state. */
-    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+    private DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
                            ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
                            byte[] graphMl, int ingressBufferCapacity,
                            ai.ravenroot.api.persistence.ExecutionStore executionStore,
                            Duration inboxRetention, String workerId, Duration executionLeaseTtl,
                            RequestReplyLimits requestReplyLimits, Clock clock,
                            ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
                            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.graphDefinitionStore = graphDefinitionStore;
         this.agentBudgets = agentBudgets;
@@ -368,6 +405,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         this.executionLeaseTtl = Objects.requireNonNull(executionLeaseTtl, "executionLeaseTtl");
         this.requestReplyLimits = Objects.requireNonNull(requestReplyLimits, "requestReplyLimits");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.graphExecutionLimits = Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
         this.id = Objects.requireNonNull(id, "id");
         this.engine = Objects.requireNonNull(engine, "engine");
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors");
@@ -540,9 +578,9 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         long generation;
         try {
             openedDomain = engine.openDomain(id.value());
-            openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl));
+            openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl), graphExecutionLimits.graphMl());
             builtRunner = new GraphRunner(openedManager, engine, openedDomain, behaviors, monitor,
-                    identitySource, GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                    identitySource, GraphRunner.DEFAULT_SHUTDOWN_BOUND, graphExecutionLimits);
             // Sources are discovered and started here -- while this graph's nodes are being spawned,
             // never earlier -- and only after the runner itself is built, so a source's start failure
             // rolls back a fully-formed runner rather than a half-built one.

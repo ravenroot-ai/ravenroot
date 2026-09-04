@@ -573,7 +573,8 @@ final class PausedExecutionObservabilityTest {
 
                 var execution = runner.executeAfterHumanTask(TestIdentities.TENANT_A,
                         key.processInstanceId(), traversalId, "effect", "v1", recorder,
-                        NodeResult.continueWith("resumed")).toCompletableFuture();
+                        NodeResult.continueWith("resumed"),
+                        new GraphExecutionBudgetSnapshot(1, 0, 0, 1, 0)).toCompletableFuture();
 
                 assertFalse(execution.isDone(), "the re-entered traversal must be parked at its gate");
                 assertEquals(List.of(ExecutionEventType.EXECUTION_STARTED,

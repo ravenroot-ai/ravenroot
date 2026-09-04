@@ -25,6 +25,8 @@ import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
+import ai.ravenroot.core.runtime.GraphExecutionLimits;
 import ai.ravenroot.core.runtime.GraphRunner;
 import ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
 
@@ -66,6 +68,7 @@ public final class DurableExecutionPauseService {
     private final ExecutionIdentitySource identities;
     private final String workerId;
     private final Duration leaseTtl;
+    private final GraphExecutionLimits executionLimits;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
 
     /**
@@ -84,7 +87,8 @@ public final class DurableExecutionPauseService {
                                         ExecutionEngine engine, BehaviorRegistry behaviors,
                                         ExecutionMonitor monitor, ExecutionIdentitySource identities,
                                         String workerId, Duration leaseTtl) {
-        this(definitions, executions, engine, behaviors, monitor, identities, workerId, leaseTtl, null);
+        this(definitions, executions, engine, behaviors, monitor, identities, workerId, leaseTtl,
+                GraphExecutionLimits.DEFAULTS, null);
     }
 
     /**
@@ -105,6 +109,18 @@ public final class DurableExecutionPauseService {
                                         String workerId, Duration leaseTtl,
                                         ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
                                                 agentBudgets) {
+        this(definitions, executions, engine, behaviors, monitor, identities, workerId, leaseTtl,
+                GraphExecutionLimits.DEFAULTS, agentBudgets);
+    }
+
+    /** Full production composition with graph limits and finite first-party agent resources. */
+    public DurableExecutionPauseService(GraphDefinitionStore definitions, ExecutionStore executions,
+                                        ExecutionEngine engine, BehaviorRegistry behaviors,
+                                        ExecutionMonitor monitor, ExecutionIdentitySource identities,
+                                        String workerId, Duration leaseTtl,
+                                        GraphExecutionLimits executionLimits,
+                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                agentBudgets) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.engine = Objects.requireNonNull(engine, "engine");
@@ -113,6 +129,7 @@ public final class DurableExecutionPauseService {
         this.identities = Objects.requireNonNull(identities, "identities");
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
+        this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
         this.agentBudgets = agentBudgets;
     }
 
@@ -200,10 +217,12 @@ public final class DurableExecutionPauseService {
         if (found.isEmpty()) return Optional.empty();
         DurableExecutionPause pause = found.get();
         ExecutionPauseRegistration request = pause.request();
+        GraphExecutionContinuationCheckpoint.Decoded checkpoint;
         ExecutionPauseContinuation continuation;
         try {
-            continuation = ExecutionPauseContinuation.decode(request.continuationVersion(),
+            checkpoint = GraphExecutionContinuationCheckpoint.read(request.continuationVersion(),
                     request.continuation());
+            continuation = ExecutionPauseContinuation.decode(checkpoint.innerVersion(), checkpoint.inner());
         } catch (RuntimeException undecodable) {
             // A hold this build cannot read stays held. Settling it would discard a traversal an
             // operator deliberately kept, on the strength of not understanding it.
@@ -223,7 +242,7 @@ public final class DurableExecutionPauseService {
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                    GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+                    GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
         } catch (RuntimeException setupFailure) {
             setupFailure = cleanup(setupFailure, recorder::close);
             setupFailure = cleanup(setupFailure, manager::close);
@@ -254,7 +273,8 @@ public final class DurableExecutionPauseService {
             result = runner.executeFromPause(request.requester(),
                     pause.key().processInstanceId(), traversalId, request.nodeId(),
                     request.graphVersionPin().reference(), recorder, request.afterInvocationId(),
-                    continuation.payloadValue(), continuation.attributeValues(), commandOf(request));
+                    continuation.payloadValue(), continuation.attributeValues(), commandOf(request),
+                    checkpoint.budget());
         } catch (RuntimeException setupFailure) {
             setupFailure = cleanup(setupFailure, runner::close);
             setupFailure = cleanup(setupFailure, () -> close(budgetBinding));
@@ -346,7 +366,8 @@ public final class DurableExecutionPauseService {
         StoredGraphDefinition stored = definitions.load(new GraphDefinitionKey(pause.key().tenantId(),
                         new GraphContentId(pause.request().graphVersionPin().reference())))
                 .toCompletableFuture().join();
-        GraphManager manager = GraphManager.readGraphMl(new ByteArrayInputStream(stored.canonical().bytes()));
+        GraphManager manager = GraphManager.readGraphMl(
+                new ByteArrayInputStream(stored.canonical().bytes()), executionLimits.graphMl());
         try {
             GraphVersionSnapshot snapshot = GraphVersionSnapshot.create(
                     new GraphVersionKey(stored.identity().graphId(), stored.identity().versionId()),

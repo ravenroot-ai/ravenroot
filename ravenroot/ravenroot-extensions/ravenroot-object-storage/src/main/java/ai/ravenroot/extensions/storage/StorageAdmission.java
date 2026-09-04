@@ -41,6 +41,10 @@ final class StorageAdmission {
 
     private synchronized void release(String key, Gate gate) { releaseReference(key, gate, true); }
 
+    private synchronized boolean retry(Gate gate, long nowNanos) {
+        return gate.takeRate(nowNanos);
+    }
+
     private void releaseReference(String key, Gate gate, boolean permit) {
         if (permit) gate.permits.release();
         gate.references--;
@@ -58,6 +62,11 @@ final class StorageAdmission {
             StorageAdmission current;
             synchronized (this) { current = owner; owner = null; }
             if (current != null) current.release(key, gate);
+        }
+        boolean retry(long nowNanos) {
+            StorageAdmission current;
+            synchronized (this) { current = owner; }
+            return current != null && current.retry(gate, nowNanos);
         }
     }
 

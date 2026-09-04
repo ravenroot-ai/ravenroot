@@ -12,7 +12,9 @@ import java.util.Set;
 class StorageNodePackageConformanceTest extends NodeBehaviorContract {
     @Override protected NodePackage nodePackage() {
         return new StorageNodePackage(name -> Optional.of(StorageTestSupport.profile(
-                Set.of(StorageProfile.Operation.GET, StorageProfile.Operation.PUT), 2, 10)));
+                Set.of(StorageProfile.Operation.GET, StorageProfile.Operation.PUT,
+                        StorageProfile.Operation.LIST, StorageProfile.Operation.DELETE,
+                        StorageProfile.Operation.DELETE_VERSION), 2, 10)));
     }
 
     @Override protected NodeConfiguration configurationFor(NodeTypeDescriptor descriptor) {

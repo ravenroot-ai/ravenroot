@@ -1,5 +1,6 @@
 package ai.ravenroot.extensions.storage;
 
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
@@ -199,6 +200,98 @@ class StorageBehaviorTest {
         assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(result).code());
         assertEquals(1, http.calls.get());
         assertEquals(1, http.cancellations.get());
+    }
+
+    @Test void alreadyCancelledSignalRefusesEveryOperationBeforeAdmissionOrHandoff() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET,
+                StorageProfile.Operation.PUT, StorageProfile.Operation.LIST, StorageProfile.Operation.DELETE), 2, 1);
+        StorageRuntime runtime = new StorageRuntime(name -> java.util.Optional.of(profile));
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        TestCancellation cancellation = new TestCancellation();
+        cancellation.cancel();
+        NodeAction get = new ObjectGetNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectGetNodeBehavior.BEHAVIOR), http);
+        NodeAction put = new ObjectPutNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectPutNodeBehavior.BEHAVIOR), http);
+        NodeAction list = new ObjectListNodeBehavior(runtime).create(new ai.ravenroot.api.node.NodeConfiguration(
+                "list", ObjectListNodeBehavior.BEHAVIOR, Map.of("storageProfile", "assets")), http);
+        NodeAction delete = new ObjectDeleteNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectDeleteNodeBehavior.BEHAVIOR), http);
+
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(get.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1")), cancellation)).code());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(put.handle(StorageTestSupport.message(
+                Map.of("version", "object.put.v1", "text", "value")), cancellation)).code());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")), cancellation)).code());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(delete.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1")), cancellation)).code());
+        assertEquals(0, http.calls.get());
+        assertDoesNotThrow(() -> get.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1"))).toCompletableFuture().join(),
+                "pre-cancelled invocations must not consume the sole admission rate token");
+        assertEquals(1, http.calls.get());
+    }
+
+    @Test void cancellationSignalStopsActiveListRetryAndActiveGet() {
+        StorageProfile listProfile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 2);
+        CancelCompletesWithRetryableResponse listHttp = new CancelCompletesWithRetryableResponse();
+        NodeAction list = new ObjectListNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(listProfile))).create(new ai.ravenroot.api.node.NodeConfiguration(
+                        "list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), listHttp);
+        TestCancellation listCancellation = new TestCancellation();
+        CompletableFuture<NodeResult> listResult = list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")), listCancellation).toCompletableFuture();
+        listCancellation.cancel();
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(listResult).code());
+        assertEquals(1, listHttp.calls.get(), "signal cancellation must suppress synchronous 503 retry");
+        assertDoesNotThrow(() -> list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture().join(),
+                "signal cancellation must not spend the retry rate token");
+
+        StorageProfile getProfile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 1, 10);
+        StorageTestSupport.HttpDouble getHttp = new StorageTestSupport.HttpDouble();
+        getHttp.response = new CompletableFuture<>();
+        NodeAction get = new ObjectGetNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(getProfile)))
+                .create(StorageTestSupport.configuration(ObjectGetNodeBehavior.BEHAVIOR), getHttp);
+        TestCancellation getCancellation = new TestCancellation();
+        CompletionStage<NodeResult> getResult = get.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1")), getCancellation);
+        getCancellation.cancel();
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(getResult).code());
+        assertEquals(1, getHttp.calls.get());
+        assertEquals(1, getHttp.cancellations.get());
+    }
+
+    @Test void cancellationSignalMakesActivePutAndDeleteAmbiguous() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.PUT,
+                StorageProfile.Operation.DELETE), 2, 10);
+        StorageRuntime runtime = new StorageRuntime(name -> java.util.Optional.of(profile));
+
+        StorageTestSupport.HttpDouble putHttp = new StorageTestSupport.HttpDouble();
+        putHttp.response = new CompletableFuture<>();
+        NodeAction put = new ObjectPutNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectPutNodeBehavior.BEHAVIOR), putHttp);
+        TestCancellation putCancellation = new TestCancellation();
+        CompletionStage<NodeResult> putResult = put.handle(StorageTestSupport.message(
+                Map.of("version", "object.put.v1", "text", "value")), putCancellation);
+        putCancellation.cancel();
+        assertEquals(StorageException.Code.AMBIGUOUS, failure(putResult).code());
+        assertEquals(1, putHttp.calls.get());
+        assertEquals(1, putHttp.cancellations.get());
+
+        StorageTestSupport.HttpDouble deleteHttp = new StorageTestSupport.HttpDouble();
+        deleteHttp.response = new CompletableFuture<>();
+        NodeAction delete = new ObjectDeleteNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectDeleteNodeBehavior.BEHAVIOR), deleteHttp);
+        TestCancellation deleteCancellation = new TestCancellation();
+        CompletionStage<NodeResult> deleteResult = delete.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1")), deleteCancellation);
+        deleteCancellation.cancel();
+        assertEquals(StorageException.Code.AMBIGUOUS, failure(deleteResult).code());
+        assertEquals(1, deleteHttp.calls.get());
+        assertEquals(1, deleteHttp.cancellations.get());
     }
 
     @Test void acceptedCancellationPreventsSynchronousRetryResponseFromChargingOrDispatching() {
@@ -627,6 +720,33 @@ class StorageBehaviorTest {
         }
         @Override public ai.ravenroot.api.node.service.OutboundWebSocketService outboundWebSocket() {
             return NodePackageServices.unavailable().outboundWebSocket();
+        }
+    }
+
+    private static final class TestCancellation implements CancellationSignal {
+        private final List<Runnable> listeners = new java.util.ArrayList<>();
+        private boolean cancelled;
+
+        @Override public synchronized boolean cancelled() { return cancelled; }
+
+        @Override public void onCancel(Runnable listener) {
+            boolean runNow;
+            synchronized (this) {
+                runNow = cancelled;
+                if (!runNow) listeners.add(listener);
+            }
+            if (runNow) listener.run();
+        }
+
+        void cancel() {
+            List<Runnable> registered;
+            synchronized (this) {
+                if (cancelled) return;
+                cancelled = true;
+                registered = List.copyOf(listeners);
+                listeners.clear();
+            }
+            registered.forEach(Runnable::run);
         }
     }
 

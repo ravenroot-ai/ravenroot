@@ -80,11 +80,12 @@ Stable failures contain no endpoint, key, signed header, remote body or credenti
 GET and DELETE perform no automatic retry. LIST may retry only configured transient transport or
 5xx failures, charges profile rate admission for every attempt, and keeps one concurrency lease and
 one absolute deadline across all attempts. Cancellation stops the active call and any future retry.
-PUT and DELETE timeout, cancellation, or transport uncertainty after handoff is `AMBIGUOUS`; neither
-mutation is automatically retried. Recovery is fail-closed by default: LIST and DELETE expose the
-standard `recovery.repeatable` declaration with no default, and the engine repeats an abandoned
-attempt only after an author explicitly chooses `repeatable`. Exact-version DELETE is the safest
-case for such a declaration; unversioned deletion still depends on the workflow's domain semantics.
+PUT and DELETE timeout, cancellation, transport uncertainty, or HTTP 500/502/503/504 after handoff
+is `AMBIGUOUS`; neither mutation is automatically retried. Recovery is fail-closed by default: LIST
+and DELETE expose the standard `recovery.repeatable` declaration with no default, and the engine
+repeats an abandoned attempt only after an author explicitly chooses `repeatable`. Exact-version
+DELETE is the safest case for such a declaration; unversioned deletion still depends on the
+workflow's domain semantics.
 
 ## Verification
 

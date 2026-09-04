@@ -58,7 +58,7 @@ public final class ObjectDeleteNodeBehavior implements NodeBehavior {
             int timeout = StorageSettings.tighten(configuration, "timeoutMs", profile.timeoutMs());
             int concurrency = StorageSettings.tighten(configuration, "maxConcurrency", profile.maxConcurrency());
             Semaphore gate = new Semaphore(concurrency, true);
-            return message -> {
+            return StorageRuntime.action((message, cancellation) -> {
                 try {
                     Map<String, Object> payload = StorageValues.object(message.payload(), "payload");
                     if (!payload.keySet().stream().allMatch(FIELDS::contains)
@@ -77,12 +77,12 @@ public final class ObjectDeleteNodeBehavior implements NodeBehavior {
                             new byte[0], timeout, Math.min(profile.maxObjectBytes(), 64 * 1024), 0,
                             StorageRuntime.Semantics.MUTATION,
                             ObjectDeleteNodeBehavior::project);
-                    return runtime.execute(message, services, profile, gate, request);
+                    return runtime.execute(message, cancellation, services, profile, gate, request);
                 } catch (RuntimeException failure) {
                     return CompletableFuture.failedFuture(failure instanceof StorageException ? failure
                             : StorageException.of(StorageException.Code.INVALID_INPUT));
                 }
-            };
+            });
         } catch (StorageException safe) {
             throw safe;
         } catch (RuntimeException invalid) {

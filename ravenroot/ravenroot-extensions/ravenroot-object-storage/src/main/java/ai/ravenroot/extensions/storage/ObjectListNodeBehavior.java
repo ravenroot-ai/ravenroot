@@ -72,7 +72,7 @@ public final class ObjectListNodeBehavior implements NodeBehavior {
             int concurrency = StorageSettings.tighten(configuration, "maxConcurrency", profile.maxConcurrency());
             int retries = StorageSettings.boundedNonNegative(configuration, "retries", 0, 3);
             Semaphore gate = new Semaphore(concurrency, true);
-            return message -> {
+            return StorageRuntime.action((message, cancellation) -> {
                 try {
                     Map<String, Object> payload = StorageValues.object(message.payload(), "payload");
                     if (!payload.keySet().stream().allMatch(FIELDS::contains)
@@ -90,12 +90,12 @@ public final class ObjectListNodeBehavior implements NodeBehavior {
                             StorageRuntime.Semantics.RETRYABLE_READ,
                             response -> StorageListXml.project(profile, message.tenantId(), prefix, maximum,
                                     projection, response));
-                    return runtime.execute(message, services, profile, gate, request);
+                    return runtime.execute(message, cancellation, services, profile, gate, request);
                 } catch (RuntimeException failure) {
                     return CompletableFuture.failedFuture(failure instanceof StorageException ? failure
                             : StorageException.of(StorageException.Code.INVALID_INPUT));
                 }
-            };
+            });
         } catch (StorageException safe) {
             throw safe;
         } catch (RuntimeException invalid) {

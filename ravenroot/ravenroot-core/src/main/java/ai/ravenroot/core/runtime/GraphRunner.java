@@ -200,6 +200,8 @@ public final class GraphRunner implements AutoCloseable {
     private final WorkerInstanceRegistry workers;
     /** Demand-created actors whose identity and lifetime are one traversal plus one logical node. */
     private final TraversalInstanceRegistry traversalInstances;
+    /** Dynamic actors retained by this runner, including instances still awaiting termination. */
+    private final RunnerActorCapacity runnerActorCapacity;
     /** Independent per-node/per-traversal admission; never a pod/tenant/deployment hierarchy. */
     private final TraversalAdmissionRegistry traversalAdmission = new TraversalAdmissionRegistry();
     /** nodeId -> catalog key, for registry-known behaviors only. See {@link #resolveCatalogKeys}. */
@@ -684,6 +686,7 @@ public final class GraphRunner implements AutoCloseable {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.executionPolicy = java.util.Objects.requireNonNull(executionPolicy, "executionPolicy");
         this.executionLimits = java.util.Objects.requireNonNull(executionLimits, "executionLimits");
+        this.runnerActorCapacity = new RunnerActorCapacity(executionLimits.maxLiveActorsPerTraversal());
         // Read the manager exactly once, here, and never again. Everything below routes through the
         // materialised definition, so no later mutation of the manager can reach a run in flight.
         GraphDefinition submitted = graphManager.definition();
@@ -895,8 +898,8 @@ public final class GraphRunner implements AutoCloseable {
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion, processInstanceId,
                 traversalId, nodeCatalogKeys, deploymentId, workloadId);
         GraphNode start = graph.start();
-        var budget = new ExecutionBudget(executionLimits);
-        ExecutionBudget.Hop rootHop = budget.reserveRoot(measure(payload) + measure(Map.of()));
+        var budget = new ExecutionBudget(executionLimits, runnerActorCapacity);
+        ExecutionBudget.Hop rootHop = budget.reserveRoot(measureDelivery(payload, Map.of()));
         var state = new ExecutionState(processInstanceId, traversalId, start.id(), new BranchLiveness(start.id()),
                 recorder, identity, identitySource, clock, budget);
         var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity, joinSpecs, clock,
@@ -1039,7 +1042,7 @@ public final class GraphRunner implements AutoCloseable {
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
                 processInstanceId, traversalId, nodeCatalogKeys, null, null);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
-                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"));
+                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
         var state = new ExecutionState(processInstanceId, traversalId, node.id(),
                 new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
@@ -1167,7 +1170,7 @@ public final class GraphRunner implements AutoCloseable {
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
                 processInstanceId, traversalId, nodeCatalogKeys, null, null);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
-                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"));
+                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
         var state = new ExecutionState(processInstanceId, traversalId, node.id(),
                 new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
@@ -1316,7 +1319,7 @@ public final class GraphRunner implements AutoCloseable {
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
                 processInstanceId, traversalId, nodeCatalogKeys, null, null);
         ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
-                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"));
+                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"), runnerActorCapacity);
         ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
         var state = new ExecutionState(processInstanceId, traversalId, held.ingressNodeId(),
                 new BranchLiveness(held.ingressNodeId()), recorder, identity, identitySource, clock, stored, budget);
@@ -2470,8 +2473,17 @@ public final class GraphRunner implements AutoCloseable {
                             // between a check and this write would leave the runtime retrying a node
                             // whose retry was never recorded. The commit's own terminal guard runs
                             // under the same lock the terminal transition takes, so there is no gap.
-                            ExecutionState.RetryCommit committed = state.retryScheduled(invocationId,
-                                    attemptId, nextAttempt, startedEventId);
+                            ExecutionState.RetryCommit committed;
+                            try {
+                                committed = state.retryScheduled(invocationId, attemptId, nextAttempt,
+                                        startedEventId, !parentInvocationIds.isEmpty(),
+                                        measureDelivery(payload, attributes));
+                            } catch (GraphExecutionLimitException refused) {
+                                state.nodeFailed(invocationId, attemptId, startedEventId);
+                                monitor.nodeFailed(identity, node.id(), invocationId, attemptId, refused,
+                                        liveInstances(node.id(), definition.nature()), connectorAttempts);
+                                throw new CompletionException(refused);
+                            }
                             if (committed != null) {
                                 // One settlement per attempt: this replaces NODE_FAILED rather than
                                 // preceding it, so a node whose transient blips are absorbed by
@@ -3154,7 +3166,16 @@ public final class GraphRunner implements AutoCloseable {
     /** Validates one routed value and returns the bytes charged to amplification accounting. */
     private long measure(NodeResult result) {
         java.util.Objects.requireNonNull(result, "node result");
-        return Math.addExact(measure(result.payload()), measure(result.attributes()));
+        return measureDelivery(result.payload(), result.attributes());
+    }
+
+    private long measureDelivery(Object payload, Map<String, Object> attributes) {
+        try {
+            return Math.addExact(measure(payload), measure(attributes));
+        } catch (ArithmeticException overflow) {
+            throw new GraphExecutionLimitException(GraphExecutionLimitException.Reason.PAYLOAD_BYTES,
+                    Long.MAX_VALUE, executionLimits.maxCumulativePayloadBytes());
+        }
     }
 
     private long measure(Object value) {
@@ -5095,10 +5116,15 @@ public final class GraphRunner implements AutoCloseable {
          *         or {@code null} when nothing was journalled
          */
         private synchronized RetryCommit retryScheduled(UUID invocationId, UUID failedAttemptId,
-                                                        NodeAttempt nextAttempt, UUID startedEventId) {
+                                                        NodeAttempt nextAttempt, UUID startedEventId,
+                                                        boolean amplified, long payloadBytes) {
             if (closing || terminal) {
                 return null;
             }
+            // One synchronized operation owns the complete retry charge and the lifecycle commit.
+            // A concurrent branch therefore either consumes all three monotonic dimensions or none,
+            // and the limit refusal precedes every retry journal event and dispatch side effect.
+            budget.reserveRetry(amplified, payloadBytes);
             var transitions = List.<ExecutionTransition>of(
                     new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
                             NodeAttemptStatus.FAILED),

@@ -135,6 +135,28 @@ class PinnedGraphToolApprovalPreflightTest {
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] TOOL_RETRY_GRAPH = new String(GRAPH, StandardCharsets.UTF_8)
+            .replace("<graph id=\"g\"", "<key id=\"retry-max\" for=\"node\" "
+                    + "attr.name=\"retry.maxAttempts\" attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-initial\" for=\"node\" attr.name=\"retry.initialBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-multiplier\" for=\"node\" attr.name=\"retry.backoffMultiplier\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-ceiling\" for=\"node\" attr.name=\"retry.maxBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-on\" for=\"node\" attr.name=\"retry.retryOn\" "
+                    + "attr.type=\"string\"/>\n<graph id=\"g\"")
+            .replace("<node id=\"end\"><data key=\"kind\">END</data></node>", """
+                    <node id="retry"><data key="kind">BEHAVIOR</data><data key="behavior">retry</data>
+                      <data key="retry-max">2</data><data key="retry-initial">0</data>
+                      <data key="retry-multiplier">1.0</data><data key="retry-ceiling">0</data>
+                      <data key="retry-on">RetryableBlip</data>
+                    </node>
+                    <node id="end"><data key="kind">END</data></node>""")
+            .replace("<edge id=\"e2\" source=\"agent\" target=\"end\"/>",
+                    "<edge id=\"e2\" source=\"agent\" target=\"retry\"/>\n"
+                            + "<edge id=\"e3\" source=\"retry\" target=\"end\"/>")
+            .getBytes(StandardCharsets.UTF_8);
 
     @Test
     void absentPinnedDefinitionDefersWithoutConsumingOrAcknowledging(@TempDir Path directory) throws Exception {
@@ -248,7 +270,7 @@ class PinnedGraphToolApprovalPreflightTest {
             @TempDir Path directory) throws Exception {
         var clock = new MutableClock(NOW);
         var definitions = new InMemoryGraphDefinitionStore(clock);
-        String pin = storeGraph(definitions);
+        String pin = storeGraph(definitions, TOOL_RETRY_GRAPH);
         Path database = directory.resolve("budget-reentry.db");
         var key = new ExecutionKey(TENANT, UUID.randomUUID());
         UUID traversal = UUID.randomUUID();
@@ -278,21 +300,30 @@ class PinnedGraphToolApprovalPreflightTest {
         }
 
         var observed = new AtomicReference<ToolCallContinuationInput.Decision>();
+        var retryEntries = new AtomicInteger();
+        var events = new java.util.concurrent.CopyOnWriteArrayList<
+                ai.ravenroot.api.application.ExecutionEvent>();
         try (ExecutionStore store = new SqliteExecutionStore(database, clock);
              var engine = new InlineExecutionEngine()) {
             var approvals = new ToolApprovalService(store, clock);
             approvals.approve(approver(), key.processInstanceId(), approvalId);
             BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
-                    new DecisionProbePackage(observed, () -> { }, true));
+                    new DecisionProbePackage(observed, () -> { }, true))
+                    .register("retry", ignored -> {
+                        retryEntries.incrementAndGet();
+                        return CompletableFuture.failedFuture(new RetryableBlip());
+                    });
             GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
             var tight = new GraphExecutionLimits(defaults.graphMl(), defaults.payload(),
                     defaults.maxFanOut(), defaults.maxResidentActors(),
                     defaults.maxLiveActorsPerTraversal(), defaults.maxInFlightHopsPerTraversal(),
-                    defaults.maxQueuedAdmissionsPerNode(), 2,
+                    defaults.maxQueuedAdmissionsPerNode(), 3,
                     defaults.maxAmplifiedDeliveries(), defaults.maxCumulativePayloadBytes(),
                     defaults.maxRecoveryDeliveriesPerAttempt());
+            var monitor = new ExecutionMonitor();
+            monitor.subscribe(events::add);
             var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
-                    engine, behaviors, new ExecutionMonitor(),
+                    engine, behaviors, monitor,
                     ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
                     "restart-worker", Duration.ofSeconds(30), tight);
             var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "restart-worker", 10,
@@ -312,7 +343,10 @@ class PinnedGraphToolApprovalPreflightTest {
                     "the approved call outcome is recorded before downstream routing is refused");
             assertEquals(ProcessInstanceStatus.FAILED,
                     store.load(key).toCompletableFuture().join().state().status(),
-                    "the stored two-step budget must refuse the successor instead of resetting after restart");
+                    "the retry must exceed the stored budget instead of resetting after restart");
+            assertEquals(1, retryEntries.get(), "the retry refusal must precede its second send");
+            assertEquals(0, events.stream().filter(event -> event.type()
+                    == ai.ravenroot.api.application.ExecutionEventType.NODE_RETRY_SCHEDULED).count());
         }
     }
 
@@ -360,6 +394,13 @@ class PinnedGraphToolApprovalPreflightTest {
             assertEquals(1, humanTasks.size());
             assertEquals("review", humanTasks.getFirst().request().nodeId());
             assertEquals(HumanTaskStatus.WAITING, humanTasks.getFirst().status());
+            var nestedCheckpoint = GraphExecutionContinuationCheckpoint.read(
+                    humanTasks.getFirst().request().continuationVersion(),
+                    humanTasks.getFirst().request().continuation());
+            assertEquals(2, nestedCheckpoint.budget().traversalSteps(),
+                    "tool-to-human re-entry must carry the original step plus the routed successor");
+            assertEquals(1, nestedCheckpoint.budget().amplifiedDeliveries());
+            assertEquals(1, nestedCheckpoint.budget().inFlightHops());
             assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
                     .toCompletableFuture().join().isEmpty(),
                     "the old approval trigger must be acknowledged while the new task waits");
@@ -697,6 +738,12 @@ class PinnedGraphToolApprovalPreflightTest {
                                     NodeResult.continueWith(null)), true));
                 }
             });
+        }
+    }
+
+    private static final class RetryableBlip extends RuntimeException {
+        private RetryableBlip() {
+            super("retryable");
         }
     }
 

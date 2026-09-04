@@ -22,8 +22,10 @@ class GraphExecutionLimitCompositionWiringTest {
         assertTrue(source.contains("GraphExecutionLimits.fromEnvironment(System.getenv())"),
                 () -> MAIN + " must read operator graph limits");
         assertEquals(2, source.split(
-                        "recoveryConfiguration\\.leaseTtl\\(\\), graphExecutionLimits\\)", -1).length - 1,
-                () -> MAIN + " must give tool and human re-entry the same limits as live execution");
+                        "recoveryConfiguration\\.leaseTtl\\(\\), graphExecutionLimits, agentBudgets\\)", -1)
+                        .length - 1,
+                () -> MAIN + " must give tool and human re-entry the same limits and agent-budget "
+                        + "lifecycle as live execution");
         assertTrue(source.contains("graphExecutionLimits.maxRecoveryDeliveriesPerAttempt())"),
                 () -> MAIN + " must bound production recovery delivery attempts from operator configuration");
     }

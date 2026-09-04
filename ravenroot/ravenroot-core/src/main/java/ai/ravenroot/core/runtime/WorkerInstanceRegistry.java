@@ -332,6 +332,10 @@ final class WorkerInstanceRegistry implements AutoCloseable {
                 instance.released.complete(null);
             }
         });
+        retiring.forEach(instance -> {
+            instance.actorReservation.close();
+            instance.released.complete(null);
+        });
         retiring.clear();
         // Belt and braces after the loop above has already emptied it entry by entry: this method's
         // whole contract is that nothing is left registered, and a per-node counter that survived a

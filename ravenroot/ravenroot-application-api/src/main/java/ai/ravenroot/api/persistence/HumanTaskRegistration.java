@@ -50,7 +50,26 @@ public record HumanTaskRegistration(
         byte[] continuation,
         String continuationDigest) {
 
-    /** Source-compatible legacy registration; durable graph re-entry refuses its absent budget. */
+    /**
+     * Creates a source-compatible legacy registration without a trusted continuation budget.
+     * Durable graph re-entry refuses the absent budget.
+     *
+     * @param taskId deterministic task identity
+     * @param traversalId suspended traversal identity
+     * @param invocationId suspended node invocation identity
+     * @param attemptId suspended node attempt identity
+     * @param nodeId graph node awaiting the decision
+     * @param correlationKey generic handler correlation key
+     * @param deduplicationKey generic handler deduplication key
+     * @param metadata bounded graph-authored display copy
+     * @param responseSchema exact bounded response contract
+     * @param responderRequirements authorization required from a responder
+     * @param requester security context that created the task
+     * @param graphVersionPin immutable graph version used for re-entry
+     * @param escalateAt optional durable escalation deadline
+     * @param expiresAt required durable expiry deadline
+     * @param reentryMapping terminal status to graph-outcome mapping
+     */
     public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
                                  String nodeId, String correlationKey, String deduplicationKey,
                                  HumanTaskMetadata metadata, HumanTaskResponseSchema responseSchema,
@@ -99,6 +118,11 @@ public record HumanTaskRegistration(
         }
     }
 
+    /**
+     * Returns an isolated copy of the trusted continuation envelope.
+     *
+     * @return copied continuation bytes
+     */
     @Override public byte[] continuation() { return continuation.clone(); }
 
     @Override public boolean equals(Object value) {

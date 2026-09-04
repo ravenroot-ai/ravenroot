@@ -84,6 +84,9 @@ public record PayloadLimits(
     /**
      * Validates a node-produced Java value and returns its canonical encoded size.
      * Conversion is bounded while it copies, so an iterable cannot allocate an unbounded mirror first.
+     *
+     * @param value node-produced Java value to validate and measure
+     * @return canonical JSON-encoded size in bytes
      */
     public int enforceAndMeasure(Object value) {
         PayloadValue bounded = PayloadValue.fromJava(value, this);

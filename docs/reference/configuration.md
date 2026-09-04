@@ -27,7 +27,7 @@ Values outside the supported ceilings refuse startup instead of silently expandi
 | `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | 256 KiB | 64 MiB | each input, node output, or attribute map |
 | `RAVENROOT_GRAPH_MAX_FAN_OUT` | 64 | 256 | distinct targets for one routed outcome or failure route |
 | `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | 256 | 4,096 | resident actors allocated when a runner starts |
-| `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | 256 | 1,024 | demand-created worker and traversal actors alive together |
+| `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | 256 | 1,024 | demand-created worker and traversal actors alive or retiring in one traversal, with the same ceiling enforced across its runner |
 | `RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS` | 1,024 | 4,096 | admitted but incomplete messages in one traversal |
 | `RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE` | 1,024 | 4,096 | messages waiting at one node gate |
 | `RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS` | 100,000 | 1,000,000 | cumulative node deliveries in one live traversal |
@@ -37,9 +37,11 @@ Values outside the supported ceilings refuse startup instead of silently expandi
 
 Admission counts nodes, edges, properties, configured fan-out, and resident demand in one bounded
 pass before actors are created. Cycles are accepted only under the finite cumulative traversal-step
-policy. Step, amplification, and byte counters are shared by every branch and cycle re-entry and do
-not reset within a live traversal. Recovery redelivery has its own persisted counter; after a process
-restart Ravenroot does not claim to restore the completed portion of a whole-graph live budget.
+policy. Step, amplification, and byte counters are shared by every branch, retry, and cycle re-entry;
+a retry atomically reserves one step, its non-root delivery, and its exact payload-plus-attribute bytes
+before the retry is recorded or sent. Tool-approval, human-task, and durable-pause checkpoints carry
+the exact counters across restart, and malformed, unknown, or legacy checkpoints without a safe budget
+state refuse re-entry instead of resetting it. Recovery redelivery has its own persisted counter.
 
 A refusal exposes a closed code such as `GRAPH_LIMIT_FAN_OUT_EXCEEDED` or
 `GRAPH_LIMIT_TRAVERSAL_STEPS_EXCEEDED`, never graph content or payload values.

@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Monotonic traversal budget shared by every asynchronous branch and cycle re-entry. */
 final class ExecutionBudget {
     private final GraphExecutionLimits limits;
+    private final RunnerActorCapacity runnerActors;
     private long traversalSteps;
     private long amplifiedDeliveries;
     private long payloadBytes;
@@ -14,12 +15,22 @@ final class ExecutionBudget {
     private int liveActors;
 
     ExecutionBudget(GraphExecutionLimits limits) {
+        this(limits, new RunnerActorCapacity(limits.maxLiveActorsPerTraversal()));
+    }
+
+    ExecutionBudget(GraphExecutionLimits limits, RunnerActorCapacity runnerActors) {
         this.limits = java.util.Objects.requireNonNull(limits, "limits");
+        this.runnerActors = java.util.Objects.requireNonNull(runnerActors, "runnerActors");
     }
 
     static ExecutionBudget restore(GraphExecutionLimits limits, GraphExecutionBudgetSnapshot snapshot) {
+        return restore(limits, snapshot, new RunnerActorCapacity(limits.maxLiveActorsPerTraversal()));
+    }
+
+    static ExecutionBudget restore(GraphExecutionLimits limits, GraphExecutionBudgetSnapshot snapshot,
+                                   RunnerActorCapacity runnerActors) {
         java.util.Objects.requireNonNull(snapshot, "snapshot");
-        var restored = new ExecutionBudget(limits);
+        var restored = new ExecutionBudget(limits, runnerActors);
         require(GraphExecutionLimitException.Reason.TRAVERSAL_STEPS, snapshot.traversalSteps(),
                 limits.maxTraversalSteps());
         require(GraphExecutionLimitException.Reason.AMPLIFIED_DELIVERIES, snapshot.amplifiedDeliveries(),
@@ -72,11 +83,24 @@ final class ExecutionBudget {
         return List.copyOf(reservations);
     }
 
+    /** Charges a fresh attempt without taking a second concurrent-hop slot for the same visit. */
+    synchronized void reserveRetry(boolean amplified, long bytes) {
+        if (bytes < 0) throw new IllegalArgumentException("budget charge cannot be negative");
+        reserve(1, amplified ? 1 : 0, bytes, 0);
+    }
+
     synchronized Actor reserveActor() {
-        long next = (long) liveActors + 1;
-        require(GraphExecutionLimitException.Reason.LIVE_ACTORS, next, limits.maxLiveActorsPerTraversal());
-        liveActors++;
-        return new Actor(this);
+        RunnerActorCapacity.Permit runnerPermit = runnerActors.reserve();
+        try {
+            long next = (long) liveActors + 1;
+            require(GraphExecutionLimitException.Reason.LIVE_ACTORS, next,
+                    limits.maxLiveActorsPerTraversal());
+            liveActors++;
+            return new Actor(this, runnerPermit);
+        } catch (RuntimeException failure) {
+            runnerPermit.close();
+            throw failure;
+        }
     }
 
     private void reserve(long steps, long amplification, long bytes, int hops) {
@@ -119,8 +143,9 @@ final class ExecutionBudget {
         inFlightHops = Math.max(0, inFlightHops - 1);
     }
 
-    private synchronized void releaseActor() {
+    private synchronized void releaseActor(RunnerActorCapacity.Permit runnerPermit) {
         liveActors = Math.max(0, liveActors - 1);
+        runnerPermit.close();
     }
 
     static final class Hop implements AutoCloseable {
@@ -134,10 +159,14 @@ final class ExecutionBudget {
 
     static final class Actor implements AutoCloseable {
         private final ExecutionBudget budget;
+        private final RunnerActorCapacity.Permit runnerPermit;
         private final AtomicBoolean closed = new AtomicBoolean();
-        private Actor(ExecutionBudget budget) { this.budget = budget; }
+        private Actor(ExecutionBudget budget, RunnerActorCapacity.Permit runnerPermit) {
+            this.budget = budget;
+            this.runnerPermit = runnerPermit;
+        }
         @Override public void close() {
-            if (closed.compareAndSet(false, true)) budget.releaseActor();
+            if (closed.compareAndSet(false, true)) budget.releaseActor(runnerPermit);
         }
     }
 }

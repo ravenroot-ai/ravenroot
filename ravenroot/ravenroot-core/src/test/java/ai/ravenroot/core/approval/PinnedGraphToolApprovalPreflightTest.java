@@ -265,6 +265,101 @@ class PinnedGraphToolApprovalPreflightTest {
         }
     }
 
+    /**
+     * The manifest's refusal, taken all the way through the real recovery loop rather than asserted
+     * against the service in isolation.
+     *
+     * <p>Both cases produce {@link RecoveryOutcome.Deferred}, and that is the fail-closed answer this
+     * path already defines: the claimed item is neither dispatched nor acknowledged, so it stays
+     * claimable and is not lost. What must never happen is {@code HandlerDispatched} — that would be
+     * the runtime resuming an execution it cannot reproduce.</p>
+     */
+    @Test
+    void recoveryRefusesAnExecutionWithNoManifestOnceManifestsAreComposed(@TempDir Path directory)
+            throws Exception {
+        assertRecoveryRefusesManifest(directory, false);
+    }
+
+    @Test
+    void recoveryRefusesAnExecutionWhoseNodePackagesNoLongerMatchThePin(@TempDir Path directory)
+            throws Exception {
+        assertRecoveryRefusesManifest(directory, true);
+    }
+
+    private void assertRecoveryRefusesManifest(Path directory, boolean pinADifferentPackageSet)
+            throws Exception {
+        var clock = new MutableClock(NOW);
+        var definitions = new InMemoryGraphDefinitionStore(clock);
+        String pin = storeGraph(definitions);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        var decision = new AtomicReference<ToolCallContinuationInput.Decision>();
+        try (ExecutionStore store = new SqliteExecutionStore(
+                directory.resolve("manifest-refusal.db"), clock);
+             var engine = new InlineExecutionEngine();
+             var manifestStore =
+                     new ai.ravenroot.core.persistence.InMemoryExecutionManifestStore(clock)) {
+            createRunning(store, key, traversal, invocation, attempt, pin);
+            var approvals = new ToolApprovalService(store, clock);
+            approvals.request(key, request(approvalId, traversal, invocation, attempt, pin, 1), "create");
+            approvals.approve(approver(), key.processInstanceId(), approvalId);
+            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
+                    new DecisionProbePackage(decision, () -> { }, true));
+            var resolver = ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
+                    store.capabilities(), behaviors,
+                    ai.ravenroot.core.runtime.UnknownBehaviorPolicy.passThrough(),
+                    GraphExecutionLimits.DEFAULTS, null);
+            var manifests = new ai.ravenroot.core.manifest.ExecutionManifestService(
+                    manifestStore, resolver, clock);
+            if (pinADifferentPackageSet) {
+                // The execution was accepted with this package at 1.0.0; the runtime now resolves the
+                // probe package's own declared version, so exactly one dimension disagrees.
+                var accepted = resolver.manifestFor(key,
+                        new ai.ravenroot.api.persistence.GraphContentId(pin),
+                        ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(
+                                new ai.ravenroot.api.persistence.GraphContentId(pin)),
+                        ai.ravenroot.api.application.ExecutionPolicy.STANDARD, NOW);
+                var rebuilt = new ai.ravenroot.api.persistence.ExecutionManifest(
+                        accepted.formatVersion(), accepted.key(), accepted.graphContentId(),
+                        accepted.graphIdentity(), accepted.runtime(),
+                        List.of(ai.ravenroot.api.persistence.PinnedNodePackage.of(
+                                resolver.nodePackages().get(0).packageId(), "0.0.1-before-the-upgrade",
+                                ai.ravenroot.api.node.NodeSdk.CONTRACT)),
+                        accepted.pinnedAt());
+                manifestStore.pin(rebuilt).toCompletableFuture().join();
+                assertEquals(1, resolver.nodePackages().size(),
+                        "the probe package is the one installed package, so the difference below is "
+                                + "unambiguous rather than one of several");
+            }
+            var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
+                    null, engine, behaviors, new ExecutionMonitor(),
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                    "worker", Duration.ofSeconds(30), GraphExecutionLimits.DEFAULTS, null, manifests);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, approvals,
+                            ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "unchanged", "policy-v1"), executor));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().noneMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    () -> "an execution this runtime cannot reproduce must not be dispatched: " + outcomes);
+            assertTrue(outcomes.stream().allMatch(RecoveryOutcome.Deferred.class::isInstance),
+                    outcomes::toString);
+            assertEquals(null, decision.get(),
+                    "the continuation never ran, so nothing observed a decision");
+            assertEquals(ToolApprovalStatus.APPROVED,
+                    store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "the durable decision is untouched: a refusal must not settle work it declined "
+                            + "to do, or the wait would be lost rather than deferred");
+        }
+    }
+
     @Test
     void freshSuspensionSurvivesSqliteRestartWithoutResettingTraversalBudget(
             @TempDir Path directory) throws Exception {

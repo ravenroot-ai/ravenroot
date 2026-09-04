@@ -895,7 +895,7 @@ class RavenrootServerTest {
             // The result must expose the produced payload.
             assertTrue(body.contains("\"payload\":"), () -> "the result carries no payload at all: " + body);
             assertEquals("hello", jsonString(body, "payload"), () -> body);
-            assertTrue(body.contains("\"visitedNodes\":[\"end\",\"future\",\"start\"]"), () -> body);
+            assertEquals(Set.of("start", "future", "end"), jsonStringSet(body, "visitedNodes"), () -> body);
             assertTrue(body.contains("\"defaultedNodes\":[]"), () -> body);
             assertTrue(body.contains("\"bypassedNodes\":[\"end\",\"future\",\"start\"]"),
                     () -> "Play/Test must report intentional bypass separately from unknown-behavior "
@@ -1243,6 +1243,20 @@ class RavenrootServerTest {
         int end = body.indexOf('"', valueStart);
         if (end < 0) throw new AssertionError("Unterminated JSON field " + field + " in " + body);
         return body.substring(valueStart, end);
+    }
+
+    private static Set<String> jsonStringSet(String body, String field) {
+        String marker = "\"" + field + "\":[";
+        int start = body.indexOf(marker);
+        if (start < 0) throw new AssertionError("Missing JSON array field " + field + " in " + body);
+        int valueStart = start + marker.length();
+        int end = body.indexOf(']', valueStart);
+        if (end < 0) throw new AssertionError("Unterminated JSON array field " + field + " in " + body);
+        String values = body.substring(valueStart, end);
+        if (values.isEmpty()) return Set.of();
+        return java.util.Arrays.stream(values.split(","))
+                .map(value -> value.substring(1, value.length() - 1))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private static HttpResponse<String> post(HttpClient client, String uri, String token) throws Exception {

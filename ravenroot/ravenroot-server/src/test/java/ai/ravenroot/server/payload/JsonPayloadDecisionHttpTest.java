@@ -16,6 +16,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
@@ -153,18 +154,14 @@ class JsonPayloadDecisionHttpTest {
             assertEquals("COMPLETED", jsonString(accepted, "status"), () -> accepted);
             assertEquals("COMPLETED", jsonString(rejected, "status"), () -> rejected);
 
-            // visitedNodes is sorted, so this is the whole traversal.
-            assertTrue(accepted.contains(
-                    "\"visitedNodes\":[\"accepted-log\",\"decide\",\"end\",\"parse\",\"start\"]"),
+            assertEquals(Set.of("start", "parse", "decide", "accepted-log", "end"),
+                    jsonStringSet(accepted, "visitedNodes"),
                     () -> "payload.status == 'OK' must select the accepted branch: " + accepted);
-            assertFalse(accepted.contains("rejected-log"),
-                    () -> "the branch the field did not choose must not have run: " + accepted);
 
-            assertTrue(rejected.contains(
-                    "\"visitedNodes\":[\"decide\",\"end\",\"parse\",\"rejected-log\",\"start\"]"),
+            assertEquals(Set.of("start", "parse", "decide", "rejected-log", "end"),
+                    jsonStringSet(rejected, "visitedNodes"),
                     () -> "the same graph must take the other branch when the field changes, or the "
                             + "decision is not reading the field at all: " + rejected);
-            assertFalse(rejected.contains("accepted-log"), () -> rejected);
 
             // The structural change the decision rests on: what reached END is an object, not the
             // submitted text. Result payloads are written with PayloadJson, whose map keys are sorted.
@@ -242,5 +239,23 @@ class JsonPayloadDecisionHttpTest {
         }
         start += field.length() + 4;
         return body.substring(start, body.indexOf('"', start));
+    }
+
+    private static Set<String> jsonStringSet(String body, String field) {
+        String marker = "\"" + field + "\":[";
+        int start = body.indexOf(marker);
+        if (start < 0) {
+            throw new AssertionError("no array field '" + field + "' in " + body);
+        }
+        start += marker.length();
+        int end = body.indexOf(']', start);
+        if (end < 0) {
+            throw new AssertionError("unterminated array field '" + field + "' in " + body);
+        }
+        String values = body.substring(start, end);
+        if (values.isEmpty()) return Set.of();
+        return java.util.Arrays.stream(values.split(","))
+                .map(value -> value.substring(1, value.length() - 1))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 }

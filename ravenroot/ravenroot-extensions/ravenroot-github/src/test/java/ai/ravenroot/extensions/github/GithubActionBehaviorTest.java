@@ -959,6 +959,113 @@ class GithubActionBehaviorTest {
         assertTrue(recovered.requests.stream().allMatch(request -> request.method().equals("GET")));
     }
 
+    @Test void draftUncertaintyPreservesDiscoveredIdentityAcrossHeadFailuresAndOmission() {
+        for (String variant : List.of("transport", "malformed", "rate")) {
+            Path path = directory.resolve("review-draft-discovered-id-" + variant + ".db");
+            MutableClock clock = new MutableClock();
+            GithubConfiguration configuration = GithubTestSupport.configuration(path);
+            String correlation = "review-draft-discovered-id-" + variant;
+            String marker = reviewMarker(correlation);
+            Map<String, Object> input = review(correlation);
+            var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                    .reply(200, pull(GithubTestSupport.SHA)).reply(500, Map.of("message", "draft uncertain"))
+                    .reply(200, List.of(reviewObject(97, "PENDING", marker)));
+            if (variant.equals("transport")) {
+                interrupted.pending = OutboundCall.failed(new IllegalStateException("head transport unavailable"));
+                interrupted.pendingAtRequest = 6;
+            } else if (variant.equals("malformed")) {
+                interrupted.reply(200, Map.of());
+            } else {
+                interrupted.reply(429, Map.of("retry-after", List.of("2")), Map.of("message", "limited"));
+            }
+            NodeResult first = review(configuration, clock, interrupted, input);
+            assertEquals("ambiguous", first.outcome(), variant);
+            assertEquals("97", GithubValues.object(first.payload()).get("remoteId"), variant);
+            assertEquals(variant.equals("rate") ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN",
+                    GithubValues.object(first.payload()).get("reason"), variant);
+            assertEquals(variant.equals("rate"),
+                    GithubValues.object(first.payload()).containsKey("retryAtEpochMs"), variant);
+            assertEquals(1, interrupted.requests.stream().filter(request -> request.method().equals("POST")).count(),
+                    variant);
+
+            clock.advance(30_000);
+            var omitted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                    .reply(200, pull(GithubTestSupport.SHA));
+            NodeResult afterOmission = review(configuration, clock, omitted, input);
+            assertEquals("ambiguous", afterOmission.outcome(), variant);
+            assertEquals("97", GithubValues.object(afterOmission.payload()).get("remoteId"), variant);
+            assertTrue(omitted.requests.stream().allMatch(request -> request.method().equals("GET")), variant);
+
+            clock.advance(30_000);
+            var recovered = new GithubTestSupport.HttpHarness().reply(200, repository())
+                    .reply(200, List.of(reviewObject(97, "PENDING", marker)))
+                    .reply(200, pull(GithubTestSupport.SHA))
+                    .reply(200, reviewObject(97, "APPROVED", marker))
+                    .reply(200, pull(GithubTestSupport.SHA));
+            NodeResult completed = review(configuration, clock, recovered, input);
+            assertEquals("continue", completed.outcome(), variant);
+            assertEquals("97", GithubValues.object(completed.payload()).get("remoteId"), variant);
+            assertEquals(1, recovered.requests.stream().filter(request -> request.method().equals("POST")).count(),
+                    "only the authoritative draft may be submitted");
+            assertTrue(recovered.requests.stream().filter(request -> request.method().equals("POST"))
+                    .allMatch(request -> request.destination().getPath().endsWith("/reviews/97/events")), variant);
+        }
+    }
+
+    @Test void uncertainSubmitRejectsSameMarkerUnderDifferentReviewIdentity() {
+        Path path = directory.resolve("review-submit-identity-conflict.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        String correlation = "review-submit-identity-conflict";
+        String marker = reviewMarker(correlation);
+        Map<String, Object> input = review(correlation);
+        var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(98, "PENDING", marker))
+                .reply(200, pull(GithubTestSupport.SHA)).reply(500, Map.of("message", "submit uncertain"))
+                .reply(200, List.of(reviewObject(99, "APPROVED", marker)));
+        NodeResult conflict = review(configuration, clock, interrupted, input);
+        assertEquals("ambiguous", conflict.outcome());
+        assertEquals("98", GithubValues.object(conflict.payload()).get("remoteId"));
+        assertEquals("REVIEW_ID_CONFLICT", GithubValues.object(conflict.payload()).get("reason"));
+        assertEquals(2, interrupted.requests.stream().filter(request -> request.method().equals("POST")).count());
+
+        clock.advance(30_000);
+        var reopened = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of(reviewObject(99, "APPROVED", marker)));
+        NodeResult replay = review(configuration, clock, reopened, input);
+        assertEquals("ambiguous", replay.outcome());
+        assertEquals("98", GithubValues.object(replay.payload()).get("remoteId"));
+        assertEquals("REVIEW_ID_CONFLICT", GithubValues.object(replay.payload()).get("reason"));
+        assertTrue(reopened.requests.stream().allMatch(request -> request.method().equals("GET")),
+                "a conflicting formal review identity must never be replaced or resubmitted");
+    }
+
+    @Test void ambiguousReviewOmissionRetainsKnownIdentityWhenHeadBecameStale() {
+        Path path = directory.resolve("review-omitted-stale-identity.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        String correlation = "review-omitted-stale-identity";
+        String marker = reviewMarker(correlation);
+        Map<String, Object> input = review(correlation);
+        var interrupted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(101, "PENDING", marker))
+                .reply(500, Map.of("message", "post-draft head unavailable"));
+        NodeResult ambiguous = review(configuration, clock, interrupted, input);
+        assertEquals("ambiguous", ambiguous.outcome());
+        assertEquals("101", GithubValues.object(ambiguous.payload()).get("remoteId"));
+
+        clock.advance(30_000);
+        String replacementHead = "f".repeat(40);
+        var stale = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(replacementHead));
+        NodeResult result = review(configuration, clock, stale, input);
+        assertEquals("stale", result.outcome());
+        assertEquals("101", GithubValues.object(result.payload()).get("remoteId"));
+        assertEquals("STALE_HEAD", GithubValues.object(result.payload()).get("reason"));
+        assertTrue(stale.requests.stream().allMatch(request -> request.method().equals("GET")),
+                "stale reconciliation must not post a replacement draft");
+    }
+
     @Test void expiredReviewWriterCannotBeTakenOverDuringOutboundUncertaintyWindow() {
         Path path = directory.resolve("review-takeover.db");
         MutableClock clock = new MutableClock();

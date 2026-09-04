@@ -99,7 +99,8 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                     priorReviewId, "REMOTE_STATE_UNKNOWN");
             throw failure;
         }
-        if (!input.commit.equals(preDraftHead)) return result("stale", "stale", input, 0, "STALE_HEAD");
+        if (!input.commit.equals(preDraftHead))
+            return result("stale", "stale", input, reconciling ? priorReviewId : 0, "STALE_HEAD");
         if (reconciling && priorReviewId > 0)
             return result("ambiguous", "ambiguous", input, priorReviewId, "REMOTE_STATE_UNKNOWN");
         final Map<String, Object> draft;
@@ -181,24 +182,26 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
 
     private static NodeResult reconcileDraftUncertainty(GithubApi api, GithubProfile profile, Input input,
                                                          String marker, long retryAt) {
+        Existing discovered = null;
         try {
-            Existing existing = findExisting(api, profile, input, marker);
-            if (existing != null) {
-                if ("PENDING".equals(existing.state)) {
+            discovered = findExisting(api, profile, input, marker);
+            if (discovered != null) {
+                if ("PENDING".equals(discovered.state)) {
                     if (!input.commit.equals(head(api, profile, input.pullNumber)))
-                        return result("stale", "stale", input, existing.id, "STALE_HEAD");
-                    return submitPending(api, profile, input, existing.id, marker);
+                        return result("stale", "stale", input, discovered.id, "STALE_HEAD");
+                    return submitPending(api, profile, input, discovered.id, marker);
                 }
-                if (!expectedState(input.verdict).equals(existing.state))
-                    return result("conflict", "conflict", input, existing.id, "REVIEW_STATE_CONFLICT");
+                if (!expectedState(input.verdict).equals(discovered.state))
+                    return result("conflict", "conflict", input, discovered.id, "REVIEW_STATE_CONFLICT");
                 boolean current = input.commit.equals(head(api, profile, input.pullNumber));
                 return result(current ? "continue" : "stale", current ? "already-recorded" : "stale", input,
-                        existing.id, current ? "" : "STALE_HEAD");
+                        discovered.id, current ? "" : "STALE_HEAD");
             }
         } catch (GithubProtocol.RateLimited limited) {
             retryAt = Math.max(retryAt, limited.retryAt());
         } catch (RuntimeException ignored) { }
-        return result("ambiguous", "ambiguous", input, 0,
+        long discoveredId = discovered == null ? 0 : discovered.id;
+        return result("ambiguous", "ambiguous", input, discoveredId,
                 retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);
     }
 
@@ -206,6 +209,8 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                                                           long reviewId, String marker, long retryAt) {
         try {
             Existing existing = findExisting(api, profile, input, marker);
+            if (existing != null && existing.id != reviewId)
+                return result("ambiguous", "ambiguous", input, reviewId, "REVIEW_ID_CONFLICT");
             if (existing != null && !"PENDING".equals(existing.state)) {
                 if (!expectedState(input.verdict).equals(existing.state))
                     return result("conflict", "conflict", input, existing.id, "REVIEW_STATE_CONFLICT");

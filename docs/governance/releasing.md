@@ -222,7 +222,10 @@ The GHCR tag is the SemVer value without `v`. The runtime image-manifest digest 
 layers, labels, version, and revision and is the content identity used for retry comparison. BuildKit
 predicate envelopes contain run-specific evidence, so their bytes may differ on a deterministic
 rebuild; a retry therefore also requires one subject-bound attestation manifest containing both the
-SPDX SBOM and SLSA provenance predicates. After publication, the workflow records and signs the
+SPDX SBOM and SLSA provenance predicates. The retry downloads those predicate blobs by the published
+attestation-manifest digest, checks every descriptor digest and byte size, parses each in-toto
+statement, and requires the exact image version and runtime image digest as its only subject. After
+publication, the workflow records and signs the
 registry's immutable top-level index digest. Digest references always use
 `ghcr.io/ravenroot-ai/ravenroot@sha256:<digest>`; a combined `name:tag@digest` reference is invalid and
 is never constructed. The protected workflow adds GitHub's keyless signed provenance for the
@@ -246,8 +249,9 @@ from the tag, then follows these rules:
 - if only part of the Central coordinate set is visible, or any payload differs, it stops for human
   investigation;
 - if the GHCR version tag exists, its Linux AMD64 image-manifest digest must match the rebuilt
-  runtime image exactly and its subject-bound SBOM and provenance predicates must be present, or
-  the retry stops; a matching image is retained without moving `latest`;
+  runtime image exactly; its SBOM and provenance predicate blobs, descriptors, in-toto types, and
+  exact version-and-digest subjects must also validate, or the retry stops; a matching image is
+  retained without moving `latest`;
 - a draft GitHub Release may receive a missing asset after all existing assets match; a published
   release must already contain exactly the complete matching set.
 
@@ -261,8 +265,9 @@ The workflow never drops a Central deployment, deletes a package version, retags
 an asset, or moves a release tag. If a Central upload was accepted but the run lost its deployment ID,
 wait for the deterministic version to become visible and rerun. Central will either reconcile as the
 same complete release or reject the duplicate; the workflow never asks it to overwrite coordinates.
-Likewise, a GHCR lookup failure other than an explicit registry `not found` response is fatal and is
-not treated as permission to push.
+Likewise, only the registry's explicit `manifest unknown` response means that the version tag is
+absent. A credential-helper, local configuration, transport, DNS, TLS, authorization, or generic
+`not found` failure is fatal and is never treated as permission to push.
 
 Verify a completed image and its keyless provenance with:
 
@@ -274,10 +279,14 @@ gh attestation verify \
   --repo ravenroot-ai/ravenroot
 ```
 
-The version and digest pulls must resolve to the same OCI index. Once the package is configured as
-public, repeat both pulls without a registry login to prove anonymous availability. Package
-visibility is an owner-controlled GHCR setting; the release workflow does not grant itself package
-administration authority or mutate visibility.
+The version and digest pulls must resolve to the same OCI index. After the protected publication job,
+a fresh job with no protected Environment, package permission, release secret, or inherited registry
+login downloads the complete image twice using Skopeo's explicit anonymous mode: once by SemVer tag
+and once by immutable digest. Both copies must preserve and validate the emitted index digest,
+runtime content, metadata, SBOM, and provenance before the workflow can succeed. Package visibility
+is an owner-controlled GHCR setting; the release workflow does not grant itself package
+administration authority or mutate visibility. The gate therefore fails closed until a future
+release is publicly readable; it does not repair the historical alpha publication.
 
 ### First-release checklist
 

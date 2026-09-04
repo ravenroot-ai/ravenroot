@@ -7,8 +7,10 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -53,7 +55,7 @@ def blob(layout: Path, digest: str) -> Path:
     return path
 
 
-def descriptor_blob(layout: Path, descriptor: object, description: str) -> tuple[str, Path]:
+def descriptor_identity(descriptor: object, description: str) -> tuple[str, int]:
     if not isinstance(descriptor, dict):
         raise OciRegistryError(f"{description} is not an OCI descriptor")
     digest = descriptor.get("digest")
@@ -62,16 +64,17 @@ def descriptor_blob(layout: Path, descriptor: object, description: str) -> tuple
         raise OciRegistryError(f"{description} has no content digest")
     if not isinstance(size, int) or isinstance(size, bool) or size < 0:
         raise OciRegistryError(f"{description} has no valid content size")
+    if re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
+        raise OciRegistryError(f"{description} has an unsupported content digest")
+    return digest, size
+
+
+def descriptor_blob(layout: Path, descriptor: object, description: str) -> tuple[str, Path]:
+    digest, size = descriptor_identity(descriptor, description)
     path = blob(layout, digest)
     if path.stat().st_size != size:
         raise OciRegistryError(f"OCI blob size mismatch: {digest}")
     return digest, path
-
-
-def exactly_one(values: list[str], description: str) -> str:
-    if len(values) != 1:
-        raise OciRegistryError(f"expected one {description}, found {len(values)}")
-    return values[0]
 
 
 def validate_predicate(
@@ -94,6 +97,38 @@ def validate_predicate(
         raise OciRegistryError(f"{predicate_type} identifies the wrong image subject")
     if digest != {"sha256": image_digest.removeprefix("sha256:")}:
         raise OciRegistryError(f"{predicate_type} subject digest differs from the image")
+
+
+def validate_attestation(
+    layout: Path, descriptor: object, version: str, image_digest: str
+) -> str:
+    attestation_digest, attestation_path = descriptor_blob(
+        layout, descriptor, "image attestation manifest"
+    )
+    attestation = read_json(attestation_path)
+    descriptor_blob(layout, attestation.get("config"), "attestation config")
+    layers = attestation.get("layers")
+    if not isinstance(layers, list):
+        raise OciRegistryError("attestation manifest has no predicate layers")
+    predicates: dict[str, Path] = {}
+    for layer in layers:
+        _digest, path = descriptor_blob(layout, layer, "attestation predicate")
+        annotations = layer.get("annotations") if isinstance(layer, dict) else None
+        predicate_type = (
+            annotations.get("in-toto.io/predicate-type")
+            if isinstance(annotations, dict)
+            else None
+        )
+        if not isinstance(predicate_type, str) or predicate_type in predicates:
+            raise OciRegistryError("attestation predicate annotations are missing or duplicated")
+        predicates[predicate_type] = path
+    if set(predicates) != PREDICATES:
+        raise OciRegistryError(
+            f"OCI attestation predicate set differs: {sorted(set(predicates))}"
+        )
+    for predicate_type, path in predicates.items():
+        validate_predicate(path, predicate_type, image_digest, version)
+    return attestation_digest
 
 
 def validate_local(layout: Path, version: str, commit: str) -> dict[str, str]:
@@ -162,32 +197,9 @@ def validate_local(layout: Path, version: str, commit: str) -> dict[str, str]:
         raise OciRegistryError(
             f"expected one image attestation manifest, found {len(attestations)}"
         )
-    attestation_digest, attestation_path = descriptor_blob(
-        layout, attestations[0], "image attestation manifest"
+    attestation_digest = validate_attestation(
+        layout, attestations[0], version, image_digest
     )
-    attestation = read_json(attestation_path)
-    descriptor_blob(layout, attestation.get("config"), "attestation config")
-    layers = attestation.get("layers")
-    if not isinstance(layers, list):
-        raise OciRegistryError("attestation manifest has no predicate layers")
-    predicates: dict[str, Path] = {}
-    for layer in layers:
-        _digest, path = descriptor_blob(layout, layer, "attestation predicate")
-        annotations = layer.get("annotations") if isinstance(layer, dict) else None
-        predicate_type = (
-            annotations.get("in-toto.io/predicate-type")
-            if isinstance(annotations, dict)
-            else None
-        )
-        if not isinstance(predicate_type, str) or predicate_type in predicates:
-            raise OciRegistryError("attestation predicate annotations are missing or duplicated")
-        predicates[predicate_type] = path
-    if set(predicates) != PREDICATES:
-        raise OciRegistryError(
-            f"OCI attestation predicate set differs: {sorted(set(predicates))}"
-        )
-    for predicate_type, path in predicates.items():
-        validate_predicate(path, predicate_type, image_digest, version)
 
     return {
         "index_digest": index_digest,
@@ -206,10 +218,16 @@ def inspect(reference: str) -> subprocess.CompletedProcess[str]:
 
 
 def remote_absent(result: subprocess.CompletedProcess[str]) -> bool:
-    message = result.stderr.lower()
-    return result.returncode != 0 and any(
-        marker in message
-        for marker in ("manifest unknown", "name unknown", "not found", "status code 404")
+    message = result.stderr.strip().lower()
+    return result.returncode != 0 and bool(
+        re.fullmatch(
+            r'(?:time="[^"\r\n]+" level=fatal msg="|fatal\[\d+\]\s+)?'
+            r'(?:error parsing image name(?:\s+(?:\\?"[^"\r\n]+\\?"|docker://\S+))?:\s*)?'
+            r"reading manifest [^\s]+ in "
+            r"ghcr\.io/ravenroot-ai/ravenroot:\s*"
+            r'manifest(?:_| )unknown(?::[^"\r\n]*)?"?',
+            message,
+        )
     )
 
 
@@ -222,7 +240,7 @@ def verify_manifest_digest(raw: str, expected_digest: str) -> None:
         )
 
 
-def remote_identity(raw: str, expected_image_digest: str) -> tuple[str, str]:
+def remote_identity(raw: str, expected_image_digest: str) -> tuple[str, dict[str, object]]:
     try:
         document = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -231,52 +249,118 @@ def remote_identity(raw: str, expected_image_digest: str) -> tuple[str, str]:
     if not isinstance(manifests, list):
         raise OciRegistryError("GHCR tag does not resolve to an OCI image index")
     images = [
-        str(item.get("digest"))
+        item
         for item in manifests
         if isinstance(item, dict)
         and isinstance(item.get("platform"), dict)
         and item["platform"].get("architecture") == "amd64"
         and item["platform"].get("os") == "linux"
     ]
-    image_digest = exactly_one(images, "published linux/amd64 image")
+    if len(images) != 1:
+        raise OciRegistryError(f"expected one published linux/amd64 image, found {len(images)}")
+    image_digest, _size = descriptor_identity(images[0], "published linux/amd64 image")
     if image_digest != expected_image_digest:
         raise OciRegistryError(
             f"immutable GHCR image differs: expected {expected_image_digest}, found {image_digest}"
         )
     attestations = [
-        str(item.get("digest"))
+        item
         for item in manifests
         if isinstance(item, dict)
         and isinstance(item.get("annotations"), dict)
         and item["annotations"].get("vnd.docker.reference.type") == "attestation-manifest"
         and item["annotations"].get("vnd.docker.reference.digest") == image_digest
     ]
-    return image_digest, exactly_one(attestations, "published image attestation manifest")
-
-
-def verify_remote_attestation(digest: str) -> None:
-    result = inspect(f"{REPOSITORY}@{digest}")
-    if result.returncode != 0:
-        raise OciRegistryError(f"cannot read published OCI attestations: {result.stderr.strip()}")
-    verify_manifest_digest(result.stdout, digest)
-    try:
-        document = json.loads(result.stdout)
-    except json.JSONDecodeError as exc:
-        raise OciRegistryError("GHCR returned an invalid attestation manifest") from exc
-    layers = document.get("layers") if isinstance(document, dict) else None
-    if not isinstance(layers, list):
-        raise OciRegistryError("published attestation manifest has no predicate layers")
-    predicates = [
-        str(annotations.get("in-toto.io/predicate-type"))
-        for layer in layers
-        if isinstance(layer, dict)
-        for annotations in [layer.get("annotations")]
-        if isinstance(annotations, dict)
-    ]
-    if len(predicates) != len(PREDICATES) or set(predicates) != PREDICATES:
+    if len(attestations) != 1:
         raise OciRegistryError(
-            f"published OCI attestation predicate set differs: {sorted(predicates)}"
+            f"expected one published image attestation manifest, found {len(attestations)}"
         )
+    descriptor_identity(attestations[0], "published image attestation manifest")
+    return image_digest, attestations[0]
+
+
+def validate_downloaded_attestation(
+    layout: Path,
+    remote_descriptor: object,
+    version: str,
+    image_digest: str,
+) -> None:
+    expected_digest, expected_size = descriptor_identity(
+        remote_descriptor, "published image attestation manifest"
+    )
+    index = read_json(layout / "index.json")
+    descriptors = index.get("manifests")
+    if not isinstance(descriptors, list) or len(descriptors) != 1:
+        raise OciRegistryError("downloaded attestation layout must contain one manifest")
+    actual_digest, actual_size = descriptor_identity(
+        descriptors[0], "downloaded image attestation manifest"
+    )
+    if (actual_digest, actual_size) != (expected_digest, expected_size):
+        raise OciRegistryError("downloaded attestation descriptor differs from GHCR")
+    validate_attestation(layout, descriptors[0], version, image_digest)
+
+
+def verify_remote_attestation(
+    descriptor: object, version: str, image_digest: str
+) -> None:
+    digest, _size = descriptor_identity(descriptor, "published image attestation manifest")
+    with tempfile.TemporaryDirectory(prefix="ravenroot-remote-attestation-") as directory:
+        layout = Path(directory) / "layout"
+        result = subprocess.run(
+            [
+                "skopeo",
+                "copy",
+                "--preserve-digests",
+                f"docker://{REPOSITORY}@{digest}",
+                f"oci:{layout}:attestation",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            raise OciRegistryError(
+                f"cannot download published OCI attestations: {result.stderr.strip()}"
+            )
+        validate_downloaded_attestation(
+            layout, descriptor, version, image_digest
+        )
+
+
+def verify_public(version: str, digest: str, commit: str) -> dict[str, str]:
+    descriptor_identity({"digest": digest, "size": 0}, "published OCI index")
+    references = {
+        "tag": f"{REPOSITORY}:{version}",
+        "digest": f"{REPOSITORY}@{digest}",
+    }
+    with tempfile.TemporaryDirectory(prefix="ravenroot-anonymous-pull-") as directory:
+        root = Path(directory)
+        for name, reference in references.items():
+            layout = root / name
+            result = subprocess.run(
+                [
+                    "skopeo",
+                    "copy",
+                    "--all",
+                    "--preserve-digests",
+                    "--src-no-creds",
+                    f"docker://{reference}",
+                    f"oci:{layout}:release",
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise OciRegistryError(
+                    f"anonymous GHCR {name} pull failed: {result.stderr.strip()}"
+                )
+            values = validate_local(layout, version, commit)
+            if values["index_digest"] != digest:
+                raise OciRegistryError(
+                    f"anonymous GHCR {name} pull resolved to a different index digest"
+                )
+    return {"digest": digest, "reference": references["digest"]}
 
 
 def reconcile(archive: Path, version: str, expected_image_digest: str) -> dict[str, str]:
@@ -289,7 +373,7 @@ def reconcile(archive: Path, version: str, expected_image_digest: str) -> dict[s
     current = inspect(tag_reference)
     if current.returncode == 0:
         _image, attestation = remote_identity(current.stdout, expected_image_digest)
-        verify_remote_attestation(attestation)
+        verify_remote_attestation(attestation, version, expected_image_digest)
     elif remote_absent(current):
         copied = subprocess.run(
             [
@@ -310,7 +394,7 @@ def reconcile(archive: Path, version: str, expected_image_digest: str) -> dict[s
     if published.returncode != 0:
         raise OciRegistryError(f"cannot verify published GHCR tag: {published.stderr.strip()}")
     _image, attestation = remote_identity(published.stdout, expected_image_digest)
-    verify_remote_attestation(attestation)
+    verify_remote_attestation(attestation, version, expected_image_digest)
     published_index = published.stdout.rstrip("\n").encode("utf-8")
     index_digest = f"sha256:{hashlib.sha256(published_index).hexdigest()}"
     digest_reference = f"{REPOSITORY}@{index_digest}"
@@ -342,6 +426,10 @@ def parser() -> argparse.ArgumentParser:
     publish.add_argument("--archive", type=Path, required=True)
     publish.add_argument("--version", required=True)
     publish.add_argument("--digest", required=True)
+    public = commands.add_parser("verify-public")
+    public.add_argument("--version", required=True)
+    public.add_argument("--digest", required=True)
+    public.add_argument("--commit", required=True)
     return result
 
 
@@ -350,8 +438,10 @@ def main() -> int:
     try:
         if arguments.command == "validate-local":
             values = validate_local(arguments.layout, arguments.version, arguments.commit)
-        else:
+        elif arguments.command == "reconcile":
             values = reconcile(arguments.archive, arguments.version, arguments.digest)
+        else:
+            values = verify_public(arguments.version, arguments.digest, arguments.commit)
     except (OciRegistryError, OSError) as exc:
         print(f"OCI registry verification failed: {exc}", file=sys.stderr)
         return 1

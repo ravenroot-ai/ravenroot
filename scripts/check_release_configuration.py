@@ -139,9 +139,14 @@ def check_workflows() -> None:
         raise ValueError("main-side authorization trigger or fail-closed implementation changed")
 
     publication = workflows["release.yml"]
-    validate, separator, publish = publication.partition("\n  publish:\n")
+    validate, separator, protected_and_public = publication.partition("\n  publish:\n")
     if not separator:
         raise ValueError("release workflow has no separately protected publish job")
+    publish, public_separator, public = protected_and_public.partition(
+        "\n  verify-public-release:\n"
+    )
+    if not public_separator:
+        raise ValueError("release workflow has no fresh anonymous verification job")
     if "secrets." in validate or "packages: write" in validate or "environment:" in validate:
         raise ValueError("non-secret release gates gained publication authority")
     if "environment:\n      name: release" not in publish:
@@ -162,6 +167,7 @@ def check_workflows() -> None:
         "central_registry.py publish-bundle",
         "oci_registry.py validate-local",
         "oci_registry.py reconcile",
+        "oci_registry.py verify-public",
         "python3 -m unittest scripts.tests.test_release_registries -v",
         "SOURCE_DATE_EPOCH",
         "image_digest",
@@ -173,6 +179,19 @@ def check_workflows() -> None:
         raise ValueError("OCI references must never combine a tag and digest")
     if ":latest" in publication:
         raise ValueError("release workflow must not create or move latest")
+    if any(
+        forbidden in public
+        for forbidden in ("secrets.", "environment:", "packages: write", "id-token: write")
+    ):
+        raise ValueError("anonymous release verification gained credentials or publication authority")
+    for required in (
+        "needs: [validate, publish]",
+        "permissions:\n      contents: read",
+        "persist-credentials: false",
+        "needs.publish.outputs.image_digest",
+    ):
+        if required not in public:
+            raise ValueError(f"anonymous release verification is missing: {required}")
 
     github_release = (ROOT / "scripts/github_release.py").read_text(encoding="utf-8")
     for required in ('"--draft"', '"--draft=false"', '"--latest=false"'):
@@ -183,6 +202,8 @@ def check_workflows() -> None:
         '"copy",',
         '"--all",',
         'f"{REPOSITORY}@{digest}"',
+        '"--src-no-creds"',
+        '"--preserve-digests"',
         '"https://spdx.dev/Document"',
         '"https://slsa.dev/provenance/v1"',
     ):

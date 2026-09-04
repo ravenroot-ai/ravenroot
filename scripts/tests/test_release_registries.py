@@ -1,5 +1,6 @@
 import hashlib
 import json
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -18,7 +19,10 @@ from scripts.oci_registry import (
     OciRegistryError,
     remote_absent,
     reconcile,
+    validate_downloaded_attestation,
     validate_local,
+    verify_public,
+    verify_remote_attestation,
 )
 
 
@@ -46,7 +50,12 @@ def add_descriptor(layout: Path, document, **values):
 
 
 def make_layout(
-    root: Path, *, version: str = VERSION, predicates=None, subject_version: str | None = None
+    root: Path,
+    *,
+    version: str = VERSION,
+    predicates=None,
+    subject_version: str | None = None,
+    statement_predicate_type: str | None = None,
 ) -> str:
     predicates = predicates or {
         "https://spdx.dev/Document",
@@ -74,7 +83,7 @@ def make_layout(
             root,
             {
                 "_type": "https://in-toto.io/Statement/v0.1",
-                "predicateType": predicate,
+                "predicateType": statement_predicate_type or predicate,
                 "subject": [subject],
                 "predicate": {},
             },
@@ -107,6 +116,19 @@ def make_layout(
     )
     (root / "index.json").write_bytes(json_bytes({"manifests": [index]}))
     return index["digest"]
+
+
+def make_attestation_layout(root: Path, **values):
+    make_layout(root, **values)
+    outer = json.loads((root / "index.json").read_text(encoding="utf-8"))
+    index_digest = outer["manifests"][0]["digest"]
+    index = json.loads(
+        (root / "blobs" / index_digest.replace(":", "/")).read_text(encoding="utf-8")
+    )
+    image = index["manifests"][0]
+    attestation = index["manifests"][1]
+    (root / "index.json").write_bytes(json_bytes({"manifests": [attestation]}))
+    return attestation, image["digest"]
 
 
 class OciRegistryTest(unittest.TestCase):
@@ -148,13 +170,120 @@ class OciRegistryTest(unittest.TestCase):
             with self.assertRaisesRegex(OciRegistryError, "wrong image subject"):
                 validate_local(layout, VERSION, COMMIT)
 
-    def test_only_explicit_registry_not_found_is_absent(self):
-        self.assertTrue(remote_absent(subprocess.CompletedProcess([], 1, "", "manifest unknown")))
-        self.assertFalse(remote_absent(subprocess.CompletedProcess([], 1, "", "unauthorized")))
+    def test_only_authoritative_manifest_absence_allows_publication(self):
+        authoritative = (
+            "reading manifest 0.2.0-alpha.1 in ghcr.io/ravenroot-ai/ravenroot: "
+            "manifest unknown"
+        )
+        self.assertTrue(remote_absent(subprocess.CompletedProcess([], 1, "", authoritative)))
+        underscored = (
+            "Error parsing image name: reading manifest release in "
+            "ghcr.io/ravenroot-ai/ravenroot: MANIFEST_UNKNOWN: unknown tag"
+        )
+        self.assertTrue(remote_absent(subprocess.CompletedProcess([], 1, "", underscored)))
+        skopeo_log = (
+            'time="2026-01-01T00:00:00Z" level=fatal msg="Error parsing image name '
+            '\\"docker://ghcr.io/ravenroot-ai/ravenroot:0.2.0-alpha.1\\": reading '
+            "manifest 0.2.0-alpha.1 in ghcr.io/ravenroot-ai/ravenroot: manifest unknown\""
+        )
+        self.assertTrue(remote_absent(subprocess.CompletedProcess([], 1, "", skopeo_log)))
+        self.assertFalse(remote_absent(subprocess.CompletedProcess([], 0, "{}", authoritative)))
+
+    def test_local_and_transport_failures_are_never_registry_absence(self):
+        failures = (
+            "credential helper executable not found",
+            "error loading registries configuration: file not found",
+            "dial tcp: lookup ghcr.io: no such host",
+            "connection refused",
+            "i/o timeout",
+            "TLS handshake timeout",
+            "x509: certificate signed by unknown authority",
+            "unauthorized: authentication required",
+            "denied: permission denied",
+            "status code 404: not found",
+            "name unknown",
+            "credential helper failed: reading manifest release in "
+            "ghcr.io/other/repository: manifest unknown",
+            "credential helper failed: reading manifest release in "
+            "ghcr.io/ravenroot-ai/ravenroot: manifest unknown",
+            "reading manifest release in ghcr.io/ravenroot-ai/ravenroot: "
+            "manifest unknown\nunauthorized: authentication required",
+        )
+        for message in failures:
+            with self.subTest(message=message):
+                self.assertFalse(remote_absent(subprocess.CompletedProcess([], 1, "", message)))
+
+    def test_downloaded_attestation_verifies_predicate_blobs_and_subjects(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layout = Path(directory)
+            descriptor, image_digest = make_attestation_layout(layout)
+            validate_downloaded_attestation(layout, descriptor, VERSION, image_digest)
+
+    def test_downloaded_attestation_rejects_wrong_subject_and_missing_or_corrupt_blob(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layout = Path(directory)
+            descriptor, image_digest = make_attestation_layout(
+                layout, subject_version="9.9.9"
+            )
+            with self.assertRaisesRegex(OciRegistryError, "wrong image subject"):
+                validate_downloaded_attestation(layout, descriptor, VERSION, image_digest)
+
+        for state in ("missing", "corrupt"):
+            with self.subTest(state=state), tempfile.TemporaryDirectory() as directory:
+                layout = Path(directory)
+                descriptor, image_digest = make_attestation_layout(layout)
+                manifest = json.loads(
+                    (layout / "blobs" / descriptor["digest"].replace(":", "/")).read_text()
+                )
+                predicate = layout / "blobs" / manifest["layers"][0]["digest"].replace(":", "/")
+                if state == "missing":
+                    predicate.unlink()
+                else:
+                    predicate.write_bytes(b"corrupt")
+                with self.assertRaisesRegex(OciRegistryError, "blob is missing|digest mismatch"):
+                    validate_downloaded_attestation(layout, descriptor, VERSION, image_digest)
+
+    def test_downloaded_attestation_rejects_descriptor_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layout = Path(directory)
+            descriptor, image_digest = make_attestation_layout(layout)
+            remote = {**descriptor, "size": descriptor["size"] + 1}
+            with self.assertRaisesRegex(OciRegistryError, "descriptor differs"):
+                validate_downloaded_attestation(layout, remote, VERSION, image_digest)
+
+    def test_downloaded_attestation_rejects_predicate_type_mismatch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            layout = Path(directory)
+            descriptor, image_digest = make_attestation_layout(
+                layout, statement_predicate_type="https://example.invalid/predicate"
+            )
+            with self.assertRaisesRegex(OciRegistryError, "annotation differs"):
+                validate_downloaded_attestation(layout, descriptor, VERSION, image_digest)
 
     @mock.patch("scripts.oci_registry.subprocess.run")
+    def test_remote_attestation_is_downloaded_by_digest_before_validation(self, run):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source"
+            source.mkdir()
+            descriptor, image_digest = make_attestation_layout(source)
+
+            def copy_attestation(arguments, **_kwargs):
+                destination = arguments[-1].removeprefix("oci:").rsplit(":", 1)[0]
+                shutil.copytree(source, destination)
+                return subprocess.CompletedProcess(arguments, 0, "", "")
+
+            run.side_effect = copy_attestation
+            verify_remote_attestation(descriptor, VERSION, image_digest)
+            arguments = run.call_args.args[0]
+            self.assertIn("--preserve-digests", arguments)
+            self.assertIn(
+                f"docker://ghcr.io/ravenroot-ai/ravenroot@{descriptor['digest']}",
+                arguments,
+            )
+
+    @mock.patch("scripts.oci_registry.verify_remote_attestation")
     @mock.patch("scripts.oci_registry.inspect")
-    def test_existing_exact_digest_is_verified_without_copy(self, inspect, run):
+    def test_existing_exact_digest_is_verified_without_copy(self, inspect, verify_attestation):
         image_digest = "sha256:" + "1" * 64
         attestation_raw = json.dumps(
             {
@@ -171,10 +300,12 @@ class OciRegistryTest(unittest.TestCase):
                 "manifests": [
                     {
                         "digest": image_digest,
+                        "size": 1,
                         "platform": {"architecture": "amd64", "os": "linux"},
                     },
                     {
                         "digest": attestation_digest,
+                        "size": len(attestation_raw.encode()),
                         "annotations": {
                             "vnd.docker.reference.digest": image_digest,
                             "vnd.docker.reference.type": "attestation-manifest",
@@ -186,15 +317,13 @@ class OciRegistryTest(unittest.TestCase):
         )
         inspect.side_effect = [
             subprocess.CompletedProcess([], 0, raw, ""),
-            subprocess.CompletedProcess([], 0, attestation_raw, ""),
             subprocess.CompletedProcess([], 0, raw, ""),
-            subprocess.CompletedProcess([], 0, attestation_raw, ""),
             subprocess.CompletedProcess([], 0, raw, ""),
         ]
         with tempfile.NamedTemporaryFile() as archive:
             result = reconcile(Path(archive.name), VERSION, image_digest)
             self.assertEqual(result["digest"], f"sha256:{hashlib.sha256(raw.encode()).hexdigest()}")
-        run.assert_not_called()
+        self.assertEqual(verify_attestation.call_count, 2)
         self.assertTrue(
             all(":0.1.0-alpha.1@" not in call.args[0] for call in inspect.call_args_list)
         )
@@ -206,6 +335,7 @@ class OciRegistryTest(unittest.TestCase):
                 "manifests": [
                     {
                         "digest": "sha256:" + "1" * 64,
+                        "size": 1,
                         "platform": {"architecture": "amd64", "os": "linux"},
                     }
                 ]
@@ -215,6 +345,33 @@ class OciRegistryTest(unittest.TestCase):
         with tempfile.NamedTemporaryFile() as archive:
             with self.assertRaisesRegex(OciRegistryError, "differs"):
                 reconcile(Path(archive.name), VERSION, "sha256:" + "0" * 64)
+
+    @mock.patch("scripts.oci_registry.validate_local")
+    @mock.patch("scripts.oci_registry.subprocess.run")
+    def test_public_gate_pulls_tag_and_digest_anonymously(self, run, validate):
+        digest = "sha256:" + "4" * 64
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        validate.return_value = {"index_digest": digest}
+        result = verify_public(VERSION, digest, COMMIT)
+        self.assertEqual(result["digest"], digest)
+        self.assertEqual(run.call_count, 2)
+        commands = [call.args[0] for call in run.call_args_list]
+        self.assertTrue(all("--src-no-creds" in command for command in commands))
+        self.assertTrue(all("--preserve-digests" in command for command in commands))
+        self.assertIn(f"docker://ghcr.io/ravenroot-ai/ravenroot:{VERSION}", commands[0])
+        self.assertIn(f"docker://ghcr.io/ravenroot-ai/ravenroot@{digest}", commands[1])
+
+    @mock.patch("scripts.oci_registry.validate_local")
+    @mock.patch("scripts.oci_registry.subprocess.run")
+    def test_public_gate_rejects_either_reference_resolving_elsewhere(self, run, validate):
+        digest = "sha256:" + "4" * 64
+        run.return_value = subprocess.CompletedProcess([], 0, "", "")
+        validate.side_effect = [
+            {"index_digest": digest},
+            {"index_digest": "sha256:" + "5" * 64},
+        ]
+        with self.assertRaisesRegex(OciRegistryError, "different index digest"):
+            verify_public(VERSION, digest, COMMIT)
 
 
 class CentralBundleTest(unittest.TestCase):

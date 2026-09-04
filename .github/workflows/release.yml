@@ -107,6 +107,8 @@ jobs:
       contents: write
       id-token: write
       packages: write
+    outputs:
+      image_digest: ${{ steps.image.outputs.digest }}
     steps:
       - name: Check out the validated tag
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -250,3 +252,27 @@ jobs:
           --tag '${{ needs.validate.outputs.tag }}'
           --commit '${{ needs.validate.outputs.commit }}'
           --assets release-assets
+
+  verify-public-release:
+    name: verify-anonymous-release
+    needs: [validate, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the validated public source without retained credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+          persist-credentials: false
+      - name: Install the OCI verification client
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes skopeo
+      - name: Pull the public image by tag and immutable digest without credentials
+        run: >-
+          python3 scripts/oci_registry.py verify-public
+          --version '${{ needs.validate.outputs.version }}'
+          --digest '${{ needs.publish.outputs.image_digest }}'
+          --commit '${{ needs.validate.outputs.commit }}'

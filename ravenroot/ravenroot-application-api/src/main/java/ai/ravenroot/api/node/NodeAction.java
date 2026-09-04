@@ -1,5 +1,6 @@
 package ai.ravenroot.api.node;
 
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 
@@ -63,4 +64,21 @@ public interface NodeAction {
      * @return the node's result; never {@code null}, and exceptionally completed when the node fails
      */
     CompletionStage<NodeResult> handle(NodeMessage message);
+
+    /**
+     * Handles one message with the engine-owned cancellation signal for this invocation.
+     *
+     * <p>The default bridge preserves the Node SDK /1 and /2 functional-interface contract: node
+     * packages compiled before cancellation-aware actions existed continue to link and execute
+     * through {@link #handle(NodeMessage)}. A behavior that owns work outside the JVM, such as a
+     * subprocess, may override this method and use {@link CancellationSignal#onCancel(Runnable)} to
+     * unwind only the resources owned by this invocation.</p>
+     *
+     * @param message the delivered message
+     * @param cancellation engine-owned signal that becomes terminal with the node invocation
+     * @return the node's result stage
+     */
+    default CompletionStage<NodeResult> handle(NodeMessage message, CancellationSignal cancellation) {
+        return handle(message);
+    }
 }

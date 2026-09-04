@@ -151,7 +151,7 @@ Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central bo
 - the reusable `ravenroot-api-testkit`, `ravenroot-engine-testkit`, and
   `ravenroot-persistence-testkit` conformance artifacts;
 - the `ravenroot-extensions` parent and the `ravenroot-ai`, `ravenroot-amqp091`,
-  `ravenroot-filesystem`, `ravenroot-jdbc`, `ravenroot-kafka`, `ravenroot-mail`,
+  `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-jdbc`, `ravenroot-kafka`, `ravenroot-mail`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
   `ravenroot-openapi-server`, `ravenroot-spel`, `ravenroot-telegram`, and
   `ravenroot-websocket` extensions.

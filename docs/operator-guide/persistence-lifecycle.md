@@ -49,9 +49,11 @@ What a hold does not do is survive on its own. **While a join's deadline is runn
 
 ### What is held durably, and what is held only in the process
 
-Not every point a traversal can be paused at is one a hold can be written down for. A hold is written down when the traversal is a single branch at a single completed node and the withheld payload is expressible in the payload type model. It is **not** written down when the traversal has fanned out at any point, when the hold lands on the traversal's very first node, when a loop is in progress, when the hold lands on a fan-in, or when the withheld payload is a value the type model does not cover — a continuation carries one hop, and writing one for a traversal that has more than one would silently discard the others on restart.
+Not every point a traversal can be paused at is one a hold can be written down for. A hold is written down when the traversal is a single branch at a single completed node. It is **not** written down when the traversal has fanned out at any point, when the hold lands on the traversal's very first node, when a loop is in progress, or when the hold lands on a fan-in — a continuation carries one hop, and writing one for a traversal that has more than one would silently discard the others on restart.
 
 Those holds still work; they are simply the process-local holds that existed before this change, and a restart forgets them. The distinction is visible where it matters: after a restart, a traversal that was held durably is reported as paused and a traversal that was not is not reported at all, because the process running it is gone. If it matters to you that a specific execution can be paused across a restart, keep its held section linear.
+
+A payload the type model cannot represent is no longer one of these cases. Such a value is refused at the payload boundary, which the traversal crosses before any hold is considered, so the traversal fails there and no hold of either kind is taken — a failed traversal is not resumable and reports nothing held.
 
 ### Stores that predate this state
 

@@ -55,9 +55,10 @@ public final class RecoveryStartupDiscovery implements AutoCloseable {
      * interrupted cohort would refuse traffic for the whole scan — turning a check that exists to
      * prevent an outage into one. The bound reaches the inventory pager itself rather than trimming a
      * cohort that was already fetched: the page round trips are the cost readiness is waiting on, so
-     * a cap applied afterwards would bound nothing that mattered. The instances past the bound are not lost or ignored: the ordinary
-     * sweep claims and decides them exactly as it decides the ones inside it, which is what acts on
-     * any of them. Only the startup report is truncated, and it says so.</p>
+     * a cap applied afterwards would bound nothing that mattered. The instances past the bound are
+     * not lost or ignored: the ordinary sweep claims and decides them exactly as it decides the ones
+     * inside it, which is what acts on any of them. Only the startup report is truncated, and it
+     * says so.</p>
      */
     public static final int DEFAULT_MAX_CLASSIFICATIONS = 500;
 

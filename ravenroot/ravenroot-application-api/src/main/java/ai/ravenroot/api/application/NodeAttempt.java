@@ -84,7 +84,7 @@ public record NodeAttempt(UUID attemptId, int ordinal, NodeAttemptStatus status,
  * Records that recovery declined to act on this attempt through delivery {@code delivery}, because
  * the deployment could not classify its execution and waiting might still change that.
  *
- * <h2>Why this is durable rather than a counter in the recovery process</h2>
+ * <h4>Why this is durable rather than a counter in the recovery process</h4>
  * <p>The recovery delivery limit is evaluated against the store's own delivery counter, which counts
  * <em>claims</em>. A claim on which nothing was dispatched is not a redelivery of anything, but it
  * increments that counter all the same, so a dependency outage silently spends the budget and the

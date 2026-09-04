@@ -159,6 +159,10 @@ public record NodeInvocation(UUID invocationId, String nodeId, Set<UUID> parentI
  * @param cause bounded operator-facing reason that leaves the attempt waiting
  * @return updated invocation whose latest attempt is parked
      */
+    public NodeInvocation parkAttempt(UUID attemptId, String cause) {
+        return replaceLatest(attemptId, latest -> latest.park(cause));
+    }
+
     /**
      * Records that recovery withheld the named attempt through {@code delivery}.
      *
@@ -184,10 +188,6 @@ public record NodeInvocation(UUID invocationId, String nodeId, Set<UUID> parentI
         }
         if (!found) throw new IllegalArgumentException("Unknown attemptId: " + attemptId);
         return new NodeInvocation(invocationId, nodeId, parentInvocationIds, status, updated, command);
-    }
-
-    public NodeInvocation parkAttempt(UUID attemptId, String cause) {
-        return replaceLatest(attemptId, latest -> latest.park(cause));
     }
 
 /**

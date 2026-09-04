@@ -148,6 +148,13 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
  * @param cause explanation recorded for the indeterminate attempt.
  * @return a new process snapshot in which the matching attempt is parked with its indeterminate cause.
  */
+    public ProcessInstance parkAttempt(UUID traversalId, UUID invocationId, UUID attemptId, String cause) {
+        requireNonTerminal();
+        Traversal traversal = traversal(traversalId);
+        NodeInvocation invocation = invocation(traversal, invocationId);
+        return replaceTraversal(traversal.replaceInvocation(invocation.parkAttempt(attemptId, cause)));
+    }
+
     /**
      * Records that recovery withheld one attempt through {@code delivery}.
      *
@@ -164,13 +171,6 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         NodeInvocation invocation = invocation(traversal, invocationId);
         return replaceTraversal(traversal.replaceInvocation(
                 invocation.recordRecoveryWithheld(attemptId, delivery)));
-    }
-
-    public ProcessInstance parkAttempt(UUID traversalId, UUID invocationId, UUID attemptId, String cause) {
-        requireNonTerminal();
-        Traversal traversal = traversal(traversalId);
-        NodeInvocation invocation = invocation(traversal, invocationId);
-        return replaceTraversal(traversal.replaceInvocation(invocation.parkAttempt(attemptId, cause)));
     }
 
 /**

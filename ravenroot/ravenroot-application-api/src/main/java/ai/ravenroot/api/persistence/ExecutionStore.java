@@ -439,13 +439,24 @@ public interface ExecutionStore extends AutoCloseable {
 
     // ---------------------------------------------------------------- durable tool approvals
 
-    /** Reads one tool approval without exposing another tenant's existence. */
+    /**
+     * Reads one tool approval without exposing another tenant's existence.
+     *
+     * @param key tenant-scoped process key
+     * @param approvalId server-minted approval identity
+     * @return matching approval, or an empty optional when it is not visible in the supplied scope
+     */
     default CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
                                                                             UUID approvalId) {
         return toolApprovalsUnsupported();
     }
 
-    /** Lists tool approvals retained for one process in registration order. */
+    /**
+     * Lists tool approvals retained for one process in registration order.
+     *
+     * @param key tenant-scoped process key
+     * @return retained approvals in registration order
+     */
     default CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
         return toolApprovalsUnsupported();
     }

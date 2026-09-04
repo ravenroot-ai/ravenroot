@@ -15,6 +15,25 @@ import java.util.UUID;
  * <p>Every authority-bearing component is structural and server supplied. Canonical arguments and
  * the continuation are bounded here before an adapter is asked to retain them; neither may be
  * projected into public audit payloads.</p>
+ *
+ * @param approvalId server-minted identity of this approval request
+ * @param traversalId traversal that proposed the tool call
+ * @param invocationId node invocation that proposed the tool call
+ * @param attemptId execution attempt that proposed the tool call
+ * @param callId stable identity of the exact proposed call
+ * @param nodeId graph node that owns the continuation
+ * @param tool canonical tool name
+ * @param canonicalArguments bounded canonical argument bytes
+ * @param argumentsDigest SHA-256 binding of {@code canonicalArguments}
+ * @param requester trusted requester identity captured at suspension
+ * @param graphVersionPin immutable graph version needed for re-entry
+ * @param policyVersion policy version that required approval
+ * @param expiresAt absolute decision deadline
+ * @param approverRequirements authorization required of a decision actor
+ * @param requesterMayApprove whether the requester may also approve this request
+ * @param continuationVersion package-owned checkpoint format version
+ * @param continuation bounded opaque checkpoint bytes
+ * @param continuationDigest SHA-256 binding of {@code continuation}
  */
 public record ToolApprovalRegistration(
         UUID approvalId,
@@ -36,7 +55,10 @@ public record ToolApprovalRegistration(
         byte[] continuation,
         String continuationDigest) {
 
+    /** Maximum canonical argument payload retained per approval. */
     public static final int MAX_ARGUMENT_BYTES = 64 * 1024;
+
+    /** Maximum opaque continuation payload retained per approval. */
     public static final int MAX_CONTINUATION_BYTES = 1024 * 1024;
 
     /** Validates and snapshots all mutable inputs. */
@@ -75,10 +97,26 @@ public record ToolApprovalRegistration(
         }
     }
 
+    /**
+     * Returns the canonical arguments without exposing internal mutable state.
+     *
+     * @return a defensive copy of the canonical argument bytes
+     */
     @Override public byte[] canonicalArguments() { return canonicalArguments.clone(); }
+
+    /**
+     * Returns the continuation without exposing internal mutable state.
+     *
+     * @return a defensive copy of the opaque continuation bytes
+     */
     @Override public byte[] continuation() { return continuation.clone(); }
 
-    /** Whether another registration is an exact replay of this request. */
+    /**
+     * Tests whether another registration is an exact replay of this request.
+     *
+     * @param other registration to compare
+     * @return {@code true} when every authority-bearing and content-binding field matches
+     */
     public boolean sameRequest(ToolApprovalRegistration other) {
         return other != null
                 && approvalId.equals(other.approvalId)
@@ -109,7 +147,12 @@ public record ToolApprovalRegistration(
         return copied;
     }
 
-    /** Returns the stable SHA-256 content binding used for arguments and continuations. */
+    /**
+     * Returns the stable SHA-256 content binding used for arguments and continuations.
+     *
+     * @param value bytes to bind
+     * @return lower-case {@code sha256:} digest
+     */
     public static String digest(byte[] value) {
         try {
             return "sha256:" + java.util.HexFormat.of().formatHex(

@@ -450,7 +450,13 @@ public sealed interface ExecutionStoreFailure {
         }
     }
 
-    /** A tool-approval transition conflicts with the first durable lifecycle winner. */
+    /**
+     * A tool-approval transition conflicts with the first durable lifecycle winner.
+     *
+     * @param approvalId approval targeted by the refused transition
+     * @param current currently committed lifecycle state
+     * @param requested requested successor state
+     */
     record ToolApprovalNotResolvable(UUID approvalId, ToolApprovalStatus current,
                                      ToolApprovalStatus requested) implements ExecutionStoreFailure {
         @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }

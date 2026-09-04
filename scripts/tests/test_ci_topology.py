@@ -83,23 +83,24 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         self.assertNotIn("npm run build", self.jobs["full-ui-e2e"])
 
     def test_verified_artifact_dependencies_are_explicit(self) -> None:
-        self.assertEqual(
-            declared_needs(self.jobs["full-ui-e2e"]),
-            {"release-classification", "full-ui-build"},
-        )
-        self.assertEqual(
-            declared_needs(self.jobs["backend-test"]),
-            {"release-classification", "backend-build"},
-        )
-        self.assertEqual(
-            declared_needs(self.jobs["full-runtime-container-smoke"]),
-            {
-                "release-classification",
+        artifact_consumers = {
+            "full-ui-e2e": {"full-ui-build"},
+            "backend-test": {"backend-build"},
+            "full-plugin-boundary": {"backend-build"},
+            "full-runtime-auth-smoke": {"backend-build"},
+            "full-runtime-jar-smoke": {"backend-build"},
+            "full-runtime-container-smoke": {
                 "full-ui-build",
                 "backend-build",
                 "full-plugin-boundary",
             },
-        )
+        }
+        for consumer, producers in artifact_consumers.items():
+            with self.subTest(consumer=consumer):
+                self.assertEqual(
+                    declared_needs(self.jobs[consumer]),
+                    {"release-classification", *producers},
+                )
         self.assertIn("name: ravenroot-ui", self.jobs["full-ui-build"])
         self.assertIn("name: ravenroot-ui", self.jobs["full-ui-e2e"])
         self.assertIn("name: ravenroot-backend-build", self.jobs["backend-build"])
@@ -114,7 +115,12 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
         }
         self.assertEqual(visible_full_jobs, visible_full_jobs.intersection(required_needs))
         for job in visible_full_jobs:
-            self.assertIn(job, self.jobs["ci-required"])
+            with self.subTest(job=job):
+                self.assertGreaterEqual(
+                    self.jobs["ci-required"].count(job),
+                    2,
+                    f"{job} must be both a dependency and an explicitly checked tier result",
+                )
 
     def test_full_jobs_preserve_event_tier_routing(self) -> None:
         policy_jobs = {

@@ -28,7 +28,8 @@ import java.util.UUID;
  * @param requester trusted requester security context
  * @param graphVersionPin immutable graph version used for continuation recovery
  * @param policyVersion policy version evaluated for the request
- * @param expiresAt store-clock decision deadline
+ * @param expiresAt absolute store-clock deadline for the approval lifecycle and effect-authority
+ *                  consumption; approval, denial, or consumption at or after it is time-ineligible
  * @param approverRequirements required approver authorization
  * @param requesterMayApprove whether separation of duties permits self-approval
  * @param continuationVersion version of the opaque trusted continuation

@@ -26,12 +26,19 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import javax.net.ssl.SSLSocketFactory;
+import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.RepetitionInfo;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import static org.junit.jupiter.api.Assertions.*;
 
 class MailImapQueryNodeBehaviorIntegrationTest {
@@ -497,17 +504,57 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         }
     }
 
-    @Test void actionAdmissionRejectsBeforeSecretsAndRecoversAfterTransportFailure() throws Exception {
+    @RepeatedTest(8)
+    @Execution(ExecutionMode.CONCURRENT)
+    @Timeout(value = 30, unit = TimeUnit.SECONDS)
+    void actionAdmissionRejectsBeforeSecretsAndRecoversAfterTransportFailure(
+            RepetitionInfo repetition) throws Exception {
         try (var server = new HoldingServer()) {
+            String suffix = Integer.toString(repetition.getCurrentRepetition());
+            String tenant = "tenant-" + suffix;
+            String profile = "reader-" + suffix;
             AtomicInteger secrets = new AtomicInteger();
-            NodeAction action = limitedAction(server.port(), ref -> { secrets.incrementAndGet(); return secret(); });
-            var first = action.handle(node(Map.of("version", "mail.imap.query.v1"))).toCompletableFuture();
-            assertTrue(server.accepted.await(1, TimeUnit.SECONDS), "first admitted call must reach the transport");
-            CompletionException saturated = assertThrows(CompletionException.class, () -> output(action, Map.of("version", "mail.imap.query.v1")));
-            assertEquals(ImapQueryException.Code.SATURATED, ((ImapQueryException) saturated.getCause()).code()); assertEquals(1, secrets.get(), "rejected work must not resolve a secret or open a socket");
-            server.close(); assertThrows(CompletionException.class, first::join);
-            CompletionException recovered = assertThrows(CompletionException.class, () -> output(action, Map.of("version", "mail.imap.query.v1")));
-            assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, ((ImapQueryException) recovered.getCause()).code()); assertEquals(2, secrets.get(), "released permit must admit the next request");
+            var credentialEntered = new CompletableFuture<Void>();
+            var releaseCredential = new CompletableFuture<Void>();
+            NodeAction action = limitedAction(server.port(), profile, ref -> {
+                if (secrets.incrementAndGet() == 1) {
+                    credentialEntered.complete(null);
+                    releaseCredential.join();
+                }
+                return secret();
+            });
+            var first = action.handle(node(tenant, Map.of("version", "mail.imap.query.v1")))
+                    .toCompletableFuture();
+            try {
+                credentialEntered.join();
+                assertFalse(first.isDone(), "the admitted call must remain held before transport");
+                assertEquals(0, server.acceptedSockets(),
+                        "the credential gate must hold the admitted call before its first socket");
+
+                ImapQueryException saturated = failure(action.handle(
+                        node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture());
+                assertEquals(ImapQueryException.Code.SATURATED, saturated.code());
+                assertEquals(1, secrets.get(), "rejected work must not resolve a second secret");
+                assertEquals(0, server.acceptedSockets(), "rejected work must not open a second connection");
+            } finally {
+                releaseCredential.complete(null);
+            }
+
+            server.awaitFirstConnection();
+            assertEquals(1, server.acceptedSockets(),
+                    "the first admitted call must open exactly one connection");
+            server.stopTransport();
+            ImapQueryException admittedFailure = failure(first);
+            assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, admittedFailure.code());
+            assertEquals(1, server.acceptedSockets(),
+                    "the admitted call must reach exactly one connection before transport failure");
+
+            ImapQueryException recovered = failure(action.handle(
+                    node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture());
+            assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, recovered.code());
+            assertEquals(2, secrets.get(), "released permit must admit and resolve the recovery request");
+            assertEquals(1, server.acceptedSockets(),
+                    "the rejected call must never add a connection, and recovery must use the stopped transport");
         }
     }
 
@@ -620,7 +667,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
         return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, fixture.port(), "localhost", "STARTTLS", Set.of("INBOX"), 10)), credentials,
                 properties -> { properties.put("mail.imap.ssl.socketFactory", socketFactory); return properties; }).create(configuration());
     }
-    private static NodeAction limitedAction(int port, CredentialResolver credentials) { return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, port, "localhost", "IMAPS", Set.of("INBOX"), 10)), credentials).create(new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR, Map.of("profile", "reader", "folder", "INBOX", "limit", "10", "maxConcurrency", "1"))); }
+    private static NodeAction limitedAction(int port, String profile, CredentialResolver credentials) { return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, port, "localhost", "IMAPS", Set.of("INBOX"), 10)), credentials).create(new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR, Map.of("profile", profile, "folder", "INBOX", "limit", "10", "maxConcurrency", "1"))); }
     private static NodeAction localAction(int preview, Set<String> folders, CredentialResolver credentials) { return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, 1, "localhost", "IMAPS", folders, preview)), credentials).create(configuration()); }
     private static ImapProfile profile(String tenant, String id, int port, String host, String mode, Set<String> folders, int preview) { return new ImapProfile(tenant, id, host, port, mode, "reader", "credential", folders, GENEROUS_TIMEOUT_MS, GENEROUS_TIMEOUT_MS, 2, 10, preview); }
     private static ImapProfile profile(String tenant, String id, int port, String host, String mode, Set<String> folders, int preview, int maxResults) { return new ImapProfile(tenant, id, host, port, mode, "reader", "credential", folders, GENEROUS_TIMEOUT_MS, GENEROUS_TIMEOUT_MS, 2, maxResults, preview); }
@@ -630,7 +677,12 @@ class MailImapQueryNodeBehaviorIntegrationTest {
     @SuppressWarnings("unchecked") private static Map<String, Object> output(NodeAction action, Map<String, Object> payload) { return (Map<String, Object>) action.handle(node(payload)).toCompletableFuture().join().payload(); }
     @SuppressWarnings("unchecked") private static Map<String, Object> map(Object value) { return (Map<String, Object>) value; }
     @SuppressWarnings("unchecked") private static List<Map<String, Object>> messages(Map<String, Object> output) { return (List<Map<String, Object>>) output.get("messages"); }
-    private static NodeMessage node(Map<String, Object> payload) { UUID id = UUID.randomUUID(); return new NodeMessage(new SecurityContext("r", "tenant", "s", PrincipalType.USER, "i"), id, id, id, id, Set.of(), "imap", payload, Map.of()); }
+    private static NodeMessage node(Map<String, Object> payload) { return node("tenant", payload); }
+    private static NodeMessage node(String tenant, Map<String, Object> payload) { UUID id = UUID.randomUUID(); return new NodeMessage(new SecurityContext("r", tenant, "s", PrincipalType.USER, "i"), id, id, id, id, Set.of(), "imap", payload, Map.of()); }
+    private static ImapQueryException failure(CompletableFuture<?> stage) {
+        CompletionException failure = assertThrows(CompletionException.class, stage::join);
+        return assertInstanceOf(ImapQueryException.class, failure.getCause());
+    }
     private static MimeMessage message(String subject, String body, Instant sentAt, boolean seen) throws Exception { MimeMessage message = new MimeMessage(Session.getInstance(new Properties())); message.setFrom(new InternetAddress("from@example.test")); message.setRecipient(Message.RecipientType.TO, new InternetAddress("reader@example.test")); message.setSubject(subject); message.setText(body); message.setSentDate(java.util.Date.from(sentAt)); if (seen) message.setFlag(Flags.Flag.SEEN, true); message.saveChanges(); return message; }
     private static MimeMessage multipartMessage() throws Exception { MimeMessage message = message("attachment", "preview more than budget", Instant.parse("2025-06-01T12:00:00Z"), false); MimeMultipart multipart = new MimeMultipart(); MimeBodyPart text = new MimeBodyPart(); text.setText("preview more than budget"); multipart.addBodyPart(text); MimeBodyPart attachment = new MimeBodyPart(); attachment.setFileName("a.txt"); attachment.setText("contents"); multipart.addBodyPart(attachment); message.setContent(multipart); message.saveChanges(); return message; }
     /** One text/plain part, one text/html part, and one attachment exercise the multipart shape. */
@@ -647,9 +699,49 @@ class MailImapQueryNodeBehaviorIntegrationTest {
     private static MimeMessage charsetMessage(String subject, String body, String charset) throws Exception { MimeMessage message = message(subject, "body", Instant.parse("2025-01-01T12:00:00Z"), false); message.setText(body, charset); message.saveChanges(); return message; }
     private static MimeMessage addressFloodMessage() throws Exception { MimeMessage message = message("addresses", "body", Instant.parse("2025-01-01T12:00:00Z"), false); List<InternetAddress> recipients = new ArrayList<>(); for (int i = 0; i < 51; i++) recipients.add(new InternetAddress("reader" + i + "@example.test")); message.setRecipients(Message.RecipientType.TO, recipients.toArray(InternetAddress[]::new)); message.saveChanges(); return message; }
     private static final class HoldingServer implements AutoCloseable {
-        private final ServerSocket listener = new ServerSocket(0); private final CountDownLatch accepted = new CountDownLatch(1); private final Thread worker;
-        private HoldingServer() throws Exception { worker = new Thread(() -> { try (Socket ignored = listener.accept()) { accepted.countDown(); while (!listener.isClosed()) Thread.onSpinWait(); } catch (Exception ignored) { } }, "imap-admission-holder"); worker.setDaemon(true); worker.start(); }
+        private final ServerSocket listener = new ServerSocket(0);
+        private final AtomicInteger acceptedSockets = new AtomicInteger();
+        private final CompletableFuture<Void> firstConnection = new CompletableFuture<>();
+        private final List<Socket> connections = new ArrayList<>();
+        private final AtomicReference<Throwable> workerFailure = new AtomicReference<>();
+        private final Thread worker;
+        private HoldingServer() throws Exception {
+            worker = new Thread(() -> {
+                try {
+                    while (!listener.isClosed()) {
+                        Socket connection = listener.accept();
+                        synchronized (connections) {
+                            connections.add(connection);
+                        }
+                        try {
+                            acceptedSockets.incrementAndGet();
+                            firstConnection.complete(null);
+                        } catch (Throwable failure) {
+                            connection.close();
+                            throw failure;
+                        }
+                    }
+                } catch (Throwable failure) {
+                    if (!listener.isClosed()) workerFailure.compareAndSet(null, failure);
+                }
+            }, "imap-admission-holder");
+            worker.setDaemon(true);
+            worker.start();
+        }
         int port() { return listener.getLocalPort(); }
-        @Override public void close() throws Exception { listener.close(); worker.join(1_000); }
+        int acceptedSockets() { return acceptedSockets.get(); }
+        void awaitFirstConnection() { firstConnection.join(); }
+        void stopTransport() throws Exception {
+            listener.close();
+            synchronized (connections) {
+                for (Socket connection : connections) connection.close();
+            }
+        }
+        @Override public void close() throws Exception {
+            stopTransport();
+            assertTrue(worker.join(java.time.Duration.ofSeconds(5)),
+                    "the deterministic IMAP fixture must stop after its listener closes");
+            if (workerFailure.get() != null) throw new AssertionError("IMAP fixture failed", workerFailure.get());
+        }
     }
 }

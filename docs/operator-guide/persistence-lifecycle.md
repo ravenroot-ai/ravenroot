@@ -37,6 +37,14 @@ A traversal an operator pauses is held, and a hold now survives the process that
 
 **Stopping a deployment or a process decides nothing.** A shutdown releases the runtime resources a held traversal was occupying and leaves the hold exactly as it was, with no actor recorded against it. The next process to start reports the traversal as held, and the same resume and cancel remain available.
 
+### Timed joins while a traversal is held
+
+A fan-in can carry a timeout, and that timeout measures **active execution time**: the interval a traversal spends held by an operator is excluded from it. Taking a hold stops the deadline and records what was left of its budget; releasing the hold gives the join exactly that remainder and nothing more. A traversal held for an hour with twelve seconds left on a thirty-second join deadline resumes with eighteen seconds, not with thirty and not with none. So pausing an execution can no longer fail the work it was pausing, which is what a hold longer than the remaining budget used to do.
+
+The stopping is real rather than bookkeeping: while a traversal is held, nothing is scheduled for its joins at all. A branch that reaches a fan-in during a hold is recorded as arrived and its bucket is opened, but its deadline is only recorded and not started, so it too begins counting at the resume. A join that is satisfied, or that proves its quorum unreachable, while the traversal is held keeps that outcome; the resume does not give a settled join a second deadline.
+
+What a hold does not do is survive on its own. **A traversal with a live join deadline is never held durably** — a hold is written down only for a single linear branch, and a traversal waiting at a fan-in is by definition not one. The two states are mutually exclusive, so a restart never has to reconcile a stored hold with a remaining budget: it drops the process-local hold and the in-memory deadline together, along with the traversal itself. If you need a specific execution to be pausable across a restart, keep its held section linear, exactly as described below.
+
 ### What is held durably, and what is held only in the process
 
 Not every point a traversal can be paused at is one a hold can be written down for. A hold is written down when the traversal is a single branch at a single completed node and the withheld payload is expressible in the payload type model. It is **not** written down when the traversal has fanned out at any point, when the hold lands on the traversal's very first node, when a loop is in progress, when the hold lands on a fan-in, or when the withheld payload is a value the type model does not cover — a continuation carries one hop, and writing one for a traversal that has more than one would silently discard the others on restart.

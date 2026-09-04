@@ -43,6 +43,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-extensions",
     "ravenroot-filesystem",
     "ravenroot-git-workspace",
+    "ravenroot-github",
     "ravenroot-jdbc",
     "ravenroot-kafka",
     "ravenroot-mail",

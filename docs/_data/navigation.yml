@@ -93,6 +93,8 @@
       url: /reference/graphml.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
+    - title: Durable human tasks
+      url: /reference/human-tasks.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: HTTP API and CLI

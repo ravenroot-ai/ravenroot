@@ -44,8 +44,16 @@ public final class BehaviorRegistry {
     public static BehaviorRegistry standard(BehaviorEnvironment environment,
                                             PublicationPolicyResolver publicationPolicies,
                                             PublicationAuditSink publicationAudit) {
+        return standard(environment, publicationPolicies, publicationAudit, null);
+    }
+
+    /** Builds the core catalog and arms {@code human-task} when a durable service is supplied. */
+    public static BehaviorRegistry standard(BehaviorEnvironment environment,
+                                            PublicationPolicyResolver publicationPolicies,
+                                            PublicationAuditSink publicationAudit,
+                                            ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         var registry = new BehaviorRegistry();
-        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit)
+        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit, humanTasks)
                 .forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
         return registry;
     }

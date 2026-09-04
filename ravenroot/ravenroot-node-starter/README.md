@@ -88,6 +88,13 @@ The contract needs no engine and no `ravenroot-core` on the test classpath. Pass
 is well-formed and can be trusted to register; it says nothing about whether a behavior does what it
 claims.
 
+The contract also discovers every property declared with
+`NodePropertyDescriptor.adapterId(...)`. Such a binding may be blank while a graph is being
+configured, so the behavior must still construct its action. If traversal later reaches the node,
+the action must return an exceptionally completed stage without a `NodeResult`. The shared contract
+checks that refusal for each adapter-binding property; package-specific tests should additionally
+assert the classified failure and the configured success path.
+
 ## Status
 
 The Node SDK has not been published as a release artifact, and this repository makes no compatibility

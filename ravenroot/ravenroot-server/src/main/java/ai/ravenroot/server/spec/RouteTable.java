@@ -340,6 +340,14 @@ public final class RouteTable {
             // signal, the same failure shape as the durable nodeId caveat.
             new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}",
                     "Reads one execution's status, payload, visited nodes and defaulted nodes. "
+                            + "paused is true while a pause is held on the traversal: status stays "
+                            + "RUNNING and paused qualifies it, so a consumer switching over status is "
+                            + "unaffected. Always present, never true for a terminal status, and read "
+                            + "live rather than stored beside the result. A hold taken at a boundary "
+                            + "the runtime can write down survives a restart and stays resumable and "
+                            + "cancellable; one taken anywhere else does not. This route reads a "
+                            + "process-local result registry, so after a restart a held traversal is "
+                            + "found through the durable inventory, where it reads as WAITING. "
                             + "410: it ran, but its result is past the retention horizon. visitedNodes, "
                             + "defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array "
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
@@ -402,7 +410,15 @@ public final class RouteTable {
                             + "the event stream, so a stalled traversal that has stopped emitting still "
                             + "appears -- that property is why this route exists. Tenant-scoped "
                             + "structurally, the same way GET /v1/executions/{id} is: never reveals "
-                            + "whether another tenant has executions running.", true, false, 200,
+                            + "whether another tenant has executions running. Each row carries paused: "
+                            + "true while a pause is held on that traversal, which is what separates a "
+                            + "deliberate hold from a stalled traversal -- both are listed and both have "
+                            + "stopped emitting. The field is always present. This listing is "
+                            + "process-local, so a traversal held before a restart is not listed here "
+                            + "at all -- not because the hold was lost, but because no traversal of a "
+                            + "process that is gone is live here. A hold taken at a boundary the "
+                            + "runtime can write down survives the restart and stays resumable and "
+                            + "cancellable; the durable inventory is where it is found.", true, false, 200,
                     STANDARD_ERRORS, READ, true),
             // Issue 154 (acceptance criterion 7): the durable, authoritative inventory API, CLI, UI,
             // audit and recovery callers share, distinct from GET /v1/executions/live's process-local
@@ -474,15 +490,22 @@ public final class RouteTable {
                             + "dispatched until the traversal is resumed. 200 with a PauseResult body "
                             + "distinguishing PAUSED, ALREADY_PAUSED and NOT_ACTIVE; unknown ownership "
                             + "fails closed as 403, not a distinct outcome. A paused traversal is still "
-                            + "live: it keeps its state, still appears in GET /v1/executions/live and is "
-                            + "still cancellable.", true, false, 200,
+                            + "live: it keeps its state, still appears in GET /v1/executions/live -- with "
+                            + "paused true -- and is still cancellable. A pause that takes effect "
+                            + "publishes EXECUTION_PAUSED once; ALREADY_PAUSED changed nothing and "
+                            + "publishes nothing. A traversal that has begun to end refuses a new hold "
+                            + "and answers NOT_ACTIVE, so no pause is ever reported after the "
+                            + "execution's terminal event.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/resume",
                     "Resumes a paused traversal (#488), continuing from the node it was holding at. "
                             + "200 with a ResumeResult body distinguishing RESUMED, NOT_PAUSED and "
                             + "NOT_ACTIVE -- resuming a traversal that was never paused is reported, not "
-                            + "silently successful.", true, false, 200,
+                            + "silently successful. A resume that releases a hold publishes "
+                            + "EXECUTION_RESUMED once. Cancelling a paused traversal, its own "
+                            + "completion, and shutdown all release the same hold and publish no "
+                            + "resume: none of them is the traversal running again.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
             new RouteDescriptor(Set.of("POST"),
@@ -494,6 +517,21 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
                             ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/human-tasks",
+                    "Lists a bounded page of the authenticated tenant's outstanding durable human "
+                            + "tasks. Terminal tasks are omitted unless includeTerminal=true; responses "
+                            + "contain bounded display and schema metadata, never execution or response payloads.",
+                    true, true, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-tasks/{taskId}/{decision}",
+                    "Resolves, denies, or cancels one tenant-scoped human task under its required "
+                            + "generation fence. Resolve accepts the task's bounded PayloadEnvelope; "
+                            + "unknown and cross-tenant task IDs are indistinguishable.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "

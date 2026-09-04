@@ -11,6 +11,7 @@ import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.AgentAuthorityBinding;
 import ai.ravenroot.api.persistence.AgentAuthorityGrantRegistration;
@@ -24,6 +25,10 @@ import ai.ravenroot.api.persistence.AgentReservationState;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionOrigin;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
@@ -39,6 +44,14 @@ import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.LeaseHandle;
@@ -57,6 +70,7 @@ import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
@@ -82,6 +96,7 @@ import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -2021,6 +2036,9 @@ public abstract class ExecutionStoreContract {
                 new ExecutionStoreFailure.OutcomeUnknown(key, "timed out").retryability());
         assertEquals(Retryability.DETERMINISTIC_REJECT,
                 new ExecutionStoreFailure.Corrupted(key, "bad state").retryability());
+        assertEquals(Retryability.DETERMINISTIC_REJECT,
+                new ExecutionStoreFailure.HumanTaskNotResolvable(UUID.randomUUID(),
+                        HumanTaskStatus.WAITING, HumanTaskStatus.RESOLVED, 1L, 2L).retryability());
 
         // The distinction ADR 0010 section 12 says must never collapse now survives coarsening, per
         // the section 12.1 amendment: a caller dispatching purely on retryability() -- not only one
@@ -2655,6 +2673,463 @@ public abstract class ExecutionStoreContract {
 
     private record AgentBudgetFixture(ExecutionKey key, UUID traversalId,
                                       List<UUID> grantIds, List<UUID> invocationIds) { }
+
+    // ============================================== durable operator holds on traversals
+
+    /**
+     * <b>The pause-commit crash boundary.</b> A hold and the two {@code WAITING} transitions beside
+     * it are one commit or none, and the store is asked which of the two it did.
+     *
+     * <p>Constructed rather than raced: the batch that would have written both is replaced by a
+     * batch whose second half is invalid, so the commit is failed at exactly the point a crash
+     * between the two writes would have left it — and the assertion is that <em>neither</em> half is
+     * visible. A test that ran the two batches concurrently and hoped for the window would pass on
+     * every run that missed it.</p>
+     */
+    @Test
+    final void holdAndItsWaitingTransitionsCommitTogetherOrNotAtAll() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = readyToHold(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+
+        // The hold is valid; the transition beside it is not, because the traversal it names is not
+        // in this instance. A store that wrote the hold first would leave it behind.
+        failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(fixture.traversalId(),
+                        TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.TraversalTransitioned(UUID.randomUUID(),
+                        TraversalStatus.WAITING))
+                .registerExecutionPause(fixture.registration())
+                .build())));
+
+        assertTrue(await(store().executionPauses(fixture.key())).isEmpty(),
+                "a refused batch must leave no hold behind");
+        assertTrue(await(store().findHeldExecutionPause(fixture.key().tenantId(),
+                fixture.traversalId())).isEmpty());
+        assertEquals(TraversalStatus.RUNNING,
+                await(store().load(fixture.key())).state().traversals()
+                        .get(fixture.traversalId()).status());
+    }
+
+    /**
+     * <b>What the commit leaves behind, and what it deliberately does not.</b> A held traversal is
+     * {@code WAITING} with its continuation stored, and — the property recovery depends on — it
+     * offers the claim loop nothing at all.
+     */
+    @Test
+    final void aHeldTraversalIsWaitingCarriesItsContinuationAndIsNotClaimable() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = hold(newKey());
+
+        DurableExecutionPause stored = await(store().findHeldExecutionPause(
+                fixture.key().tenantId(), fixture.traversalId())).orElseThrow();
+        assertEquals(ExecutionPauseStatus.HELD, stored.status());
+        assertEquals(fixture.registration().nodeId(), stored.request().nodeId());
+        assertEquals(fixture.registration().afterInvocationId(), stored.request().afterInvocationId());
+        assertEquals(fixture.registration().requester(), stored.request().requester());
+        assertEquals(fixture.registration().graphVersionPin(), stored.request().graphVersionPin());
+        assertEquals(fixture.registration().continuationVersion(), stored.request().continuationVersion());
+        assertEquals(fixture.registration().continuationDigest(), stored.request().continuationDigest());
+        assertArrayEquals(fixture.registration().continuation(), stored.request().continuation());
+        // Defensive copy, like every other stored byte array on this port.
+        byte[] escaped = stored.request().continuation();
+        escaped[0] = '!';
+        assertNotEquals('!', stored.request().continuation()[0]);
+
+        assertEquals(TraversalStatus.WAITING,
+                await(store().load(fixture.key())).state().traversals()
+                        .get(fixture.traversalId()).status());
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "recovery-worker", 10,
+                        Duration.ofMinutes(1))).isEmpty(),
+                "a held traversal must offer a recovery sweep nothing to claim");
+    }
+
+    /** A traversal may carry one live hold, so a resume presenting only a traversal id is decidable. */
+    @Test
+    final void oneLiveHoldPerTraversalAndSettledHoldsAreRetainedRatherThanReused() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = hold(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        ExecutionPauseRegistration second = copyHold(fixture.registration(), UUID.randomUUID());
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(before.revision()))
+                        .registerExecutionPause(second)
+                        .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+
+        settleHold(fixture, new ExecutionPauseTransition.Resumed(fixture.pauseId(), "issuer|USER|operator"),
+                TraversalStatus.RUNNING);
+        assertTrue(await(store().findHeldExecutionPause(fixture.key().tenantId(),
+                fixture.traversalId())).isEmpty(), "a settled hold is not the traversal's live hold");
+        assertEquals(1, await(store().executionPauses(fixture.key())).size(),
+                "a settled hold is retained as the evidence a repeat is refused against");
+
+        // The traversal is free to be held again, under a new identity.
+        StoredProcessInstance afterResume = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(afterResume.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(fixture.traversalId(),
+                        TraversalStatus.WAITING))
+                .registerExecutionPause(second)
+                .build()));
+        assertEquals(second.pauseId(), await(store().findHeldExecutionPause(fixture.key().tenantId(),
+                fixture.traversalId())).orElseThrow().request().pauseId());
+    }
+
+    /**
+     * <b>The resume crash boundary.</b> The settlement and the traversal's return to {@code RUNNING}
+     * are one commit, and a failure of either leaves the traversal held rather than stranded.
+     *
+     * <p>Stranded is the specific outcome this rules out: a traversal whose hold is gone and whose
+     * status is still {@code WAITING} can never have an invocation added to it by any process and
+     * can never be released again, because there is no longer a hold to release.</p>
+     */
+    @Test
+    final void aResumeThatCannotCommitLeavesTheTraversalHeldRatherThanStranded() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = hold(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+
+        failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .applyExecutionPause(new ExecutionPauseTransition.Resumed(fixture.pauseId(),
+                        "issuer|USER|operator"))
+                .apply(new ExecutionTransition.TraversalTransitioned(fixture.traversalId(),
+                        TraversalStatus.RUNNING))
+                // Refused: the aggregate cannot transition an invocation that is not there.
+                .apply(new ExecutionTransition.InvocationTransitioned(fixture.traversalId(),
+                        UUID.randomUUID(), NodeInvocationStatus.RUNNING))
+                .build())));
+
+        assertEquals(ExecutionPauseStatus.HELD, await(store().loadExecutionPause(fixture.key(),
+                fixture.pauseId())).orElseThrow().status());
+        assertEquals(TraversalStatus.WAITING,
+                await(store().load(fixture.key())).state().traversals()
+                        .get(fixture.traversalId()).status());
+    }
+
+    /**
+     * <b>The resource-release boundary.</b> Nothing about a running process is recorded in a hold, so
+     * a process that releases everything and stops leaves the hold exactly as it was, and the hold is
+     * still the traversal's live one when the store is opened again.
+     */
+    @Test
+    final void aHoldSurvivesEverythingAProcessReleasesWhenItStops() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = hold(newKey());
+        // A stopping process releases its lease and stops renewing it; nothing it does settles a hold.
+        LeaseHandle lease = await(store().claim(fixture.key(), "worker-before-restart", Duration.ofMinutes(1)));
+        await(store().release(lease));
+
+        DurableExecutionPause afterRelease = await(store().findHeldExecutionPause(
+                fixture.key().tenantId(), fixture.traversalId())).orElseThrow();
+        assertEquals(ExecutionPauseStatus.HELD, afterRelease.status());
+        assertEquals("", afterRelease.actor(), "a process stopping is nobody's decision about the hold");
+        assertEquals(TraversalStatus.WAITING,
+                await(store().load(fixture.key())).state().traversals()
+                        .get(fixture.traversalId()).status());
+        assertTrue(await(store().claimPendingWork(fixture.key().tenantId(), "worker-after-restart", 10,
+                        Duration.ofMinutes(1))).isEmpty(),
+                "a restart's first sweep must not find a held traversal claimable");
+    }
+
+    /** Settlement is first-writer-wins and single-use, so a redelivered decision cannot re-decide. */
+    @Test
+    final void holdSettlementIsSingleUseAndRefusesASecondDecision() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = hold(newKey());
+        settleHold(fixture, new ExecutionPauseTransition.Cancelled(fixture.pauseId(), "issuer|USER|operator"),
+                TraversalStatus.FAILED);
+        // An exact repeat is a duplicate delivery and is a no-op success.
+        StoredProcessInstance afterFirst = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(afterFirst.revision()))
+                .applyExecutionPause(new ExecutionPauseTransition.Cancelled(fixture.pauseId(),
+                        "issuer|USER|operator"))
+                .build()));
+
+        StoredProcessInstance afterReplay = await(store().load(fixture.key()));
+        ExecutionStoreFailure conflicting = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(fixture.key())
+                        .expecting(RevisionExpectation.exactly(afterReplay.revision()))
+                        .applyExecutionPause(new ExecutionPauseTransition.Resumed(fixture.pauseId(),
+                                "issuer|USER|other"))
+                        .build())));
+        var refused = assertInstanceOf(ExecutionStoreFailure.ExecutionPauseNotResolvable.class, conflicting);
+        assertEquals(ExecutionPauseStatus.CANCELLED, refused.current());
+        assertEquals(ExecutionPauseStatus.RESUMED, refused.requested());
+    }
+
+    /** A hold is not a cross-tenant existence oracle, exactly as every other keyed read here. */
+    @Test
+    final void anotherTenantsHoldIsIndistinguishableFromNone() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = hold(keyFor(DEFAULT_TENANT));
+        assertTrue(await(store().findHeldExecutionPause("other-tenant", fixture.traversalId())).isEmpty());
+        assertTrue(await(store().loadExecutionPause(
+                new ExecutionKey("other-tenant", fixture.key().processInstanceId()),
+                fixture.pauseId())).isEmpty());
+    }
+
+    /** A hold naming an invocation the aggregate does not contain is refused rather than stored. */
+    @Test
+    final void aHoldMustNameAnInvocationThatExists() {
+        assumeCapability(StoreCapability.EXECUTION_PAUSES);
+        HoldFixture fixture = readyToHold(newKey());
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        ExecutionPauseRegistration dangling = new ExecutionPauseRegistration(UUID.randomUUID(),
+                fixture.traversalId(), UUID.randomUUID(), "next", "PROCESS", "process",
+                fixture.registration().requester(), fixture.registration().graphVersionPin(), 1,
+                fixture.registration().continuation(), fixture.registration().continuationDigest());
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerExecutionPause(dangling)
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+    }
+
+    /** Creates an instance with one completed invocation, ready for a hold to sit behind. */
+    private HoldFixture readyToHold(ExecutionKey key) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.COMPLETED))
+                .apply(new ExecutionTransition.InvocationTransitioned(traversalId, invocationId,
+                        NodeInvocationStatus.COMPLETED))
+                .build()));
+        byte[] continuation = "{\"attributes\":{},\"payload\":\"held\"}".getBytes(StandardCharsets.UTF_8);
+        var registration = new ExecutionPauseRegistration(UUID.randomUUID(), traversalId, invocationId,
+                "next", "PROCESS", "process",
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                new GraphVersionPin("graph-v1"), 1, continuation, digest(continuation));
+        return new HoldFixture(key, traversalId, registration);
+    }
+
+    /** Commits the hold {@link #readyToHold} prepared, as the runtime commits one. */
+    private HoldFixture hold(ExecutionKey key) {
+        HoldFixture fixture = readyToHold(key);
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(fixture.traversalId(),
+                        TraversalStatus.WAITING))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.WAITING))
+                .registerExecutionPause(fixture.registration())
+                .build()));
+        return fixture;
+    }
+
+    private void settleHold(HoldFixture fixture, ExecutionPauseTransition transition,
+                            TraversalStatus next) {
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .applyExecutionPause(transition)
+                .apply(new ExecutionTransition.TraversalTransitioned(fixture.traversalId(), next))
+                .build()));
+    }
+
+    private static ExecutionPauseRegistration copyHold(ExecutionPauseRegistration source, UUID pauseId) {
+        return new ExecutionPauseRegistration(pauseId, source.traversalId(), source.afterInvocationId(),
+                source.nodeId(), source.commandDirective(), source.commandName(), source.requester(),
+                source.graphVersionPin(), source.continuationVersion(), source.continuation(),
+                source.continuationDigest());
+    }
+
+    private record HoldFixture(ExecutionKey key, UUID traversalId,
+                               ExecutionPauseRegistration registration) {
+        private UUID pauseId() {
+            return registration.pauseId();
+        }
+    }
+
+    // ============================================== first-class durable human tasks
+
+    @Test
+    final void humanTaskRoundTripsBoundedPublicContractAndTenantScope() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        HumanTaskFixture fixture = waitingHumanTask(newKey(), UUID.randomUUID(), "human-dedup-1",
+                "human-correlation-1");
+
+        DurableHumanTask stored = await(store().loadHumanTask(
+                fixture.key().tenantId(), fixture.registration().taskId())).orElseThrow();
+        assertEquals(HumanTaskStatus.WAITING, stored.status());
+        assertEquals(1L, stored.generation());
+        assertEquals(fixture.registration(), stored.request());
+        assertTrue(await(store().loadHumanTask("another-tenant", fixture.registration().taskId())).isEmpty(),
+                "another tenant must not learn whether the task exists");
+    }
+
+    @Test
+    final void humanTaskRegistrationIsExactlyOnceAndDeduplicationIsTenantWide() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        HumanTaskFixture fixture = waitingHumanTask(newKey(), UUID.randomUUID(), "human-dedup-1",
+                "human-correlation-1");
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerHumanTask(fixture.registration()).build()));
+
+        HumanTaskRegistration changed = copyHumanTask(fixture.registration(), UUID.randomUUID(),
+                "human-dedup-1", "human-correlation-2");
+        HumanTaskFixture secondProcess = runningHumanTaskFixture(newKey(), changed);
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(secondProcess.key())
+                        .expecting(RevisionExpectation.exactly(
+                                await(store().load(secondProcess.key())).revision()))
+                        .registerHumanTask(secondProcess.registration()).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+    }
+
+    @Test
+    final void humanTaskTransitionsAreGenerationFencedReplaySafeAndStoreTimed() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        HumanTaskFixture fixture = waitingHumanTask(newKey(), UUID.randomUUID(), "human-dedup-1",
+                "human-correlation-1");
+
+        ExecutionStoreFailure early = failureOf(() -> transitionHumanTask(fixture,
+                new HumanTaskTransition.Escalated(fixture.registration().taskId(), 1L)));
+        assertInstanceOf(ExecutionStoreFailure.HumanTaskNotResolvable.class, early);
+
+        clock().advance(Duration.ofMinutes(1));
+        transitionHumanTask(fixture,
+                new HumanTaskTransition.Escalated(fixture.registration().taskId(), 1L));
+        transitionHumanTask(fixture,
+                new HumanTaskTransition.Resolved(fixture.registration().taskId(), 2L,
+                        "issuer|USER|responder"));
+        transitionHumanTask(fixture,
+                new HumanTaskTransition.Resolved(fixture.registration().taskId(), 2L,
+                        "issuer|USER|responder"));
+
+        DurableHumanTask resolved = await(store().loadHumanTask(
+                fixture.key().tenantId(), fixture.registration().taskId())).orElseThrow();
+        assertEquals(HumanTaskStatus.RESOLVED, resolved.status());
+        assertEquals(3L, resolved.generation(), "an exact replay must not advance generation");
+
+        ExecutionStoreFailure conflict = failureOf(() -> transitionHumanTask(fixture,
+                new HumanTaskTransition.Denied(fixture.registration().taskId(), 3L,
+                        "issuer|USER|other")));
+        assertInstanceOf(ExecutionStoreFailure.HumanTaskNotResolvable.class, conflict);
+    }
+
+    @Test
+    final void humanTaskInboxIsBoundedFilteredAndCursorBased() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        String tenant = "human-inbox-tenant";
+        waitingHumanTask(keyFor(tenant), UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                "human-dedup-1", "human-correlation-1");
+        HumanTaskFixture terminal = waitingHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                "human-dedup-2", "human-correlation-2");
+        transitionHumanTask(terminal, new HumanTaskTransition.Denied(
+                terminal.registration().taskId(), 1L, "issuer|USER|responder"));
+        waitingHumanTask(keyFor(tenant), UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                "human-dedup-3", "human-correlation-3");
+
+        HumanTaskPage outstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(10)));
+        assertEquals(2, outstanding.items().size());
+        HumanTaskPage boundedOutstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(1)));
+        assertEquals(1, boundedOutstanding.items().size());
+        assertTrue(boundedOutstanding.nextCursor().isPresent(),
+                "filtered-out terminal rows must not consume the bounded page lookahead");
+        HumanTaskPage nextOutstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(1).after(boundedOutstanding.nextCursor().orElseThrow())));
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                nextOutstanding.items().getFirst().request().taskId());
+        assertTrue(nextOutstanding.nextCursor().isEmpty());
+        HumanTaskPage first = await(store().listHumanTasks(tenant, HumanTaskQuery.everything(1)));
+        assertEquals(1, first.items().size());
+        assertTrue(first.nextCursor().isPresent());
+        HumanTaskPage rest = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.everything(10).after(first.nextCursor().orElseThrow())));
+        assertEquals(2, rest.items().size());
+
+        ExecutionStoreFailure oversized = failureOf(() -> await(store().listHumanTasks(tenant,
+                HumanTaskQuery.everything(store().maxHumanTaskPageSize() + 1))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, oversized);
+    }
+
+    private HumanTaskFixture waitingHumanTask(ExecutionKey key, UUID taskId, String deduplicationKey,
+                                              String correlationKey) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING)).build()));
+        HumanTaskRegistration registration = humanTaskRegistration(key, taskId, traversalId, invocationId,
+                attemptId, deduplicationKey, correlationKey);
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .registerHumanTask(registration).build()));
+        return new HumanTaskFixture(key, registration);
+    }
+
+    private HumanTaskFixture runningHumanTaskFixture(ExecutionKey key, HumanTaskRegistration template) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING)).build()));
+        return new HumanTaskFixture(key, new HumanTaskRegistration(template.taskId(), traversalId,
+                invocationId, attemptId, template.nodeId(), template.correlationKey(),
+                template.deduplicationKey(), template.metadata(), template.responseSchema(),
+                template.responderRequirements(),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
+                template.reentryMapping()));
+    }
+
+    private HumanTaskRegistration humanTaskRegistration(ExecutionKey key, UUID taskId, UUID traversalId,
+                                                        UUID invocationId, UUID attemptId,
+                                                        String deduplicationKey, String correlationKey) {
+        return new HumanTaskRegistration(taskId, traversalId, invocationId, attemptId, "human-review",
+                correlationKey, deduplicationKey,
+                new HumanTaskMetadata("Review this request", "Confirm the public request details."),
+                new HumanTaskResponseSchema("application/json", "urn:ravenroot:test:human-response",
+                        "1", PayloadKind.MAP, 4096),
+                HandlerAuthorization.ofRoles("REVIEWER"),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
+                clock().instant().plus(Duration.ofMinutes(5)),
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+    }
+
+    private static HumanTaskRegistration copyHumanTask(HumanTaskRegistration source, UUID taskId,
+                                                       String deduplicationKey, String correlationKey) {
+        return new HumanTaskRegistration(taskId, source.traversalId(), source.invocationId(),
+                source.attemptId(), source.nodeId(), correlationKey, deduplicationKey, source.metadata(),
+                source.responseSchema(), source.responderRequirements(), source.requester(),
+                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping());
+    }
+
+    private void transitionHumanTask(HumanTaskFixture fixture, HumanTaskTransition transition) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .applyHumanTask(transition).build()));
+    }
+
+    private record HumanTaskFixture(ExecutionKey key, HumanTaskRegistration registration) {
+    }
 
     // ============================================== PERS-05: durable handlers, wait and re-entry
 

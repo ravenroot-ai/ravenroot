@@ -461,6 +461,44 @@ public sealed interface ExecutionStoreFailure {
         }
     }
 
+    /**
+     * A human-task transition lost its generation fence or conflicts with the first winner.
+     *
+     * @param taskId target task identity.
+     * @param current currently committed status.
+     * @param requested requested successor status.
+     * @param expectedGeneration generation presented by the caller.
+     * @param actualGeneration currently committed generation.
+     */
+    record HumanTaskNotResolvable(UUID taskId, HumanTaskStatus current, HumanTaskStatus requested,
+                                  long expectedGeneration, long actualGeneration)
+            implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "human task " + taskId + " is " + current + " at generation " + actualGeneration
+                    + " and cannot transition to " + requested + " from expected generation "
+                    + expectedGeneration;
+        }
+    }
+
+    /**
+     * An execution-pause transition conflicts with the first durable lifecycle winner.
+     *
+     * @param pauseId target hold identity.
+     * @param current currently committed status.
+     * @param requested requested successor status.
+     */
+    record ExecutionPauseNotResolvable(UUID pauseId, ExecutionPauseStatus current,
+                                       ExecutionPauseStatus requested) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "execution pause " + pauseId + " is " + current
+                    + " and cannot transition to " + requested;
+        }
+    }
+
 /**
  * Convenience for adapters that reject a batch before any key context exists.
  * @param reason machine-readable reason for the store failure.

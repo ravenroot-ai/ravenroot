@@ -8,6 +8,7 @@ import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 import jakarta.mail.Address;
 import jakarta.mail.Flags;
@@ -99,6 +100,7 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
     private final UnaryOperator<Properties> sessionProperties;
     private final Executor executor;
     private final LongSupplier nanoTime;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public MailImapQueryNodeBehavior() { this(new EnvironmentImapProfileResolver(), new ai.ravenroot.extensions.mail.EnvironmentMailCredentialResolver()); }
     public MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials) { this(profiles, credentials, UnaryOperator.identity()); }
@@ -106,7 +108,14 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
     MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials, UnaryOperator<Properties> sessionProperties) { this(profiles, credentials, sessionProperties, DEFAULT_IMAP_EXECUTOR); }
     MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials, UnaryOperator<Properties> sessionProperties, Executor executor) { this(profiles, credentials, sessionProperties, executor, System::nanoTime); }
     MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials, UnaryOperator<Properties> sessionProperties, Executor executor, LongSupplier nanoTime) {
+        this(profiles, credentials, sessionProperties, executor, nanoTime,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+    MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials,
+                              UnaryOperator<Properties> sessionProperties, Executor executor,
+                              LongSupplier nanoTime, ReservedNetworkPolicy destinationPolicy) {
         this.profiles = Objects.requireNonNull(profiles); this.credentials = Objects.requireNonNull(credentials); this.sessionProperties = Objects.requireNonNull(sessionProperties); this.executor = Objects.requireNonNull(executor); this.nanoTime = Objects.requireNonNull(nanoTime);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public NodeTypeDescriptor descriptor() {
@@ -184,6 +193,8 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         ImapProfile profile = resolved.orElseThrow(() -> new ImapQueryException(ImapQueryException.Code.PROFILE_UNAVAILABLE, "IMAP profile unavailable"));
         if (!tenant.equals(profile.tenant()) || !profileId.equals(profile.id()))
             throw new ImapQueryException(ImapQueryException.Code.PROFILE_UNAVAILABLE, "IMAP profile unavailable");
+        try { destinationPolicy.requireAllowedLiteral(profile.host()); }
+        catch (SecurityException refused) { throw new ImapQueryException(ImapQueryException.Code.PROFILE_UNAVAILABLE, "IMAP profile unavailable"); }
         return profile;
     }
 

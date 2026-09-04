@@ -4,6 +4,7 @@ import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -30,6 +31,7 @@ final class TelegramBotApiClient {
     private final CredentialResolver credentials;
     private final ClientFactory clients;
     private final URI origin;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     TelegramBotApiClient(CredentialResolver credentials) {
         this(credentials, timeout -> HttpClient.newBuilder().connectTimeout(timeout)
@@ -41,10 +43,20 @@ final class TelegramBotApiClient {
     }
 
     TelegramBotApiClient(CredentialResolver credentials, ClientFactory clients, URI origin) {
+        this(credentials, clients, origin, ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+
+    TelegramBotApiClient(CredentialResolver credentials, ClientFactory clients, URI origin,
+                         ReservedNetworkPolicy destinationPolicy) {
+        URI normalized = normalizeOrigin(origin);
+        destinationPolicy.requireAllowedLiteral(normalized.getHost());
         this.credentials = java.util.Objects.requireNonNull(credentials);
         this.clients = java.util.Objects.requireNonNull(clients);
-        this.origin = normalizeOrigin(origin);
+        this.origin = normalized;
+        this.destinationPolicy = java.util.Objects.requireNonNull(destinationPolicy);
     }
+
+    ReservedNetworkPolicy destinationPolicy() { return destinationPolicy; }
 
     Outcome call(TelegramProfile profile, int requestTimeoutMs, int retries, String method, Body body) {
         String token = resolveToken(profile.credentialRef());

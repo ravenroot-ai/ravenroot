@@ -17,6 +17,8 @@ import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphVersionKey;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
+import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
+import ai.ravenroot.core.humantask.HumanTaskService;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
@@ -31,13 +33,16 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ForkJoinPool;
 
 /** Production trusted re-entry against the immutable graph bytes pinned by the approval. */
 public final class PinnedGraphToolApprovalContinuationExecutor
         implements ToolApprovalContinuationExecutor {
+    private static final java.util.concurrent.Executor CLEANUP_EXECUTOR = ForkJoinPool.commonPool();
     private final GraphDefinitionStore definitions;
     private final ExecutionStore executions;
     private final ToolApprovalService approvals;
+    private final HumanTaskService humanTasks;
     private final ExecutionEngine engine;
     private final BehaviorRegistry behaviors;
     private final ExecutionMonitor monitor;
@@ -56,8 +61,21 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        ExecutionMonitor monitor,
                                                        ExecutionIdentitySource identities,
                                                        String workerId, Duration leaseTtl) {
-        this(definitions, executions, approvals, engine, behaviors, monitor, identities, workerId,
-                leaseTtl, null);
+        this(definitions, executions, approvals, null, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, null);
+    }
+
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       HumanTaskService humanTasks,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl) {
+        this(definitions, executions, approvals, humanTasks, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, null);
     }
 
     public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
@@ -69,9 +87,25 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        ExecutionIdentitySource identities,
                                                        String workerId, Duration leaseTtl,
                                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(definitions, executions, approvals, null, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, agentBudgets);
+    }
+
+    /** Creates a continuation executor with both durable decision and resource services. */
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       HumanTaskService humanTasks,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl,
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.approvals = Objects.requireNonNull(approvals, "approvals");
+        this.humanTasks = humanTasks;
         this.engine = Objects.requireNonNull(engine, "engine");
         this.behaviors = Objects.requireNonNull(behaviors, "behaviors");
         this.monitor = Objects.requireNonNull(monitor, "monitor");
@@ -131,7 +165,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             AutoCloseable approvalBinding = null;
             AutoCloseable budgetBinding = null;
             try {
-                approvalBinding = approvals.bindLive(new ExecutionKey(
+                approvalBinding = bindLive(new ExecutionKey(
                         continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
                 budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(new ExecutionKey(
                         continuation.requester().tenantId(), continuation.processInstanceId()), recorder);
@@ -163,12 +197,19 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                 DurableToolApproval current = executions.loadToolApproval(
                         claim.key(), continuation.approvalId()).toCompletableFuture().join()
                         .orElse(storedApproval);
+                if (failure != null && isDurableSuspension(unwrap(failure))) {
+                    if (current.status() == ToolApprovalStatus.SUCCEEDED) return true;
+                    if (current.status() == ToolApprovalStatus.FAILED) return false;
+                    return false;
+                }
                 if (current.status() == ToolApprovalStatus.SUCCEEDED) return true;
                 if (current.status() == ToolApprovalStatus.FAILED) return false;
                 if (failure != null) throw new CompletionException(unwrap(failure));
                 return approvedEffect ? succeeded : false;
             });
-            return effectResult.whenComplete((ignored, failure) -> {
+            // Pekko may complete on the node's actor-dispatcher thread. Runner shutdown waits for
+            // that node, so cleanup must move off the completion thread to avoid waiting on itself.
+            return effectResult.whenCompleteAsync((ignored, failure) -> {
                 try {
                     closeBinding(approvalResourceBinding);
                 } finally {
@@ -190,7 +231,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                         manager.close();
                     }
                 }
-            });
+            }, CLEANUP_EXECUTOR);
         } catch (CompletionException wrapped) {
             return CompletableFuture.failedFuture(wrapped.getCause());
         } catch (RuntimeException failure) {
@@ -220,6 +261,33 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         } catch (Exception failure) {
             throw new IllegalStateException("failed to release approval continuation binding", failure);
         }
+    }
+
+    private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
+        AutoCloseable approvalBinding = approvals.bindLive(key, recorder);
+        if (humanTasks == null) return approvalBinding;
+        try {
+            AutoCloseable taskBinding = humanTasks.bindLive(key, recorder);
+            return () -> {
+                try {
+                    closeBinding(taskBinding);
+                } finally {
+                    closeBinding(approvalBinding);
+                }
+            };
+        } catch (RuntimeException failure) {
+            try {
+                closeBinding(approvalBinding);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+    }
+
+    private static boolean isDurableSuspension(Throwable failure) {
+        return failure instanceof DurableHumanTaskSuspension
+                || failure instanceof ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
     }
 
     private Prepared prepare(String tenantId, String pin, String nodeId) {

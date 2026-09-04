@@ -453,7 +453,7 @@
     },
     "/v1/executions/live": {
       "get": {
-        "summary": "Lists this tenant's live executions (accepted and not yet terminal) with their identifiers. Read directly from runtime bookkeeping, never derived from the event stream, so a stalled traversal that has stopped emitting still appears -- that property is why this route exists. Tenant-scoped structurally, the same way GET /v1/executions/{id} is: never reveals whether another tenant has executions running.",
+        "summary": "Lists this tenant's live executions (accepted and not yet terminal) with their identifiers. Read directly from runtime bookkeeping, never derived from the event stream, so a stalled traversal that has stopped emitting still appears -- that property is why this route exists. Tenant-scoped structurally, the same way GET /v1/executions/{id} is: never reveals whether another tenant has executions running. Each row carries paused: true while a pause is held on that traversal, which is what separates a deliberate hold from a stalled traversal -- both are listed and both have stopped emitting. The field is always present. This listing is process-local, so a traversal held before a restart is not listed here at all -- not because the hold was lost, but because no traversal of a process that is gone is live here. A hold taken at a boundary the runtime can write down survives the restart and stays resumable and cancellable; the durable inventory is where it is found.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "responses": {
@@ -469,7 +469,7 @@
     },
     "/v1/executions/{id}": {
       "get": {
-        "summary": "Reads one execution's status, payload, visited nodes and defaulted nodes. 410: it ran, but its result is past the retention horizon. visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array of node ids with no repeats: the runtime holds every one of them as a set, so a node reached, defaulted, bypassed or failed-and-handled more than once in this traversal still appears exactly once here, and none of the four says how many times. A fifth field, untakenEdges (#519), is not one of these four and is not a node list: each entry is a string naming one outgoing edge of a node this run bypassed -- \"<source>-><target> [outcome=<outcome>]\" -- that the node's own hardcoded 'continue' outcome could never select, whether the bypass came from mode=test or from an individual edge naming the passthrough command under mode=run. It has no corresponding event on GET /v1/events. GET /v1/events, read directly and filtered client-side to this traversalId and a node id (neither endpoint takes such a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, bypassedNodes, defaultedNodes and handledFailureNodes respectively -- except on a node with an orchestration retry policy, where a visit is one NODE_STARTED per attempt, each intermediate attempt settles as NODE_RETRY_SCHEDULED rather than NODE_FAILED, and only the last settles as one of the four. So a client counting visits by counting NODE_STARTED overcounts a retried node, and the attempt ordinal that would separate them is not on this projection -- the four node lists in this response are sets and remain exact. Under both of that stream's sources, with two silent-undercount caveats of the same shape where the source is a durable journal. First, NODE_DEFAULTED rows exist only in a journal written by a build that emits them, and nothing in the data says which: envelopeVersion does not change, correctly, because the envelope's shape did not -- so a client counting defaults over a window spanning that upgrade undercounts with no signal. Second, nodeId is a best-effort join against invocation state with its own retention, so a client filtering by node can undercount silently too; from the in-memory ring the node id is carried on the event itself. Which applies is observable: /v1/events/recent's own response names its source, 'source=DURABLE' or 'source=RING' -- the only place on this API that surfaces it, since neither /v1/status nor /v1/runtime does. The durable response carries the type but not the node id, so it cannot attribute any of the four to a node; the ring response carries both, like /v1/events. Without a journal, /v1/events keeps a bounded in-memory window that resets on every restart and can be shorter than this result's own retention.",
+        "summary": "Reads one execution's status, payload, visited nodes and defaulted nodes. paused is true while a pause is held on the traversal: status stays RUNNING and paused qualifies it, so a consumer switching over status is unaffected. Always present, never true for a terminal status, and read live rather than stored beside the result. A hold taken at a boundary the runtime can write down survives a restart and stays resumable and cancellable; one taken anywhere else does not. This route reads a process-local result registry, so after a restart a held traversal is found through the durable inventory, where it reads as WAITING. 410: it ran, but its result is past the retention horizon. visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array of node ids with no repeats: the runtime holds every one of them as a set, so a node reached, defaulted, bypassed or failed-and-handled more than once in this traversal still appears exactly once here, and none of the four says how many times. A fifth field, untakenEdges (#519), is not one of these four and is not a node list: each entry is a string naming one outgoing edge of a node this run bypassed -- \"<source>-><target> [outcome=<outcome>]\" -- that the node's own hardcoded 'continue' outcome could never select, whether the bypass came from mode=test or from an individual edge naming the passthrough command under mode=run. It has no corresponding event on GET /v1/events. GET /v1/events, read directly and filtered client-side to this traversalId and a node id (neither endpoint takes such a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, bypassedNodes, defaultedNodes and handledFailureNodes respectively -- except on a node with an orchestration retry policy, where a visit is one NODE_STARTED per attempt, each intermediate attempt settles as NODE_RETRY_SCHEDULED rather than NODE_FAILED, and only the last settles as one of the four. So a client counting visits by counting NODE_STARTED overcounts a retried node, and the attempt ordinal that would separate them is not on this projection -- the four node lists in this response are sets and remain exact. Under both of that stream's sources, with two silent-undercount caveats of the same shape where the source is a durable journal. First, NODE_DEFAULTED rows exist only in a journal written by a build that emits them, and nothing in the data says which: envelopeVersion does not change, correctly, because the envelope's shape did not -- so a client counting defaults over a window spanning that upgrade undercounts with no signal. Second, nodeId is a best-effort join against invocation state with its own retention, so a client filtering by node can undercount silently too; from the in-memory ring the node id is carried on the event itself. Which applies is observable: /v1/events/recent's own response names its source, 'source=DURABLE' or 'source=RING' -- the only place on this API that surfaces it, since neither /v1/status nor /v1/runtime does. The durable response carries the type but not the node id, so it cannot attribute any of the four to a node; the ring response carries both, like /v1/events. Without a journal, /v1/events keeps a bounded in-memory window that resets on every restart and can be shorter than this result's own retention.",
         "x-assistant-posture": "READ",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -512,7 +512,7 @@
     },
     "/v1/executions/{id}/pause": {
       "post": {
-        "summary": "Pauses a traversal (#488): the node in flight finishes and nothing after it is dispatched until the traversal is resumed. 200 with a PauseResult body distinguishing PAUSED, ALREADY_PAUSED and NOT_ACTIVE; unknown ownership fails closed as 403, not a distinct outcome. A paused traversal is still live: it keeps its state, still appears in GET /v1/executions/live and is still cancellable.",
+        "summary": "Pauses a traversal (#488): the node in flight finishes and nothing after it is dispatched until the traversal is resumed. 200 with a PauseResult body distinguishing PAUSED, ALREADY_PAUSED and NOT_ACTIVE; unknown ownership fails closed as 403, not a distinct outcome. A paused traversal is still live: it keeps its state, still appears in GET /v1/executions/live -- with paused true -- and is still cancellable. A pause that takes effect publishes EXECUTION_PAUSED once; ALREADY_PAUSED changed nothing and publishes nothing. A traversal that has begun to end refuses a new hold and answers NOT_ACTIVE, so no pause is ever reported after the execution's terminal event.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -533,7 +533,7 @@
     },
     "/v1/executions/{id}/resume": {
       "post": {
-        "summary": "Resumes a paused traversal (#488), continuing from the node it was holding at. 200 with a ResumeResult body distinguishing RESUMED, NOT_PAUSED and NOT_ACTIVE -- resuming a traversal that was never paused is reported, not silently successful.",
+        "summary": "Resumes a paused traversal (#488), continuing from the node it was holding at. 200 with a ResumeResult body distinguishing RESUMED, NOT_PAUSED and NOT_ACTIVE -- resuming a traversal that was never paused is reported, not silently successful. A resume that releases a hold publishes EXECUTION_RESUMED once. Cancelling a paused traversal, its own completion, and shutdown all release the same hold and publish no resume: none of them is the traversal running again.",
         "x-assistant-posture": "NEVER",
         "security": [{"bearerAuth": []}],
         "parameters": [
@@ -612,6 +612,55 @@
           "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
           "413": {"description": "GRAPHML_DOCUMENT_TOO_LARGE"},
           "400": {"description": "GRAPHML_UNSAFE_XML"}
+        }
+      }
+    },
+    "/v1/human-tasks": {
+      "get": {
+        "summary": "Lists a bounded page of the authenticated tenant's outstanding durable human tasks. Terminal tasks are omitted unless includeTerminal=true; responses contain bounded display and schema metadata, never execution or response payloads.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "status", "in": "query", "required": false, "description": "Comma-separated lifecycle statuses.", "schema": {"type": "string"}},
+          {"name": "includeTerminal", "in": "query", "required": false, "schema": {"type": "boolean", "default": false}},
+          {"name": "cursor", "in": "query", "required": false, "schema": {"type": "string", "format": "uuid"}},
+          {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 50}}
+        ],
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskInboxPage"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/human-tasks/{taskId}/{decision}": {
+      "post": {
+        "summary": "Resolves, denies, or cancels one tenant-scoped human task under its required generation fence. Resolve accepts the task's bounded PayloadEnvelope; unknown and cross-tenant task IDs are indistinguishable.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "decision", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": false, "description": "Required when decision is resolve; ignored for deny and cancel.", "content": {"application/vnd.ravenroot.payload+json": {"schema": {"$ref": "#/components/schemas/PayloadEnvelope"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskDecisionResult"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "500": {"description": "INTERNAL_ERROR"}
         }
       }
     },
@@ -951,6 +1000,12 @@
   "components": {
     "securitySchemes": {
       "bearerAuth": {"type": "http", "scheme": "bearer"}
+    },
+    "schemas": {
+      "PayloadEnvelope": {"type": "object", "required": ["schema", "schemaVersion", "kind", "value"], "properties": {"schema": {"type": "string"}, "schemaVersion": {"type": "string"}, "kind": {"type": "string"}, "value": {}}},
+      "HumanTaskInboxItem": {"type": "object", "required": ["taskId", "processInstanceId", "nodeId", "title", "description", "status", "generation", "responseContentType", "responseSchema", "responseSchemaVersion", "responseKind", "maxResponseBytes", "expiresAt"], "properties": {"taskId": {"type": "string", "format": "uuid"}, "processInstanceId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "status": {"type": "string"}, "generation": {"type": "integer", "format": "int64"}, "responseContentType": {"type": "string"}, "responseSchema": {"type": "string"}, "responseSchemaVersion": {"type": "string"}, "responseKind": {"type": "string"}, "maxResponseBytes": {"type": "integer"}, "expiresAt": {"type": "string", "format": "date-time"}, "escalateAt": {"type": "string", "format": "date-time"}}},
+      "HumanTaskInboxPage": {"type": "object", "required": ["items", "nextCursor"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskInboxItem"}}, "nextCursor": {"type": "string", "format": "uuid", "nullable": true}}},
+      "HumanTaskDecisionResult": {"type": "object", "required": ["outcome", "taskId", "generation"], "properties": {"outcome": {"type": "string"}, "taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "resumeTraversalId": {"type": "string", "format": "uuid"}}}
     }
   }
 }

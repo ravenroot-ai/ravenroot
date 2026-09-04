@@ -118,7 +118,7 @@ substitution this record exists to prevent.
   every composition that does not opt in. The manifest makes them refusable, not absent.
 - Three dependency classes are pinned less than completely, and the manifest's wording claims only
   what it records. A node package is pinned by id and by a digest of its declared version and SDK
-  contract, never by a content digest, so a package republished under an unchanged version is not
+  contract, never by a digest of its content, so a package republished under an unchanged version is not
   detected. A program artifact's
   content digest is pinned transitively, because its source lives in the document, but its approval
   state is deliberately not pinned and stays a live check at redemption. There is no parser version
@@ -130,6 +130,11 @@ substitution this record exists to prevent.
 - A tenant reading the compatibility projection learns which dimensions changed and never what they
   changed to. Diagnosing *why* a difference appeared requires the server-side record, which is
   deliberate: the alternative discloses a deployment's inventory to anyone who submitted one graph.
+  One residual follows from reporting a dimension per difference rather than a set: a caller whose
+  packages all differ can recover the size of *its own* pinned package set from the length of that
+  list. It is never the deployment's current inventory, it appears only once packages already
+  differ, and it is bounded. Collapsing the duplicates would hide whether one package changed or
+  five, which is worth more to the caller than the residual costs it.
 - The comparison is intolerant by design, so an operator changing an execution limit, an engine
   capability or an installed package version will find retained work refusing to resume until that
   change is reverted or the work is abandoned deliberately.

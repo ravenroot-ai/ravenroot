@@ -102,6 +102,20 @@ class AgentNodeBehaviorTest {
     }
 
     @Test
+    @DisplayName("the managed operator output ceiling survives through the agent result")
+    void managedOperatorOutputCeilingCannotBeWidenedByTheAgentProfile() {
+        var http = new AiTestSupport.ScriptedHttp()
+                .thenWithOutputLimit(AiTestSupport.answers("done"), 32);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        AgentException refusal = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.RESPONSE_TOO_LARGE, refusal.code());
+        assertEquals(1, http.calls());
+    }
+
+    @Test
     @DisplayName("a provider usage breach fails before its generated answer can leave the node")
     void aProviderUsageBreachNeverReturnsTheOverBudgetAnswer() {
         var resources = new AiTestSupport.TrackingAgentResources().failingSettlement(

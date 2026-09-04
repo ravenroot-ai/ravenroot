@@ -29,6 +29,19 @@ dispatched. Child grants must
 be strict subsets of their parent authority or finite ceilings, and cancellation releases active
 team slots without refunding cumulative fan-out.
 
+Model-provider requests also declare a finite external-I/O representation contract. The shipped
+OpenAI-compatible and Anthropic adapters accept JSON over identity or one bounded gzip member, and
+separately cap transport, decoded, and parsed output bytes under the provider timeout. First-party
+agent and MCP calls propagate engine cancellation to their active managed call. The standalone
+`ModelProvider` SPI currently has no cancellation signal, so those separately installed adapters
+provide deadline and streaming-subscription cancellation but do not claim runtime-forced teardown;
+that narrower capability fails closed on representation violations.
+
+Program requests are serialized through a streaming byte ceiling rather than accumulated first.
+Their response wire/output ceiling and total deadline come from the sandbox policy, and program
+admission is released only after a launched supervisor session has been terminated and reaped. This
+is an operation/process cleanup guarantee, not the runtime-neutral deployment fencing contract.
+
 ## Linked contracts
 
 - [Primary interface](../reference/embed-extension-contracts.md)

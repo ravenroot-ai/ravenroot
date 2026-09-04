@@ -23,10 +23,24 @@ import java.util.UUID;
  * pause knew which was which. The distinction is read live from the runtime's own pause bookkeeping,
  * the same map the pause command mutates, so this field and {@code PauseResult} cannot disagree.</p>
  *
- * <p><strong>It is not durable.</strong> A hold lives in the process that owns the traversal and does
- * not survive a restart, so this field is a live projection and never a recovered fact. That is why
- * it is a qualifier here rather than a new value of the durable lifecycle status: a status a restart
- * silently forgets would be a durable claim the system cannot keep.</p>
+ * <p><strong>This listing is process-local, and so is this field.</strong> Every row here is a
+ * traversal <em>this</em> process is running, so a hold reported here is one this process is
+ * keeping; a traversal held before a restart is not listed here at all, because nothing in this
+ * process is running it. That is a property of the listing rather than of the hold — see
+ * {@link RavenrootApplication#liveExecutions(String)}.</p>
+ *
+ * <p><strong>A hold can be durable, and this field does not say whether it is.</strong> A hold taken
+ * at a boundary the runtime can write down survives the process that took it, is reported after a
+ * restart by {@link RavenrootApplication#executionPaused(String, java.util.UUID)}, and stays
+ * resumable and cancellable there. Do not build reconciliation on the premise that no hold outlives
+ * its process: the ones written down do, only the others are lost with it, and which is which is
+ * stated where the rule lives rather than guessed from this field.</p>
+ *
+ * <p>It remains a qualifier here rather than a new value of the durable lifecycle status, for a
+ * reason that does not depend on durability at all: a hold is orthogonal to what the traversal is
+ * doing. A traversal held durably is stored as {@code WAITING}, the vocabulary every durable wait
+ * already uses, and the hold record beside it says which wait it is. Collapsing the two would make a
+ * deliberate hold indistinguishable from a wait on an external decision.</p>
  * @param processInstanceId the stable process instance id used to identify the requested resource.
  * @param traversalId the stable traversal id used to identify the requested resource.
  * @param graphVersion the graph version constraint applied while processing the request.

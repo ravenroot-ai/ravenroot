@@ -342,8 +342,12 @@ public final class RouteTable {
                     "Reads one execution's status, payload, visited nodes and defaulted nodes. "
                             + "paused is true while a pause is held on the traversal: status stays "
                             + "RUNNING and paused qualifies it, so a consumer switching over status is "
-                            + "unaffected. Always present, never true for a terminal status, and "
-                            + "process-local state that does not survive a restart. "
+                            + "unaffected. Always present, never true for a terminal status, and read "
+                            + "live rather than stored beside the result. A hold taken at a boundary "
+                            + "the runtime can write down survives a restart and stays resumable and "
+                            + "cancellable; one taken anywhere else does not. This route reads a "
+                            + "process-local result registry, so after a restart a held traversal is "
+                            + "found through the durable inventory, where it reads as WAITING. "
                             + "410: it ran, but its result is past the retention horizon. visitedNodes, "
                             + "defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array "
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
@@ -409,8 +413,12 @@ public final class RouteTable {
                             + "whether another tenant has executions running. Each row carries paused: "
                             + "true while a pause is held on that traversal, which is what separates a "
                             + "deliberate hold from a stalled traversal -- both are listed and both have "
-                            + "stopped emitting. The field is always present, and it is process-local "
-                            + "runtime state that does not survive a restart.", true, false, 200,
+                            + "stopped emitting. The field is always present. This listing is "
+                            + "process-local, so a traversal held before a restart is not listed here "
+                            + "at all -- not because the hold was lost, but because no traversal of a "
+                            + "process that is gone is live here. A hold taken at a boundary the "
+                            + "runtime can write down survives the restart and stays resumable and "
+                            + "cancellable; the durable inventory is where it is found.", true, false, 200,
                     STANDARD_ERRORS, READ, true),
             // Issue 154 (acceptance criterion 7): the durable, authoritative inventory API, CLI, UI,
             // audit and recovery callers share, distinct from GET /v1/executions/live's process-local

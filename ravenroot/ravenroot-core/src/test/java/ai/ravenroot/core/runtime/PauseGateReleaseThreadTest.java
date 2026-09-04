@@ -34,7 +34,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>The defect is latency charged to the wrong thread, not a wrong result, so a threshold in
  * milliseconds would be a statement about this machine rather than about the code. What is asserted
  * instead is <em>which thread</em> did the work: the control call runs on a thread this test names,
- * and no durable write and no invocation identity may be charged to that name. Both probes sit at
+ * and no graph write and no invocation identity may be charged to that name. The one write that may
+ * be, and must be, is the control call settling the durable hold it is releasing — that write is the
+ * operation being performed rather than a hop's work misattributed, it cannot be deferred without
+ * the call reporting a release it does not know committed, and the test asserts it lands here rather
+ * than merely tolerating it. Both probes sit at
  * the two operations in the released hop's prologue —
  * {@code identitySource.nextNodeInvocationId()} and {@code state.nodeStarted}, whose write
  * {@link ExecutionRecorder#record} joins on its caller's thread.</p>
@@ -253,8 +257,17 @@ class PauseGateReleaseThreadTest {
          * The measurement: no durable write and no invocation identity charged to the control thread.
          */
         void assertControlThreadRanNoGraphWork() {
-            assertEquals(0L, store.writesFrom(CONTROL_THREAD),
+            assertEquals(0L, store.graphWritesFrom(CONTROL_THREAD),
                     "a control endpoint must not pay for journal writes; writes were issued from "
+                            + store.writingThreads());
+            // The separation above is only honest if the excluded write is the one it names. This
+            // traversal is held at a boundary the runtime writes down, so releasing it settles that
+            // hold, and the settlement is the control operation itself rather than graph work
+            // misattributed. Asserting it landed here keeps the exclusion from being a hole an
+            // unrelated write could later slip through.
+            assertEquals(1L, store.holdSettlementsFrom(CONTROL_THREAD),
+                    "the control call's own settlement of the hold it released must be charged to it, "
+                            + "and it is the only store write that may be; writes were issued from "
                             + store.writingThreads());
             assertEquals(0L, invocationMintingThreads.stream().filter(CONTROL_THREAD::equals).count(),
                     "a control endpoint must not run a hop's prologue; invocation ids were minted on "

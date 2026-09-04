@@ -491,6 +491,68 @@ public interface ExecutionStore extends AutoCloseable {
         return humanTasksUnsupported();
     }
 
+    // ---------------------------------------------------------------- durable execution pauses
+
+    /**
+     * Reads one durable operator hold without exposing another tenant's existence.
+     *
+     * <p>Empty is an answer rather than a failure, exactly as it is for a handler: asking whether a
+     * traversal is held is the ordinary question, and the ordinary answer is that it is not.</p>
+     *
+     * @param key the owning process instance.
+     * @param pauseId the hold identity.
+     * @return stage yielding the stored hold, or empty when this instance has none with that identity.
+     */
+    default CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                                UUID pauseId) {
+        return executionPausesUnsupported();
+    }
+
+    /**
+     * Lists every hold recorded against one process instance, held and settled, in commit order.
+     *
+     * <p>Held and settled together, for the reason {@link #handlers(ExecutionKey)} lists both: the
+     * retention of settled holds is otherwise unverifiable by the conformance suite and
+     * undiagnosable by an operator, who cannot ask about a hold identity nobody told them.</p>
+     *
+     * @param key the owning process instance.
+     * @return stage yielding this instance's holds in commit order, empty when it has none.
+     */
+    default CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return executionPausesUnsupported();
+    }
+
+    /**
+     * Resolves the single <em>held</em> hold of {@code tenantId} over {@code traversalId}.
+     *
+     * <p>This is the lookup that answers "is this traversal still paused" after a restart, and it is
+     * the reason a traversal may carry at most one hold that is not terminal: a resume presents a
+     * traversal id and must resolve to exactly one hold, deterministically, in a process that was
+     * not running when the hold was taken. Settled holds are excluded so a traversal that was
+     * resumed and paused again resolves to its current hold rather than its history.</p>
+     *
+     * <p>Tenant-scoped as its first parameter, like every other operation that does not already
+     * carry an {@link ExecutionKey}: an operator asking about a traversal knows a tenant and a
+     * traversal id and does not yet know the process instance. A traversal of another tenant reads
+     * as empty rather than as a denial, so this is not a cross-tenant existence oracle.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param traversalId the traversal being asked about.
+     * @return stage yielding the traversal's current hold, or empty when it is not held.
+     */
+    default CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                     UUID traversalId) {
+        return executionPausesUnsupported();
+    }
+
+    /** Additive fail-closed default for adapters that do not implement durable holds. */
+    private static <T> CompletionStage<T> executionPausesUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_PAUSES)));
+        return refused;
+    }
+
     /** Additive fail-closed default for adapters that do not implement human tasks. */
     private static <T> CompletionStage<T> humanTasksUnsupported() {
         var refused = new java.util.concurrent.CompletableFuture<T>();

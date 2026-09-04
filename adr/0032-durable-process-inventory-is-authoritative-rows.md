@@ -1,9 +1,9 @@
 # ADR 0032: The durable process inventory is authoritative rows, not a projection
 
-- Status: Accepted
+- Status: Superseded in part
 - Date: 2026-09-03
 - Supersedes: Discovering process instances and traversals only through the process-local live-execution view, with no tenant-scoped record surviving a restart
-- Superseded by: None
+- Superseded by: [ADR 0033](0033-durable-operator-holds.md) for its statement that the product keeps no durable record of an operator hold
 - Public references: [Durable process inventory](../docs/architecture/process-inventory.md), [Persistence, lifecycle, and recovery](../docs/operator-guide/persistence-lifecycle.md), [HTTP API and CLI](../docs/reference/api-cli.md), [ADR 0007](0007-process-traversal-invocation-attempt-lifecycle.md), [ADR 0022](0022-ambiguous-work-is-parked.md)
 
 ## Context
@@ -40,10 +40,13 @@ unexpired lease exists, and whether any attempt is parked. It is deliberately no
 Storing it would create a second copy of the lifecycle that can disagree with the first, most
 sharply at a lease's silent expiry: expiry is the passage of time rather than a write, so there is no
 transaction in which a stored classification could have been corrected to match. There is
-deliberately no durable "paused" value in that classification, because no durable pause state exists
-in the product: pause and resume act on process-local runtime state today, and the stored lifecycle
-status has no member for it. Guessing one here would be exactly the kind of value a derived answer
-must not invent.
+deliberately no durable "paused" value in that classification, and the reason given here at the time
+— that the product kept no durable record of an operator hold — no longer holds.
+[ADR 0033](0033-durable-operator-holds.md) made such a record, and the conclusion survived it unchanged: a held traversal is stored
+as `WAITING`, the same lifecycle value every other durable wait writes, so the derived classification
+reports `WAITING` and the hold record beside the instance says which wait it is. Adding a `PAUSED`
+rank would have been exactly the kind of value a derived answer must not invent — a second copy of a
+fact that is already stored somewhere authoritative.
 
 Pagination orders by `(createdAt descending, processInstanceId descending)`. Both components are
 immutable for the life of a row, so a row cannot move between pages while a scan is in flight; work
@@ -59,14 +62,17 @@ wrong" is indistinguishable from one that means "there is none."
 - An authorized tenant can rediscover its non-terminal work, and its terminal work within the
   retention window, after a restart, from the same rows the lifecycle already committed — with no
   rebuild delay and no window in which the inventory is known to lag the lifecycle.
-- Because the recovery classification is derived rather than stored, a durable pause state can be
-  added later with no schema migration, no backfill, and no change to any row already written. That
-  is the specific advantage this decision buys in exchange for computing the classification on every
-  read instead of storing it once.
-- Until that later work lands, a process instance paused through process-local runtime state reports
-  whatever its stored lifecycle status is — typically active — through the inventory. Durable
-  discoverability of a paused instance as paused is not a capability of this decision, and this record
-  must not be read as claiming it is.
+- Because the recovery classification is derived rather than stored, durable operator holds
+  ([ADR 0033](0033-durable-operator-holds.md)) arrived without touching this classification at all:
+  no new value, no backfill, and no change to any row already written. That is the specific advantage
+  this decision buys in exchange for computing the classification on every read instead of storing it
+  once. What it did not avoid, and what this record predicted it would, is a schema addition for the
+  hold record itself — the prediction was about the inventory's own rows, and about those it held.
+- A held instance reports `WAITING` through the inventory, like every other durable wait, and is
+  therefore ranked above the interrupted cohort a restart has to act on. Which wait it is comes from
+  the hold record beside the instance rather than from a classification this listing invents. A hold
+  taken at a boundary the runtime cannot write down leaves no stored trace, and such an instance
+  reports whatever its lifecycle status already was.
 - Terminal retention may not be configured shorter than event-journal retention, so a durable
   instance can never be pruned while its own events are still readable; a terminal row is retained a
   minimum of as long as the events that describe it.

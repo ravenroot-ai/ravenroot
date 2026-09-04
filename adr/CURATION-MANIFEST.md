@@ -37,7 +37,8 @@ without presenting the same choice as two independent contracts.
 | 2026-08-29 | [0029](0029-model-provider-spi-after-externalization.md) | Accepted | Defines the model-provider extension boundary after AI-node externalization. |
 | 2026-08-30 | [0030](0030-zero-or-more-node-emissions.md) | Accepted contract | Defines a future emission contract and states its implementation status explicitly. |
 | 2026-09-03 | [0031](0031-durable-canonical-graph-definitions.md) | Accepted | Defines durable, content-addressed graph definitions and their relationship to ADR 0008 identity and ADR 0023 deployment versions. |
-| 2026-09-03 | [0032](0032-durable-process-inventory-is-authoritative-rows.md) | Accepted | Defines the durable, tenant-scoped process inventory as authoritative rows with a derived, unstored recovery classification. |
+| 2026-09-03 | [0032](0032-durable-process-inventory-is-authoritative-rows.md) | Superseded in part | Defines the durable, tenant-scoped process inventory as authoritative rows with a derived, unstored recovery classification. Its statement that the product keeps no durable record of an operator hold is superseded by 0033; the derived-classification decision stands. |
+| 2026-09-04 | [0033](0033-durable-operator-holds.md) | Accepted | Defines an operator hold on a traversal as a durable record committed at a writable traversal boundary, with the traversal stored as `WAITING`, no claimable work, and continuation only by an authorized resume. |
 
 ## Publication rules
 

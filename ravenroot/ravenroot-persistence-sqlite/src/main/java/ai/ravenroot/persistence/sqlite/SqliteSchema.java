@@ -581,7 +581,47 @@ final class SqliteSchema {
                 """,
                 "CREATE UNIQUE INDEX human_task_live_correlation ON human_task "
                         + "(tenant_id, correlation_key) WHERE status IN ('WAITING', 'ESCALATED')",
-                "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")));
+                "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")),
+                // A hold is a child of its process instance and dies with it, like every other
+                // durable decision record here. It carries its own continuation because a handler
+                // by contract carries none, and the continuation is the only reason a held
+                // traversal can be continued at all by a process that did not take the hold.
+                new SchemaMigration(10, "durable operator holds on traversals", List.of(
+                """
+                CREATE TABLE execution_pause (
+                    tenant_id                TEXT    NOT NULL,
+                    process_instance_id      TEXT    NOT NULL,
+                    pause_id                 TEXT    NOT NULL,
+                    position                 INTEGER NOT NULL,
+                    traversal_id             TEXT    NOT NULL,
+                    after_invocation_id      TEXT    NOT NULL,
+                    node_id                  TEXT    NOT NULL,
+                    command_directive        TEXT    NOT NULL,
+                    command_name             TEXT    NOT NULL,
+                    requester_request_id     TEXT    NOT NULL,
+                    requester_subject        TEXT    NOT NULL,
+                    requester_principal_type TEXT    NOT NULL,
+                    requester_issuer         TEXT    NOT NULL,
+                    graph_version_pin        TEXT    NOT NULL,
+                    continuation_version     INTEGER NOT NULL,
+                    continuation             BLOB    NOT NULL,
+                    continuation_digest      TEXT    NOT NULL,
+                    status                   TEXT    NOT NULL,
+                    actor                    TEXT    NOT NULL,
+                    revision                 INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, pause_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                // The uniqueness that makes "is this traversal held" a single deterministic answer
+                // for a process that has just started and knows only a traversal id. Settled holds
+                // are excluded so a traversal resumed and held again resolves to its current hold
+                // rather than to its history.
+                "CREATE UNIQUE INDEX execution_pause_held_traversal ON execution_pause "
+                        + "(tenant_id, traversal_id) WHERE status = 'HELD'",
+                "CREATE INDEX execution_pause_by_traversal ON execution_pause "
+                        + "(tenant_id, traversal_id)")));
     }
 
     static int currentVersion() {

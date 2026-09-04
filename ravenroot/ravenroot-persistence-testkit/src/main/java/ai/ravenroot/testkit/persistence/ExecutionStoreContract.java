@@ -1211,6 +1211,115 @@ public abstract class ExecutionStoreContract {
                 .build()));
     }
 
+    /**
+     * The orchestration retry's write, held to the same standard as the park resolution above.
+     *
+     * <p>An orchestration retry is not a distinct transition type: it is
+     * {@code AttemptTransitioned(FAILED)} followed by {@code AttemptAdded(next)} in one batch, and it
+     * relies on three properties of the port that were true before this test existed and were never
+     * asserted together for this shape. All three are asserted here, in both adapters, because the
+     * runtime's crash-safety argument is built on them.</p>
+     * <ol>
+     *   <li><b>The pair is atomic.</b> The batch does not partially apply, so there is no instant at
+     *       which the invocation has a failed attempt and no successor.</li>
+     *   <li><b>The invocation stays {@code RUNNING}.</b> Unlike a terminal failure, a retried
+     *       invocation is a visit still in progress, and an aggregate that marked it {@code FAILED}
+     *       would refuse the very attempt this batch appends.</li>
+     *   <li><b>The successor is immediately claimable, and it is the only claimable item.</b> That is
+     *       what makes a crash during the backoff recoverable: the retry is durably {@code SCHEDULED},
+     *       which recovery reads as provably effect-free.</li>
+     * </ol>
+     */
+    @Test
+    final void anOrchestrationRetryFailsAndAppendsInOneStepAndLeavesTheInvocationRunning() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID secondAttempt = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, firstAttempt);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, firstAttempt,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+
+        await(store().apply(retryBatch(key, traversalId, invocationId, firstAttempt, secondAttempt,
+                running.revision())));
+
+        StoredProcessInstance afterRetry = await(store().load(key));
+        List<NodeAttempt> attempts = attemptsOf(afterRetry, traversalId, invocationId);
+        assertEquals(2, attempts.size(), "fail-and-append is one commit, so neither half can be lost");
+        assertEquals(NodeAttemptStatus.FAILED, attempts.get(0).status());
+        assertEquals(1, attempts.get(0).ordinal());
+        assertEquals(NodeAttemptStatus.SCHEDULED, attempts.get(1).status());
+        assertEquals(2, attempts.get(1).ordinal(), "a retry is the next ordinal, never a counter");
+        assertEquals(NodeInvocationStatus.RUNNING,
+                afterRetry.state().traversals().get(traversalId).invocations().get(invocationId).status(),
+                "an invocation with a scheduled retry is a visit still in progress");
+
+        List<PendingWork> claimed = await(store().claimPendingWork(key.tenantId(), "worker-1", 10, TTL));
+        assertEquals(1, claimed.size(), "the failed attempt has left the claim loop, the retry has entered it");
+        var dispatch = assertInstanceOf(PendingWork.AttemptDispatch.class, claimed.get(0));
+        assertEquals(secondAttempt, dispatch.attemptId());
+        assertEquals(2, dispatch.attemptOrdinal(),
+                "the ordinal reaches a recovering worker on the claim, not only in the aggregate");
+    }
+
+    /**
+     * Replaying the identical retry commit is refused, so a crash between the write and its
+     * acknowledgement cannot produce a third attempt.
+     *
+     * <p>This is the exactly-once property the runtime depends on, and it is asserted through the
+     * revision expectation rather than through an idempotency key on purpose: the retry decision is
+     * made by a worker that already holds the instance's revision, so the cheapest correct guard is
+     * the one it is already carrying. The second assertion is the independent domain guard behind it —
+     * even with a revision that matched, the aggregate refuses an ordinal that is not exactly one past
+     * its history — so the property does not rest on a single mechanism.</p>
+     */
+    @Test
+    final void replayingARetryCommitCannotProduceASecondAppendedAttempt() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID firstAttempt = UUID.randomUUID();
+        UUID secondAttempt = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, firstAttempt);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, firstAttempt,
+                        NodeAttemptStatus.RUNNING))
+                .build()));
+        StoredProcessInstance retried = await(store().apply(retryBatch(key, traversalId, invocationId,
+                firstAttempt, secondAttempt, running.revision())));
+
+        ExecutionStoreFailure staleReplay = failureOf(() -> await(store().apply(retryBatch(key, traversalId,
+                invocationId, firstAttempt, UUID.randomUUID(), running.revision()))));
+        assertInstanceOf(ExecutionStoreFailure.ConcurrencyConflict.class, staleReplay,
+                "the revision the retry was decided at is gone, so the replay cannot land");
+
+        ExecutionStoreFailure freshReplay = failureOf(() -> await(store().apply(retryBatch(key, traversalId,
+                invocationId, firstAttempt, UUID.randomUUID(), retried.revision()))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, freshReplay,
+                "even at the current revision, the aggregate refuses to fail an attempt that already "
+                        + "failed and to append an ordinal that already exists");
+
+        assertEquals(2, attemptsOf(await(store().load(key)), traversalId, invocationId).size(),
+                "neither refusal may leave a third attempt behind");
+    }
+
+    /** The retry commit both adapters must apply identically: fail the attempt, append the next. */
+    private static ExecutionBatch retryBatch(ExecutionKey key, UUID traversalId, UUID invocationId,
+                                             UUID failedAttemptId, UUID nextAttemptId, long revision) {
+        return ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, failedAttemptId,
+                        NodeAttemptStatus.FAILED))
+                .apply(new ExecutionTransition.AttemptAdded(traversalId, invocationId,
+                        new NodeAttempt(nextAttemptId, 2, NodeAttemptStatus.SCHEDULED)))
+                .build();
+    }
+
     private static NodeAttempt onlyAttempt(StoredProcessInstance stored) {
         return stored.state().traversals().values().iterator().next()
                 .invocations().values().iterator().next().attempts().getLast();

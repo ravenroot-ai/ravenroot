@@ -10,13 +10,39 @@ import java.util.function.Consumer;
  * Emits execution events to the server's own log as one JSON object per line.
  *
  * <p>This is the <strong>server-side audit</strong> projection and is deliberately <em>not</em> the
- * SSE projection, which {@code RavenrootServer} serialises separately. The two differ in exactly one
- * respect: this one carries {@code tenantId} and {@code requestId}, so an operator can join an
- * execution to the authorization decision that permitted it, and the SSE frame carries neither, so a
- * browser client is not told about tenant naming (SEC-07).</p>
+ * SSE projection, which {@code RavenrootServer} serialises separately. They have different audiences
+ * and different disclosure rules, which is why the two serialisers are not merged.</p>
  *
- * <p>That divergence is the reason the two serialisers are not merged: they have different audiences
- * and different disclosure rules.</p>
+ * <h2>Everything this line carries that the SSE frame does not</h2>
+ * <p>Kept as a list rather than a sentence, because it used to say "exactly one respect" and had
+ * silently become ten. Each entry is a deliberate divergence with its own reason, and
+ * {@code StructuredExecutionLoggerTest} asserts the set in both directions so the next addition to
+ * either serialiser cannot slip in unrecorded:</p>
+ * <ul>
+ *   <li>{@code tenantId} and {@code requestId} — so an operator can join an execution to the
+ *       authorization decision that permitted it. The SSE frame carries neither, so a browser client
+ *       is not told about tenant naming (SEC-07).</li>
+ *   <li>{@code attemptOrdinal} — without it a retry's {@code NODE_STARTED} is byte-identical to an
+ *       initial attempt's on the line an operator greps, so three starts could not be told from one
+ *       visit retried twice. It is durable state the aggregate already holds, so the HTTP projection
+ *       leaves it out rather than shipping a copy a durable replay could not reproduce; a log line is
+ *       written once, at the moment it was true, and has no replay to disagree with.</li>
+ *   <li>{@code connectorAttempts} — the same argument, for retries a connector performed inside one
+ *       orchestration attempt.</li>
+ *   <li>{@code event} — the constant log-record discriminator {@code ravenroot.execution}, which
+ *       lets an operator select these lines out of the server's other structured output. An SSE
+ *       stream is already scoped to executions by its route, so the frame needs no discriminator.</li>
+ *   <li>{@code detail} — the operator-facing text. The SSE frame carries the author-facing
+ *       {@code message}, {@code description} and their redaction and truncation flags instead,
+ *       because the two audiences are told different things about the same event.</li>
+ *   <li>{@code joinWaitDuration}, {@code nodeCatalogKey}, {@code deploymentId} and
+ *       {@code workloadId} — operational correlation an operator needs to attribute a line to a
+ *       deployment, a workload and a catalogued node. They are absent from the SSE frame for the
+ *       same reason as tenant naming: an author's browser client is not told how the server is
+ *       deployed.</li>
+ * </ul>
+ *
+ * <p>{@code publicReason} is carried by both and is not a divergence.</p>
  */
 public final class StructuredExecutionLogger implements Consumer<ExecutionEvent> {
     private final PrintStream output;
@@ -76,6 +102,20 @@ public final class StructuredExecutionLogger implements Consumer<ExecutionEvent>
                         : "\"" + escape(event.deploymentId()) + "\"")
                 + ",\"workloadId\":" + (event.workloadId() == null ? "null"
                         : "\"" + escape(event.workloadId()) + "\"")
+                // The attempt-scoped counts, trailing for the same field-order reason as the keys
+                // above. Without the ordinal a retry's NODE_STARTED is byte-identical to an initial
+                // attempt's on the one line an operator actually greps, so the audit log could show a
+                // node starting three times and give no way to tell three visits from one visit
+                // retried twice. 0 on both keys reads as "not stated", exactly as it does on the
+                // event: it is not a claim that this was an initial attempt, nor that a connector
+                // tried exactly once.
+                + ",\"attemptOrdinal\":" + event.attemptOrdinal()
+                + ",\"connectorAttempts\":" + event.connectorAttempts()
+                // The bounded classifier, and the only new key here that can be absent. On a retry it
+                // names why the failure was considered repeatable, which is what turns a run of retry
+                // lines from noise into a diagnosis.
+                + ",\"publicReason\":" + (event.publicReason() == null ? "null"
+                        : "\"" + escape(event.publicReason()) + "\"")
                 + "}";
     }
 

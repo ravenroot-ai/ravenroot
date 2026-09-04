@@ -89,6 +89,11 @@ import java.util.Set;
  *       {@link NodeBypassProperty#validateShape}, the third of the same family: the property
  *       is unreserved, its legal values are fixed by the platform, and a descriptor declaring the
  *       name would hold a second authority over the one key that decides whether a node runs.</li>
+ *   <li><b>{@code retry.*} shape anti-collision</b> — enforced by
+ *       {@link NodeRetryProperty#validateShape}. Platform-owned rather than unreserved-but-fixed,
+ *       and refused outright rather than shape-checked: the orchestrator enforces the attempt bound,
+ *       so a descriptor declaring one of these names would hold a second authority over how many
+ *       times an effect may happen.</li>
  *   <li><b>Malformed or reserved command name</b> — every entry in {@code descriptor.commands()} is
  *       parsed through {@link ai.ravenroot.api.execution.NodeCommand#application} at registration, so
  *       a bad name fails to load rather than becoming meaningful only because a graph spells it.</li>
@@ -98,12 +103,12 @@ import java.util.Set;
  *       cannot excuse leaving this out, because unknown contract, both anti-collisions and command
  *       parsing above are not conditional metadata either and are listed anyway.</li>
  * </ol>
- * <p>Fifteen {@code throw} sites feed this enumeration — eleven in this file plus the four delegated
- * validators above — but this list has fourteen items, because the required-but-invisible entry
- * (rule 5) covers two of those fifteen under one rule, as its own text now says. Neither "twelve" nor
+ * <p>Sixteen {@code throw} sites feed this enumeration — eleven in this file plus the five delegated
+ * validators above — but this list has fifteen items, because the required-but-invisible entry
+ * (rule 5) covers two of those sixteen under one rule, as its own text now says. Neither "twelve" nor
  * "twelve items, fourteen throws" is the answer this class gets to give without recounting
  * {@code throw} against {@link #validate}. The descriptor-null guard and the {@code execution.bypass}
- * anti-collision are both included in the current count of fifteen.
+ * anti-collision are both included in the current count of sixteen.
  */
 public final class NodeTypeDescriptorValidator {
     private NodeTypeDescriptorValidator() {
@@ -154,6 +159,10 @@ public final class NodeTypeDescriptorValidator {
         // over the one key that decides whether a node executes at all.
         NodeBypassProperty.validateShape(descriptor);
         NodeRuntimeMaxConcurrencyProperty.validateShape(descriptor);
+        // The `retry.*` family is platform-owned for the reason `runtime.maxConcurrency` is: the
+        // orchestrator enforces the bound, so a behavior package holding a second authority over the
+        // same key would silently decide how many times an effect may happen.
+        NodeRetryProperty.validateShape(descriptor);
         // Named commands are executable application vocabulary. Parse them at catalog load so a
         // malformed or reserved name cannot become meaningful merely because a graph spells it.
         descriptor.commands().forEach(ai.ravenroot.api.execution.NodeCommand::application);

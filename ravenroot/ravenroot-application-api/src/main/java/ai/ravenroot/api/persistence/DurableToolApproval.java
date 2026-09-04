@@ -3,15 +3,17 @@ package ai.ravenroot.api.persistence;
 /**
  * Stored state of one exact tool approval request.
  *
- * @param key process that owns the approval
- * @param request immutable request and continuation binding
- * @param status current durable lifecycle state
- * @param actor authenticated actor that made the decision, or an empty string for system transitions
- * @param revision monotonic approval revision used for optimistic concurrency
+ * @param key owning execution identity
+ * @param request immutable approval request
+ * @param status current durable approval state
+ * @param actor bounded identity supplied by the latest actor-bearing decision or system
+ *              cancellation, retained through later actorless effect transitions, or empty before
+ *              any actor-bearing transition
+ * @param revision enclosing process and execution-store revision containing this approval snapshot
  */
 public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration request,
                                   ToolApprovalStatus status, String actor, long revision) {
-    /** Validates the stored approval state. */
+    /** Validates the durable approval projection. */
     public DurableToolApproval {
         if (key == null) throw new IllegalArgumentException("key cannot be null");
         if (request == null) throw new IllegalArgumentException("request cannot be null");
@@ -24,12 +26,12 @@ public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration req
     }
 
     /**
-     * Creates the initial pending state for a registered request.
+     * Creates a pending approval.
      *
-     * @param key process that owns the approval
-     * @param request immutable request to approve or refuse
-     * @param revision initial durable revision
-     * @return pending approval state
+     * @param key owning execution identity
+     * @param request immutable request
+     * @param revision enclosing process and execution-store revision for the pending snapshot
+     * @return pending approval snapshot
      */
     public static DurableToolApproval pending(ExecutionKey key, ToolApprovalRegistration request,
                                               long revision) {
@@ -37,11 +39,11 @@ public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration req
     }
 
     /**
-     * Applies a legal transition and returns the next immutable state.
+     * Applies one legal state transition.
      *
-     * @param transition lifecycle change targeting this approval
-     * @param nextRevision revision assigned to the returned state
-     * @return transitioned approval state
+     * @param transition requested transition
+     * @param nextRevision enclosing process and execution-store revision assigned to the result
+     * @return transitioned approval snapshot
      */
     public DurableToolApproval apply(ToolApprovalTransition transition, long nextRevision) {
         if (!request.approvalId().equals(transition.approvalId())) {
@@ -56,12 +58,10 @@ public record DurableToolApproval(ExecutionKey key, ToolApprovalRegistration req
     }
 
     /**
-     * Tests whether a transition exactly repeats the committed outcome.
+     * Tests whether a transition is an exact duplicate of the state already stored.
      *
-     * <p>Conflicting actors are not duplicates, and consumption is deliberately never replayable.</p>
-     *
-     * @param transition transition to compare with the stored outcome
-     * @return {@code true} when the transition is an idempotent duplicate
+     * @param transition transition to compare
+     * @return {@code true} when replay is an idempotent no-op
      */
     public boolean alreadyApplied(ToolApprovalTransition transition) {
         return status == transition.next()

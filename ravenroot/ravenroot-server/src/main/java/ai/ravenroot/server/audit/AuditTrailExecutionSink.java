@@ -20,7 +20,7 @@ import java.util.function.Consumer;
  * {@code TelemetryBridge} subscriptions, not in place of either — this class adds a destination, it
  * does not move one, and every non-decisional event it sees is simply not appended anywhere by it.
  *
- * <h2>Exactly four types, and why the other six are not a near miss</h2>
+ * <h2>Exactly four types, and why the excluded ones are not a near miss</h2>
  * <p>A per-node event fires once per node invocation, scaling with nodes &times; traversals, which is
  * the wrong order of
  * magnitude for {@link AuditTrail#append}'s synchronous, per-tenant-serialized, double-fsync write.
@@ -54,6 +54,17 @@ import java.util.function.Consumer;
  * graph's own shape, driven instead by how often an upstream system redelivers, and its own Javadoc
  * states plainly that neither of its two causes is a failure. An audit chain whose volume is set by
  * someone else's retry behaviour is not an audit chain.</p>
+ *
+ * <p>{@link ExecutionEventType#EXECUTION_PAUSED} and {@link ExecutionEventType#EXECUTION_RESUMED}
+ * are excluded on the opposite ground from every exclusion above, and it is worth being explicit
+ * because they otherwise look like exactly the kind of thing this chain is for: they are control
+ * actions taken over somebody's work, they are traversal-scoped, and they are bounded by operator
+ * behaviour rather than by graph shape. They are excluded because they are <b>already audited, and
+ * audited better</b>. {@code AuthorizedRavenrootApplication} records every pause and resume at the
+ * point it authorizes them, carrying the acting principal's own identity. This class cannot match
+ * that — see the known gap below — so admitting them here would write a second, weaker record of an
+ * act already recorded properly, and an investigator would find two entries per pause of which one
+ * could not say who did it. Duplication that degrades attribution is worse than no duplication.</p>
  *
  * <h2>A known gap, stated rather than papered over</h2>
  * <p>{@link AuditEnvelope#principal()} is required and non-blank, but {@link ExecutionEvent} carries

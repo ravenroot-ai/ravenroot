@@ -164,6 +164,10 @@ final class McpProtocol {
      * the decision belongs, because here there is no profile to consult.</p>
      */
     static List<Announced> readTools(PayloadValue.MapValue result) {
+        return readTools(result, Integer.MAX_VALUE);
+    }
+
+    static List<Announced> readTools(PayloadValue.MapValue result, long maximumOutputBytes) {
         if (!(result.entries().get("tools") instanceof PayloadValue.ListValue list)) {
             throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_UNREADABLE);
         }
@@ -183,7 +187,12 @@ final class McpProtocol {
                             : emptyObjectSchema();
             announced.add(new Announced(name, description == null ? "" : description, schema));
         }
-        return List.copyOf(announced);
+        List<Announced> projected = List.copyOf(announced);
+        var measurable = projected.stream().map(tool -> Map.of(
+                "name", tool.name(), "description", tool.description(),
+                "inputSchema", tool.schema().toJava())).toList();
+        requireProjection(measurable, maximumOutputBytes);
+        return projected;
     }
 
     /**
@@ -199,6 +208,10 @@ final class McpProtocol {
      * read and act on. The refusal path is for a server that would not or could not run it at all.</p>
      */
     static String readToolContent(PayloadValue.MapValue result) {
+        return readToolContent(result, Integer.MAX_VALUE);
+    }
+
+    static String readToolContent(PayloadValue.MapValue result, long maximumOutputBytes) {
         if (!(result.entries().get("content") instanceof PayloadValue.ListValue parts)) {
             throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_UNREADABLE);
         }
@@ -229,7 +242,9 @@ final class McpProtocol {
         }
         // Never empty: AgentTool's contract forbids it, because an empty tool message reads to a
         // model as a call that succeeded and returned nothing.
-        return text.isEmpty() ? "The tool returned no content." : text.toString();
+        String projected = text.isEmpty() ? "The tool returned no content." : text.toString();
+        requireProjection(projected, maximumOutputBytes);
+        return projected;
     }
 
     /** Whether a syntactically valid tool result says the remote effect failed. */
@@ -243,6 +258,16 @@ final class McpProtocol {
         schema.put("type", PayloadValue.of("object"));
         schema.put("properties", PayloadValue.map(Map.of()));
         return new PayloadValue.MapValue(Map.copyOf(schema));
+    }
+
+    static void requireProjection(Object value, long maximumOutputBytes) {
+        try {
+            int ceiling = Math.toIntExact(Math.min(maximumOutputBytes, 64L * 1024 * 1024));
+            new PayloadLimits(ceiling, 48, 10_000, 200_000, ceiling, 256)
+                    .enforceAndMeasure(value);
+        } catch (RuntimeException oversized) {
+            throw new McpRefusal(McpRefusal.Reason.SERVER_RESPONSE_TOO_LARGE);
+        }
     }
 
     private static PayloadValue parse(byte[] body, String contentType, int maxResponseBytes) {

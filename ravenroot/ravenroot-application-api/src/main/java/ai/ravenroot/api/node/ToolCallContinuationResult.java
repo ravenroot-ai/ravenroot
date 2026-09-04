@@ -8,8 +8,8 @@ import java.util.concurrent.CompletionStage;
 /**
  * Immediate terminal outcome of the redeemed effect plus its possibly suspended continuation.
  *
- * @param nodeResult eventual result of the resumed node invocation
- * @param effectSucceeded whether the exact redeemed effect completed successfully
+ * @param nodeResult eventual node result, which may suspend again for a later approval
+ * @param effectSucceeded whether the redeemed effect itself completed successfully
  */
 public record ToolCallContinuationResult(CompletionStage<NodeResult> nodeResult,
                                          boolean effectSucceeded) {

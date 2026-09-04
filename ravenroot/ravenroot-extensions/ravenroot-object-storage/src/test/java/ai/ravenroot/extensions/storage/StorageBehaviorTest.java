@@ -1,9 +1,11 @@
 package ai.ravenroot.extensions.storage;
 
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import org.junit.jupiter.api.Test;
 
@@ -15,10 +17,437 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class StorageBehaviorTest {
+    @Test void listPaginatesAcrossRestartWithTenantAndScopeBoundOpaqueCursor() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 2, 10);
+        StorageTestSupport.HttpDouble firstHttp = new StorageTestSupport.HttpDouble();
+        firstHttp.response = CompletableFuture.completedFuture(xml("""
+                <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                  <IsTruncated>true</IsTruncated>
+                  <NextContinuationToken>opaque+/=token</NextContinuationToken>
+                  <Contents><Key>tenant-data/folder/a.txt</Key><Size>4</Size><ETag>"a"</ETag>
+                    <Owner><DisplayName>secret-owner</DisplayName></Owner></Contents>
+                  <Contents><Key>tenant-data/folder/b.txt</Key><Size>5</Size><ETag>"b"</ETag></Contents>
+                </ListBucketResult>
+                """));
+        Map<String, Object> properties = Map.of("storageProfile", "assets", "prefix", "folder", "maxResults", "2",
+                "projection", "size,etag");
+        NodeAction first = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        properties), firstHttp);
+
+        Map<?, ?> pageOne = (Map<?, ?>) first.handle(StorageTestSupport.message("tenant-a",
+                Map.of("version", "object.list.v1"))).toCompletableFuture().join().payload();
+        assertEquals("object.list.result.v1", pageOne.get("version"));
+        assertEquals(2, ((List<?>) pageOne.get("objects")).size());
+        Map<?, ?> firstObject = (Map<?, ?>) ((List<?>) pageOne.get("objects")).getFirst();
+        assertEquals(Map.of("key", "folder/a.txt", "size", 4L, "etag", "\"a\""), firstObject);
+        assertFalse(pageOne.toString().contains("secret-owner"));
+        String cursor = (String) pageOne.get("cursor");
+        assertFalse(cursor.contains("opaque"));
+        assertEquals("list-type=2&max-keys=2&prefix=tenant-data%2Ffolder",
+                firstHttp.request.get().destination().getRawQuery());
+
+        StorageTestSupport.HttpDouble secondHttp = new StorageTestSupport.HttpDouble();
+        secondHttp.response = CompletableFuture.completedFuture(xml("""
+                <ListBucketResult><IsTruncated>false</IsTruncated>
+                  <Contents><Key>tenant-data/folder/c.txt</Key><Size>6</Size><ETag>"c"</ETag></Contents>
+                </ListBucketResult>
+                """));
+        NodeAction restarted = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        properties), secondHttp);
+        Map<?, ?> pageTwo = (Map<?, ?>) restarted.handle(StorageTestSupport.message("tenant-a",
+                Map.of("version", "object.list.v1", "cursor", cursor))).toCompletableFuture().join().payload();
+        assertEquals(false, pageTwo.get("truncated"));
+        assertFalse(pageTwo.containsKey("cursor"));
+        assertTrue(secondHttp.request.get().destination().getRawQuery()
+                .contains("continuation-token=opaque%2B%2F%3Dtoken"));
+
+        int calls = secondHttp.calls.get();
+        assertEquals(StorageException.Code.INVALID_INPUT, failure(restarted.handle(
+                StorageTestSupport.message("tenant-b", Map.of("version", "object.list.v1", "cursor", cursor)))).code());
+        assertEquals(calls, secondHttp.calls.get());
+
+        StorageProfile rotated = new StorageProfile("assets", profile.origin(), profile.region(), profile.bucket(),
+                profile.keyPrefix(), profile.addressingStyle(), "rotated-signing-binding", profile.allowedOperations(),
+                profile.allowedContentTypes(), profile.allowIfMatch(), profile.allowIfNoneMatch(),
+                profile.maxObjectBytes(), profile.timeoutMs(), profile.maxConcurrency(),
+                profile.maxRequestsPerSecond());
+        StorageTestSupport.HttpDouble rotatedHttp = new StorageTestSupport.HttpDouble();
+        NodeAction rotatedAction = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(rotated)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        properties), rotatedHttp);
+        assertEquals(StorageException.Code.INVALID_INPUT, failure(rotatedAction.handle(
+                StorageTestSupport.message("tenant-a", Map.of("version", "object.list.v1", "cursor", cursor)))).code());
+        assertEquals(0, rotatedHttp.calls.get());
+
+        String[] cursorParts = cursor.split("\\.", -1);
+        String substituted = cursorParts[0] + "." + cursorParts[1] + "."
+                + Base64.getUrlEncoder().withoutPadding().encodeToString(
+                "hostile-provider-token".getBytes(StandardCharsets.UTF_8));
+        StorageTestSupport.HttpDouble substitutedHttp = new StorageTestSupport.HttpDouble();
+        substitutedHttp.response = CompletableFuture.completedFuture(xml("""
+                <ListBucketResult><IsTruncated>false</IsTruncated>
+                  <Contents><Key>tenant-data/folder/confined.txt</Key><Size>7</Size><ETag>"safe"</ETag></Contents>
+                </ListBucketResult>
+                """));
+        NodeAction substitutedAction = new ObjectListNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(profile))).create(new ai.ravenroot.api.node.NodeConfiguration(
+                        "list", ObjectListNodeBehavior.BEHAVIOR, properties), substitutedHttp);
+        Map<?, ?> confined = (Map<?, ?>) substitutedAction.handle(StorageTestSupport.message("tenant-a",
+                Map.of("version", "object.list.v1", "cursor", substituted))).toCompletableFuture().join().payload();
+        assertEquals("folder/confined.txt", ((Map<?, ?>) ((List<?>) confined.get("objects")).getFirst()).get("key"));
+        assertTrue(substitutedHttp.request.get().destination().getRawQuery()
+                .contains("prefix=tenant-data%2Ffolder"));
+        assertTrue(substitutedHttp.request.get().destination().getRawQuery()
+                .contains("continuation-token=hostile-provider-token"));
+        assertEquals("s3.example.test", substitutedHttp.request.get().destination().getHost());
+    }
+
+    @Test void listRetriesOnlyTransientReadsWithinOneAdmissionAndRejectsUnsafeXml() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 3);
+        SequenceHttp http = new SequenceHttp(List.of(
+                new OutboundHttpResponse(503, Map.of(), new byte[0]),
+                xml("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>")));
+        NodeAction action = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), http);
+        assertDoesNotThrow(() -> action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture().join());
+        assertEquals(2, http.calls.get());
+        assertTrue(http.requests.get(1).deadline().compareTo(http.requests.getFirst().deadline()) <= 0);
+
+        StorageProfile oneRequest = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 1);
+        SequenceHttp rateBound = new SequenceHttp(List.of(
+                new OutboundHttpResponse(503, Map.of(), new byte[0]),
+                xml("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>")));
+        NodeAction rateLimitedRetry = new ObjectListNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(oneRequest))).create(new ai.ravenroot.api.node.NodeConfiguration(
+                        "list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), rateBound);
+        assertEquals(StorageException.Code.RATE_LIMITED, failure(rateLimitedRetry.handle(
+                StorageTestSupport.message(Map.of("version", "object.list.v1")))).code());
+        assertEquals(1, rateBound.calls.get(), "a retry consumes a fresh profile rate token before transport");
+
+        SequenceHttp oversized = new SequenceHttp(List.of(
+                new OutboundHttpResponse(503, Map.of(), new byte[1025]),
+                xml("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>")));
+        NodeAction responseBound = new ObjectListNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(profile))).create(new ai.ravenroot.api.node.NodeConfiguration(
+                        "list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), oversized);
+        assertEquals(StorageException.Code.RESPONSE_TOO_LARGE, failure(responseBound.handle(
+                StorageTestSupport.message(Map.of("version", "object.list.v1")))).code());
+        assertEquals(1, oversized.calls.get(), "oversized retryable responses are rejected before retry");
+
+        StorageTestSupport.HttpDouble hostile = new StorageTestSupport.HttpDouble();
+        hostile.response = CompletableFuture.completedFuture(xml("""
+                <!DOCTYPE ListBucketResult [<!ENTITY xxe SYSTEM "file:///private/secret">]>
+                <ListBucketResult><IsTruncated>false</IsTruncated><Contents>
+                  <Key>&xxe;</Key></Contents></ListBucketResult>
+                """));
+        NodeAction strict = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets")), hostile);
+        StorageException rejected = failure(strict.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))));
+        assertEquals(StorageException.Code.RESPONSE_INVALID, rejected.code());
+        assertFalse(rejected.getMessage().contains("private"));
+    }
+
+    @Test void listCannotEscapeProfilePrefixOrConfiguredBounds() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 2, 10);
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        http.response = CompletableFuture.completedFuture(xml("""
+                <ListBucketResult><IsTruncated>false</IsTruncated>
+                  <Contents><Key>other-tenant/secret</Key></Contents></ListBucketResult>
+                """));
+        NodeAction action = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "prefix", "folder", "maxResults", "1",
+                                "endpoint", "https://attacker.invalid", "bucket", "other")), http);
+        assertEquals(StorageException.Code.RESPONSE_INVALID, failure(action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")))).code());
+        assertEquals("s3.example.test", http.request.get().destination().getHost());
+        assertTrue(http.request.get().destination().getRawQuery().contains("prefix=tenant-data%2Ffolder"));
+
+        http.response = CompletableFuture.completedFuture(xml("""
+                <ListBucketResult><IsTruncated>false</IsTruncated>
+                  <Contents><Key>tenant-data/folder/a</Key></Contents>
+                  <Contents><Key>tenant-data/folder/b</Key></Contents></ListBucketResult>
+                """));
+        assertEquals(StorageException.Code.RESPONSE_INVALID, failure(action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")))).code());
+    }
+
+    @Test void cancellingListStopsTheActiveCallAndPreventsConfiguredRetry() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 10);
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        http.response = new CompletableFuture<>();
+        NodeAction action = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "3")), http);
+        CompletableFuture<NodeResult> result = action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture();
+        assertTrue(result.cancel(true));
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(result).code());
+        assertEquals(1, http.calls.get());
+        assertEquals(1, http.cancellations.get());
+    }
+
+    @Test void alreadyCancelledSignalRefusesEveryOperationBeforeAdmissionOrHandoff() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET,
+                StorageProfile.Operation.PUT, StorageProfile.Operation.LIST, StorageProfile.Operation.DELETE), 2, 1);
+        StorageRuntime runtime = new StorageRuntime(name -> java.util.Optional.of(profile));
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        TestCancellation cancellation = new TestCancellation();
+        cancellation.cancel();
+        NodeAction get = new ObjectGetNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectGetNodeBehavior.BEHAVIOR), http);
+        NodeAction put = new ObjectPutNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectPutNodeBehavior.BEHAVIOR), http);
+        NodeAction list = new ObjectListNodeBehavior(runtime).create(new ai.ravenroot.api.node.NodeConfiguration(
+                "list", ObjectListNodeBehavior.BEHAVIOR, Map.of("storageProfile", "assets")), http);
+        NodeAction delete = new ObjectDeleteNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectDeleteNodeBehavior.BEHAVIOR), http);
+
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(get.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1")), cancellation)).code());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(put.handle(StorageTestSupport.message(
+                Map.of("version", "object.put.v1", "text", "value")), cancellation)).code());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")), cancellation)).code());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(delete.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1")), cancellation)).code());
+        assertEquals(0, http.calls.get());
+        assertDoesNotThrow(() -> get.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1"))).toCompletableFuture().join(),
+                "pre-cancelled invocations must not consume the sole admission rate token");
+        assertEquals(1, http.calls.get());
+    }
+
+    @Test void cancellationSignalStopsActiveListRetryAndActiveGet() {
+        StorageProfile listProfile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 2);
+        CancelCompletesWithRetryableResponse listHttp = new CancelCompletesWithRetryableResponse();
+        NodeAction list = new ObjectListNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(listProfile))).create(new ai.ravenroot.api.node.NodeConfiguration(
+                        "list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), listHttp);
+        TestCancellation listCancellation = new TestCancellation();
+        CompletableFuture<NodeResult> listResult = list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")), listCancellation).toCompletableFuture();
+        listCancellation.cancel();
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(listResult).code());
+        assertEquals(1, listHttp.calls.get(), "signal cancellation must suppress synchronous 503 retry");
+        assertDoesNotThrow(() -> list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture().join(),
+                "signal cancellation must not spend the retry rate token");
+
+        StorageProfile getProfile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 1, 10);
+        StorageTestSupport.HttpDouble getHttp = new StorageTestSupport.HttpDouble();
+        getHttp.response = new CompletableFuture<>();
+        NodeAction get = new ObjectGetNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(getProfile)))
+                .create(StorageTestSupport.configuration(ObjectGetNodeBehavior.BEHAVIOR), getHttp);
+        TestCancellation getCancellation = new TestCancellation();
+        CompletionStage<NodeResult> getResult = get.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1")), getCancellation);
+        getCancellation.cancel();
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(getResult).code());
+        assertEquals(1, getHttp.calls.get());
+        assertEquals(1, getHttp.cancellations.get());
+    }
+
+    @Test void cancellationSignalMakesActivePutAndDeleteAmbiguous() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.PUT,
+                StorageProfile.Operation.DELETE), 2, 10);
+        StorageRuntime runtime = new StorageRuntime(name -> java.util.Optional.of(profile));
+
+        StorageTestSupport.HttpDouble putHttp = new StorageTestSupport.HttpDouble();
+        putHttp.response = new CompletableFuture<>();
+        NodeAction put = new ObjectPutNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectPutNodeBehavior.BEHAVIOR), putHttp);
+        TestCancellation putCancellation = new TestCancellation();
+        CompletionStage<NodeResult> putResult = put.handle(StorageTestSupport.message(
+                Map.of("version", "object.put.v1", "text", "value")), putCancellation);
+        putCancellation.cancel();
+        assertEquals(StorageException.Code.AMBIGUOUS, failure(putResult).code());
+        assertEquals(1, putHttp.calls.get());
+        assertEquals(1, putHttp.cancellations.get());
+
+        StorageTestSupport.HttpDouble deleteHttp = new StorageTestSupport.HttpDouble();
+        deleteHttp.response = new CompletableFuture<>();
+        NodeAction delete = new ObjectDeleteNodeBehavior(runtime).create(
+                StorageTestSupport.configuration(ObjectDeleteNodeBehavior.BEHAVIOR), deleteHttp);
+        TestCancellation deleteCancellation = new TestCancellation();
+        CompletionStage<NodeResult> deleteResult = delete.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1")), deleteCancellation);
+        deleteCancellation.cancel();
+        assertEquals(StorageException.Code.AMBIGUOUS, failure(deleteResult).code());
+        assertEquals(1, deleteHttp.calls.get());
+        assertEquals(1, deleteHttp.cancellations.get());
+    }
+
+    @Test void acceptedCancellationPreventsSynchronousRetryResponseFromChargingOrDispatching() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 2);
+        CancelCompletesWithRetryableResponse http = new CancelCompletesWithRetryableResponse();
+        NodeAction action = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), http);
+
+        CompletableFuture<NodeResult> cancelled = action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture();
+        assertTrue(cancelled.cancel(true));
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(cancelled).code());
+        assertEquals(1, http.calls.get(), "a 503 delivered synchronously by call.cancel must not dispatch a retry");
+
+        assertDoesNotThrow(() -> action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture().join(),
+                "the cancelled call must not consume the retry rate token");
+        assertEquals(2, http.calls.get());
+    }
+
+    @Test void cancellationCannotWinWhileAResponseCallbackOwnsTheRetryHandoff() throws Exception {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST), 1, 3);
+        BarrierRetryHttp http = new BarrierRetryHttp();
+        NodeAction action = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets", "retries", "1")), http);
+        CompletableFuture<NodeResult> result = action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))).toCompletableFuture();
+        Thread callback = Thread.ofPlatform().start(() -> http.first.complete(
+                new OutboundHttpResponse(503, Map.of(), new byte[0])));
+        assertTrue(http.secondEntered.await(5, TimeUnit.SECONDS), "retry did not reach the transport barrier");
+
+        CountDownLatch cancelStarted = new CountDownLatch(1);
+        CompletableFuture<Boolean> cancellation = new CompletableFuture<>();
+        Thread canceller = Thread.ofPlatform().start(() -> {
+            cancelStarted.countDown();
+            cancellation.complete(result.cancel(true));
+        });
+        assertTrue(cancelStarted.await(5, TimeUnit.SECONDS));
+        try {
+            assertThreadBlocked(canceller, cancellation);
+        } finally {
+            http.releaseSecond.countDown();
+        }
+        callback.join(5_000);
+        canceller.join(5_000);
+        assertFalse(callback.isAlive());
+        assertFalse(canceller.isAlive());
+        assertTrue(cancellation.join());
+        assertEquals(StorageException.Code.DEADLINE_EXCEEDED, failure(result).code());
+        assertEquals(2, http.calls.get(), "only the retry linearized before the accepted cancellation may dispatch");
+        assertEquals(1, http.cancellations.get());
+    }
+
+    @Test void listXmlRejectsInternalEntitiesDepthAndElementFloodsWithSanitizedFailures() {
+        StorageProfile profile = new StorageProfile("assets", java.net.URI.create("https://s3.example.test"),
+                "eu-west-1", "bucket-a", "tenant-data", StorageProfile.AddressingStyle.PATH, "assets-s3",
+                Set.of(StorageProfile.Operation.LIST), Set.of(), false, false,
+                1024 * 1024, 2000, 1, 100);
+        assertInvalidListXml(profile, """
+                <!DOCTYPE ListBucketResult [<!ENTITY internal "tenant-data/folder/secret">]>
+                <ListBucketResult><IsTruncated>false</IsTruncated>
+                  <Contents><Key>&internal;</Key></Contents></ListBucketResult>
+                """);
+        assertInvalidListXml(profile, "<ListBucketResult><a><b><c><d><e><f><g><h/></g></f></e></d></c></b></a>"
+                + "<IsTruncated>false</IsTruncated></ListBucketResult>");
+        assertInvalidListXml(profile, "<ListBucketResult><IsTruncated>false</IsTruncated>"
+                + "<Ignored/>".repeat(16_385) + "</ListBucketResult>");
+    }
+
+    @Test void unavailableManagedServiceFailsListDeleteAndPutBeforeAnyProviderTransport() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST,
+                StorageProfile.Operation.DELETE, StorageProfile.Operation.PUT), 2, 10);
+        StorageRuntime runtime = new StorageRuntime(name -> java.util.Optional.of(profile));
+        NodeAction list = new ObjectListNodeBehavior(runtime).create(new ai.ravenroot.api.node.NodeConfiguration(
+                "list", ObjectListNodeBehavior.BEHAVIOR, Map.of("storageProfile", "assets")),
+                NodePackageServices.unavailable());
+        NodeAction delete = new ObjectDeleteNodeBehavior(runtime).create(StorageTestSupport.configuration(
+                ObjectDeleteNodeBehavior.BEHAVIOR), NodePackageServices.unavailable());
+        NodeAction put = new ObjectPutNodeBehavior(runtime).create(StorageTestSupport.configuration(
+                ObjectPutNodeBehavior.BEHAVIOR), NodePackageServices.unavailable());
+        assertEquals(StorageException.Code.CAPACITY_UNAVAILABLE, failure(list.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1")))).code());
+        assertEquals(StorageException.Code.CAPACITY_UNAVAILABLE, failure(delete.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1")))).code());
+        assertEquals(StorageException.Code.CAPACITY_UNAVAILABLE, failure(put.handle(StorageTestSupport.message(
+                Map.of("version", "object.put.v1", "text", "value")))).code());
+    }
+
+    @Test void deleteIsSingleAttemptVersionScopedIdempotentAndSanitized() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.DELETE,
+                StorageProfile.Operation.DELETE_VERSION), 2, 10);
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        http.response = CompletableFuture.completedFuture(new OutboundHttpResponse(204, Map.of(), new byte[0]));
+        NodeAction action = new ObjectDeleteNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(StorageTestSupport.configuration(ObjectDeleteNodeBehavior.BEHAVIOR), http);
+        Map<?, ?> deleted = (Map<?, ?>) action.handle(StorageTestSupport.message(Map.of(
+                "version", "object.delete.v1", "versionId", "v+/=1"))).toCompletableFuture().join().payload();
+        assertEquals(Map.of("version", "object.delete.result.v1", "status", "DELETED", "deleted", true), deleted);
+        assertEquals("DELETE", http.request.get().method());
+        assertEquals("versionId=v%2B%2F%3D1", http.request.get().destination().getRawQuery());
+        assertEquals(1, http.calls.get(), "delete performs no HEAD or automatic retry");
+
+        http.response = CompletableFuture.completedFuture(new OutboundHttpResponse(404, Map.of(),
+                "<Error><Message>sensitive remote detail</Message></Error>".getBytes(StandardCharsets.UTF_8)));
+        Map<?, ?> missing = (Map<?, ?>) action.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1"))).toCompletableFuture().join().payload();
+        assertEquals("NOT_FOUND", missing.get("status"));
+        assertEquals(false, missing.get("deleted"));
+        assertFalse(missing.toString().contains("sensitive"));
+    }
+
+    @Test void deleteVersionRequiresSeparateAuthorityAndUncertaintyNeverRetries() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.DELETE), 2, 10);
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        NodeAction action = new ObjectDeleteNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(StorageTestSupport.configuration(ObjectDeleteNodeBehavior.BEHAVIOR), http);
+        assertEquals(StorageException.Code.INVALID_INPUT, failure(action.handle(StorageTestSupport.message(Map.of(
+                "version", "object.delete.v1", "versionId", "not-authorized")))).code());
+        assertEquals(0, http.calls.get());
+
+        http.response = CompletableFuture.failedFuture(new NodePackageServiceException(
+                NodePackageServiceException.Reason.TRANSPORT_FAILED));
+        assertEquals(StorageException.Code.AMBIGUOUS, failure(action.handle(StorageTestSupport.message(
+                Map.of("version", "object.delete.v1")))).code());
+        assertEquals(1, http.calls.get());
+    }
+
+    @Test void mutationServerFailuresAfterHandoffAreAmbiguousAndNeverRetried() {
+        for (int status : List.of(500, 502, 503, 504)) {
+            StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.DELETE,
+                    StorageProfile.Operation.PUT), 2, 10);
+            byte[] responseBody = status == 503 ? new byte[profile.maxObjectBytes() + 1] : new byte[0];
+            StorageTestSupport.HttpDouble deleteHttp = new StorageTestSupport.HttpDouble();
+            deleteHttp.response = CompletableFuture.completedFuture(
+                    new OutboundHttpResponse(status, Map.of(), responseBody));
+            NodeAction delete = new ObjectDeleteNodeBehavior(new StorageRuntime(name ->
+                    java.util.Optional.of(profile))).create(StorageTestSupport.configuration(
+                            ObjectDeleteNodeBehavior.BEHAVIOR), deleteHttp);
+            assertEquals(StorageException.Code.AMBIGUOUS, failure(delete.handle(StorageTestSupport.message(
+                    Map.of("version", "object.delete.v1")))).code());
+            assertEquals(1, deleteHttp.calls.get());
+
+            StorageTestSupport.HttpDouble putHttp = new StorageTestSupport.HttpDouble();
+            putHttp.response = CompletableFuture.completedFuture(
+                    new OutboundHttpResponse(status, Map.of(), responseBody));
+            NodeAction put = new ObjectPutNodeBehavior(new StorageRuntime(name ->
+                    java.util.Optional.of(profile))).create(StorageTestSupport.configuration(
+                            ObjectPutNodeBehavior.BEHAVIOR), putHttp);
+            assertEquals(StorageException.Code.AMBIGUOUS, failure(put.handle(StorageTestSupport.message(
+                    Map.of("version", "object.put.v1", "text", "value")))).code());
+            assertEquals(1, putHttp.calls.get());
+        }
+    }
+
     @Test void getUsesManagedS3SigningAndProjectsBoundedTextMetadata() {
         StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
         ObjectGetNodeBehavior behavior = new ObjectGetNodeBehavior(new StorageRuntime(name ->
@@ -34,6 +463,12 @@ class StorageBehaviorTest {
         assertEquals("assets-s3", http.request.get().signing().orElseThrow().bindingId());
         assertTrue(http.request.get().credential().isEmpty());
         assertFalse(http.request.get().headers().containsKey("authorization"));
+        assertEquals(1024, http.request.get().limits().maximumEncodedResponseBytes());
+        assertTrue(http.request.get().limits().maximumOutputBytes()
+                > http.request.get().limits().maximumDecodedResponseBytes());
+        assertEquals(Set.of("text/plain", "application/octet-stream"),
+                http.request.get().limits().acceptedMediaTypes());
+        assertEquals(Set.of("identity"), http.request.get().limits().acceptedContentEncodings());
         assertEquals("tenant-a", http.message.get().tenantId());
         Map<?, ?> output = (Map<?, ?>) result.payload();
         assertEquals("object.get.result.v1", output.get("version"));
@@ -42,6 +477,42 @@ class StorageBehaviorTest {
         assertEquals("2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824", output.get("sha256"));
         assertEquals("\"etag-1\"", output.get("etag"));
         assertEquals("version-1", output.get("versionId"));
+    }
+
+    @Test void getBase64ProjectionEnforcesTheExactCanonicalLimitBeforeExpansion() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 1, 10);
+        StorageSettings settings = new StorageSettings(profile, StorageProfile.Operation.GET,
+                java.net.URI.create("https://s3.example.test/bucket-a/object"), "base64", 1024, 1000, 1);
+        byte[] body = new byte[257];
+        OutboundHttpResponse response = StorageTestSupport.response(200, body);
+
+        NodeResult projected = StorageRuntime.project(settings, new byte[0], response,
+                StorageRuntime.projectedOutputLimit(body.length));
+        int exact = new ai.ravenroot.api.payload.PayloadLimits(64 * 1024 * 1024, 32, 1_000_000,
+                5_000_000, 64 * 1024 * 1024, 4_096).enforceAndMeasure(projected.payload());
+
+        assertDoesNotThrow(() -> StorageRuntime.project(settings, new byte[0], response, exact));
+        StorageException oversized = assertThrows(StorageException.class,
+                () -> StorageRuntime.project(settings, new byte[0], response, exact - 1L));
+        assertEquals(StorageException.Code.RESPONSE_TOO_LARGE, oversized.code());
+        assertEquals(StorageRuntime.base64Length(body.length),
+                ((String) ((Map<?, ?>) projected.payload()).get("base64")).length());
+    }
+
+    @Test void managedOperatorOutputCeilingCannotBeWidenedByStorageProjection() {
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        http.response = CompletableFuture.completedFuture(new OutboundHttpResponse(200,
+                Map.of("etag", List.of("\"etag-1\"")), "hello".getBytes(StandardCharsets.UTF_8), 32));
+        ObjectGetNodeBehavior behavior = new ObjectGetNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 1, 10))));
+        NodeAction action = behavior.create(StorageTestSupport.configuration(ObjectGetNodeBehavior.BEHAVIOR), http);
+
+        StorageException refused = failure(action.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1"))));
+
+        assertEquals(StorageException.Code.RESPONSE_TOO_LARGE, refused.code());
+        assertTrue(http.request.get().limits().maximumOutputBytes() > 32,
+                "the graph/profile request was wider than the managed operator response authority");
     }
 
     @Test void putSendsOneBodyAndOnlyProfileAuthorizedConditionals() {
@@ -195,5 +666,152 @@ class StorageBehaviorTest {
     private static StorageException failure(CompletionStage<?> stage) {
         try { stage.toCompletableFuture().join(); throw new AssertionError("expected failure"); }
         catch (CompletionException failure) { return (StorageException) failure.getCause(); }
+    }
+
+    private static OutboundHttpResponse xml(String xml) {
+        return new OutboundHttpResponse(200, Map.of(), xml.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static void assertInvalidListXml(StorageProfile profile, String xml) {
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        http.response = CompletableFuture.completedFuture(xml(xml));
+        NodeAction action = new ObjectListNodeBehavior(new StorageRuntime(name -> java.util.Optional.of(profile)))
+                .create(new ai.ravenroot.api.node.NodeConfiguration("list", ObjectListNodeBehavior.BEHAVIOR,
+                        Map.of("storageProfile", "assets")), http);
+        StorageException failure = failure(action.handle(StorageTestSupport.message(
+                Map.of("version", "object.list.v1"))));
+        assertEquals(StorageException.Code.RESPONSE_INVALID, failure.code());
+        assertEquals("Object storage failed: RESPONSE_INVALID", failure.getMessage());
+    }
+
+    private static void assertThreadBlocked(Thread thread, CompletableFuture<?> result) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (System.nanoTime() < deadline && thread.getState() != Thread.State.BLOCKED && !result.isDone()) {
+            Thread.onSpinWait();
+        }
+        assertFalse(result.isDone(), "cancellation returned before the retry handoff released its state lock");
+        assertEquals(Thread.State.BLOCKED, thread.getState(),
+                "cancellation must wait on the runtime's linearized attempt state");
+    }
+
+    private static final class CancelCompletesWithRetryableResponse implements NodePackageServices {
+        private final AtomicInteger calls = new AtomicInteger();
+        private final CompletableFuture<OutboundHttpResponse> first = new CompletableFuture<>();
+
+        @Override public Set<ai.ravenroot.api.node.service.NodePackageCapability> capabilities() {
+            return Set.of(ai.ravenroot.api.node.service.NodePackageCapability.OUTBOUND_HTTP);
+        }
+        @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
+            return NodePackageServices.unavailable().credentials();
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundHttpService outboundHttp() {
+            return (message, request) -> {
+                if (calls.getAndIncrement() == 0) {
+                    return new ai.ravenroot.api.node.service.OutboundCall<>() {
+                        @Override public CompletionStage<OutboundHttpResponse> completion() { return first; }
+                        @Override public boolean cancel() {
+                            return first.complete(new OutboundHttpResponse(503, Map.of(), new byte[0]));
+                        }
+                    };
+                }
+                return ai.ravenroot.api.node.service.OutboundCall.completed(xml(
+                        "<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>"));
+            };
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundWebSocketService outboundWebSocket() {
+            return NodePackageServices.unavailable().outboundWebSocket();
+        }
+    }
+
+    private static final class BarrierRetryHttp implements NodePackageServices {
+        private final AtomicInteger calls = new AtomicInteger();
+        private final AtomicInteger cancellations = new AtomicInteger();
+        private final CompletableFuture<OutboundHttpResponse> first = new CompletableFuture<>();
+        private final CompletableFuture<OutboundHttpResponse> second = new CompletableFuture<>();
+        private final CountDownLatch secondEntered = new CountDownLatch(1);
+        private final CountDownLatch releaseSecond = new CountDownLatch(1);
+
+        @Override public Set<ai.ravenroot.api.node.service.NodePackageCapability> capabilities() {
+            return Set.of(ai.ravenroot.api.node.service.NodePackageCapability.OUTBOUND_HTTP);
+        }
+        @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
+            return NodePackageServices.unavailable().credentials();
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundHttpService outboundHttp() {
+            return (message, request) -> {
+                int invocation = calls.getAndIncrement();
+                if (invocation == 0) return call(first);
+                secondEntered.countDown();
+                try {
+                    if (!releaseSecond.await(5, TimeUnit.SECONDS)) {
+                        throw new AssertionError("retry transport barrier was not released");
+                    }
+                } catch (InterruptedException failure) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError("retry transport barrier interrupted", failure);
+                }
+                return call(second);
+            };
+        }
+        private ai.ravenroot.api.node.service.OutboundCall<OutboundHttpResponse> call(
+                CompletableFuture<OutboundHttpResponse> response) {
+            return new ai.ravenroot.api.node.service.OutboundCall<>() {
+                @Override public CompletionStage<OutboundHttpResponse> completion() { return response; }
+                @Override public boolean cancel() { cancellations.incrementAndGet(); return response.cancel(true); }
+            };
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundWebSocketService outboundWebSocket() {
+            return NodePackageServices.unavailable().outboundWebSocket();
+        }
+    }
+
+    private static final class TestCancellation implements CancellationSignal {
+        private final List<Runnable> listeners = new java.util.ArrayList<>();
+        private boolean cancelled;
+
+        @Override public synchronized boolean cancelled() { return cancelled; }
+
+        @Override public void onCancel(Runnable listener) {
+            boolean runNow;
+            synchronized (this) {
+                runNow = cancelled;
+                if (!runNow) listeners.add(listener);
+            }
+            if (runNow) listener.run();
+        }
+
+        void cancel() {
+            List<Runnable> registered;
+            synchronized (this) {
+                if (cancelled) return;
+                cancelled = true;
+                registered = List.copyOf(listeners);
+                listeners.clear();
+            }
+            registered.forEach(Runnable::run);
+        }
+    }
+
+    private static final class SequenceHttp implements ai.ravenroot.api.node.service.NodePackageServices {
+        private final List<OutboundHttpResponse> responses;
+        private final List<ai.ravenroot.api.node.service.OutboundHttpRequest> requests = new java.util.ArrayList<>();
+        private final AtomicInteger calls = new AtomicInteger();
+        SequenceHttp(List<OutboundHttpResponse> responses) { this.responses = List.copyOf(responses); }
+        @Override public Set<ai.ravenroot.api.node.service.NodePackageCapability> capabilities() {
+            return Set.of(ai.ravenroot.api.node.service.NodePackageCapability.OUTBOUND_HTTP);
+        }
+        @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
+            return ai.ravenroot.api.node.service.NodePackageServices.unavailable().credentials();
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundHttpService outboundHttp() {
+            return (message, request) -> {
+                int index = calls.getAndIncrement();
+                requests.add(request);
+                return ai.ravenroot.api.node.service.OutboundCall.completed(responses.get(index));
+            };
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundWebSocketService outboundWebSocket() {
+            return ai.ravenroot.api.node.service.NodePackageServices.unavailable().outboundWebSocket();
+        }
     }
 }

@@ -55,10 +55,10 @@ final class AggregateStorage {
         String tenantId = key.tenantId();
         String instanceId = key.processInstanceId().toString();
 
-        Map<UUID, Set<UUID>> parents = readParents(connection, tenantId, instanceId);
-        Map<UUID, List<NodeAttempt>> attempts = readAttempts(connection, tenantId, instanceId);
+        Map<UUID, Set<UUID>> parents = readParents(connection, key);
+        Map<UUID, List<NodeAttempt>> attempts = readAttempts(connection, key);
         Map<UUID, List<NodeInvocation>> invocations =
-                readInvocations(connection, tenantId, instanceId, parents, attempts);
+                readInvocations(connection, key, parents, attempts);
 
         var traversals = new LinkedHashMap<UUID, Traversal>();
         try (PreparedStatement statement = connection.prepareStatement(
@@ -68,7 +68,7 @@ final class AggregateStorage {
             statement.setString(2, instanceId);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    UUID traversalId = UUID.fromString(rows.getString("traversal_id"));
+                    UUID traversalId = StoredUuid.required(rows, "traversal", "traversal_id", key);
                     var ordered = new LinkedHashMap<UUID, NodeInvocation>();
                     for (NodeInvocation invocation : invocations.getOrDefault(traversalId, List.of())) {
                         ordered.put(invocation.invocationId(), invocation);
@@ -78,22 +78,42 @@ final class AggregateStorage {
                 }
             }
         }
+        Set<UUID> traversalIds = traversals.keySet();
+        for (UUID traversalId : invocations.keySet()) {
+            StoredUuid.requireKnown(traversalIds, traversalId, "invocation", "traversal_id", key);
+        }
+        Set<UUID> invocationIds = invocations.values().stream()
+                .flatMap(List::stream).map(NodeInvocation::invocationId)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+        for (UUID invocationId : parents.keySet()) {
+            StoredUuid.requireKnown(invocationIds, invocationId, "invocation_parent",
+                    "invocation_id", key);
+        }
+        for (Set<UUID> parentIds : parents.values()) {
+            for (UUID parentId : parentIds) {
+                StoredUuid.requireKnown(invocationIds, parentId, "invocation_parent",
+                        "parent_invocation_id", key);
+            }
+        }
+        for (UUID invocationId : attempts.keySet()) {
+            StoredUuid.requireKnown(invocationIds, invocationId, "attempt", "invocation_id", key);
+        }
         return new ProcessInstance(key.processInstanceId(), status, traversals);
     }
 
     private static Map<UUID, List<NodeInvocation>> readInvocations(
-            Connection connection, String tenantId, String instanceId,
+            Connection connection, ExecutionKey key,
             Map<UUID, Set<UUID>> parents, Map<UUID, List<NodeAttempt>> attempts) throws SQLException {
         var byTraversal = new LinkedHashMap<UUID, List<NodeInvocation>>();
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT traversal_id, invocation_id, node_id, status, node_command FROM invocation "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY traversal_id, position")) {
-            statement.setString(1, tenantId);
-            statement.setString(2, instanceId);
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    UUID traversalId = UUID.fromString(rows.getString("traversal_id"));
-                    UUID invocationId = UUID.fromString(rows.getString("invocation_id"));
+                    UUID traversalId = StoredUuid.required(rows, "invocation", "traversal_id", key);
+                    UUID invocationId = StoredUuid.required(rows, "invocation", "invocation_id", key);
                     byTraversal.computeIfAbsent(traversalId, ignored -> new ArrayList<>())
                             .add(new NodeInvocation(invocationId, rows.getString("node_id"),
                                     parents.getOrDefault(invocationId, Set.of()),
@@ -106,39 +126,41 @@ final class AggregateStorage {
         return byTraversal;
     }
 
-    private static Map<UUID, Set<UUID>> readParents(Connection connection, String tenantId, String instanceId)
+    private static Map<UUID, Set<UUID>> readParents(Connection connection, ExecutionKey key)
             throws SQLException {
         var parents = new LinkedHashMap<UUID, Set<UUID>>();
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT invocation_id, parent_invocation_id FROM invocation_parent "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY parent_invocation_id")) {
-            statement.setString(1, tenantId);
-            statement.setString(2, instanceId);
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
-                    parents.computeIfAbsent(UUID.fromString(rows.getString("invocation_id")),
+                    parents.computeIfAbsent(StoredUuid.required(rows, "invocation_parent",
+                                    "invocation_id", key),
                                     ignored -> new LinkedHashSet<>())
-                            .add(UUID.fromString(rows.getString("parent_invocation_id")));
+                            .add(StoredUuid.required(rows, "invocation_parent",
+                                    "parent_invocation_id", key));
                 }
             }
         }
         return parents;
     }
 
-    private static Map<UUID, List<NodeAttempt>> readAttempts(Connection connection, String tenantId,
-                                                             String instanceId) throws SQLException {
+    private static Map<UUID, List<NodeAttempt>> readAttempts(Connection connection, ExecutionKey key)
+            throws SQLException {
         var attempts = new LinkedHashMap<UUID, List<NodeAttempt>>();
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT invocation_id, attempt_id, ordinal, status, completion, park_cause FROM attempt "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY invocation_id, ordinal")) {
-            statement.setString(1, tenantId);
-            statement.setString(2, instanceId);
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
                     String completion = rows.getString("completion");
-                    attempts.computeIfAbsent(UUID.fromString(rows.getString("invocation_id")),
+                    attempts.computeIfAbsent(StoredUuid.required(rows, "attempt", "invocation_id", key),
                                     ignored -> new ArrayList<>())
-                            .add(new NodeAttempt(UUID.fromString(rows.getString("attempt_id")),
+                            .add(new NodeAttempt(StoredUuid.required(rows, "attempt", "attempt_id", key),
                                     rows.getInt("ordinal"),
                                     NodeAttemptStatus.valueOf(rows.getString("status")),
                                     completion == null ? null : NodeAttemptCompletion.valueOf(completion),

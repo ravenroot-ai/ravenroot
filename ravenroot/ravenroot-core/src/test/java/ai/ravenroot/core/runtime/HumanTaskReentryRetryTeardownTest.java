@@ -112,9 +112,10 @@ class HumanTaskReentryRetryTeardownTest {
                          ExecutionIdentitySource.randomUuids(), new ai.ravenroot.core.persistence.InMemoryJoinStore(),
                          CLOCK);
                  var recorder = ExecutionRecorder.open(store, key, "human-reentry", LEASE_TTL, revision);
-                 var binding = tasks.bindLive(key, recorder)) {
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
                 var execution = runner.executeAfterHumanTask(security(), key.processInstanceId(), traversalId,
-                        "resume", GRAPH_VERSION, recorder, NodeResult.continueWith(Map.of()))
+                        "resume", GRAPH_VERSION, recorder, NodeResult.continueWith(Map.of()),
+                        new GraphExecutionBudgetSnapshot(0, 0, 0, 1, 0))
                         .toCompletableFuture();
 
                 await(() -> retryEntries.get() == 1 && nestedSignal.get() != null,
@@ -189,7 +190,8 @@ class HumanTaskReentryRetryTeardownTest {
                  var recorder = ExecutionRecorder.open(store, key, "tool-reentry", LEASE_TTL, revision);
                  var binding = approvals.bindLive(key, recorder)) {
                 var execution = runner.executeAfterHumanTask(security(), key.processInstanceId(), traversalId,
-                        "resume", GRAPH_VERSION, recorder, NodeResult.continueWith(Map.of()))
+                        "resume", GRAPH_VERSION, recorder, NodeResult.continueWith(Map.of()),
+                        new GraphExecutionBudgetSnapshot(0, 0, 0, 1, 0))
                         .toCompletableFuture();
 
                 await(() -> retryEntries.get() == 1 && nestedSignal.get() != null,

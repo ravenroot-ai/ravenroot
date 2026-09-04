@@ -2,29 +2,28 @@ package ai.ravenroot.api.persistence;
 
 /** Durable lifecycle of one exact tool-call approval request. */
 public enum ToolApprovalStatus {
-    /** Waiting for an authorized decision. */
+    /** Awaiting an authorized decision. */
     PENDING,
-    /** Approved, with the one-time effect not yet consumed. */
+    /** Approved and awaiting single-use redemption. */
     APPROVED,
-    /** Refused by an authorized decision actor. */
+    /** Explicitly denied with no effect. */
     DENIED,
-    /** Refused because its absolute decision deadline elapsed. */
+    /** The store-clock deadline elapsed before effect authority was consumed, including after approval. */
     EXPIRED,
-    /** Cancelled before an effect was consumed. */
+    /** Explicitly cancelled with no effect. */
     CANCELLED,
-    /** One-time authority consumed immediately before attempting the effect. */
+    /** The one-time grant was consumed immediately before effect. */
     CONSUMED,
-    /** Consumed effect completed successfully. */
+    /** The consumed effect completed successfully. */
     SUCCEEDED,
-    /** Consumed effect completed with a known failure. */
+    /** The consumed effect completed with known failure. */
     FAILED,
-    /** Effect outcome cannot be established safely. */
+    /** The consumed effect outcome cannot be determined safely. */
     INDETERMINATE;
 
     /**
      * Returns whether no further transition is legal.
-     *
-     * @return {@code true} for a terminal state
+     * @return whether the state is terminal
      */
     public boolean terminal() {
         return switch (this) {
@@ -34,10 +33,9 @@ public enum ToolApprovalStatus {
     }
 
     /**
-     * Returns whether this state can move directly to {@code next}.
-     *
-     * @param next proposed successor state
-     * @return {@code true} when the direct transition is legal
+     * Tests whether this state can move directly to {@code next}.
+     * @param next proposed successor
+     * @return whether the transition is legal
      */
     public boolean canTransitionTo(ToolApprovalStatus next) {
         return switch (this) {

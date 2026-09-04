@@ -1,8 +1,18 @@
 package ai.ravenroot.testkit;
 
+import ai.ravenroot.api.ai.ModelProvider;
+import ai.ravenroot.api.ai.ModelRequest;
+import ai.ravenroot.api.ai.ModelResponse;
+import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionLookup;
+import ai.ravenroot.api.application.ExecutionOutcome;
 import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.catalog.NodeOutcomeDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.EngineCapability;
 import ai.ravenroot.api.execution.EngineState;
@@ -18,12 +28,14 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.execution.NodeStatus;
 import ai.ravenroot.api.execution.NodeTerminationReason;
 import ai.ravenroot.api.execution.RavenNode;
+import ai.ravenroot.core.ai.ModelProviderRegistry;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.GraphRunner;
 import ai.ravenroot.core.runtime.JoinFailureException;
@@ -35,7 +47,9 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -57,13 +71,45 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests every adapter against the mandatory Ravenroot engine semantics. */
 public abstract class ExecutionEngineContract {
+    private static final String REBINDING_BEHAVIOR = "application-bound-adapter";
+    private static final String REBINDING_PROVIDER = "application-provider";
+    private static final String REBINDING_NODE = "adapter";
+    private static final String REBINDING_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="provider" for="node" attr.name="provider" attr.type="string"/>
+              <key id="prompt" for="node" attr.name="prompt" attr.type="string"/>
+              <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="application-adapter-rebinding" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="adapter">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">application-bound-adapter</data>
+                  <data key="provider">application-provider</data>
+                  <data key="prompt">Process the payload</data>
+                </node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-adapter" source="start" target="adapter">
+                  <data key="outcome">continue</data>
+                </edge>
+                <edge id="adapter-end" source="adapter" target="end">
+                  <data key="outcome">continue</data>
+                </edge>
+              </graph>
+            </graphml>
+            """;
     /**
      * The identity every conformance message and traversal runs as. An engine adapter is not a
      * security boundary — it transports {@code NodeMessage} opaquely — so one fixed context is enough
@@ -140,6 +186,191 @@ public abstract class ExecutionEngineContract {
             assertEquals(1, factoryCalls.get());
             assertEquals(1, handlerCalls.get());
             assertTrue(result.defaultedNodes().isEmpty());
+        }
+    }
+
+    /** A new application submission resolves adapters again without changing an admitted run. */
+    @Test
+    final void aLaterApplicationSubmissionResolvesANewlyRegisteredAdapter() throws Exception {
+        var providers = new ModelProviderRegistry();
+        var providerInvocations = new AtomicInteger();
+        var registry = new BehaviorRegistry().registerFactory(new RebindingFactory(providers));
+        var monitor = new ExecutionMonitor();
+        UUID firstTraversalId = UUID.randomUUID();
+        UUID secondTraversalId = UUID.randomUUID();
+        var firstTerminal = new CompletableFuture<ExecutionEvent>();
+        var secondTerminal = new CompletableFuture<ExecutionEvent>();
+
+        try (var subscription = monitor.subscribe(event -> {
+                 if (event.traversalId().equals(firstTraversalId)
+                         && event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                     firstTerminal.complete(event);
+                 }
+                 if (event.traversalId().equals(secondTraversalId)
+                         && event.type() == ExecutionEventType.EXECUTION_COMPLETED) {
+                     secondTerminal.complete(event);
+                 }
+             });
+             var application = new DefaultRavenrootApplication(engine(), monitor, registry)) {
+            var first = application.startGraphMl(TCK_IDENTITY, firstTraversalId, rebindingGraph(), "first");
+            ExecutionEvent firstFailure = firstTerminal.get(10, TimeUnit.SECONDS);
+            ExecutionOutcome firstOutcome = awaitTerminalOutcome(application, firstTraversalId);
+
+            assertEquals(first.processInstanceId(), firstFailure.processInstanceId());
+            assertEquals(first.traversalId(), firstFailure.traversalId());
+            assertEquals(first.traversalId(), first.executionId());
+            assertEquals(ProcessInstanceStatus.FAILED, firstOutcome.status());
+            assertEquals(first.processInstanceId(), firstOutcome.processInstanceId());
+            assertEquals(first.traversalId(), firstOutcome.traversalId());
+            assertNull(firstOutcome.payload(), "a refused execution must retain no result payload");
+            assertEquals(0, providerInvocations.get(),
+                    "the unavailable adapter must refuse without invoking provider capability");
+            assertEquals(1, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_STARTED,
+                    REBINDING_NODE), "the first submission must reach the bound node");
+            assertEquals(1, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_FAILED,
+                    REBINDING_NODE), "the reached node must refuse the unavailable adapter");
+            assertEquals(0, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_COMPLETED,
+                    REBINDING_NODE), "a refusal must not manufacture a NodeResult");
+            assertEquals(0, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_DEFAULTED,
+                    REBINDING_NODE), "a refusal must not degrade into an unresolved-node default");
+
+            providers.register(countingProvider(providerInvocations));
+            var second = application.startGraphMl(TCK_IDENTITY, secondTraversalId, rebindingGraph(), "second");
+            ExecutionEvent secondSuccess = secondTerminal.get(10, TimeUnit.SECONDS);
+            ExecutionOutcome secondOutcome = awaitTerminalOutcome(application, secondTraversalId);
+
+            assertEquals(second.processInstanceId(), secondSuccess.processInstanceId());
+            assertEquals(second.traversalId(), secondSuccess.traversalId());
+            assertEquals(second.traversalId(), second.executionId());
+            assertEquals(ProcessInstanceStatus.COMPLETED, secondOutcome.status());
+            assertEquals(second.processInstanceId(), secondOutcome.processInstanceId());
+            assertEquals(second.traversalId(), secondOutcome.traversalId());
+            assertEquals("resolved-second", secondOutcome.payload(),
+                    "the application must retain the newly resolved provider's exact result");
+            assertEquals(first.graphVersion(), second.graphVersion(),
+                    "both submissions must execute the identical graph document");
+            assertFalse(first.graphVersion().isBlank(), "the application must pin a graph version");
+            assertNotEquals(first.processInstanceId(), second.processInstanceId(),
+                    "separate submissions must create separate process instances");
+            assertNotEquals(first.traversalId(), second.traversalId(),
+                    "separate submissions must create separate traversals");
+            assertEquals(1, providerInvocations.get(),
+                    "only the later submission may invoke the newly registered provider");
+            assertEquals(1, eventCount(monitor, secondTraversalId, ExecutionEventType.NODE_COMPLETED,
+                    REBINDING_NODE), "the later submission must run the resolved adapter");
+            assertEquals(0, eventCount(monitor, secondTraversalId, ExecutionEventType.NODE_FAILED,
+                    REBINDING_NODE), "the resolved adapter must not retain the earlier refusal");
+            assertEquals(0, eventCount(monitor, secondTraversalId, ExecutionEventType.NODE_DEFAULTED,
+                    REBINDING_NODE), "the resolved adapter must run rather than default");
+
+            ExecutionEvent firstStarted = onlyEvent(monitor, firstTraversalId,
+                    ExecutionEventType.NODE_STARTED, REBINDING_NODE);
+            ExecutionEvent firstFailed = onlyEvent(monitor, firstTraversalId,
+                    ExecutionEventType.NODE_FAILED, REBINDING_NODE);
+            ExecutionEvent secondStarted = onlyEvent(monitor, secondTraversalId,
+                    ExecutionEventType.NODE_STARTED, REBINDING_NODE);
+            ExecutionEvent secondCompleted = onlyEvent(monitor, secondTraversalId,
+                    ExecutionEventType.NODE_COMPLETED, REBINDING_NODE);
+            assertEquals(first.processInstanceId(), firstStarted.processInstanceId());
+            assertEquals(first.processInstanceId(), firstFailed.processInstanceId());
+            assertEquals(second.processInstanceId(), secondStarted.processInstanceId());
+            assertEquals(second.processInstanceId(), secondCompleted.processInstanceId());
+            assertNotNull(firstStarted.invocationId());
+            assertNotNull(secondStarted.invocationId());
+            assertEquals(firstStarted.invocationId(), firstFailed.invocationId(),
+                    "the first node failure must settle the invocation that started");
+            assertEquals(secondStarted.invocationId(), secondCompleted.invocationId(),
+                    "the second node completion must settle the invocation that started");
+            assertNotEquals(firstStarted.invocationId(), secondStarted.invocationId(),
+                    "the two reached-node attempts must have distinct invocation identities");
+        }
+    }
+
+    private record RebindingFactory(ModelProviderRegistry providers) implements NodeBehaviorFactory {
+        @Override
+        public NodeTypeDescriptor descriptor() {
+            return new NodeTypeDescriptor(REBINDING_BEHAVIOR, "Application-bound adapter", "TCK",
+                    "Adapter resolution across application submissions.", "actor", false, List.of(
+                    NodePropertyDescriptor.adapterId("provider", "Provider", NodePropertyType.STRING,
+                            "Required provider adapter."),
+                    NodePropertyDescriptor.required("prompt", "Prompt", NodePropertyType.TEXT,
+                            "Deterministic test prompt.")), Set.of("external-provider"))
+                    .withOutcomes(NodeOutcomeDescriptor.literal("continue", "The adapter answered."));
+        }
+
+        @Override
+        public NodeHandler create(GraphNode node) {
+            String providerId = NodePropertyDescriptor.adapterIdOf(node.properties().get("provider"));
+            var resolved = providers.find(providerId);
+            if (resolved.isEmpty()) {
+                return message -> CompletableFuture.failedFuture(
+                        new IllegalStateException("No provider configured for node " + node.id()));
+            }
+            ModelProvider provider = resolved.get();
+            return message -> provider.generate(new ModelRequest(message.executionId(), node.id(),
+                            node.properties().get("prompt").toString(), message.payload(), "", "", Map.of()))
+                    .thenApply(response -> new NodeResult("continue", response.payload(), message.attributes()));
+        }
+    }
+
+    private static ModelProvider countingProvider(AtomicInteger invocations) {
+        return new ModelProvider() {
+            @Override
+            public String id() {
+                return REBINDING_PROVIDER;
+            }
+
+            @Override
+            public CompletionStage<ModelResponse> generate(ModelRequest request) {
+                invocations.incrementAndGet();
+                return CompletableFuture.completedFuture(
+                        new ModelResponse("resolved-" + request.payload(), id(), request.model(), Map.of()));
+            }
+        };
+    }
+
+    private static ByteArrayInputStream rebindingGraph() {
+        return new ByteArrayInputStream(REBINDING_GRAPH.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static long eventCount(ExecutionMonitor monitor, UUID traversalId,
+                                   ExecutionEventType type, String nodeId) {
+        return monitor.eventsAfter(0).stream().filter(event -> event.traversalId().equals(traversalId)
+                && event.type() == type && nodeId.equals(event.nodeId())).count();
+    }
+
+    private static ExecutionEvent onlyEvent(ExecutionMonitor monitor, UUID traversalId,
+                                            ExecutionEventType type, String nodeId) {
+        var matches = monitor.eventsAfter(0).stream().filter(event -> event.traversalId().equals(traversalId)
+                && event.type() == type && nodeId.equals(event.nodeId())).toList();
+        assertEquals(1, matches.size(),
+                () -> "expected exactly one " + type + " event for " + nodeId + " in " + traversalId);
+        return matches.getFirst();
+    }
+
+    private static ExecutionOutcome awaitTerminalOutcome(DefaultRavenrootApplication application,
+                                                          UUID traversalId) throws Exception {
+        var terminal = new CompletableFuture<ExecutionOutcome>();
+        pollTerminalOutcome(application, traversalId, terminal);
+        return terminal.orTimeout(10, TimeUnit.SECONDS).get();
+    }
+
+    private static void pollTerminalOutcome(DefaultRavenrootApplication application, UUID traversalId,
+                                            CompletableFuture<ExecutionOutcome> terminal) {
+        if (terminal.isDone()) {
+            return;
+        }
+        try {
+            if (application.executionResult(TCK_IDENTITY.tenantId(), traversalId)
+                    instanceof ExecutionLookup.Found found
+                    && found.outcome().status().terminal()) {
+                terminal.complete(found.outcome());
+                return;
+            }
+            CompletableFuture.delayedExecutor(1, TimeUnit.MILLISECONDS)
+                    .execute(() -> pollTerminalOutcome(application, traversalId, terminal));
+        } catch (RuntimeException failure) {
+            terminal.completeExceptionally(failure);
         }
     }
 
@@ -916,6 +1147,18 @@ public abstract class ExecutionEngineContract {
                                 "one branch satisfied the quorum, so its payload is not wrapped")));
     }
 
+    /** A refused model branch is observable without preventing an independent quorum-one success. */
+    @Test
+    final void absorbsAnUnconfiguredModelBranchWhenQuorumIsStillMet() throws Exception {
+        RefusedModelQuorumFixture.assertQuorumOneCompletes(engine());
+    }
+
+    /** The same refusal fails the traversal when the remaining branch cannot meet quorum. */
+    @Test
+    final void failsWhenAnUnconfiguredModelBranchMakesQuorumUnreachable() throws Exception {
+        RefusedModelQuorumFixture.assertUnmetQuorumFails(engine());
+    }
+
     private DynamicTest faultCase(String name, int branches, Map<String, Object> joinProperties,
                                   Set<String> failing, boolean oneBranchBlocks,
                                   java.util.function.Consumer<FanInOutcome> expectation) {
@@ -1102,33 +1345,83 @@ public abstract class ExecutionEngineContract {
         assertTrue(refusal.getMessage().toLowerCase(java.util.Locale.ROOT).contains("clos"),
                 "a closed domain must refuse promptly and say so. Without asserting the reason this "
                         + "passes against an adapter that dropped its own check and merely timed out "
-                        + "talking to a dead guardian -- a mutation that survived the first version "
-                        + "of this test. It reported: " + refusal.getMessage());
+                        + "talking to a dead guardian -- a mutation this test's earlier shape once "
+                        + "let through. It reported: " + refusal.getMessage());
     }
 
     /**
-     * The property the operational cap depends on: domains close CONCURRENTLY, not in series.
+     * The property this engine's contribution to the shutdown budget depends on: domains close
+     * CONCURRENTLY, not in series. <b>This is an engine-level property only.</b> Whether it holds at
+     * the pod level -- across the deployments actually running on one pod -- is a separate question
+     * answered by how the pod's own shutdown sequence invokes {@code close()} on each deployment's
+     * domain, not by anything this test can see; see
+     * {@code ai.ravenroot.server.deployment.DeploymentCapConfiguration}'s Javadoc for that answer as it
+     * stands today (currently: it does not hold at the pod level -- deployments are closed one at a
+     * time -- and the shutdown budget is sized accordingly, not assumed independent of {@code M}).
      *
-     * <p>the deployment-admission contract defines the per-pod cap from a shutdown budget it states is independent of the
-     * number of active deployments. That independence is a claim about this behaviour: if domains
-     * closed in series the budget would grow with M and the configured cap would be wrong.
+     * <p><b>Proved by a barrier, not by a stopwatch.</b> An elapsed-time-ratio design -- comparing how
+     * long eight concurrent closes take against one -- is a known-bad shape for this property: nodes
+     * that stop instantly make eight serial closes as fast as one, so a mutation that makes closing
+     * strictly serial can survive such a comparison outright; it is a control that could not fail. Here
+     * every domain's node blocks inside its stop until all eight have arrived; if closes were
+     * serialised the second would never start, the barrier would never trip and this test would time
+     * out. No two elapsed times are ever compared against each other, so no machine speed can make it
+     * pass or fail for the wrong reason.
      *
-     * <p><b>Proved by a barrier, not by a stopwatch.</b> The first version of this test compared
-     * elapsed time for eight closes against one and asserted a ratio — and a mutation that made
-     * closing strictly serial SURVIVED it, because nodes that stop instantly make eight serial closes
-     * as fast as one. It was a control that could not fail. Here every domain's node blocks inside
-     * its stop until all eight have arrived; if closes were serialised the second would never start,
-     * the barrier would never trip and this test would time out. No clock is involved, so no machine
-     * speed can make it pass or fail for the wrong reason.
+     * <p><b>Diagnosis: why an earlier barrier-based shape of this test still passed under a mutation
+     * that serialises closing, and what the actual cause was — corrected after being disproved by
+     * measurement.</b> That shape issued all eight {@code close()} calls from a single calling thread,
+     * evaluated one at a time inside a single stream expression, and gave each blocked node's
+     * {@code onStop} a private 30-second timeout on {@code release}. A mutation that makes
+     * {@code close()} block its own caller until the domain has fully settled — indistinguishable from
+     * "domains close in series" when observed from outside — survived it, passing after 160.5 seconds
+     * instead of failing. <b>The private per-node timeout was NOT the cause: it was measured, not
+     * assumed.</b> Tripling it from 30s to 90s left the elapsed time exactly unchanged (160.5s either
+     * way), which a 30-second private escape firing eight times in sequence cannot produce. The actual
+     * escape is {@code SubtreeDomain.close()}'s own two-phase bound, unrelated to the test's node
+     * fixture: {@code settleAll(stop).orTimeout(10, SECONDS)} then, on that timeout,
+     * {@code settleAll(cancel).orTimeout(10, SECONDS)} -- {@code .orTimeout} resolves the domain's
+     * {@code close()} stage on its own clock regardless of whether the underlying node has actually
+     * settled, so a caller blocked inside one domain's {@code close()} is released by the ENGINE after
+     * about 20 seconds no matter how long the node fixture's own private wait is set to, as long as
+     * that private wait is not shorter. Eight of those in series, one after another because a single
+     * calling thread could only reach the next {@code close()} once the previous one returned, is
+     * 8 x ~20s = ~160s -- exactly what was measured. This is D, the same per-domain close bound this
+     * class's own {@link #closesDomainsConcurrentlyRatherThanInSeries()} measures and
+     * {@code DeploymentCapConfiguration} cites — a legitimate, load-bearing production safety bound
+     * (it is what keeps one wedged node from hanging its domain's close forever), not a test artifact,
+     * and not something this test should or can remove from the scenario while still using a node that
+     * blocks long enough to make arrival observable.
      *
-     * <p><b>UNPROVEN, and recorded as such.</b> A mutation that makes {@code close()} block
-     * until settled — which is what "domains close in series" looks like from a caller's side —
-     * survived this test. The mutation was verified to apply at the intended point, so the survival is
-     * real rather than a harness artifact, and the reason was not established before this increment
-     * landed. Treat this test as expressing an intent that is not yet demonstrated to be enforceable:
-     * it may be passing for a reason unrelated to what it asserts. Establishing that, or replacing it
-     * with a gate that provably fails, is outstanding work on the M-independence the deployment-admission contract's cap
-     * formula depends on.
+     * <p>The fix is therefore singular, not twofold: <b>independent callers.</b> Each domain's
+     * {@code close()} is now invoked from its own thread (a fixed pool sized to the domain count,
+     * released together off a {@link CyclicBarrier} so they are issued together), so a mutation that
+     * makes {@code close()} block its caller can only block that one thread — there is no shared
+     * calling thread left for it to serialise the other seven onto. {@link #blockingOnStop}'s own
+     * private timeout on {@code release} is unchanged from before this fix and is not what makes this
+     * test correct; it is a hygiene safety net (see its own Javadoc), and the {@code finally} block
+     * below that always fires {@code release.countDown()} — whether the assertion passed or failed — is
+     * a faster, deterministic version of that same hygiene, not a detection mechanism.
+     *
+     * <p><b>The bound also had to be tightened, not just the issuance.</b> Independent callers alone
+     * defeats a caller-blocking mutation, but a mutation that serialises the engine's OWN dispatch of
+     * domain closes — e.g. routing every domain's close body through one shared, width-{@code W}
+     * thread pool inside the adapter — is a different, more direct violation of "domains close
+     * concurrently", and is only caught if the wait below is short enough to notice it. With {@code W}
+     * threads serving {@code width} domains, batches of {@code W} close concurrently but each batch
+     * still pays the engine's own ~20-second (D) bound, so the total time for every domain to at least
+     * BEGIN closing is {@code (ceil(width / W) - 1) * D}. A wait of 30 seconds only ever detects
+     * {@code W <= 3} (2 batches, ({@literal 3-1}) x 20 = 40s > 30s already borderline; {@code W = 4}
+     * gives ({@literal 2-1}) x 20 = 20s, comfortably under 30s, and passes -- verified: a real mutation
+     * routing this engine's domain closes through a shared {@code newFixedThreadPool(4)} passes this
+     * test in ~20.4s at a 30-second wait). A 10-second wait detects every {@code W} from 1 up to
+     * {@code width - 1} (the narrowest escapable case, one extra batch, costs exactly D = ~20s, which
+     * is comfortably above 10s), while staying well above the sub-second time a genuinely concurrent
+     * close takes even under heavy machine load. {@code width} itself is fixed at 8 to match
+     * {@code DeploymentCapConfiguration.DEFAULT_MAX_ACTIVE_DEPLOYMENTS} — a shared pool sized to accept
+     * all 8 at once is indistinguishable from true per-domain concurrency for a pod actually running 8
+     * deployments, which is not a gap in this test, it is the operational bound this test exists to
+     * protect.
      */
     @Test
     final void closesDomainsConcurrentlyRatherThanInSeries() throws Exception {
@@ -1142,20 +1435,61 @@ public abstract class ExecutionEngineContract {
             domains.add(domain);
         }
 
-        var closes = domains.stream().map(ExecutionDomain::close)
-                .map(java.util.concurrent.CompletionStage::toCompletableFuture)
-                .toArray(java.util.concurrent.CompletableFuture[]::new);
+        // Every close() is issued from its own thread, released together off a barrier, so a mutation
+        // that makes close() block its caller cannot serialise issuance -- there is no single calling
+        // thread left for it to serialise onto.
+        var ready = new CyclicBarrier(width);
+        var pool = Executors.newFixedThreadPool(width);
+        try {
+            List<CompletableFuture<Void>> closes = new ArrayList<>();
+            for (ExecutionDomain domain : domains) {
+                closes.add(CompletableFuture.supplyAsync(() -> {
+                    try {
+                        ready.await(30, TimeUnit.SECONDS);
+                    } catch (Exception barrierFailure) {
+                        throw new RuntimeException("domain " + domain.name()
+                                + " never reached the issuance barrier", barrierFailure);
+                    }
+                    return domain.close();
+                }, pool).thenCompose(java.util.function.Function.identity()).toCompletableFuture());
+            }
 
-        assertTrue(arrived.await(30, TimeUnit.SECONDS),
-                "only " + (width - arrived.getCount()) + " of " + width + " domains began closing. "
-                        + "Domains are closing in series, so a pod's shutdown budget grows with the "
-                        + "number of active deployments and ADR 0021 D7's cap formula is not "
-                        + "M-independent");
-        release.countDown();
-        java.util.concurrent.CompletableFuture.allOf(closes).get(60, TimeUnit.SECONDS);
+            try {
+                // 10s, not 30s: short enough that even one extra serialised batch (~20s, this
+                // engine's own per-domain close bound D) is caught, long enough that a genuinely
+                // concurrent close -- sub-second, even under heavy machine load -- never comes close.
+                // See this method's own Javadoc for the discrimination-boundary arithmetic and the
+                // mutation that a 30-second wait let through.
+                assertTrue(arrived.await(10, TimeUnit.SECONDS),
+                        "only " + (width - arrived.getCount()) + " of " + width + " domains began "
+                                + "closing within 10 seconds. Domains are closing in series (or in "
+                                + "batches narrower than " + width + "), so a pod's shutdown budget "
+                                + "grows with the number of deployments closing concurrently on it, "
+                                + "which DeploymentCapConfiguration's shutdown-budget arithmetic must "
+                                + "account for");
+            } finally {
+                // Not required for detection (see this method's Javadoc): a faster, deterministic
+                // version of the hygiene blockingOnStop's own private timeout already provides.
+                release.countDown();
+            }
+
+            CompletableFuture.allOf(closes.toArray(CompletableFuture[]::new)).get(60, TimeUnit.SECONDS);
+        } finally {
+            pool.shutdown();
+        }
     }
 
-    /** A node whose stop blocks until every peer has also begun stopping. */
+    /**
+     * A node whose stop blocks until every peer has also begun stopping.
+     *
+     * <p>The private 30-second timeout on {@code release} is hygiene only -- a safety net so a bug in
+     * this test's own control flow cannot leak a thread blocked forever -- and is not what makes
+     * {@link #closesDomainsConcurrentlyRatherThanInSeries()} correct. That was tested directly: tripling
+     * it to 90 seconds changes nothing about whether or how fast that test catches a serialising
+     * mutation, because the actual escape a serialised close relies on is the production engine's own
+     * per-domain close bound (~20s), not this fixture's timeout, as long as this timeout is not shorter
+     * than that. See that method's own Javadoc for the full, measurement-corrected diagnosis.
+     */
     private static RavenNode blockingOnStop(java.util.concurrent.CountDownLatch arrived,
                                             java.util.concurrent.CountDownLatch release) {
         return new RavenNode() {

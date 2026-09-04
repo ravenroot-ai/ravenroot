@@ -41,7 +41,7 @@ class ResultCommandTest {
     @Test
     void printsStatusPayloadAndVisitedNodes() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e1", "COMPLETED", false, List.of("start", "end"),
+        var view = new CliBackend.ResultView("e1", "COMPLETED", false, false, List.of("start", "end"),
                 List.of(), List.of(), false, List.of(), List.of(), "\"hello\"");
 
         assertEquals(0, cli(new StubBackend(view), new PrintStream(bytes)).run("result", "e1"));
@@ -60,7 +60,7 @@ class ResultCommandTest {
     @Test
     void makesADegradedRunVisibleEvenThoughItsStatusIsPlainSuccess() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e2", "COMPLETED", true, List.of("start", "future", "end"),
+        var view = new CliBackend.ResultView("e2", "COMPLETED", false, true, List.of("start", "future", "end"),
                 List.of("future"), List.of(), false, List.of(), List.of(), "\"hello\"");
 
         assertEquals(0, cli(new StubBackend(view), new PrintStream(bytes)).run("result", "e2"));
@@ -82,7 +82,7 @@ class ResultCommandTest {
     @Test
     void makesARunThatExecutedNothingVisibleThoughItLooksExactlyLikeACleanOne() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e4", "COMPLETED", false, List.of("start", "effect", "end"),
+        var view = new CliBackend.ResultView("e4", "COMPLETED", false, false, List.of("start", "effect", "end"),
                 List.of(), List.of("start", "effect", "end"), false, List.of(), List.of(),
                 "\"OPERATOR-PAYLOAD\"");
 
@@ -99,7 +99,7 @@ class ResultCommandTest {
     @Test
     void makesAHandledFailureVisibleThoughTheRunCompleted() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e5", "COMPLETED", false, List.of("start", "flaky", "end"),
+        var view = new CliBackend.ResultView("e5", "COMPLETED", false, false, List.of("start", "flaky", "end"),
                 List.of(), List.of(), true, List.of("flaky"), List.of(), "\"hello\"");
 
         assertEquals(0, cli(new StubBackend(view), new PrintStream(bytes)).run("result", "e5"));
@@ -114,7 +114,7 @@ class ResultCommandTest {
     @Test
     void aCleanRunPrintsNeitherBypassedNorHandledFailureLines() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e6", "COMPLETED", false, List.of("start", "end"),
+        var view = new CliBackend.ResultView("e6", "COMPLETED", false, false, List.of("start", "end"),
                 List.of(), List.of(), false, List.of(), List.of(), "\"hello\"");
 
         assertEquals(0, cli(new StubBackend(view), new PrintStream(bytes)).run("result", "e6"));
@@ -136,7 +136,7 @@ class ResultCommandTest {
     @Test
     void makesUntakenEdgesVisibleForAnIndividuallyBypassedBranchPoint() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e7", "COMPLETED", false, List.of("start", "gate"),
+        var view = new CliBackend.ResultView("e7", "COMPLETED", false, false, List.of("start", "gate"),
                 List.of(), List.of("start", "gate"), false, List.of(),
                 List.of("gate->approvedNode [outcome=approved]", "gate->rejectedNode [outcome=rejected]"),
                 "\"in\"");
@@ -153,20 +153,44 @@ class ResultCommandTest {
     @Test
     void aRunningExecutionPrintsNoPayloadLineRatherThanAnEmptyOne() {
         var bytes = new ByteArrayOutputStream();
-        var view = new CliBackend.ResultView("e3", "RUNNING", false, List.of(), List.of(),
+        var view = new CliBackend.ResultView("e3", "RUNNING", false, false, List.of(), List.of(),
                 List.of(), false, List.of(), List.of(), null);
 
         assertEquals(0, cli(new StubBackend(view), new PrintStream(bytes)).run("result", "e3"));
 
         String printed = bytes.toString();
         assertTrue(printed.contains("status=RUNNING"), printed);
+        assertTrue(printed.contains("paused=false"),
+                "a running execution says so rather than omitting the line, which is what lets a "
+                        + "reader tell \"not held\" from \"this backend cannot report holds\": " + printed);
         assertFalse(printed.contains("payload="), "no payload yet must mean no payload line: " + printed);
+    }
+
+    /**
+     * A held execution is printed as held, beside its status rather than instead of it.
+     *
+     * <p>The companion of the assertion above, and the reason both exist: a line that only ever reads
+     * {@code false} would satisfy that one, and a status that changed to something other than
+     * {@code RUNNING} would hide the hold behind a value existing consumers already switch over. Only
+     * the pair pins the intended shape — {@code status=RUNNING} <em>and</em> {@code paused=true}.</p>
+     */
+    @Test
+    void aHeldExecutionPrintsItsHoldBesideAStatusThatIsStillRunning() {
+        var bytes = new ByteArrayOutputStream();
+        var view = new CliBackend.ResultView("e8", "RUNNING", true, false, List.of("start"), List.of(),
+                List.of(), false, List.of(), List.of(), null);
+
+        assertEquals(0, cli(new StubBackend(view), new PrintStream(bytes)).run("result", "e8"));
+
+        String printed = bytes.toString();
+        assertTrue(printed.contains("status=RUNNING"), printed);
+        assertTrue(printed.contains("paused=true"), printed);
     }
 
     @Test
     void missingOrExtraArgumentsAreRejectedRatherThanGuessed() {
         var bytes = new ByteArrayOutputStream();
-        var backend = new StubBackend(new CliBackend.ResultView("e", "COMPLETED", false,
+        var backend = new StubBackend(new CliBackend.ResultView("e", "COMPLETED", false, false,
                 List.of(), List.of(), List.of(), false, List.of(), List.of(), "1"));
 
         assertFalse(cli(backend, new PrintStream(bytes)).run("result") == 0,

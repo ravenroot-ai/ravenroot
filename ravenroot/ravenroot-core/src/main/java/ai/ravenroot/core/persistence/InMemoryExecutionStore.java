@@ -7,7 +7,13 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -41,6 +47,9 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
@@ -141,6 +150,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      */
     private final Map<String, Instant> inventoryRetainedFrom = new LinkedHashMap<>();
     private final AtomicLong revisionSequence = new AtomicLong();
+    private AgentAuthorityControl agentAuthorityControl = new AgentAuthorityControl(
+            AgentAuthorityControlState.ACTIVE, 0, Instant.EPOCH, 0);
     private final Clock clock;
     private final Duration maxLeaseTtl;
     private final int maxPayloadBytes;
@@ -229,7 +240,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
                 StoreCapability.DURABLE_HANDLERS,
                 StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
-                StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS);
+                StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
+                StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS);
     }
 
     @Override
@@ -361,9 +373,36 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.approvals);
                 applyToolApprovalWrites(key, batch, folded, pin, approvals, revision, now);
 
+                DurableAgentAuthorityBudget agentBudget = existing == null ? null : existing.agentBudget;
+                for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+                    requireAgentAuthorityControl(operation);
+                    if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                        NodeInvocation invocation = folded.traversals().values().stream()
+                                .flatMap(traversal -> traversal.invocations().values().stream())
+                                .filter(candidate -> candidate.invocationId()
+                                        .equals(register.binding().invocationId()))
+                                .findFirst().orElse(null);
+                        if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                                || !invocation.parentInvocationIds()
+                                        .equals(register.binding().causalParentInvocationIds())) {
+                            throw failure(ExecutionStoreFailure.invalid(
+                                    "agent grant binding does not name the post-fold invocation"));
+                        }
+                    }
+                    try {
+                        agentBudget = AgentAuthorityBudgetFold.apply(key, agentBudget, operation, now);
+                    } catch (IllegalArgumentException | IllegalStateException invalid) {
+                        throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                    }
+                }
                 var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
                         : new LinkedHashMap<>(existing.humanTasks);
                 applyHumanTaskWrites(key, batch, folded, pin, humanTasks, revision, now);
+
+                var executionPauses = existing == null
+                        ? new LinkedHashMap<UUID, DurableExecutionPause>()
+                        : new LinkedHashMap<>(existing.executionPauses);
+                applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
 
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
@@ -371,7 +410,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         timers,
                         handlers,
                         approvals,
+                        agentBudget,
                         humanTasks,
+                        executionPauses,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -404,6 +445,80 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return entry.toStoredRevalidated(key);
             }
         });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.agentBudget);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return complete(() -> {
+            synchronized (monitor) {
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return complete(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            synchronized (monitor) {
+                if (agentAuthorityControl.state() != expectedState
+                        || agentAuthorityControl.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                if (targetState == AgentAuthorityControlState.KILLED) {
+                    long releasedTeamActive = 0;
+                    for (Entry entry : instances.values()) {
+                        if (entry.agentBudget != null
+                                && entry.agentBudget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                                && entry.agentBudget.controlEpoch() == expectedEpoch) {
+                            long before = entry.agentBudget.reserved().teamActive();
+                            entry.agentBudget = AgentAuthorityBudgetFold.apply(entry.agentBudget.key(),
+                                    entry.agentBudget, new AgentBudgetOperation.KillRoot(expectedEpoch),
+                                    clock.instant());
+                            releasedTeamActive = Math.addExact(releasedTeamActive,
+                                    before - entry.agentBudget.reserved().teamActive());
+                        }
+                    }
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(), Math.addExact(
+                            agentAuthorityControl.teamActiveReleased(), releasedTeamActive));
+                } else {
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(),
+                            agentAuthorityControl.teamActiveReleased());
+                }
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    private void requireAgentAuthorityControl(AgentBudgetOperation operation) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (agentAuthorityControl.state() != AgentAuthorityControlState.ACTIVE
+                || agentAuthorityControl.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid("agent authority control is not active for this epoch"));
+        }
     }
 
     @Override
@@ -1377,6 +1492,104 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
     }
 
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty()
+                        : Optional.ofNullable(entry.executionPauses.get(pauseId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.executionPauses.values());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    for (DurableExecutionPause pause : entry.executionPauses.values()) {
+                        if (pause.status() == ExecutionPauseStatus.HELD
+                                && traversalId.equals(pause.request().traversalId())) {
+                            return Optional.of(pause);
+                        }
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    /**
+     * Folds this batch's hold writes after the aggregate, for the reason handler writes fold after
+     * it: a hold names the invocation it sits behind, and that invocation may have been completed by
+     * this same batch.
+     */
+    private void applyExecutionPauseWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                           GraphVersionPin pin,
+                                           Map<UUID, DurableExecutionPause> pauses, long revision) {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            DurableExecutionPause existing = pauses.get(registration.pauseId());
+            if (existing != null) {
+                if (!existing.request().equals(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                            + " is already committed with a different hold"));
+                }
+                continue;
+            }
+            // At most one live hold per traversal, which is what makes findHeldExecutionPause a
+            // deterministic single answer for a resume that presents only a traversal id.
+            for (DurableExecutionPause other : pauses.values()) {
+                if (other.status() == ExecutionPauseStatus.HELD
+                        && other.request().traversalId().equals(registration.traversalId())) {
+                    throw failure(ExecutionStoreFailure.invalid("traversal "
+                            + registration.traversalId() + " is already held by " + other.request().pauseId()));
+                }
+            }
+            pauses.put(registration.pauseId(), DurableExecutionPause.held(key, registration, revision));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = pauses.get(transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            pauses.put(transition.pauseId(), current.apply(transition, revision));
+        }
+    }
+
     // ---------------------------------------------------------------- durable human tasks
 
     @Override
@@ -2229,8 +2442,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableHandler> handlers;
         /** Registration order, retained for deterministic operator inspection. */
         private final Map<UUID, DurableToolApproval> approvals;
+        private DurableAgentAuthorityBudget agentBudget;
         /** First-class human tasks retained in registration order within this instance. */
         private final Map<UUID, DurableHumanTask> humanTasks;
+        /** Operator holds retained in commit order within this instance. */
+        private final Map<UUID, DurableExecutionPause> executionPauses;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -2243,7 +2459,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
                       Map<UUID, DurableHandler> handlers,
                       Map<UUID, DurableToolApproval> approvals,
+                      DurableAgentAuthorityBudget agentBudget,
                       Map<UUID, DurableHumanTask> humanTasks,
+                      Map<UUID, DurableExecutionPause> executionPauses,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -2256,7 +2474,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.timers = timers;
             this.handlers = handlers;
             this.approvals = approvals;
+            this.agentBudget = agentBudget;
             this.humanTasks = humanTasks;
+            this.executionPauses = executionPauses;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;

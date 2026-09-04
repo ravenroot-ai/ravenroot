@@ -48,6 +48,12 @@ deliberately not `CREDENTIAL_RESOLUTION`; the agent additionally requires `TOOL_
 profile names an `OutboundCredentialBinding`; the runtime resolves it and places it on the request.
 There is no code path here that could return a secret.
 
+Each model and MCP request also carries immutable per-operation external-I/O limits. The managed
+runtime intersects them with operator policy, validates JSON media type, bounds encoded wire bytes,
+single-member gzip expansion, decoded bytes, and projected output separately, and applies the model
+profile's total deadline. Engine cancellation is registered before the call starts and is propagated
+to the active managed HTTP call; a late cancellation cannot start a model run.
+
 **A skill's body is not in the prompt until it is asked for.** An untrusted author turn lists a declared
 skill's name and description; `LoadSkillTool` hands the body over when the model calls for it, once
 per run. That is the whole difference between a skill and more text in `instructions` — an unused
@@ -61,11 +67,12 @@ records bounded source-kind/digest provenance for each of those inputs; it never
 content in the provenance record.
 
 **A model request is not authority.** In addition to `OUTBOUND_HTTP`, the `agent` behavior requires
-the `TOOL_AUTHORIZATION` package capability. The runtime parses and canonicalizes each requested
+the `TOOL_AUTHORIZATION` and `AGENT_RESOURCES` package capabilities. The runtime parses and canonicalizes each requested
 argument object under fixed bounds, evaluates the deployment's tool policy with the trusted tenant
 identity immediately before the effect, and emits correlated payload-free audit records. Missing or
-malformed authorization denies by default. `REQUIRE_APPROVAL` is a no-effect refusal in this release;
-approval redemption belongs to the approval lifecycle.
+malformed authorization denies by default. `REQUIRE_APPROVAL` durably parks the run with its tool
+reservation held; a valid one-time decision either releases it without effect or dispatches the exact
+stored call through the approval recovery lifecycle.
 
 **A tool answers; a budget terminates.** An `agent` tool never fails the node: a wrong argument, an
 invented tool name or a broken tool comes back as a tool *result* the model can read and correct. A

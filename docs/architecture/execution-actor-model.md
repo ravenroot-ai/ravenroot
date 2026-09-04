@@ -13,6 +13,14 @@ Each accepted execution owns traversal state while actor messaging isolates disp
 - A node actor contains one attempt and reports a classified result to its supervisor.
 - Pause lets the in-flight node finish and then closes the dispatch gate; resume reopens it.
 - Cancellation and completion race through named terminal outcomes so callers can distinguish the winner.
+- Each live traversal owns one monotonic budget shared by branches and cycle re-entry. Fan-out reserves
+  every child delivery atomically before the first child is dispatched. A retry reserves its new
+  traversal step, non-root amplification, and exact payload-plus-attribute bytes before its durable
+  retry transition or second send.
+- Demand-created worker and traversal actors, in-flight hops, and admission waiters have runtime
+  ceilings below the adapters' emergency stash backstops. Dynamic actor capacity also remains charged
+  at runner scope while an actor is retiring, so successive traversals cannot evade the limit by
+  accumulating slow or non-terminating stops.
 
 ## Architectural consequence
 

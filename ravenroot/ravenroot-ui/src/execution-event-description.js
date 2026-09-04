@@ -102,6 +102,12 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   JOIN_ITERATION_BACKLOG: 'A join is holding state for several iterations.',
   JOIN_ARRIVAL_DISCARDED: 'A duplicate or late join arrival was ignored.',
   JOIN_FAILED: 'Join conditions could not be satisfied.',
+  // "Holding" rather than "stopped", matching `PublicExecutionDescription.forType`'s own choice: a
+  // paused execution has not stopped -- it keeps its state, it is still listed live and it is still
+  // cancellable. A reader told an execution had stopped would go looking for a result that is not
+  // coming.
+  EXECUTION_PAUSED: 'Execution was paused and is holding before its next node.',
+  EXECUTION_RESUMED: 'Execution was resumed and is running again.',
   EXECUTION_COMPLETED: 'Execution completed successfully.',
   EXECUTION_FAILED: 'Execution failed. Protected diagnostics may contain more detail.',
   // Durable-journal types. They reach this table only as the fallback for a peer that sent no

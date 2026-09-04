@@ -90,7 +90,7 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
         output.put("sourceVersionSha256", GithubValues.sha256(versionBytes));
         output.put("generation", 0L); output.put("attempts", 0L); output.put("remoteId", input.commit);
         requireHead(api, profile, input.commit);
-        return NodeResult.continueWith(Map.copyOf(output));
+        return GithubValues.result("continue", Map.copyOf(output), Map.of());
     }
 
     private static void requireHead(GithubApi api, GithubProfile profile, String commit) {

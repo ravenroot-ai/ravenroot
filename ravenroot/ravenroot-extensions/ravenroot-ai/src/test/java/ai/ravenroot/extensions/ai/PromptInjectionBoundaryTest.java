@@ -126,7 +126,9 @@ class PromptInjectionBoundaryTest {
     @Test
     void approvalRequiredSuspendsFailClosedWithoutASecondTurnOrEffect() {
         var alpha = new McpDouble("alpha", "search").returning("must not be reached");
+        var resources = new AiTestSupport.TrackingAgentResources();
         var http = new AiTestSupport.RoutedHttp(CHAT)
+                .resources(resources)
                 .authorizing((message, tool, arguments) -> decision(
                         ToolCallAuthorization.Disposition.REQUIRE_APPROVAL, arguments))
                 .chatting(AiTestSupport.asksFor("call-1", "alpha__search"),
@@ -148,6 +150,10 @@ class PromptInjectionBoundaryTest {
         assertEquals(List.of(), alpha.calledTools());
         assertEquals(1, http.chatBodies().size(),
                 "a required approval must tear down the run instead of becoming model-visible text");
+        assertEquals(1, resources.suspends.get());
+        assertEquals(0, resources.cancels.get(),
+                "expected approval waiting must retain the durable grant and held reservation");
+        assertEquals(0, resources.completes.get());
     }
 
     @Test

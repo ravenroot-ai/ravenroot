@@ -46,15 +46,16 @@ public final class ObjectPutNodeBehavior implements NodeBehavior {
     @Override public NodeAction create(NodeConfiguration configuration, NodePackageServices services) {
         StorageSettings settings = StorageSettings.compile(configuration, runtime.profiles, StorageProfile.Operation.PUT);
         Semaphore action = new Semaphore(settings.maxConcurrency(), true);
-        return message -> {
+        return StorageRuntime.action((message, cancellation) -> {
             try {
                 Prepared prepared = prepare(message.payload(), settings);
-                return runtime.execute(message, services, settings, action, prepared.body, prepared.headers);
+                return runtime.execute(message, cancellation, services, settings, action,
+                        prepared.body, prepared.headers);
             } catch (RuntimeException failure) {
                 return CompletableFuture.failedFuture(failure instanceof StorageException ? failure
                         : StorageException.of(StorageException.Code.INVALID_INPUT));
             }
-        };
+        });
     }
 
     private static Prepared prepare(Object value, StorageSettings settings) {

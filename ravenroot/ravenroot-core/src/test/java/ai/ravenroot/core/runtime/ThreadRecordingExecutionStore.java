@@ -36,19 +36,61 @@ import java.util.concurrent.CopyOnWriteArrayList;
  * the probe to them would make the assertion "the control thread touched the store" rather than "the
  * control thread wrote to the journal", which is a different and weaker statement than the one the
  * test establishes.</p>
+ *
+ * <h2>A control call's own settlement is recorded apart from graph work</h2>
+ * <p>Releasing a durable hold commits the settlement of that hold, and it commits on the caller's
+ * thread necessarily: the control call answers whether the traversal was released, and it cannot
+ * answer that before knowing whether the release committed. Deferring it would mean reporting a
+ * resume that had not happened, which is the precise failure {@code GraphRunner} refuses.</p>
+ *
+ * <p>That write is the control operation <em>being performed</em>, not a hop's prologue being
+ * charged to the wrong thread, so it is counted separately rather than folded into the same total.
+ * The distinction is read off the batch itself — a settlement is the batch carrying an execution
+ * pause transition — and not off the thread, so it cannot absorb an unrelated write that happens to
+ * land on the same thread. {@link #graphWritesFrom} is the number the ordering assertion is made
+ * over; {@link #holdSettlementsFrom} exists so a test can assert the settlement <em>did</em> land
+ * there, which is what keeps the separation from becoming a hole.</p>
  */
 final class ThreadRecordingExecutionStore implements ExecutionStore {
 
     private final ExecutionStore delegate;
+    private final Set<StoreCapability> withheld;
     private final List<String> writingThreads = new CopyOnWriteArrayList<>();
+    private final List<String> holdSettlementThreads = new CopyOnWriteArrayList<>();
+    private final java.util.concurrent.atomic.AtomicBoolean failNextSettlement =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     ThreadRecordingExecutionStore(ExecutionStore delegate) {
-        this.delegate = delegate;
+        this(delegate, Set.of());
     }
 
-    /** How many durable writes were issued from the thread with this name. */
+    /**
+     * Wraps {@code delegate} while hiding capabilities it really has.
+     *
+     * <p>Hiding rather than substituting a different store, because the point of such a test is that
+     * everything else about the store is unchanged: an adapter that has not implemented a capability
+     * is not a broken adapter, and the runtime's behaviour against it has to be the ordinary
+     * behaviour minus that one thing. The reads behind a withheld capability keep delegating, so a
+     * test can still assert what the underlying store does or does not hold.</p>
+     */
+    ThreadRecordingExecutionStore(ExecutionStore delegate, Set<StoreCapability> withheld) {
+        this.delegate = delegate;
+        this.withheld = Set.copyOf(withheld);
+    }
+
+    /** How many durable writes of any kind were issued from the thread with this name. */
     long writesFrom(String threadName) {
         return writingThreads.stream().filter(threadName::equals).count();
+    }
+
+    /** How many of those were graph work rather than a control call settling a hold it released. */
+    long graphWritesFrom(String threadName) {
+        return writesFrom(threadName) - holdSettlementsFrom(threadName);
+    }
+
+    /** How many hold settlements were issued from the thread with this name. */
+    long holdSettlementsFrom(String threadName) {
+        return holdSettlementThreads.stream().filter(threadName::equals).count();
     }
 
     /** Every write's thread name, in order — for the failure message, so a red run names the culprit. */
@@ -56,9 +98,29 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
         return List.copyOf(writingThreads);
     }
 
+    /** Refuses the next hold settlement, and only that: every other batch still commits. */
+    void failNextHoldSettlement() {
+        failNextSettlement.set(true);
+    }
+
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
-        writingThreads.add(Thread.currentThread().getName());
+        String thread = Thread.currentThread().getName();
+        writingThreads.add(thread);
+        if (!batch.executionPauseTransitions().isEmpty()) {
+            holdSettlementThreads.add(thread);
+            if (failNextSettlement.compareAndSet(true, false)) {
+                // Refused narrowly on purpose. A revision conflict or a lost fence would fail every
+                // later write too, so a test using one could not tell "the settlement was refused"
+                // apart from "nothing could be written at all" -- and it is exactly the first that
+                // the caller has to survive.
+                var refused = new java.util.concurrent.CompletableFuture<StoredProcessInstance>();
+                refused.completeExceptionally(new ai.ravenroot.api.persistence.ExecutionStoreException(
+                        new ai.ravenroot.api.persistence.ExecutionStoreFailure.Unavailable(
+                                "hold settlement refused by the fixture")));
+                return refused;
+            }
+        }
         return delegate.apply(batch);
     }
 
@@ -66,7 +128,9 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
 
     @Override
     public Set<StoreCapability> capabilities() {
-        return delegate.capabilities();
+        var declared = new java.util.LinkedHashSet<>(delegate.capabilities());
+        declared.removeAll(withheld);
+        return Set.copyOf(declared);
     }
 
     @Override
@@ -226,6 +290,24 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
         return delegate.purgeExpiredProcessInstances(tenantId);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            loadExecutionPause(ExecutionKey key, java.util.UUID pauseId) {
+        return delegate.loadExecutionPause(key, pauseId);
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            executionPauses(ExecutionKey key) {
+        return delegate.executionPauses(key);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            findHeldExecutionPause(String tenantId, java.util.UUID traversalId) {
+        return delegate.findHeldExecutionPause(tenantId, traversalId);
     }
 
     @Override

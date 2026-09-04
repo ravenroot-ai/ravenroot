@@ -13,7 +13,50 @@ Add behavior through narrow packages whose capabilities are discoverable and who
 
 An extension advertises behavior; it never self-grants egress, credentials, tools, deployment, or artifact approval. Operators retain installation and configuration authority.
 
+## External I/O boundary
+
+Every external operation needs finite limits before transport or process handoff. Managed HTTP
+requests carry `ExternalIoLimits`; the runtime intersects them with operator policy, so an adapter can
+only tighten request wire bytes, encoded response bytes, decoded bytes, projected output, media type,
+content encoding, expansion ratio, deadline, and cooperative cancellation. Missing media type is
+valid only for an empty response whose status is declared to carry an interpreted representation.
+Encoding and byte bounds apply to every status, while media-type validation applies only to success
+and the bounded additional statuses that the caller's immutable protocol schema says it will parse;
+opaque error bodies can therefore reach status classification without becoming parser input. The
+shared decoder supports identity and, only when requested, one complete gzip member; unknown,
+stacked, malformed, trailing, or concatenated encodings fail closed.
+
+Decoded transport bytes and final projected bytes are separate limits. An adapter that wraps,
+escapes, base64-encodes, or otherwise expands a response must derive a finite projection ceiling and
+enforce it at the final `NodeResult` or provider-response boundary. Object storage, for example,
+checks the exact base64-and-metadata size before allocating the encoded value and then checks every
+canonical result payload; a raw-object ceiling is not incorrectly reused as the larger base64 ceiling.
+The managed HTTP response carries the effective operator-intersected output ceiling. A package must
+intersect that value with its locally derived structural ceiling when it creates the final result;
+the request object alone is not evidence of the authority the managed service actually granted.
+
+The managed JDK HTTP bridge cancels the subscription on a streaming breach, signals cancellation to
+the transport, and retains admission until its worker exits. It does not claim forced socket teardown
+within `cancellationBound`; packages that require that stronger lifecycle guarantee must use a
+runtime with an enforceable supervisor boundary. The GraalVM adapter is such a boundary: request
+serialization is streaming-bounded and cancellation retains admission through bounded terminate and
+reap cleanup.
+
+Protocol-specific connectors must enforce equivalent finite profile limits at their actual client
+boundary or document a narrower fail-closed capability. WebSocket bounds messages, fragments, queue,
+lifetime, and idle time without negotiating compression. Mail, AMQP, Kafka, JDBC, OCR, and Telegram
+use the finite limits and cleanup rules documented by their extension READMEs; graph payloads cannot
+enable an unsupported encoding or unbounded projection. Runtime-neutral forced termination,
+deployment fencing, and broker custody/acknowledgement redesign are outside this per-operation I/O
+contract.
+
+Conformance tests should include declared and undeclared oversized streams, slow completion and
+deadline, compression expansion, large projections, cancellation before and during handoff, and
+observable release of admission, worker, stream, process, file-descriptor, and temporary-storage
+resources used by the adapter. A longer timeout is not evidence of cleanup.
+
 ## Linked contracts
 
+- [First-party extension dependency pack](extension-pack.md)
 - [Primary interface](../architecture/ai-extension-boundaries.md)
 - [Operational or security model](../troubleshooting/ai-extensions.md)

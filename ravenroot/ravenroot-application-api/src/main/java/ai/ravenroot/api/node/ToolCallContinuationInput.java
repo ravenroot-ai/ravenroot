@@ -8,15 +8,15 @@ import java.util.UUID;
 
 /** Exact server-minted input to a trusted node package's durable tool-call continuation. */
 public final class ToolCallContinuationInput {
-    /** Stored terminal or consumable decision delivered to the trusted continuation. */
+    /** Exact durable decision being resumed. */
     public enum Decision {
-        /** The exact call may perform its one-time authorized effect. */
+        /** Approval granted; the effect may execute once after redemption. */
         APPROVED,
-        /** The exact call was refused by an authorized actor. */
+        /** Approval denied; continuation must produce no effect. */
         DENIED,
-        /** The request expired before effect consumption. */
+        /** Approval expired; continuation must produce no effect. */
         EXPIRED,
-        /** The request was cancelled before effect consumption. */
+        /** Approval cancelled; continuation must produce no effect. */
         CANCELLED
     }
 
@@ -35,19 +35,18 @@ public final class ToolCallContinuationInput {
 
     /**
      * Creates an exact immutable continuation input.
-     *
-     * @param message message delivered to the fresh re-entry traversal
-     * @param approvalId approval being resumed
-     * @param originalTraversalId traversal that proposed the call
-     * @param originalInvocationId invocation that proposed the call
-     * @param originalAttemptId attempt that proposed the call
+     * @param message trusted re-entry invocation message
+     * @param approvalId stored approval identifier
+     * @param originalTraversalId traversal that requested the tool call
+     * @param originalInvocationId invocation that requested the tool call
+     * @param originalAttemptId attempt that requested the tool call
      * @param tool canonical tool name
-     * @param canonicalArguments bounded canonical argument bytes
-     * @param argumentsDigest content binding of the canonical arguments
-     * @param decision exact stored decision being resumed
-     * @param version package-owned checkpoint format version
-     * @param checkpoint bounded opaque checkpoint bytes
-     * @param checkpointDigest content binding of the checkpoint
+     * @param canonicalArguments canonical immutable argument bytes
+     * @param argumentsDigest SHA-256 binding for the arguments
+     * @param decision exact stored decision
+     * @param version checkpoint format version
+     * @param checkpoint bounded checkpoint bytes
+     * @param checkpointDigest SHA-256 binding for the checkpoint
      */
     public ToolCallContinuationInput(NodeMessage message, UUID approvalId,
                                      UUID originalTraversalId, UUID originalInvocationId,
@@ -70,86 +69,63 @@ public final class ToolCallContinuationInput {
     }
 
     /**
-     * Returns the re-entry message.
-     *
-     * @return message delivered to the fresh re-entry traversal
+     * Returns the trusted re-entry message.
+     * @return trusted re-entry invocation message
      */
     public NodeMessage message() { return message; }
-
     /**
      * Returns the approval identity.
-     *
-     * @return approval being resumed
+     * @return stored approval identifier
      */
     public UUID approvalId() { return approvalId; }
-
     /**
      * Returns the original traversal identity.
-     *
-     * @return traversal that proposed the call
+     * @return traversal that requested the tool call
      */
     public UUID originalTraversalId() { return originalTraversalId; }
-
     /**
      * Returns the original invocation identity.
-     *
-     * @return invocation that proposed the call
+     * @return invocation that requested the tool call
      */
     public UUID originalInvocationId() { return originalInvocationId; }
-
     /**
      * Returns the original attempt identity.
-     *
-     * @return attempt that proposed the call
+     * @return attempt that requested the tool call
      */
     public UUID originalAttemptId() { return originalAttemptId; }
-
     /**
-     * Returns the requested tool.
-     *
+     * Returns the tool name.
      * @return canonical tool name
      */
     public String tool() { return tool; }
-
     /**
-     * Returns the canonical arguments without exposing internal mutable state.
-     *
-     * @return defensive copy of the canonical argument bytes
+     * Returns the canonical arguments.
+     * @return defensive copy of canonical argument bytes
      */
     public byte[] canonicalArguments() { return canonicalArguments.clone(); }
-
     /**
-     * Returns the canonical argument binding.
-     *
-     * @return content binding of the canonical arguments
+     * Returns the argument digest.
+     * @return SHA-256 argument binding
      */
     public String argumentsDigest() { return argumentsDigest; }
-
     /**
-     * Returns the approval decision.
-     *
-     * @return exact stored decision being resumed
+     * Returns the durable decision.
+     * @return exact stored decision
      */
     public Decision decision() { return decision; }
-
     /**
-     * Returns the checkpoint format version.
-     *
-     * @return package-owned checkpoint format version
+     * Returns the checkpoint version.
+     * @return checkpoint format version
      */
     public int version() { return version; }
-
     /**
-     * Returns the checkpoint without exposing internal mutable state.
-     *
-     * @return defensive copy of the opaque checkpoint bytes
+     * Returns the checkpoint.
+     * @return defensive copy of checkpoint bytes
      */
     public byte[] checkpoint() { return checkpoint.clone(); }
-
     /**
-     * Returns the checkpoint binding.
-     *
-     * @return content binding of the checkpoint
+     * Returns the checkpoint digest.
+     * @return SHA-256 checkpoint binding
      */
     public String checkpointDigest() { return checkpointDigest; }
 

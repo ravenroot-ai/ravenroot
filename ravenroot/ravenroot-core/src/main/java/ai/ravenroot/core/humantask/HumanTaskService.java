@@ -36,6 +36,8 @@ import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
+import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
@@ -59,7 +61,7 @@ public final class HumanTaskService {
 
     private final ExecutionStore store;
     private final Clock clock;
-    private final Map<ExecutionKey, ExecutionRecorder> liveRecorders = new ConcurrentHashMap<>();
+    private final Map<ExecutionKey, LiveBinding> liveRecorders = new ConcurrentHashMap<>();
     private volatile Set<String> recoverableTenants;
 
     public HumanTaskService(ExecutionStore store, Clock clock) {
@@ -75,16 +77,24 @@ public final class HumanTaskService {
     }
 
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
+        return bindLive(key, recorder, null);
+    }
+
+    /** Binds the recorder and trusted graph-budget source used by durable production re-entry. */
+    public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder,
+                                  java.util.function.Function<NodeMessage,
+                                          GraphExecutionBudgetSnapshot> budgetSnapshot) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(recorder, "recorder");
         if (!key.tenantId().equals(recorder.tenantId())
                 || !key.processInstanceId().equals(recorder.processInstanceId())) {
             throw new IllegalArgumentException("recorder belongs to a different execution");
         }
-        if (liveRecorders.putIfAbsent(key, recorder) != null) {
+        var binding = new LiveBinding(recorder, budgetSnapshot);
+        if (liveRecorders.putIfAbsent(key, binding) != null) {
             throw new IllegalStateException("a live recorder is already bound for this execution");
         }
-        return () -> liveRecorders.remove(key, recorder);
+        return () -> liveRecorders.remove(key, binding);
     }
 
     public void restrictRecoveryTenants(Set<String> tenantIds) {
@@ -103,16 +113,25 @@ public final class HumanTaskService {
         if (configured != null && !configured.contains(key.tenantId())) {
             return new HumanTaskResult(HumanTaskResult.Code.UNAVAILABLE, null, null);
         }
-        ExecutionRecorder recorder = liveRecorders.get(key);
-        if (recorder == null) return new HumanTaskResult(HumanTaskResult.Code.UNAVAILABLE, null, null);
+        LiveBinding binding = liveRecorders.get(key);
+        if (binding == null) return new HumanTaskResult(HumanTaskResult.Code.UNAVAILABLE, null, null);
+        ExecutionRecorder recorder = binding.recorder();
         UUID taskId = taskId(message);
         Instant now = clock.instant();
+        int continuationVersion = 1;
+        byte[] continuation = new byte[0];
+        if (binding.budgetSnapshot() != null) {
+            continuation = GraphExecutionContinuationCheckpoint.write(
+                    1, new byte[0], binding.budgetSnapshot().apply(message));
+            continuationVersion = GraphExecutionContinuationCheckpoint.VERSION;
+        }
         var registration = new HumanTaskRegistration(taskId, message.traversalId(),
                 message.invocationId(), message.attemptId(), message.nodeId(), taskId.toString(),
                 "human-task:" + message.attemptId(), definition.metadata(), definition.responseSchema(),
                 definition.responderRequirements(), message.security(), recorder.graphVersionPin(),
                 definition.escalationDelay().map(now::plus), now.plus(definition.expiryDelay()),
-                definition.reentryMapping());
+                definition.reentryMapping(), continuationVersion, continuation,
+                ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation));
         DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         if (existing != null) {
             return new HumanTaskResult(existing.request().sameRequest(registration)
@@ -137,6 +156,10 @@ public final class HumanTaskService {
         DurableHumanTask created = await(store.loadHumanTask(key.tenantId(), taskId)).orElseThrow();
         return new HumanTaskResult(HumanTaskResult.Code.CREATED, created, null);
     }
+
+    private record LiveBinding(ExecutionRecorder recorder,
+                               java.util.function.Function<NodeMessage,
+                                       GraphExecutionBudgetSnapshot> budgetSnapshot) { }
 
     public HumanTaskPage inbox(RequestContext context, HumanTaskQuery query) {
         Objects.requireNonNull(context, "context");

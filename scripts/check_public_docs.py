@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOTS = (ROOT / "README.md", ROOT / "docs", ROOT / "adr")
 ADR_REQUIRED_SECTIONS = ("Context", "Decision", "Consequences")
 ADR_REQUIRED_FIELDS = ("Status", "Date")
+ADR_FILENAME = re.compile(r"^([0-9]{4})-.*\.md$")
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 MERMAID_FENCE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
 
@@ -50,6 +51,18 @@ def local_link_errors(files: list[Path]) -> list[str]:
     return errors
 
 
+def adr_documents() -> list[Path]:
+    """Return the direct files that belong to the numbered ADR namespace."""
+    directory = ROOT / "adr"
+    if not directory.is_dir():
+        return []
+    return sorted(
+        document
+        for document in directory.iterdir()
+        if document.is_file() and ADR_FILENAME.fullmatch(document.name)
+    )
+
+
 def adr_errors() -> list[str]:
     errors: list[str] = []
     manifest = ROOT / "adr/CURATION-MANIFEST.md"
@@ -58,7 +71,15 @@ def adr_errors() -> list[str]:
         errors.append("adr/CURATION-MANIFEST.md is missing")
     if not index.is_file():
         errors.append("adr/README.md is missing")
-    for document in sorted((ROOT / "adr").glob("[0-9][0-9][0-9][0-9]-*.md")):
+    documents = adr_documents()
+    by_prefix: dict[str, list[Path]] = {}
+    for document in documents:
+        by_prefix.setdefault(document.name[:4], []).append(document)
+    for prefix, conflicts in sorted(by_prefix.items()):
+        if len(conflicts) > 1:
+            paths = ", ".join(document.relative_to(ROOT).as_posix() for document in conflicts)
+            errors.append(f"adr: duplicate ADR prefix {prefix}: {paths}")
+    for document in documents:
         text = document.read_text(encoding="utf-8")
         if not text.startswith("# "):
             errors.append(f"{document.relative_to(ROOT)}: ADR must start with a level-one title")
@@ -69,6 +90,124 @@ def adr_errors() -> list[str]:
             if not re.search(rf"(?mi)^##\s+{re.escape(section)}\s*$", text):
                 errors.append(f"{document.relative_to(ROOT)}: missing {section} section")
     return errors
+
+
+# --------------------------------------------------------------- superseded claims
+#
+# Statements the product has since reversed, which keep being left behind in prose that was written
+# when they were true. They are checked mechanically because a human sweep has already missed them
+# twice, once in a file the same commit was editing: the phrases sit in Javadoc and in reference
+# tables rather than in the document that describes the feature, so nothing brings a reader of the
+# change past them.
+#
+# Each entry is the phrase to look for and why its presence is a defect. Keep the phrases narrow: a
+# pattern that also matches a true statement makes the allowlist grow until it means nothing.
+SUPERSEDED_CLAIMS = {
+    "never durable":
+        "an operator hold is durable when it is taken at a boundary the runtime can write down",
+    "restart forgets":
+        "a restart no longer forgets every hold; it forgets only the ones never written down",
+    "does not survive a restart":
+        "a durable hold survives a restart and stays resumable and cancellable",
+    "no durable pause state":
+        "a durable hold is a first-class stored record with its own schema",
+    "durable pause state can be added later":
+        "it was added, and it required a schema addition for the hold record",
+    "durable pause state can be introduced later":
+        "it was introduced, and it required a schema addition for the hold record",
+    "same in-memory traversal":
+        "a hold resumed after a restart continues in a different process, rebuilt from the pinned graph",
+    "written to no store":
+        "a hold at a writable boundary is committed with the transitions that record the traversal as waiting",
+}
+
+# Where such a phrase is still true, and why. A bare list of paths would be a rubber stamp on the
+# first conflict, so each exemption states the statement it is protecting; a reader deciding whether
+# to add one has to be able to say the same kind of sentence.
+#
+# Every entry must still match something. An exemption whose text has been rewritten is removed by
+# the check itself rather than left to accumulate, which is what stops the list from outliving its
+# reasons.
+CLAIM_EXEMPTIONS = {
+    ("docs/operator-guide/persistence-lifecycle.md", "restart forgets"):
+        "describes the process-local residual: a hold at a boundary that cannot be written down is "
+        "still forgotten, and this is the page that tells an operator which is which",
+    ("adr/0020-artifact-execution-admission.md", "restart forgets"):
+        "about the artifact registry and its revocation state, which are genuinely in-memory and "
+        "have nothing to do with holds",
+    ("ravenroot/ravenroot-persistence-sqlite/src/test/java/ai/ravenroot/persistence/sqlite/"
+     "SqliteEmbedRegistrationStoreTest.java", "restart forgets"):
+        "asserts that an embed revocation must survive a restart; the phrase is the defect the test "
+        "exists to refuse, not a claim about pauses",
+    ("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/"
+     "ExecutionEvent.java", "never durable"):
+        "describes ExecutionEvent#authorMessage, the author-facing failure text, which really is "
+        "live-stream only and is written to no store; nothing to do with holds",
+}
+
+
+def superseded_claim_errors(files: list[Path]) -> list[str]:
+    errors: list[str] = []
+    matched_exemptions: set[tuple[str, str]] = set()
+    for document in files:
+        relative = document.relative_to(ROOT).as_posix()
+        flattened, lines = _flatten(document.read_text(encoding="utf-8"))
+        for phrase, reason in SUPERSEDED_CLAIMS.items():
+            start = flattened.find(phrase)
+            if start < 0:
+                continue
+            if (relative, phrase) in CLAIM_EXEMPTIONS:
+                matched_exemptions.add((relative, phrase))
+                continue
+            errors.append(
+                f"{relative}:{lines[start]}: states a superseded claim: \"{phrase}\" -- {reason}. "
+                f"Correct the statement, or add an exemption to CLAIM_EXEMPTIONS in "
+                f"{Path(__file__).name} saying why it is still true here."
+            )
+    for entry in sorted(set(CLAIM_EXEMPTIONS) - matched_exemptions):
+        errors.append(
+            f"{entry[0]}: stale exemption for \"{entry[1]}\": the phrase is no longer there, so the "
+            f"exemption is protecting nothing. Remove it from CLAIM_EXEMPTIONS."
+        )
+    return errors
+
+
+def _flatten(text: str) -> tuple[str, list[int]]:
+    """Lower-cased text with comment markers and line breaks removed, plus each character's line.
+
+    Javadoc and Markdown both wrap, so a phrase is regularly split across lines by a ``*`` or a list
+    marker. Matching the raw text would miss exactly the occurrences that are hardest to spot by
+    eye, which are the ones this check exists for. The parallel line numbers are kept so a failure
+    still names where to look.
+    """
+    flattened: list[str] = []
+    lines: list[int] = []
+    for number, line in enumerate(text.splitlines(), 1):
+        stripped = re.sub(r"^\s*(/\*\*|\*/|\*|//|#+|>|[-*+]\s)\s?", "", line)
+        for character in stripped.lower():
+            if character.isspace():
+                if flattened and flattened[-1] == " ":
+                    continue
+                flattened.append(" ")
+            else:
+                flattened.append(character)
+            lines.append(number)
+        if flattened and flattened[-1] != " ":
+            flattened.append(" ")
+            lines.append(number)
+    return "".join(flattened), lines
+
+
+def tracked_prose_files() -> list[Path]:
+    """Every tracked Markdown and Java file, because the claims live in both."""
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "*.md", "*.java"],
+        cwd=ROOT, capture_output=True, text=True, check=True,
+    )
+    return sorted(
+        ROOT / name for name in result.stdout.split("\0")
+        if name and (ROOT / name).is_file()
+    )
 
 
 def render_mermaid(files: list[Path], puppeteer_config: Path | None = None) -> list[str]:
@@ -117,6 +256,7 @@ def main() -> int:
     args = parser.parse_args()
     files = markdown_files()
     errors = local_link_errors(files) + adr_errors()
+    errors += superseded_claim_errors(tracked_prose_files())
     if args.render_mermaid:
         config = args.puppeteer_config
         if config is not None and not config.is_absolute():
@@ -129,7 +269,8 @@ def main() -> int:
         for error in errors:
             print(error, file=sys.stderr)
         return 1
-    print(f"Validated {len(files)} public Markdown files and the ADR collection.")
+    print(f"Validated {len(files)} public Markdown files, the ADR collection, and "
+          f"{len(tracked_prose_files())} tracked Markdown and Java files for superseded claims.")
     return 0
 
 

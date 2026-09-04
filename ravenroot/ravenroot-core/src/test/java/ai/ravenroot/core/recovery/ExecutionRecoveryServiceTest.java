@@ -179,6 +179,21 @@ class ExecutionRecoveryServiceTest {
         assertNull(currentAttempt(fixture).parkCause());
     }
 
+    @Test
+    void aRepeatableAttemptIsParkedBeforeRecoveryCanExceedItsDeliveryBudget() {
+        Fixture fixture = scheduleAttempt();
+        driveToRunning(fixture);
+        var dispatcher = new RecordingDispatcher(true);
+        var service = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-1", 10, TTL,
+                declaredInCatalog("repeatable"), dispatcher, 1);
+
+        var parked = assertInstanceOf(RecoveryOutcome.Parked.class, service.sweepOnce().getFirst());
+
+        assertTrue(parked.cause().contains("recovery delivery limit exceeded"));
+        assertTrue(dispatcher.sent.isEmpty(), "the over-budget attempt must be parked before dispatch");
+        assertEquals(NodeAttemptStatus.PARKED, currentAttempt(fixture).status());
+    }
+
     /**
      * The deviation from ADR 0022's written detection rule, pinned so it cannot be quietly undone.
      *

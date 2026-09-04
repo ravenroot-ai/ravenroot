@@ -5,119 +5,119 @@ import java.util.UUID;
 /** One compare-and-set lifecycle transition for a durable tool approval. */
 public sealed interface ToolApprovalTransition {
     /**
-     * Returns the approval targeted by this transition.
-     *
-     * @return approval targeted by this transition
+     * Returns the target approval identifier.
+     * @return target approval identifier
      */
     UUID approvalId();
-
     /**
-     * Returns the lifecycle state produced by this transition.
-     *
-     * @return lifecycle state produced by this transition
+     * Returns the successor approval status.
+     * @return successor approval status
      */
     ToolApprovalStatus next();
-
     /**
-     * Returns the actor responsible for this transition.
-     *
-     * @return authenticated decision actor, or an empty string for system transitions
+     * Returns the bounded actor identity.
+     * @return actor identity, or empty for server-driven transitions
      */
     String actor();
 
     /**
-     * Records an authorized approval decision.
-     *
-     * @param approvalId target approval identity
-     * @param actor authenticated approving actor
+     * An authorized approval decision.
+     * @param approvalId target approval
+     * @param actor approving identity
      */
     record Approved(UUID approvalId, String actor) implements ToolApprovalTransition {
-        /** Validates the target and actor. */
+        /** Validates transition inputs. */
         public Approved { requireId(approvalId); actor = requireActor(actor); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.APPROVED; }
     }
 
     /**
-     * Records an authorized denial decision.
-     *
-     * @param approvalId target approval identity
-     * @param actor authenticated denying actor
+     * An authorized denial decision.
+     * @param approvalId target approval
+     * @param actor denying identity
      */
     record Denied(UUID approvalId, String actor) implements ToolApprovalTransition {
-        /** Validates the target and actor. */
+        /** Validates transition inputs. */
         public Denied { requireId(approvalId); actor = requireActor(actor); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.DENIED; }
     }
 
     /**
-     * Records expiration by the durable store clock.
-     *
-     * @param approvalId target approval identity
+     * A store-clock expiry before effect authority is consumed, including after approval.
+     * @param approvalId target approval
      */
     record Expired(UUID approvalId) implements ToolApprovalTransition {
-        /** Validates the target approval identity. */
+        /** Validates transition inputs. */
         public Expired { requireId(approvalId); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.EXPIRED; }
+        /** {@inheritDoc} */
         @Override public String actor() { return ""; }
     }
 
     /**
-     * Records cancellation before effect consumption.
-     *
-     * @param approvalId target approval identity
-     * @param actor authenticated cancellation actor
+     * An authorized cancellation decision.
+     * @param approvalId target approval
+     * @param actor cancelling identity
      */
     record Cancelled(UUID approvalId, String actor) implements ToolApprovalTransition {
-        /** Validates the target and actor. */
+        /** Validates transition inputs. */
         public Cancelled { requireId(approvalId); actor = requireActor(actor); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.CANCELLED; }
     }
 
     /**
-     * Consumes the approval's one-time effect authority.
-     *
-     * @param approvalId target approval identity
+     * A single-use redemption transition.
+     * @param approvalId target approval
      */
     record Consumed(UUID approvalId) implements ToolApprovalTransition {
-        /** Validates the target approval identity. */
+        /** Validates transition inputs. */
         public Consumed { requireId(approvalId); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.CONSUMED; }
+        /** {@inheritDoc} */
         @Override public String actor() { return ""; }
     }
 
     /**
-     * Records successful completion of the consumed effect.
-     *
-     * @param approvalId target approval identity
+     * A successful effect outcome.
+     * @param approvalId target approval
      */
     record Succeeded(UUID approvalId) implements ToolApprovalTransition {
-        /** Validates the target approval identity. */
+        /** Validates transition inputs. */
         public Succeeded { requireId(approvalId); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.SUCCEEDED; }
+        /** {@inheritDoc} */
         @Override public String actor() { return ""; }
     }
 
     /**
-     * Records a known failure of the consumed effect.
-     *
-     * @param approvalId target approval identity
+     * A known failed effect outcome.
+     * @param approvalId target approval
      */
     record Failed(UUID approvalId) implements ToolApprovalTransition {
-        /** Validates the target approval identity. */
+        /** Validates transition inputs. */
         public Failed { requireId(approvalId); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.FAILED; }
+        /** {@inheritDoc} */
         @Override public String actor() { return ""; }
     }
 
     /**
-     * Records an effect whose outcome cannot be established safely.
-     *
-     * @param approvalId target approval identity
+     * An effect outcome that cannot be determined safely.
+     * @param approvalId target approval
      */
     record Indeterminate(UUID approvalId) implements ToolApprovalTransition {
-        /** Validates the target approval identity. */
+        /** Validates transition inputs. */
         public Indeterminate { requireId(approvalId); }
+        /** {@inheritDoc} */
         @Override public ToolApprovalStatus next() { return ToolApprovalStatus.INDETERMINATE; }
+        /** {@inheritDoc} */
         @Override public String actor() { return ""; }
     }
 

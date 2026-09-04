@@ -182,7 +182,23 @@ public final class BehaviorRegistry {
         return descriptor;
     }
 
-    /** Backward-compatible lookup for configuration-independent handlers. */
+    /**
+     * Looks up and materializes a configuration-independent handler registered under {@code name}.
+     *
+     * <p>This backward-compatible convenience method creates the handler with a synthetic
+     * property-less behavior node. A registered factory that requires node properties may therefore
+     * throw while the handler is being materialized. The {@link Optional} describes only whether a
+     * behavior name is registered; it does not turn a factory's configuration failure into an empty
+     * result.</p>
+     *
+     * <p>For a property-dependent behavior, use {@link #create(GraphNode)} with a graph node carrying
+     * the configuration required by the behavior's descriptor.</p>
+     *
+     * @param name the registered behavior name to look up
+     * @return the materialized handler, or empty when no behavior is registered under {@code name}
+     * @throws IllegalArgumentException when the registered factory cannot materialize a handler
+     *                                  without node properties
+     */
     public Optional<NodeHandler> find(String name) {
         var factory = factories.get(name);
         return factory == null ? Optional.empty()

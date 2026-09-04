@@ -451,11 +451,15 @@ public sealed interface ExecutionStoreFailure {
     }
 
     /**
-     * A tool-approval transition conflicts with the first durable lifecycle winner.
+     * A tool-approval lifecycle transition is illegal for the committed state or ineligible at the
+     * store clock's current time.
      *
-     * @param approvalId approval targeted by the refused transition
-     * @param current currently committed lifecycle state
-     * @param requested requested successor state
+     * <p>This includes conflicts with a durable lifecycle winner, expiry requested before the
+     * absolute deadline, and approval, denial, or consumption attempted after that deadline.</p>
+     *
+     * @param approvalId target approval identity
+     * @param current currently committed status
+     * @param requested requested successor status
      */
     record ToolApprovalNotResolvable(UUID approvalId, ToolApprovalStatus current,
                                      ToolApprovalStatus requested) implements ExecutionStoreFailure {
@@ -485,6 +489,23 @@ public sealed interface ExecutionStoreFailure {
             return "human task " + taskId + " is " + current + " at generation " + actualGeneration
                     + " and cannot transition to " + requested + " from expected generation "
                     + expectedGeneration;
+        }
+    }
+
+    /**
+     * An execution-pause transition conflicts with the first durable lifecycle winner.
+     *
+     * @param pauseId target hold identity.
+     * @param current currently committed status.
+     * @param requested requested successor status.
+     */
+    record ExecutionPauseNotResolvable(UUID pauseId, ExecutionPauseStatus current,
+                                       ExecutionPauseStatus requested) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "execution pause " + pauseId + " is " + current
+                    + " and cannot transition to " + requested;
         }
     }
 

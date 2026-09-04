@@ -16,24 +16,25 @@ import java.util.UUID;
  * the continuation are bounded here before an adapter is asked to retain them; neither may be
  * projected into public audit payloads.</p>
  *
- * @param approvalId server-minted identity of this approval request
- * @param traversalId traversal that proposed the tool call
- * @param invocationId node invocation that proposed the tool call
- * @param attemptId execution attempt that proposed the tool call
- * @param callId stable identity of the exact proposed call
- * @param nodeId graph node that owns the continuation
+ * @param approvalId server-minted approval identifier
+ * @param traversalId traversal that requested the effect
+ * @param invocationId exact node invocation that requested the effect
+ * @param attemptId exact attempt within the invocation
+ * @param callId server-minted tool-call identifier
+ * @param nodeId requesting node identifier
  * @param tool canonical tool name
  * @param canonicalArguments bounded canonical argument bytes
- * @param argumentsDigest SHA-256 binding of {@code canonicalArguments}
- * @param requester trusted requester identity captured at suspension
- * @param graphVersionPin immutable graph version needed for re-entry
- * @param policyVersion policy version that required approval
- * @param expiresAt absolute decision deadline
- * @param approverRequirements authorization required of a decision actor
- * @param requesterMayApprove whether the requester may also approve this request
- * @param continuationVersion package-owned checkpoint format version
- * @param continuation bounded opaque checkpoint bytes
- * @param continuationDigest SHA-256 binding of {@code continuation}
+ * @param argumentsDigest SHA-256 binding for the canonical arguments
+ * @param requester trusted requester security context
+ * @param graphVersionPin immutable graph version used for continuation recovery
+ * @param policyVersion policy version evaluated for the request
+ * @param expiresAt absolute store-clock deadline for approval and effect-authority consumption;
+ *                  an approved request can still expire until consumption wins
+ * @param approverRequirements required approver authorization
+ * @param requesterMayApprove whether separation of duties permits self-approval
+ * @param continuationVersion version of the opaque trusted continuation
+ * @param continuation bounded opaque continuation bytes
+ * @param continuationDigest SHA-256 binding for the continuation
  */
 public record ToolApprovalRegistration(
         UUID approvalId,
@@ -55,10 +56,7 @@ public record ToolApprovalRegistration(
         byte[] continuation,
         String continuationDigest) {
 
-    /** Maximum canonical argument payload retained per approval. */
     public static final int MAX_ARGUMENT_BYTES = 64 * 1024;
-
-    /** Maximum opaque continuation payload retained per approval. */
     public static final int MAX_CONTINUATION_BYTES = 1024 * 1024;
 
     /** Validates and snapshots all mutable inputs. */
@@ -98,15 +96,12 @@ public record ToolApprovalRegistration(
     }
 
     /**
-     * Returns the canonical arguments without exposing internal mutable state.
-     *
+     * Returns the bounded canonical arguments.
      * @return a defensive copy of the canonical argument bytes
      */
     @Override public byte[] canonicalArguments() { return canonicalArguments.clone(); }
-
     /**
-     * Returns the continuation without exposing internal mutable state.
-     *
+     * Returns the opaque trusted continuation.
      * @return a defensive copy of the opaque continuation bytes
      */
     @Override public byte[] continuation() { return continuation.clone(); }
@@ -115,7 +110,7 @@ public record ToolApprovalRegistration(
      * Tests whether another registration is an exact replay of this request.
      *
      * @param other registration to compare
-     * @return {@code true} when every authority-bearing and content-binding field matches
+     * @return {@code true} when all authority-bearing fields are identical
      */
     public boolean sameRequest(ToolApprovalRegistration other) {
         return other != null
@@ -150,7 +145,7 @@ public record ToolApprovalRegistration(
     /**
      * Returns the stable SHA-256 content binding used for arguments and continuations.
      *
-     * @param value bytes to bind
+     * @param value bytes to hash
      * @return lower-case {@code sha256:} digest
      */
     public static String digest(byte[] value) {

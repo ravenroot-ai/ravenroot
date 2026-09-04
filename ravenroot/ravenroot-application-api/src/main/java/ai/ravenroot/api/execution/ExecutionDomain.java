@@ -27,22 +27,27 @@ import java.util.concurrent.CompletionStage;
  * and resume-on-failure mean exactly what {@link ExecutionEngine} says they mean for a node in a
  * domain, and a domain never makes them optional.
  *
- * <h2>Closing is bounded, and independent of how many domains exist</h2>
+ * <h2>Closing is bounded, and one domain closing concurrently with another is not itself delayed by it
+ * -- an engine-level guarantee, verified deterministically</h2>
  * <p>{@link #close()} is bounded in time by the adapter, like {@link ExecutionEngine#close()}, and
- * closing one domain must not be delayed by another closing concurrently. That independence is what
- * lets the operational cap be defined per pod without the shutdown budget growing with the number of
- * active deployments, and the conformance suite asserts it deterministically -- via a barrier every
- * concurrently-closing domain must pass together, never by comparing elapsed time -- rather than
- * assuming it: see {@code ExecutionEngineContract.closesDomainsConcurrentlyRatherThanInSeries()} in
- * {@code ravenroot-engine-testkit}.
+ * closing one domain must not be delayed by another closing concurrently. Both shipped adapters meet
+ * this, and it is no longer merely assumed: the conformance suite asserts it deterministically -- via a
+ * barrier every concurrently-closing domain must pass through together, never by comparing elapsed time
+ * -- see {@code ExecutionEngineContract.closesDomainsConcurrentlyRatherThanInSeries()} in
+ * {@code ravenroot-engine-testkit}. That suite runs against the Pekko adapter on every build here;
+ * whether it currently also runs against the Akka adapter in a given environment is a build-environment
+ * fact, not a property of this contract -- see the "THIS FILE IS NOT COMPILED OR TESTED" section atop
+ * {@code AkkaExecutionEngine} for the current status of that module in this repository's own
+ * environment.
  *
- * <p>Both shipped adapters bound one domain's own close at 20 seconds -- two sequential
- * {@code TERMINATION_BOUND_SECONDS = 10}-bounded phases, settle every member via {@code stop()} and
- * escalate to {@code cancel()} only if that timed out, inside each adapter's own
- * {@code SubtreeDomain.close()}. Because domains close concurrently rather than one after another, this
- * per-domain bound (the deployment-admission contract's {@code D} term, see
- * {@code ai.ravenroot.server.deployment.DeploymentCapConfiguration}) contributes to a pod's worst-case
- * shutdown time exactly once, regardless of how many deployments are active.
+ * <p><b>This is an engine-level guarantee about {@code close()} itself, not a claim about any
+ * particular pod's shutdown time.</b> Whether a running pod's own shutdown sequence ever actually
+ * exercises this concurrency -- i.e. whether it asks more than one deployment's domain to close at the
+ * same time, rather than one after another -- is a property of whatever composes
+ * {@link ExecutionEngine} into that pod, not of this interface, and the two can differ: a caller that
+ * happens to close its domains one at a time gets none of the benefit this guarantee makes available.
+ * See {@code ai.ravenroot.server.deployment.DeploymentCapConfiguration}'s Javadoc for where that
+ * composition stands today and how the operator-facing shutdown budget is sized from it.
  */
 public interface ExecutionDomain {
 /**

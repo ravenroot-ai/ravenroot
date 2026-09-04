@@ -479,17 +479,16 @@ public final class AgentNodeBehavior implements NodeBehavior {
         try {
             resources = services.agentResources().admit(message, resourceRequest(settings));
         } catch (RuntimeException refused) {
-            leases.forEach(Admission.Lease::close);
-            return CompletableFuture.failedFuture(sanitize(refused));
+            return CompletableFuture.failedFuture(sanitize(
+                    cleanupBeforeRun(leases, null, refused, false)));
         }
         for (McpProfile server : settings.mcpServers()) {
             Admission.Lease held = mcpAdmission.tryAcquire(
                     message.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
-                leases.forEach(Admission.Lease::close);
-                resources.failAttempt();
-                return CompletableFuture.failedFuture(
-                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+                Throwable failure = cleanupBeforeRun(leases, resources,
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+                return CompletableFuture.failedFuture(failure);
             }
             leases.add(held);
         }
@@ -497,9 +496,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
         try {
             run = new Run(message, services, settings, resources);
         } catch (RuntimeException failure) {
-            leases.forEach(Admission.Lease::close);
-            resources.failAttempt();
-            return CompletableFuture.failedFuture(sanitize(failure));
+            return CompletableFuture.failedFuture(sanitize(
+                    cleanupBeforeRun(leases, resources, failure, false)));
         }
         var result = new CompletableFuture<NodeResult>();
         // ONE callback holding both actions, in this order, and not two callbacks written in this
@@ -516,45 +514,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // The leases are held until the LAST turn finishes, not until the first returns -- and, with
         // MCP servers declared, until after discovery, which happens before the first turn. Every
         // lease is idempotent, so a run that fails between two turns releases here exactly once.
-        result.whenComplete((ignored, failure) -> {
-            try {
-                run.abort();
-                if (failure == null) {
-                    resources.complete();
-                } else if (!run.suspended()) {
-                    // A node failure may still be followed by a durable GraphRunner retry. The
-                    // first-party mediator detaches this attempt while preserving the logical
-                    // grant; the fail-closed SPI default cancels for mediators that cannot prove it.
-                    resources.failAttempt();
-                }
-            } finally {
-                // The finally is the whole point, and it was learned the expensive way. Fusing the
-                // two actions into one callback bought the ordering and lost something the two
-                // separate registrations had for free: independence. OutboundCall.cancel() is a
-                // runtime implementation and its contract does not promise it will not throw -- this
-                // file guards seven other crossings into the runtime for exactly that reason -- and
-                // without this finally, one throw there skips the release entirely. That is not a
-                // lost nanosecond: Admission.Gate is reference-counted and only leaves the map at
-                // zero, so the (tenant, profile) key stays poisoned for the life of the process.
-                for (Admission.Lease held : leases) {
-                    // One at a time and not forEach, so that a lease refusing to close cannot take
-                    // the ones after it down with it. Admission.releaseReference raises on a broken
-                    // invariant, which is deliberate and stays -- what changes is that it costs one
-                    // lease instead of all of them.
-                    try {
-                        held.close();
-                    } catch (RuntimeException broken) {
-                        // Deliberately swallowed HERE and nowhere else in this class: this is the
-                        // terminal callback of a run that has already completed, so there is nothing
-                        // left to fail and no caller to tell. Rethrowing would only lose the
-                        // remaining leases.
-                        continue;
-                    }
-                }
-            }
-        });
+        CompletionStage<NodeResult> exposed = cleanupView(result, run, leases, resources, true);
         run.start(result);
-        return cancellableView(result);
+        return exposed;
     }
 
     private CompletionStage<ToolCallContinuationResult> resume(ToolCallContinuationInput input,
@@ -582,18 +544,18 @@ public final class AgentNodeBehavior implements NodeBehavior {
         Admission.Lease profile = profileAdmission.tryAcquire(
                 restored.tenantId() + " " + settings.profile().name(), settings.profile().maxConcurrency());
         if (profile == null) {
-            resources.cancel();
-            return CompletableFuture.failedFuture(new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+            Throwable failure = cleanupBeforeRun(leases, resources,
+                    new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+            return CompletableFuture.failedFuture(failure);
         }
         leases.add(profile);
         for (McpProfile server : settings.mcpServers()) {
             Admission.Lease held = mcpAdmission.tryAcquire(
                     restored.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
-                leases.forEach(Admission.Lease::close);
-                resources.cancel();
-                return CompletableFuture.failedFuture(
-                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+                Throwable failure = cleanupBeforeRun(leases, resources,
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+                return CompletableFuture.failedFuture(failure);
             }
             leases.add(held);
         }
@@ -601,29 +563,27 @@ public final class AgentNodeBehavior implements NodeBehavior {
         try {
             run = new Run(restored, services, settings, checkpoint, resources);
         } catch (RuntimeException invalid) {
-            leases.forEach(Admission.Lease::close);
-            resources.cancel();
-            return CompletableFuture.failedFuture(invalid);
+            return CompletableFuture.failedFuture(
+                    cleanupBeforeRun(leases, resources, invalid, false));
         }
         var result = new CompletableFuture<ToolCallContinuationResult>();
-        java.util.function.Consumer<Throwable> cleanup = failure -> {
-            try { run.abort(); } finally { leases.forEach(Admission.Lease::close); }
-            if (failure == null) {
-                resources.complete();
-            } else if (!run.suspended()) {
-                resources.cancel();
-            }
-        };
+        var exposed = new CompletableFuture<ToolCallContinuationResult>();
         result.whenComplete((continued, failure) -> {
             if (failure != null) {
-                cleanup.accept(failure);
-            } else {
-                continued.nodeResult().whenComplete((ignored, continuationFailure) -> cleanup.accept(
-                        continuationFailure));
+                Throwable terminal = cleanup(run, leases, resources, failure, false);
+                exposed.completeExceptionally(terminal);
+                return;
             }
+            var cleanedNode = new CompletableFuture<NodeResult>();
+            continued.nodeResult().whenComplete((nodeResult, continuationFailure) -> {
+                Throwable terminal = cleanup(run, leases, resources, continuationFailure, false);
+                if (terminal != null) cleanedNode.completeExceptionally(terminal);
+                else cleanedNode.complete(nodeResult);
+            });
+            exposed.complete(new ToolCallContinuationResult(cleanedNode, continued.effectSucceeded()));
         });
         run.resume(input, checkpoint, result);
-        return result;
+        return exposed;
     }
 
     private static AgentResourceRequest resourceRequest(Settings settings) {
@@ -747,29 +707,92 @@ public final class AgentNodeBehavior implements NodeBehavior {
      * this node's provenance marking must never allow. So the view is a future that forwards
      * cancellation inwards and takes its value only from the run.</p>
      */
-    private static CompletionStage<NodeResult> cancellableView(CompletableFuture<NodeResult> run) {
+    private static CompletionStage<NodeResult> cleanupView(CompletableFuture<NodeResult> result,
+                                                            Run run,
+                                                            List<Admission.Lease> leases,
+                                                            AgentResourceSession resources,
+                                                            boolean retryableFailure) {
         var exposed = new CompletableFuture<NodeResult>() {
             @Override
             public boolean cancel(boolean mayInterruptIfRunning) {
-                // This future first and the run second, so the return value does not depend on a
-                // subtlety of CompletableFuture. It was reported that the other order returns false
-                // on a cancellation that worked; MEASURED, it does not -- cancel() answers
-                // "cancelled || isCancelled()", and the exception the forwarding below propagates is
-                // itself a CancellationException, so the already-completed future still reports
-                // true. The order here is the one that stays correct without relying on that.
-                boolean cancelled = super.cancel(mayInterruptIfRunning);
-                run.cancel(mayInterruptIfRunning);
-                return cancelled;
+                boolean cancelled = result.cancel(mayInterruptIfRunning);
+                return cancelled || isCancelled();
             }
         };
-        run.whenComplete((value, failure) -> {
-            if (failure != null) {
-                exposed.completeExceptionally(failure);
-            } else {
-                exposed.complete(value);
-            }
+        result.whenComplete((value, failure) -> {
+            Throwable terminal = cleanup(run, leases, resources, failure, retryableFailure);
+            if (terminal != null) exposed.completeExceptionally(terminal);
+            else exposed.complete(value);
         });
         return exposed;
+    }
+
+    private static Throwable cleanup(Run run, List<Admission.Lease> leases,
+                                     AgentResourceSession resources, Throwable original,
+                                     boolean retryableFailure) {
+        Throwable failure = original;
+        try {
+            run.abort();
+        } catch (RuntimeException abortFailure) {
+            failure = appendFailure(failure, abortFailure);
+        }
+        try {
+            if (original == null) resources.complete();
+            else if (!run.suspended()) {
+                if (retryableFailure && !(rootCause(original) instanceof CancellationException)) {
+                    resources.failAttempt();
+                }
+                else resources.cancel();
+            }
+        } catch (RuntimeException resourceFailure) {
+            failure = appendFailure(failure, resourceFailure);
+        }
+        for (Admission.Lease held : leases) {
+            try {
+                held.close();
+            } catch (RuntimeException leaseFailure) {
+                failure = appendFailure(failure, leaseFailure);
+            }
+        }
+        return failure;
+    }
+
+    private static Throwable cleanupBeforeRun(List<Admission.Lease> leases,
+                                               AgentResourceSession resources,
+                                               Throwable original,
+                                               boolean retryableFailure) {
+        Throwable failure = original;
+        if (resources != null) {
+            try {
+                if (retryableFailure) resources.failAttempt();
+                else resources.cancel();
+            } catch (RuntimeException resourceFailure) {
+                failure = appendFailure(failure, resourceFailure);
+            }
+        }
+        for (Admission.Lease held : leases) {
+            try {
+                held.close();
+            } catch (RuntimeException leaseFailure) {
+                failure = appendFailure(failure, leaseFailure);
+            }
+        }
+        return failure;
+    }
+
+    private static Throwable appendFailure(Throwable primary, RuntimeException cleanupFailure) {
+        if (primary == null) return cleanupFailure;
+        if (primary != cleanupFailure) primary.addSuppressed(cleanupFailure);
+        return primary;
+    }
+
+    private static Throwable rootCause(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /**
@@ -1209,6 +1232,12 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         result.completeExceptionally(suspension.signal());
                         return;
                     }
+                    if (cause instanceof NodePackageServiceException service
+                            && service.reason() == NodePackageServiceException.Reason
+                                    .EFFECT_OUTCOME_INDETERMINATE) {
+                        result.completeExceptionally(service);
+                        return;
+                    }
                     // A failed stage is a tool that broke its own contract. It costs a turn and not a
                     // traversal, for the reason on AgentTool: a defect in one tool must not be able to
                     // terminate an execution the model could still finish another way. Nothing of the
@@ -1431,7 +1460,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE, RESPONSE_TOO_LARGE -> AgentException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> AgentException.Code.DEADLINE_EXCEEDED;
                 case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> AgentException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> AgentException.Code.TRANSPORT_UNAVAILABLE;
+                case BUDGET_EXHAUSTED -> AgentException.Code.TOKEN_BUDGET_EXHAUSTED;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        AgentException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new AgentException(AgentException.Code.TRANSPORT_UNAVAILABLE);

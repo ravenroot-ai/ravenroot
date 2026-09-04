@@ -645,7 +645,10 @@ final class SqliteSchema {
                 """,
                 "INSERT INTO agent_authority_control "
                         + "(singleton, state, epoch, changed_at_epoch_second, changed_at_nano) "
-                        + "VALUES (1, 'ACTIVE', 0, 0, 0)")));
+                        + "VALUES (1, 'ACTIVE', 0, 0, 0)")),
+                new SchemaMigration(13, "agent authority kill release aggregate", List.of(
+                "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
+                        + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")));
     }
 
     static int currentVersion() {

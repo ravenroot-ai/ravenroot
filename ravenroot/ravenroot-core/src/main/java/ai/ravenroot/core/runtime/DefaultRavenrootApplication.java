@@ -1497,7 +1497,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return durablePauses.updateAndGet(existing -> existing != null ? existing
                 : new ai.ravenroot.core.pause.DurableExecutionPauseService(graphDefinitionStore,
                         executionStore, engine, behaviors, monitor, identitySource, workerId,
-                        executionLeaseTtl));
+                        executionLeaseTtl, agentBudgets));
     }
 
     /**
@@ -1819,15 +1819,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes) {
         return deployments.computeIfAbsent(id, key -> {
-            // The definition store is threaded through, but this composition supplies no execution
-            // store, so a hosted traversal here is not durably recorded and is therefore not durably
-            // bound to a definition. That is the pre-existing shape of deployment registration and
-            // this change does not alter it; giving deployments durable execution state is separate
-            // work. Passing the store now is what keeps the two from having to be threaded twice --
-            // see DefaultGraphDeployment's constructor that takes both, which is where the binding
-            // actually happens.
             var created = new DefaultGraphDeployment(key, engine, behaviors, monitor, identitySource, graphMlBytes,
-                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, graphDefinitionStore);
+                    DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executionStore,
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, workerId, executionLeaseTtl,
+                    ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
+                            DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                    graphDefinitionStore, agentBudgets);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });

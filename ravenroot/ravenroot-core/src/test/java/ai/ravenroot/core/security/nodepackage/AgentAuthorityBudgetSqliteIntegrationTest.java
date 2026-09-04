@@ -147,6 +147,8 @@ class AgentAuthorityBudgetSqliteIntegrationTest {
                 assertEquals(1, tripB.get(10, TimeUnit.SECONDS));
                 assertEquals(AgentAuthorityControlState.KILLED,
                         first.loadAgentAuthorityControl().toCompletableFuture().join().state());
+                assertEquals(1, first.loadAgentAuthorityControl().toCompletableFuture().join()
+                        .teamActiveReleased());
                 var killed = first.loadAgentAuthorityBudget(original.key())
                         .toCompletableFuture().join().orElseThrow();
                 assertEquals(AgentAuthorityState.KILLED, killed.state());
@@ -176,6 +178,8 @@ class AgentAuthorityBudgetSqliteIntegrationTest {
             assertEquals(AgentAuthorityControlState.ACTIVE,
                     reopened.loadAgentAuthorityControl().toCompletableFuture().join().state());
             assertEquals(2, reopened.loadAgentAuthorityControl().toCompletableFuture().join().epoch());
+            assertEquals(1, reopened.loadAgentAuthorityControl().toCompletableFuture().join()
+                    .teamActiveReleased());
         }
     }
 

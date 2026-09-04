@@ -469,20 +469,28 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     throw failure(ExecutionStoreFailure.invalid(
                             "agent authority control epoch is exhausted"));
                 }
-                AgentAuthorityControl next = new AgentAuthorityControl(targetState, nextEpoch, clock.instant());
-                if (targetState == AgentAuthorityControlState.KILLED) {
-                    killAgentAuthorityBudgets(expectedEpoch);
+                long releasedTeamActive = targetState == AgentAuthorityControlState.KILLED
+                        ? killAgentAuthorityBudgets(expectedEpoch) : 0;
+                AgentAuthorityControl next;
+                try {
+                    next = new AgentAuthorityControl(targetState, nextEpoch, clock.instant(),
+                            Math.addExact(current.teamActiveReleased(), releasedTeamActive));
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority release aggregate is exhausted"));
                 }
                 try (PreparedStatement statement = connection.prepareStatement(
                         "UPDATE agent_authority_control SET state = ?, epoch = ?, "
-                                + "changed_at_epoch_second = ?, changed_at_nano = ? "
+                                + "changed_at_epoch_second = ?, changed_at_nano = ?, "
+                                + "team_active_released = ? "
                                 + "WHERE singleton = 1 AND state = ? AND epoch = ?")) {
                     statement.setString(1, next.state().name());
                     statement.setLong(2, next.epoch());
                     statement.setLong(3, next.changedAt().getEpochSecond());
                     statement.setInt(4, next.changedAt().getNano());
-                    statement.setString(5, expectedState.name());
-                    statement.setLong(6, expectedEpoch);
+                    statement.setLong(5, next.teamActiveReleased());
+                    statement.setString(6, expectedState.name());
+                    statement.setLong(7, expectedEpoch);
                     if (statement.executeUpdate() != 1) {
                         throw failure(ExecutionStoreFailure.invalid(
                                 "agent authority control expectation is stale"));
@@ -2644,7 +2652,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private AgentAuthorityControl readAgentAuthorityControl() throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT state, epoch, changed_at_epoch_second, changed_at_nano "
+                "SELECT state, epoch, changed_at_epoch_second, changed_at_nano, team_active_released "
                         + "FROM agent_authority_control WHERE singleton = 1");
              ResultSet rows = statement.executeQuery()) {
             if (!rows.next()) {
@@ -2653,7 +2661,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
             }
             try {
                 return new AgentAuthorityControl(AgentAuthorityControlState.valueOf(rows.getString(1)),
-                        rows.getLong(2), Instant.ofEpochSecond(rows.getLong(3), rows.getInt(4)));
+                        rows.getLong(2), Instant.ofEpochSecond(rows.getLong(3), rows.getInt(4)),
+                        rows.getLong(5));
             } catch (RuntimeException invalid) {
                 throw failure(new ExecutionStoreFailure.Unavailable(
                         "agent authority control is invalid"));
@@ -2661,8 +2670,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
-    private void killAgentAuthorityBudgets(long expectedEpoch) throws SQLException {
+    private long killAgentAuthorityBudgets(long expectedEpoch) throws SQLException {
         var replacements = new ArrayList<BudgetReplacement>();
+        long releasedTeamActive = 0;
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget");
              ResultSet rows = statement.executeQuery()) {
@@ -2679,6 +2689,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         && budget.controlEpoch() == expectedEpoch) {
                     DurableAgentAuthorityBudget killed = AgentAuthorityBudgetFold.apply(key, budget,
                             new AgentBudgetOperation.KillRoot(expectedEpoch), clock.instant());
+                    try {
+                        releasedTeamActive = Math.addExact(releasedTeamActive,
+                                budget.reserved().teamActive() - killed.reserved().teamActive());
+                    } catch (ArithmeticException overflow) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority release aggregate is exhausted"));
+                    }
                     replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
                 }
             }
@@ -2694,6 +2711,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             }
             update.executeBatch();
         }
+        return releasedTeamActive;
     }
 
     private record BudgetReplacement(ExecutionKey key, byte[] aggregate) { }

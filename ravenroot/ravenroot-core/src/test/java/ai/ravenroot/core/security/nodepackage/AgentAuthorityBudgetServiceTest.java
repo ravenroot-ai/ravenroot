@@ -12,6 +12,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.ToolCallContinuationInput;
 import ai.ravenroot.api.node.service.AgentChildResourceRequest;
 import ai.ravenroot.api.node.service.AgentResourceRequest;
+import ai.ravenroot.api.node.service.AgentResourceSession;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.persistence.AgentAuthorityState;
@@ -30,6 +31,7 @@ import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.security.ToolCallAuditSink;
+import ai.ravenroot.api.security.ToolCallAuditEvent;
 import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.core.approval.ToolApprovalService;
 import ai.ravenroot.core.approval.ToolApprovalSettings;
@@ -49,8 +51,12 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -179,6 +185,114 @@ class AgentAuthorityBudgetServiceTest {
             childSession.complete();
             assertEquals(2, fixture.budget().spent().teamCumulative());
             assertEquals(1, fixture.budget().reserved().teamActive());
+        }
+    }
+
+    @Test
+    void concurrentRepeatedChildCreationRegistersAndReportsOneLogicalMember() throws Exception {
+        var seen = new ArrayList<String>();
+        AgentBudgetTelemetry telemetry = (dimension, outcome, amount) -> seen.add(
+                dimension.name() + ':' + outcome.name() + ':' + amount);
+        try (Fixture fixture = new Fixture(policy(1), telemetry)) {
+            var parent = fixture.budgets.admit(fixture.message, resources());
+            NodeMessage child = fixture.addChildMessage();
+            var request = new AgentChildResourceRequest(child, Set.of("data-a"), Set.of(),
+                    new AgentResourceRequest(3, 90, 10, Duration.ofMillis(900)));
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var first = CompletableFuture.supplyAsync(() -> createChild(parent, request, ready, start));
+            var second = CompletableFuture.supplyAsync(() -> createChild(parent, request, ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+            AgentResourceSession firstSession = first.get(5, TimeUnit.SECONDS);
+            AgentResourceSession secondSession = second.get(5, TimeUnit.SECONDS);
+
+            assertSame(firstSession, secondSession);
+            assertEquals(2, fixture.budget().grants().size());
+            assertEquals(2, fixture.budget().spent().teamCumulative());
+            assertEquals(2, fixture.budget().reserved().teamActive());
+            assertEquals(2, seen.stream().filter("TEAM_CUMULATIVE:USED:1"::equals).count());
+            assertEquals(2, seen.stream().filter("TEAM_ACTIVE:RESERVED:1"::equals).count());
+            firstSession.complete();
+            parent.complete();
+        }
+    }
+
+    @Test
+    void concurrentRepeatedRootAdmissionRegistersAndReportsOneLogicalMember() throws Exception {
+        var seen = new ArrayList<String>();
+        AgentBudgetTelemetry telemetry = (dimension, outcome, amount) -> seen.add(
+                dimension.name() + ':' + outcome.name() + ':' + amount);
+        try (Fixture fixture = new Fixture(policy(1), telemetry)) {
+            var ready = new CountDownLatch(2);
+            var start = new CountDownLatch(1);
+            var first = CompletableFuture.supplyAsync(() -> admit(fixture, ready, start));
+            var second = CompletableFuture.supplyAsync(() -> admit(fixture, ready, start));
+            assertTrue(ready.await(5, TimeUnit.SECONDS));
+            start.countDown();
+
+            AgentResourceSession firstSession = first.get(5, TimeUnit.SECONDS);
+            AgentResourceSession secondSession = second.get(5, TimeUnit.SECONDS);
+            assertSame(firstSession, secondSession);
+            assertEquals(1, fixture.budget().grants().size());
+            assertEquals(1, seen.stream().filter("TEAM_CUMULATIVE:USED:1"::equals).count());
+            assertEquals(1, seen.stream().filter("TEAM_ACTIVE:RESERVED:1"::equals).count());
+            firstSession.complete();
+        }
+    }
+
+    @Test
+    void completedParentPreservesCausalAttenuationWhileCancelledParentCannotResetAuthority() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession parent = fixture.budgets.admit(fixture.message, resources());
+            parent.complete();
+            NodeMessage child = fixture.addChildMessage();
+
+            AgentResourceSession childSession = fixture.budgets.admit(child,
+                    new AgentResourceRequest(3, 90, 10, Duration.ofMillis(900)));
+            var budget = fixture.budget();
+            assertEquals(2, budget.grants().size());
+            assertEquals(2, budget.spent().teamCumulative());
+            assertEquals(1, budget.reserved().teamActive());
+            assertEquals(2, budget.grants().values().stream()
+                    .mapToLong(grant -> grant.registration().depth()).max().orElseThrow());
+            childSession.complete();
+        }
+
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession parent = fixture.budgets.admit(fixture.message, resources());
+            parent.cancel();
+            NodeMessage child = fixture.addChildMessage();
+            assertThrows(NodePackageServiceException.class,
+                    () -> fixture.budgets.admit(child, resources()));
+            assertEquals(1, fixture.budget().grants().size(),
+                    "a cancelled parent cannot turn a causal child into a fresh root grant");
+        }
+    }
+
+    @Test
+    void deterministicGrantReuseRequiresExactImmutableBindingAndSecurity() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession original = fixture.budgets.admit(fixture.message, resources());
+            original.suspend();
+            NodeMessage changedNode = new NodeMessage(fixture.security, fixture.key.processInstanceId(),
+                    fixture.traversalId, fixture.invocationId, UUID.randomUUID(), Set.of(), "other", null,
+                    Map.of());
+            assertThrows(NodePackageServiceException.class,
+                    () -> fixture.budgets.admit(changedNode, resources()));
+            NodeMessage changedLineage = new NodeMessage(fixture.security, fixture.key.processInstanceId(),
+                    fixture.traversalId, fixture.invocationId, UUID.randomUUID(), Set.of(UUID.randomUUID()),
+                    "agent", null, Map.of());
+            assertThrows(NodePackageServiceException.class,
+                    () -> fixture.budgets.admit(changedLineage, resources()));
+            SecurityContext changedRequest = new SecurityContext("different-request", "tenant-a", "user",
+                    PrincipalType.USER, "issuer");
+            NodeMessage changedSecurity = new NodeMessage(changedRequest, fixture.key.processInstanceId(),
+                    fixture.traversalId, fixture.invocationId, UUID.randomUUID(), Set.of(), "agent", null,
+                    Map.of());
+            assertThrows(NodePackageServiceException.class,
+                    () -> fixture.budgets.admit(changedSecurity, resources()));
+            assertEquals(1, fixture.budget().grants().size());
         }
     }
 
@@ -430,7 +544,9 @@ class AgentAuthorityBudgetServiceTest {
             var permit = session.reserveModelTurn(1);
             UUID reservationId = fixture.budget().reservations().keySet().iterator().next();
             permit.dispatch();
-            permit.settle(Optional.of(Long.MAX_VALUE), Optional.of(20L));
+            NodePackageServiceException exhausted = assertThrows(NodePackageServiceException.class,
+                    () -> permit.settle(Optional.of(Long.MAX_VALUE), Optional.of(20L)));
+            assertEquals(NodePackageServiceException.Reason.BUDGET_EXHAUSTED, exhausted.reason());
 
             var budget = fixture.budget();
             var breached = budget.reservations().get(reservationId);
@@ -439,11 +555,24 @@ class AgentAuthorityBudgetServiceTest {
                     "the durable record must retain the provider-reported overage");
             assertEquals(Long.MAX_VALUE, breached.actual().costMicros(),
                     "overflowing reported cost must saturate visibly rather than normalize downward");
+            assertEquals(Long.MAX_VALUE, budget.spent().inputTokens(),
+                    "aggregate accounting must retain provider-authoritative overage");
+            assertEquals(20, budget.spent().outputTokens());
+            assertEquals(Long.MAX_VALUE, budget.spent().costMicros());
             assertEquals(AgentAuthorityState.CANCELLED, budget.state());
             assertEquals(AgentGrantState.EXHAUSTED,
                     budget.grants().values().iterator().next().state());
+            assertEquals(0, budget.reserved().teamActive());
             assertThrows(NodePackageServiceException.class, () -> session.reserveModelTurn(2));
             assertTrue(seen.contains("TURNS:BREACHED:1"));
+            assertTrue(seen.contains("INPUT_TOKENS:BREACHED:" + Long.MAX_VALUE));
+            assertTrue(seen.contains("OUTPUT_TOKENS:BREACHED:20"));
+            assertTrue(seen.contains("COST_MICROS:BREACHED:" + Long.MAX_VALUE));
+            assertEquals(0, seen.stream().filter(value -> value.startsWith("INPUT_TOKENS:USED:")
+                    || value.startsWith("OUTPUT_TOKENS:USED:")
+                    || value.startsWith("COST_MICROS:USED:")).count(),
+                    "one breached reservation must not also publish duplicate economic usage");
+            assertEquals(1, seen.stream().filter("TEAM_ACTIVE:RELEASED:1"::equals).count());
         }
     }
 
@@ -465,8 +594,49 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     @Test
-    void killRequiresBothPlatformRoleAndScopeAndIsRuntimeWide() throws Exception {
+    void truthfulEffectAuditSurvivesAccountingFailureAndCannotBeCompletedTwice() throws Exception {
+        var events = new ArrayList<ToolCallAuditEvent>();
         try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            fixture.budgets.admit(fixture.message, resources());
+            var managed = managedTools(fixture, ToolDecision.Disposition.ALLOW, events);
+            var authorization = managed.toolAuthorization().authorize(fixture.message, "alpha__search",
+                    "{}".getBytes(StandardCharsets.UTF_8));
+            fixture.detachRecorder();
+
+            NodePackageServiceException failure = assertThrows(NodePackageServiceException.class,
+                    () -> authorization.complete(
+                            ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.SUCCEEDED));
+            assertEquals(NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE, failure.reason());
+            authorization.complete(ai.ravenroot.api.node.service.ToolCallAuthorization.Outcome.FAILED);
+            assertEquals(List.of(ToolCallAuditEvent.Disposition.ATTEMPT,
+                            ToolCallAuditEvent.Disposition.SUCCEEDED),
+                    events.stream().map(ToolCallAuditEvent::disposition).toList());
+        }
+    }
+
+    @Test
+    void refusalAuditSurvivesDeniedProposalAccountingFailure() throws Exception {
+        var events = new ArrayList<ToolCallAuditEvent>();
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            fixture.budgets.admit(fixture.message, resources());
+            var managed = managedTools(fixture, ToolDecision.Disposition.DENY, events);
+            fixture.detachRecorder();
+
+            NodePackageServiceException failure = assertThrows(NodePackageServiceException.class,
+                    () -> managed.toolAuthorization().authorize(fixture.message, "alpha__search",
+                            "{}".getBytes(StandardCharsets.UTF_8)));
+            assertEquals(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE, failure.reason());
+            assertEquals(List.of(ToolCallAuditEvent.Disposition.DENIED),
+                    events.stream().map(ToolCallAuditEvent::disposition).toList());
+        }
+    }
+
+    @Test
+    void killRequiresBothPlatformRoleAndScopeAndIsRuntimeWide() throws Exception {
+        var seen = new ArrayList<String>();
+        AgentBudgetTelemetry telemetry = (dimension, outcome, amount) -> seen.add(
+                dimension.name() + ':' + outcome.name() + ':' + amount);
+        try (Fixture fixture = new Fixture(policy(1), telemetry)) {
             fixture.budgets.admit(fixture.message, resources());
             RequestContext nonAdmin = new RequestContext("control", "user", PrincipalType.USER, "issuer",
                     "tenant-a", Set.of(), Set.of("ravenroot.agent.authority.control"));
@@ -483,7 +653,47 @@ class AgentAuthorityBudgetServiceTest {
             assertEquals(1, fixture.budgets.trip(runtimeAdmin));
             assertEquals(AgentAuthorityState.KILLED, fixture.budget().state());
             assertEquals(1, fixture.budget().controlEpoch());
+            assertEquals(0, fixture.budget().reserved().teamActive());
+            assertEquals(1, seen.stream().filter("TEAM_ACTIVE:RELEASED:1"::equals).count());
+            assertEquals(1, fixture.store.loadAgentAuthorityControl().toCompletableFuture().join()
+                    .teamActiveReleased());
         }
+    }
+
+    private static AgentResourceSession createChild(AgentResourceSession parent,
+                                                     AgentChildResourceRequest request,
+                                                     CountDownLatch ready, CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("child race did not start");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
+        return parent.createChild(request);
+    }
+
+    private static AgentResourceSession admit(Fixture fixture, CountDownLatch ready, CountDownLatch start) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("admission race did not start");
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
+        return fixture.budgets.admit(fixture.message, resources());
+    }
+
+    private static ai.ravenroot.api.node.service.NodePackageServices managedTools(
+            Fixture fixture, ToolDecision.Disposition disposition, List<ToolCallAuditEvent> events) {
+        return ManagedNodePackageServices.builder("test.package", NodePackageEgressPolicy.builder().build(),
+                        (packageId, tenantId, reference) -> Optional.empty())
+                .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .grant(NodePackageCapability.AGENT_RESOURCES)
+                .agentAuthorityBudgets(fixture.budgets)
+                .toolAuthorization(invocation -> new ToolDecision(disposition, "test", "policy-v1"),
+                        events::add)
+                .build();
     }
 
     private static AgentAuthorityBudgetPolicy policy(long bootEpoch) {

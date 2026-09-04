@@ -133,6 +133,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
      * deployment's many traversals converges on one stored copy.
      */
     private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
+    private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     private final Duration inboxRetention;
     /**
      * This pod's worker identity for lease ownership, and how long a traversal's lease lives.
@@ -201,7 +202,8 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                                   ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity, null,
                 DEFAULT_INBOX_RETENTION, "ravenroot-" + UUID.randomUUID(), Duration.ofSeconds(30),
-                RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), graphDefinitionStore);
+                RequestReplyLimits.defaults(ingressBufferCapacity), Clock.systemUTC(), graphDefinitionStore,
+                null);
     }
 
     /**
@@ -306,7 +308,37 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                                   ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
                 executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
-                Clock.systemUTC(), graphDefinitionStore);
+                Clock.systemUTC(), graphDefinitionStore, null);
+    }
+
+    /**
+     * Composes durable hosted traversals with finite first-party agent resources.
+     * @param id deployment identity
+     * @param engine execution engine
+     * @param behaviors trusted behavior registry
+     * @param monitor execution event monitor
+     * @param identitySource trusted execution identity source
+     * @param graphMl immutable graph document
+     * @param ingressBufferCapacity bounded ingress capacity
+     * @param executionStore durable execution store
+     * @param inboxRetention durable inbox retention
+     * @param workerId execution worker identity
+     * @param executionLeaseTtl execution lease duration
+     * @param requestReplyLimits request/reply limits
+     * @param graphDefinitionStore pinned graph-definition store
+     * @param agentBudgets finite agent authority mediator, or {@code null} when unavailable
+     */
+    public DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                                  ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                                  byte[] graphMl, int ingressBufferCapacity,
+                                  ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                                  Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                                  RequestReplyLimits requestReplyLimits,
+                                  ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                  ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                Clock.systemUTC(), graphDefinitionStore, agentBudgets);
     }
 
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
@@ -318,7 +350,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            RequestReplyLimits requestReplyLimits, Clock clock) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
                 executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
-                null);
+                null, null);
     }
 
     /** The terminal constructor, and the only one that assigns state. */
@@ -328,8 +360,10 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            ai.ravenroot.api.persistence.ExecutionStore executionStore,
                            Duration inboxRetention, String workerId, Duration executionLeaseTtl,
                            RequestReplyLimits requestReplyLimits, Clock clock,
-                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore) {
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets) {
         this.graphDefinitionStore = graphDefinitionStore;
+        this.agentBudgets = agentBudgets;
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.executionLeaseTtl = Objects.requireNonNull(executionLeaseTtl, "executionLeaseTtl");
         this.requestReplyLimits = Objects.requireNonNull(requestReplyLimits, "requestReplyLimits");
@@ -535,8 +569,10 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                         @Override
                         public CompletionStage<GraphExecutionResult> execute(SecurityContext establishedIdentity,
                                 UUID processInstanceId, UUID traversalId, Object payload) {
-                            return readyRunner.execute(establishedIdentity, processInstanceId, traversalId,
-                                    payload, graphVersion, id.value(), traversalId.toString());
+                            ExecutionRecorder recorder = openTraversalRecorder(
+                                    establishedIdentity, processInstanceId, traversalId);
+                            return executeHosted(readyRunner, establishedIdentity, processInstanceId,
+                                    traversalId, payload, recorder);
                         }
 
                         @Override
@@ -1131,6 +1167,58 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         }
     }
 
+    private CompletionStage<GraphExecutionResult> executeHosted(GraphRunner activeRunner,
+            SecurityContext security, UUID processInstanceId, UUID traversalId, Object payload,
+            ExecutionRecorder recorder) {
+        ai.ravenroot.api.persistence.ExecutionKey key = new ai.ravenroot.api.persistence.ExecutionKey(
+                security.tenantId(), processInstanceId);
+        AutoCloseable budgetBinding = null;
+        try {
+            budgetBinding = agentBudgets == null || recorder == null
+                    ? null : agentBudgets.bindLive(key, recorder);
+            CompletionStage<GraphExecutionResult> execution = activeRunner.execute(security,
+                    processInstanceId, traversalId, payload, graphVersion, id.value(),
+                    traversalId.toString(), recorder);
+            AutoCloseable finalBudgetBinding = budgetBinding;
+            return execution.whenComplete((result, failure) -> {
+                Throwable cause = unwrapFailure(failure);
+                try {
+                    if (agentBudgets != null && recorder != null && (cause == null
+                            || !(cause instanceof ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
+                            || cause instanceof ai.ravenroot.core.humantask.DurableHumanTaskSuspension))) {
+                        agentBudgets.finishProcess(key, failure == null && result != null);
+                    }
+                } finally {
+                    closeQuietly(finalBudgetBinding);
+                    closeQuietly(recorder);
+                }
+            });
+        } catch (RuntimeException | Error failure) {
+            closeQuietly(budgetBinding);
+            closeQuietly(recorder);
+            throw failure;
+        }
+    }
+
+    private static Throwable unwrapFailure(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof java.util.concurrent.CompletionException
+                || current instanceof java.util.concurrent.ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
+    }
+
+    private static void closeQuietly(AutoCloseable binding) {
+        if (binding == null) return;
+        try {
+            binding.close();
+        } catch (Exception ignored) {
+            // Store lease expiry and process teardown remain the recovery backstops.
+        }
+    }
+
     private static <T> T awaitStore(CompletionStage<T> stage) {
         try {
             return stage.toCompletableFuture().join();
@@ -1196,18 +1284,15 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 // as a unit, which in the current scope (no cluster, no multi-attempt redelivery) is exactly
                 // what one accepted ingress event's traversal already is. Both are fixed for this one
                 // execute() call, so every event it produces carries the same pair.
-                activeRunner.execute(security, processInstanceId, traversalId, payload, graphVersion,
-                                id.value(), traversalId.toString(), recorder)
+                executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
                         .whenComplete((ignoredResult, ignoredError) -> {
                             // Closed on TRAVERSAL completion, never on deployment stop: a
                             // deployment that runs for days would otherwise hold every instance it
                             // ever touched, and each held lease is an instance a recovery sweep is
                             // correctly forbidden from reclaiming.
-                            closeQuietly(recorder);
                             permits.release();
                         });
             } catch (RuntimeException | Error dispatchFailure) {
-                closeQuietly(recorder);
                 permits.release();
                 throw dispatchFailure;
             }
@@ -1308,14 +1393,11 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 throw recordFailure;
             }
             try {
-                activeRunner.execute(security, processInstanceId, traversalId, payload, graphVersion,
-                                id.value(), traversalId.toString(), recorder)
+                executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
                         .whenComplete((ignoredResult, ignoredError) -> {
-                            closeQuietly(recorder);
                             permits.release();
                         });
             } catch (RuntimeException | Error dispatchFailure) {
-                closeQuietly(recorder);
                 permits.release();
                 throw dispatchFailure;
             }

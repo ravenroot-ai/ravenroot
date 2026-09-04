@@ -261,7 +261,7 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl());
+                        recoveryConfiguration.leaseTtl(), agentBudgets);
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor));
             }

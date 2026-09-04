@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.ai;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
@@ -16,8 +17,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -95,6 +99,48 @@ class AgentNodeBehaviorTest {
         assertEquals(1, result.attributes().get("agent.turns"));
         assertEquals(0, result.attributes().get("agent.toolCalls"));
         assertEquals(0, behavior.admissionEntries());
+    }
+
+    @Test
+    @DisplayName("a provider usage breach fails before its generated answer can leave the node")
+    void aProviderUsageBreachNeverReturnsTheOverBudgetAnswer() {
+        var resources = new AiTestSupport.TrackingAgentResources().failingSettlement(
+                new NodePackageServiceException(NodePackageServiceException.Reason.BUDGET_EXHAUSTED));
+        var http = new AiTestSupport.ScriptedHttp().then(
+                AiTestSupport.answersUsing("must-not-escape", 101, 20));
+        http.resources(resources);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        AgentException refusal = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.TOKEN_BUDGET_EXHAUSTED, refusal.code());
+        assertEquals(1, http.calls());
+        assertEquals(0, resources.completes.get());
+        assertEquals(1, resources.failedAttempts.get());
+    }
+
+    @Test
+    @DisplayName("the exposed result waits for durable resource terminalization")
+    void resultCompletionFollowsResourceCompletion() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var resources = new AiTestSupport.TrackingAgentResources().blockingCompletion(entered, release);
+        var http = new AiTestSupport.ScriptedHttp().then(AiTestSupport.answers("done"));
+        http.resources(resources);
+        NodeAction action = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)))
+                .create(configuration(Map.of("provider", "local", "instructions", "be terse",
+                        "objective", "say hi")), http);
+
+        CompletableFuture<NodeResult> observed = CompletableFuture.supplyAsync(
+                        () -> action.handle(AiTestSupport.message("a payload")))
+                .thenCompose(java.util.function.Function.identity()).toCompletableFuture();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        assertFalse(observed.isDone(),
+                "the runner must not observe node completion before durable resources terminate");
+        release.countDown();
+        assertEquals("done", observed.get(5, TimeUnit.SECONDS).payload());
+        assertEquals(1, resources.completes.get());
     }
 
     @Test

@@ -240,9 +240,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         String tool = safeToolName(rawTool);
         UUID callId = UUID.randomUUID();
         if ("invalid-tool".equals(tool)) {
-            chargeDeniedTool(delivered, callId);
-            recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
-                    "TOOL_INVALID");
+            auditAndChargeDenied(delivered, callId, tool, "", "TOOL_INVALID");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
                     delivered, tool, false);
         }
@@ -260,9 +258,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             arguments = object;
             canonical = PayloadJson.write(arguments).getBytes(StandardCharsets.UTF_8);
         } catch (RuntimeException invalid) {
-            chargeDeniedTool(delivered, callId);
-            recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
-                    "ARGUMENTS_INVALID");
+            auditAndChargeDenied(delivered, callId, tool, "", "ARGUMENTS_INVALID");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
                     delivered, tool, false);
         }
@@ -276,9 +272,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                     delivered.processInstanceId(), delivered.nodeId(), tool, policyArguments)),
                     "toolPolicy decision");
         } catch (RuntimeException policyFailure) {
-            chargeDeniedTool(delivered, callId);
-            recordTool(delivered, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED,
-                    "POLICY_UNAVAILABLE");
+            auditAndChargeDenied(delivered, callId, tool, digest, "POLICY_UNAVAILABLE");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, digest, canonical,
                     delivered, tool, false);
         }
@@ -299,12 +293,14 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             case REQUIRE_APPROVAL -> "APPROVAL_REQUIRED";
         };
         AgentAuthorityBudgetService.ToolReservation reservation = null;
-        if (disposition == ToolCallAuthorization.Disposition.ALLOW) {
-            reservation = reserveTool(delivered, callId);
-        } else if (disposition == ToolCallAuthorization.Disposition.DENY) {
-            chargeDeniedTool(delivered, callId);
+        if (disposition == ToolCallAuthorization.Disposition.DENY) {
+            auditAndChargeDenied(delivered, callId, tool, digest, reason);
+        } else {
+            recordTool(delivered, callId, tool, digest, auditDisposition, reason);
+            if (disposition == ToolCallAuthorization.Disposition.ALLOW) {
+                reservation = reserveTool(delivered, callId);
+            }
         }
-        recordTool(delivered, callId, tool, digest, auditDisposition, reason);
         return new ManagedToolCall(callId, disposition, digest, canonical, delivered, tool,
                 disposition == ToolCallAuthorization.Disposition.ALLOW, reservation);
     }
@@ -319,6 +315,25 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         if (capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
                 && agentAuthorityBudgets != null) {
             agentAuthorityBudgets.chargeDeniedTool(message, callId);
+        }
+    }
+
+    private void auditAndChargeDenied(NodeMessage message, UUID callId, String tool,
+                                      String digest, String reason) {
+        RuntimeException failure = null;
+        try {
+            recordTool(message, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED, reason);
+        } catch (RuntimeException auditFailure) {
+            failure = auditFailure;
+        }
+        try {
+            chargeDeniedTool(message, callId);
+        } catch (RuntimeException accountingFailure) {
+            if (failure == null) failure = accountingFailure;
+            else failure.addSuppressed(accountingFailure);
+        }
+        if (failure != null) {
+            throw new NodePackageServiceException(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
         }
     }
 
@@ -418,11 +433,24 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         public void complete(Outcome outcome) {
             Objects.requireNonNull(outcome, "outcome");
             if (!terminalExpected || !completed.compareAndSet(false, true)) return;
-            if (budgetReservation != null) budgetReservation.settle();
-            recordTool(message, callId, tool, argumentsDigest,
-                    outcome == Outcome.SUCCEEDED ? ToolCallAuditEvent.Disposition.SUCCEEDED
-                            : ToolCallAuditEvent.Disposition.FAILED,
-                    outcome == Outcome.SUCCEEDED ? "EFFECT_SUCCEEDED" : "EFFECT_FAILED");
+            boolean failed = false;
+            try {
+                recordTool(message, callId, tool, argumentsDigest,
+                        outcome == Outcome.SUCCEEDED ? ToolCallAuditEvent.Disposition.SUCCEEDED
+                                : ToolCallAuditEvent.Disposition.FAILED,
+                        outcome == Outcome.SUCCEEDED ? "EFFECT_SUCCEEDED" : "EFFECT_FAILED");
+            } catch (RuntimeException auditFailure) {
+                failed = true;
+            }
+            try {
+                if (budgetReservation != null) budgetReservation.settle();
+            } catch (RuntimeException accountingFailure) {
+                failed = true;
+            }
+            if (failed) {
+                throw new NodePackageServiceException(
+                        NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE);
+            }
         }
     }
 

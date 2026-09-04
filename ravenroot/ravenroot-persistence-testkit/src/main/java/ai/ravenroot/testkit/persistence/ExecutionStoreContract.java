@@ -15,6 +15,7 @@ import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.AgentAuthorityBinding;
 import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
 import ai.ravenroot.api.persistence.AgentAuthorityGrantRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityRootRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityState;
@@ -2529,11 +2530,14 @@ public abstract class ExecutionStoreContract {
         assertEquals(before, budget(fixture.key()));
 
         assertEquals(0, await(store().loadAgentAuthorityControl()).epoch());
-        assertEquals(1, await(store().transitionAgentAuthorityControl(
-                AgentAuthorityControlState.ACTIVE, 0, AgentAuthorityControlState.KILLED)).epoch());
+        AgentAuthorityControl killedControl = await(store().transitionAgentAuthorityControl(
+                AgentAuthorityControlState.ACTIVE, 0, AgentAuthorityControlState.KILLED));
+        assertEquals(1, killedControl.epoch());
+        assertEquals(1, killedControl.teamActiveReleased());
         DurableAgentAuthorityBudget killed = budget(fixture.key());
         assertEquals(AgentAuthorityState.KILLED, killed.state());
         assertEquals(1, killed.controlEpoch());
+        assertEquals(0, killed.reserved().teamActive());
         ExecutionStoreFailure staleDispatch = failureOf(() -> applyBudget(fixture.key(),
                 new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 0)));
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, staleDispatch);
@@ -2553,7 +2557,8 @@ public abstract class ExecutionStoreContract {
     @Test
     final void providerUsageBreachRetainsObservedOverageAndRevokesAuthority() {
         assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
-        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 2);
+        long cumulative = budget(fixture.key()).spent().teamCumulative();
         AgentBudgetReservation held = hold(fixture, fixture.grantIds().getFirst(), 1,
                 new AgentBudgetVector(1, 10, 10, 10, 20, 0, 0, 0, 0));
         applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 0));
@@ -2567,6 +2572,17 @@ public abstract class ExecutionStoreContract {
         assertEquals(AgentAuthorityState.CANCELLED, breached.state());
         assertEquals(AgentGrantState.EXHAUSTED,
                 breached.grants().get(fixture.grantIds().getFirst()).state());
+        assertEquals(AgentGrantState.CANCELLED,
+                breached.grants().get(fixture.grantIds().get(1)).state(),
+                "revoking the root must retire sibling authority too");
+        assertEquals(observed.turns(), breached.spent().turns());
+        assertEquals(observed.inputTokens(), breached.spent().inputTokens());
+        assertEquals(observed.outputTokens(), breached.spent().outputTokens());
+        assertEquals(observed.elapsedMillis(), breached.spent().elapsedMillis());
+        assertEquals(observed.costMicros(), breached.spent().costMicros());
+        assertEquals(cumulative, breached.spent().teamCumulative());
+        assertEquals(0, breached.reserved().teamActive(),
+                "a breached root cannot retain phantom active-team slots");
         ExecutionStoreFailure refused = failureOf(() -> hold(fixture,
                 fixture.grantIds().getFirst(), 2,
                 new AgentBudgetVector(1, 1, 1, 1, 1, 0, 0, 0, 0)));

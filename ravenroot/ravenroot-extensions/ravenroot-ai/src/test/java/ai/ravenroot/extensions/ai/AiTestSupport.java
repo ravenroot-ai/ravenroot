@@ -64,12 +64,17 @@ final class AiTestSupport {
         final AtomicInteger admissions = new AtomicInteger();
         final AtomicInteger completes = new AtomicInteger();
         final AtomicInteger cancels = new AtomicInteger();
+        final AtomicInteger failedAttempts = new AtomicInteger();
         final AtomicInteger suspends = new AtomicInteger();
         final AtomicInteger modelDispatches = new AtomicInteger();
         final AtomicInteger modelReleases = new AtomicInteger();
         final AtomicInteger modelIndeterminate = new AtomicInteger();
         private final long maximumOutputTokens;
         private final java.time.Duration maximumDuration;
+        private volatile RuntimeException settlementFailure;
+        private volatile RuntimeException cancellationFailure;
+        private volatile java.util.concurrent.CountDownLatch completionEntered;
+        private volatile java.util.concurrent.CountDownLatch releaseCompletion;
 
         TrackingAgentResources() {
             this(Long.MAX_VALUE, java.time.Duration.ofDays(3650));
@@ -78,6 +83,23 @@ final class AiTestSupport {
         TrackingAgentResources(long maximumOutputTokens, java.time.Duration maximumDuration) {
             this.maximumOutputTokens = maximumOutputTokens;
             this.maximumDuration = maximumDuration;
+        }
+
+        TrackingAgentResources failingSettlement(RuntimeException failure) {
+            settlementFailure = failure;
+            return this;
+        }
+
+        TrackingAgentResources failingCancellation(RuntimeException failure) {
+            cancellationFailure = failure;
+            return this;
+        }
+
+        TrackingAgentResources blockingCompletion(java.util.concurrent.CountDownLatch entered,
+                                                   java.util.concurrent.CountDownLatch release) {
+            completionEntered = entered;
+            releaseCompletion = release;
+            return this;
         }
 
         @Override public ai.ravenroot.api.node.service.AgentResourceSession admit(
@@ -113,6 +135,7 @@ final class AiTestSupport {
                         @Override public void settle(java.util.Optional<Long> inputTokens,
                                                      java.util.Optional<Long> outputTokens) {
                             terminal.compareAndSet(false, true);
+                            if (settlementFailure != null) throw settlementFailure;
                         }
                         @Override public void indeterminate() {
                             if (terminal.compareAndSet(false, true)) modelIndeterminate.incrementAndGet();
@@ -121,8 +144,25 @@ final class AiTestSupport {
                 }
                 @Override public ai.ravenroot.api.node.service.AgentResourceSession createChild(
                         ai.ravenroot.api.node.service.AgentChildResourceRequest request) { return session(); }
-                @Override public void complete() { completes.incrementAndGet(); }
-                @Override public void cancel() { cancels.incrementAndGet(); }
+                @Override public void complete() {
+                    completes.incrementAndGet();
+                    if (completionEntered != null) completionEntered.countDown();
+                    if (releaseCompletion != null) {
+                        try {
+                            if (!releaseCompletion.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("resource completion was not released");
+                            }
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("resource completion interrupted", interrupted);
+                        }
+                    }
+                }
+                @Override public void cancel() {
+                    cancels.incrementAndGet();
+                    if (cancellationFailure != null) throw cancellationFailure;
+                }
+                @Override public void failAttempt() { failedAttempts.incrementAndGet(); }
                 @Override public void suspend() { suspends.incrementAndGet(); }
             };
         }

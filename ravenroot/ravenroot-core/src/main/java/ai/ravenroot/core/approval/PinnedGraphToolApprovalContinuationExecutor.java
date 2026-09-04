@@ -178,6 +178,8 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             }
             AutoCloseable approvalResourceBinding = approvalBinding;
             AutoCloseable budgetResourceBinding = budgetBinding;
+            ExecutionKey executionKey = new ExecutionKey(
+                    continuation.requester().tenantId(), continuation.processInstanceId());
             CompletionStage<Boolean> result = runner.executeFrom(continuation.requester(),
                     continuation.processInstanceId(), continuation.resumeTraversalId(),
                     continuation.nodeId(), continuation.graphVersionPin().reference(), recorder,
@@ -194,17 +196,21 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                         }
                     }, prepared.action());
             CompletionStage<Boolean> effectResult = result.handle((succeeded, failure) -> {
+                Throwable cause = failure == null ? null : unwrap(failure);
+                if (agentBudgets != null && (cause == null || !isDurableSuspension(cause))) {
+                    agentBudgets.finishProcess(executionKey, failure == null);
+                }
                 DurableToolApproval current = executions.loadToolApproval(
                         claim.key(), continuation.approvalId()).toCompletableFuture().join()
                         .orElse(storedApproval);
-                if (failure != null && isDurableSuspension(unwrap(failure))) {
+                if (failure != null && isDurableSuspension(cause)) {
                     if (current.status() == ToolApprovalStatus.SUCCEEDED) return true;
                     if (current.status() == ToolApprovalStatus.FAILED) return false;
                     return false;
                 }
                 if (current.status() == ToolApprovalStatus.SUCCEEDED) return true;
                 if (current.status() == ToolApprovalStatus.FAILED) return false;
-                if (failure != null) throw new CompletionException(unwrap(failure));
+                if (failure != null) throw new CompletionException(cause);
                 return approvedEffect ? succeeded : false;
             });
             // Pekko may complete on the node's actor-dispatcher thread. Runner shutdown waits for

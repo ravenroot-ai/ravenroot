@@ -151,7 +151,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Map<String, Instant> inventoryRetainedFrom = new LinkedHashMap<>();
     private final AtomicLong revisionSequence = new AtomicLong();
     private AgentAuthorityControl agentAuthorityControl = new AgentAuthorityControl(
-            AgentAuthorityControlState.ACTIVE, 0, Instant.EPOCH);
+            AgentAuthorityControlState.ACTIVE, 0, Instant.EPOCH, 0);
     private final Clock clock;
     private final Duration maxLeaseTtl;
     private final int maxPayloadBytes;
@@ -481,18 +481,27 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                             "agent authority control expectation is stale"));
                 }
                 if (targetState == AgentAuthorityControlState.KILLED) {
+                    long releasedTeamActive = 0;
                     for (Entry entry : instances.values()) {
                         if (entry.agentBudget != null
                                 && entry.agentBudget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
                                 && entry.agentBudget.controlEpoch() == expectedEpoch) {
+                            long before = entry.agentBudget.reserved().teamActive();
                             entry.agentBudget = AgentAuthorityBudgetFold.apply(entry.agentBudget.key(),
                                     entry.agentBudget, new AgentBudgetOperation.KillRoot(expectedEpoch),
                                     clock.instant());
+                            releasedTeamActive = Math.addExact(releasedTeamActive,
+                                    before - entry.agentBudget.reserved().teamActive());
                         }
                     }
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(), Math.addExact(
+                            agentAuthorityControl.teamActiveReleased(), releasedTeamActive));
+                } else {
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(),
+                            agentAuthorityControl.teamActiveReleased());
                 }
-                agentAuthorityControl = new AgentAuthorityControl(targetState,
-                        Math.addExact(expectedEpoch, 1), clock.instant());
                 return agentAuthorityControl;
             }
         });

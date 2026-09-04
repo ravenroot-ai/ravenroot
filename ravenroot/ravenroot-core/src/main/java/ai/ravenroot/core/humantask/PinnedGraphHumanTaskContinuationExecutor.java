@@ -50,6 +50,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
     private final ExecutionIdentitySource identities;
     private final String workerId;
     private final Duration leaseTtl;
+    private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     private final Map<PendingWork.HandlerTrigger, ExecutionRecorder> awaitingAcknowledgement
             = new ConcurrentHashMap<>();
 
@@ -62,7 +63,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     ExecutionIdentitySource identities,
                                                     String workerId, Duration leaseTtl) {
         this(definitions, executions, tasks, null, engine, behaviors, monitor, identities,
-                workerId, leaseTtl);
+                workerId, leaseTtl, null);
     }
 
     /**
@@ -81,6 +82,35 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                                                     ExecutionMonitor monitor,
                                                     ExecutionIdentitySource identities,
                                                     String workerId, Duration leaseTtl) {
+        this(definitions, executions, tasks, approvals, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, null);
+    }
+
+    /**
+     * Creates a continuation executor with durable decisions and finite agent resources.
+     * @param definitions pinned graph-definition store
+     * @param executions durable execution store
+     * @param tasks durable human-task service
+     * @param approvals durable tool-approval service, or {@code null} when unavailable
+     * @param engine execution engine used for resumed traversal work
+     * @param behaviors trusted behavior registry
+     * @param monitor execution event monitor
+     * @param identities trusted execution identity source
+     * @param workerId recovery worker identity
+     * @param leaseTtl claimed execution lease duration
+     * @param agentBudgets finite agent authority mediator, or {@code null} when unavailable
+     */
+    public PinnedGraphHumanTaskContinuationExecutor(GraphDefinitionStore definitions,
+                                                    ExecutionStore executions,
+                                                    HumanTaskService tasks,
+                                                    ToolApprovalService approvals,
+                                                    ExecutionEngine engine,
+                                                    BehaviorRegistry behaviors,
+                                                    ExecutionMonitor monitor,
+                                                    ExecutionIdentitySource identities,
+                                                    String workerId, Duration leaseTtl,
+                                                    ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                            agentBudgets) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.tasks = Objects.requireNonNull(tasks, "tasks");
@@ -91,6 +121,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         this.identities = Objects.requireNonNull(identities, "identities");
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
+        this.agentBudgets = agentBudgets;
     }
 
     @Override
@@ -136,6 +167,11 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                     task.request().graphVersionPin().reference(), recorder, result(task, handler));
             CompletionStage<Void> handoff = result.handle((ignored, failure) -> {
                 Throwable cause = unwrap(failure);
+                if (agentBudgets != null && (cause == null
+                        || !(cause instanceof DurableHumanTaskSuspension
+                        || cause instanceof DurableToolApprovalSuspension))) {
+                    agentBudgets.finishProcess(task.key(), failure == null);
+                }
                 if (cause == null || cause instanceof DurableHumanTaskSuspension
                         || cause instanceof DurableToolApprovalSuspension) return null;
                 throw new CompletionException(cause);
@@ -216,20 +252,36 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
 
     private AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
         AutoCloseable taskBinding = tasks.bindLive(key, recorder);
-        if (approvals == null) return taskBinding;
+        AutoCloseable approvalBinding = null;
+        AutoCloseable budgetBinding = null;
         try {
-            AutoCloseable approvalBinding = approvals.bindLive(key, recorder);
+            approvalBinding = approvals == null ? null : approvals.bindLive(key, recorder);
+            budgetBinding = agentBudgets == null ? null : agentBudgets.bindLive(key, recorder);
+            AutoCloseable finalApprovalBinding = approvalBinding;
+            AutoCloseable finalBudgetBinding = budgetBinding;
             return () -> {
                 try {
-                    close(approvalBinding);
+                    if (finalBudgetBinding != null) close(finalBudgetBinding);
                 } finally {
-                    close(taskBinding);
+                    try {
+                        if (finalApprovalBinding != null) close(finalApprovalBinding);
+                    } finally {
+                        close(taskBinding);
+                    }
                 }
             };
         } catch (RuntimeException failure) {
             try {
-                close(taskBinding);
+                if (budgetBinding != null) close(budgetBinding);
             } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                if (approvalBinding != null) close(approvalBinding);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try { close(taskBinding); } catch (RuntimeException cleanupFailure) {
                 failure.addSuppressed(cleanupFailure);
             }
             throw failure;

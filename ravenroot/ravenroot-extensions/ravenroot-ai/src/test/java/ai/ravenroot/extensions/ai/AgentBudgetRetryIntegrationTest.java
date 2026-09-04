@@ -116,6 +116,29 @@ class AgentBudgetRetryIntegrationTest {
         }
     }
 
+    @Test
+    void completedAgentParentAttenuatesTheDownstreamAgentWithoutResettingAccounting() throws Exception {
+        var http = new AiTestSupport.ScriptedHttp()
+                .then(AiTestSupport.answersUsing("first", 10, 5))
+                .then(AiTestSupport.answersUsing("second", 10, 5));
+        try (var harness = new Harness(http, policy(1_000), Harness.causalAgentGraph())) {
+            http.resources(harness.budgets);
+
+            GraphExecutionResult result = harness.run(false);
+
+            assertEquals("second", result.payload());
+            assertEquals(2, http.calls());
+            var budget = harness.budget();
+            assertEquals(2, budget.grants().size());
+            assertEquals(List.of(1L, 2L), budget.grants().values().stream()
+                    .map(grant -> grant.registration().depth()).sorted().toList());
+            assertEquals(2, budget.spent().teamCumulative());
+            assertEquals(0, budget.reserved().teamActive());
+            assertEquals(20, budget.spent().inputTokens());
+            assertEquals(10, budget.spent().outputTokens());
+        }
+    }
+
     private static AgentResourceService firstPermitHasNoTime(AgentAuthorityBudgetService delegate) {
         var first = new AtomicBoolean(true);
         return new AgentResourceService() {
@@ -169,7 +192,7 @@ class AgentBudgetRetryIntegrationTest {
         return new AgentAuthorityBudgetPolicy("runtime-a", 1, "policy-v1", "rate-v1", "USD",
                 Duration.ofMinutes(1),
                 new AgentBudgetVector(4, totalTokens, totalTokens, 60_000, 100_000, 4, 2, 2, 2),
-                100, 20, 1, 1, Set.of(), Set.of());
+                100, 20, 1, 1, Set.of(), Set.of("runtime:delegate"));
     }
 
     private static final class Harness implements AutoCloseable {
@@ -186,6 +209,11 @@ class AgentBudgetRetryIntegrationTest {
         private final GraphRunner runner;
 
         private Harness(AiTestSupport.ScriptedHttp http, AgentAuthorityBudgetPolicy policy) {
+            this(http, policy, graph());
+        }
+
+        private Harness(AiTestSupport.ScriptedHttp http, AgentAuthorityBudgetPolicy policy,
+                        GraphDefinition definition) {
             var accepted = new ProcessInstance(key.processInstanceId(), ProcessInstanceStatus.ACCEPTED,
                     Map.of(traversalId, new Traversal(traversalId, "start", TraversalStatus.ACCEPTED, Map.of())));
             long revision = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
@@ -202,10 +230,10 @@ class AgentBudgetRetryIntegrationTest {
             NodeAction action = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(
                     "https://model.example/v1"))).create(AiTestSupport.agentConfiguration(Map.of(
                     "provider", "local", "instructions", "be terse", "objective", "answer",
-                    "maxTurns", 1, "maxTotalTokens", policy.rootMaxima().inputTokens(),
+                    "maxTurns", 2, "maxTotalTokens", policy.rootMaxima().inputTokens(),
                     "maxTokens", 20, "timeoutMs", 10_000)), http);
             var behaviors = new BehaviorRegistry().register("agent", action::handle);
-            manager = GraphManager.from(graph());
+            manager = GraphManager.from(definition);
             runner = new GraphRunner(manager, engine, behaviors, new ExecutionMonitor(),
                     ExecutionIdentitySource.randomUuids(), new InMemoryJoinStore(), Clock.systemUTC());
         }
@@ -241,6 +269,15 @@ class AgentBudgetRetryIntegrationTest {
                             NodeRetryProperty.RETRY_ON, AgentException.class.getSimpleName())),
                     GraphNode.error("error"), GraphNode.end("end")), List.of(
                     GraphEdge.to("start", "agent"), GraphEdge.to("agent", "end")));
+        }
+
+        private static GraphDefinition causalAgentGraph() {
+            return new GraphDefinition(List.of(GraphNode.start("start"),
+                    new GraphNode("parent", NodeKind.BEHAVIOR, "agent", Map.of()),
+                    new GraphNode("child", NodeKind.BEHAVIOR, "agent", Map.of()),
+                    GraphNode.error("error"), GraphNode.end("end")), List.of(
+                    GraphEdge.to("start", "parent"), GraphEdge.to("parent", "child"),
+                    GraphEdge.to("child", "end")));
         }
 
         @Override public void close() throws Exception {

@@ -151,8 +151,8 @@ public final class AgentAuthorityBudgetFold {
         if (!parents.isEmpty()) {
             for (UUID parentId : parents) {
                 DurableAgentGrant parent = current.grants().get(parentId);
-                if (parent == null || parent.state() != AgentGrantState.ACTIVE) {
-                    throw new IllegalStateException("contributing parent grant is not active");
+                if (parent == null || parent.state() == AgentGrantState.CANCELLED) {
+                    throw new IllegalStateException("contributing parent grant is cancelled or absent");
                 }
                 if (!operation.binding().causalParentInvocationIds().contains(parent.binding().invocationId())) {
                     throw new IllegalStateException("contributing parent grant is not a causal parent invocation");
@@ -295,20 +295,36 @@ public final class AgentAuthorityBudgetFold {
                 || observed.componentwiseAtMost(existing.requested())) {
             throw new IllegalStateException("agent usage breach is invalid");
         }
+        if (!existing.actual().componentwiseAtMost(observed)) {
+            throw new IllegalStateException("observed breach cannot refund dispatched usage");
+        }
         AgentBudgetVector remainder = existing.requested().minus(existing.actual());
+        AgentBudgetVector observedDelta = observed.minus(existing.actual());
         var reservations = new LinkedHashMap<>(current.reservations());
         reservations.put(existing.reservationId(), new AgentBudgetReservation(existing.reservationId(),
                 existing.grantId(), existing.operationKey(), existing.requested(), observed,
                 AgentReservationState.BREACHED));
+        Set<UUID> breachedChain = new LinkedHashSet<>();
         var grants = new LinkedHashMap<>(current.grants());
         for (DurableAgentGrant ancestor : ancestors(current,
                 activeOrTerminalGrant(current, existing.grantId()))) {
+            breachedChain.add(ancestor.registration().grantId());
             grants.put(ancestor.registration().grantId(), new DurableAgentGrant(ancestor.registration(),
-                    ancestor.binding(), AgentGrantState.EXHAUSTED,
-                    ancestor.spent().plus(remainder), ancestor.reserved().minus(remainder)));
+                    ancestor.binding(), ancestor.state(), plusSaturated(ancestor.spent(), observedDelta),
+                    ancestor.reserved().minus(remainder)));
         }
-        return copy(current, AgentAuthorityState.CANCELLED,
-                current.spent().plus(remainder), current.reserved().minus(remainder), grants, reservations);
+        DurableAgentAuthorityBudget charged = copy(current, current.state(),
+                plusSaturated(current.spent(), observedDelta), current.reserved().minus(remainder),
+                grants, reservations);
+        DurableAgentAuthorityBudget retired = retireAllGrants(charged);
+        grants = new LinkedHashMap<>(retired.grants());
+        for (UUID grantId : breachedChain) {
+            DurableAgentGrant grant = grants.get(grantId);
+            grants.put(grantId, new DurableAgentGrant(grant.registration(), grant.binding(),
+                    AgentGrantState.EXHAUSTED, grant.spent(), grant.reserved()));
+        }
+        return copy(retired, AgentAuthorityState.CANCELLED, retired.spent(), retired.reserved(),
+                grants, retired.reservations());
     }
 
     private static DurableAgentAuthorityBudget dispatchReservation(DurableAgentAuthorityBudget current,
@@ -474,6 +490,22 @@ public final class AgentAuthorityBudgetFold {
                 Math.min(a.costMicros(), b.costMicros()), Math.min(a.toolCalls(), b.toolCalls()),
                 Math.min(a.delegationDepth(), b.delegationDepth()),
                 Math.min(a.teamCumulative(), b.teamCumulative()), Math.min(a.teamActive(), b.teamActive()));
+    }
+
+    private static AgentBudgetVector plusSaturated(AgentBudgetVector left, AgentBudgetVector right) {
+        return new AgentBudgetVector(saturatedAdd(left.turns(), right.turns()),
+                saturatedAdd(left.inputTokens(), right.inputTokens()),
+                saturatedAdd(left.outputTokens(), right.outputTokens()),
+                saturatedAdd(left.elapsedMillis(), right.elapsedMillis()),
+                saturatedAdd(left.costMicros(), right.costMicros()),
+                saturatedAdd(left.toolCalls(), right.toolCalls()),
+                Math.max(left.delegationDepth(), right.delegationDepth()),
+                saturatedAdd(left.teamCumulative(), right.teamCumulative()),
+                saturatedAdd(left.teamActive(), right.teamActive()));
+    }
+
+    private static long saturatedAdd(long left, long right) {
+        return left > Long.MAX_VALUE - right ? Long.MAX_VALUE : left + right;
     }
 
     private static long combinedTokens(long... values) {

@@ -269,6 +269,13 @@ class CardinalityAllowlistTest {
         }));
         assertEquals(DISTINCT_VALUES * 2L, metric.getLongSumData().getPoints().stream()
                 .mapToLong(point -> point.getValue()).sum());
+        assertEquals(DISTINCT_VALUES / 2L, metric.getLongSumData().getPoints().stream()
+                .filter(point -> "TEAM_ACTIVE".equals(point.getAttributes().get(
+                        TelemetryBridge.METRIC_ATTR_AGENT_DIMENSION)))
+                .filter(point -> "RELEASED".equals(point.getAttributes().get(
+                        TelemetryBridge.METRIC_ATTR_AGENT_OUTCOME)))
+                .mapToLong(point -> point.getValue()).sum(),
+                "durable active-slot releases must remain visible as one bounded aggregate series");
     }
 
     /**

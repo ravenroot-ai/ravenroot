@@ -191,6 +191,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             return false;
         } finally {
             if (manager != null) manager.close();
+        }
     }
 
     @Override

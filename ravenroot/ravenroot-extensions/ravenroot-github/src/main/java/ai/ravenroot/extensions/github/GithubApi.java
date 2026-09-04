@@ -4,6 +4,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 
@@ -13,6 +14,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -54,7 +56,11 @@ final class GithubApi {
         OutboundCall<OutboundHttpResponse> call;
         try {
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(profile.rest(path), method,
-                    headers, body, Duration.ofMillis(profile.timeoutMs()), profile.credential()));
+                    headers, body, Duration.ofMillis(profile.timeoutMs()), profile.credential(), null,
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length), profile.maxResponseBytes(),
+                            profile.maxResponseBytes(), profile.maxResponseBytes(), 100,
+                            Duration.ofMillis(profile.timeoutMs()), Set.of("application/json",
+                                    "application/vnd.github+json"))));
             control.attach(call);
         } catch (RuntimeException failure) { throw sanitize(failure); }
         try {

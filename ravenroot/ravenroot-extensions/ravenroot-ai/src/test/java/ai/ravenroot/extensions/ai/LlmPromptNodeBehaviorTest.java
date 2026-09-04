@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.ai;
 
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
@@ -116,6 +118,11 @@ class LlmPromptNodeBehaviorTest {
         assertEquals(PayloadValue.of("Summarise the product"), turn.entries().get("content"));
         assertEquals("POST", services.request.get().method());
         assertEquals(java.util.Optional.empty(), services.request.get().credential());
+        assertEquals(AiTestSupport.profile(ENDPOINT).maxResponseBytes(),
+                services.request.get().limits().maximumEncodedResponseBytes());
+        assertEquals(Set.of("application/json"), services.request.get().limits().acceptedMediaTypes());
+        assertEquals(Set.of("identity", "gzip"),
+                services.request.get().limits().acceptedContentEncodings());
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> provenance = (List<Map<String, Object>>)
                 result.attributes().get(ModelInputProvenance.PROMPT_ATTRIBUTE);
@@ -306,6 +313,27 @@ class LlmPromptNodeBehaviorTest {
         assertFalse(new String(services.request.get().body(), StandardCharsets.UTF_8).contains("llm-key"));
     }
 
+    @Test
+    void engineCancellationCancelsTheActiveModelCallAndReturnsTheAdmissionPermit() throws Exception {
+        var services = new AiTestSupport.HttpDouble();
+        services.response = new CompletableFuture<>();
+        var behavior = new LlmPromptNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+        NodeAction action = behavior.create(
+                AiTestSupport.configuration(Map.of("provider", "local", "prompt", "Hi")), services);
+        var cancellation = new TestCancellation();
+
+        var result = action.handle(AiTestSupport.message("x"), cancellation).toCompletableFuture();
+        cancellation.cancel();
+
+        CompletionException failure = assertThrows(CompletionException.class, result::join);
+        assertEquals(LlmPromptException.Code.DEADLINE_EXCEEDED,
+                assertInstanceOf(LlmPromptException.class, failure.getCause()).code());
+        for (int attempt = 0; attempt < 100 && behavior.admissionEntries() != 0; attempt++) {
+            java.util.concurrent.locks.LockSupport.parkNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(1));
+        }
+        assertEquals(0, behavior.admissionEntries());
+    }
+
     private static LlmPromptException failureOf(NodeAction action) {
         return failureOf(action, "payload");
     }
@@ -318,5 +346,18 @@ class LlmPromptNodeBehaviorTest {
             cause = cause.getCause();
         }
         return assertInstanceOf(LlmPromptException.class, cause);
+    }
+
+    private static final class TestCancellation implements CancellationSignal {
+        private final java.util.List<Runnable> listeners = new java.util.concurrent.CopyOnWriteArrayList<>();
+        private volatile boolean cancelled;
+        @Override public boolean cancelled() { return cancelled; }
+        @Override public void onCancel(Runnable listener) {
+            if (cancelled) listener.run(); else listeners.add(listener);
+        }
+        void cancel() {
+            cancelled = true;
+            listeners.forEach(Runnable::run);
+        }
     }
 }

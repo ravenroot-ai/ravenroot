@@ -5,6 +5,7 @@ import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.deployment.TrustedIngress;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.CredentialLease;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
@@ -278,6 +279,92 @@ class ManagedNodePackageServicesTest {
                 services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
                         "POST", Map.of(), new byte[4], Duration.ofSeconds(1), null)));
         assertEquals(1, hits.get());
+    }
+
+    @Test
+    void requestSpecificLimitsOnlyNarrowOperatorAuthorityBeforeTransportAndProjection() throws Exception {
+        AtomicInteger hits = new AtomicInteger();
+        server = server(exchange -> {
+            hits.incrementAndGet();
+            exchange.getResponseHeaders().set("Content-Type", "text/plain");
+            respond(exchange, 200, "0123456789");
+        });
+        int port = server.getAddress().getPort();
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("POST").byteLimits(128, 128, 128).build();
+        var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), OptionalSecret.none());
+
+        ExternalIoLimits narrow = ExternalIoLimits.http(4, 6, Duration.ofSeconds(1), Set.of("text/plain"));
+        assertReason(NodePackageServiceException.Reason.REQUEST_TOO_LARGE,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[5], Duration.ofSeconds(2), null, null, narrow)));
+        assertEquals(0, hits.get());
+        assertReason(NodePackageServiceException.Reason.RESPONSE_TOO_LARGE,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[4], Duration.ofSeconds(2), null, null, narrow)));
+        assertEquals(1, hits.get());
+
+        ExternalIoLimits wrongMedia = ExternalIoLimits.http(4, 128, Duration.ofSeconds(1),
+                Set.of("application/json"));
+        assertReason(NodePackageServiceException.Reason.PROTOCOL_REFUSED,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[4], Duration.ofSeconds(2), null, null, wrongMedia)));
+        assertEquals(2, hits.get());
+    }
+
+    @Test
+    void cancellingASlowHttpReadStopsTheCallAndReturnsItsPermitAfterTransportCleanup() throws Exception {
+        CountDownLatch firstByteSent = new CountDownLatch(1);
+        CountDownLatch releaseSlowResponse = new CountDownLatch(1);
+        server = server(exchange -> {
+            if ("/slow".equals(exchange.getRequestURI().getPath())) {
+                exchange.sendResponseHeaders(200, 0);
+                exchange.getResponseBody().write('x');
+                exchange.getResponseBody().flush();
+                firstByteSent.countDown();
+                releaseSlowResponse.await();
+                exchange.close();
+                return;
+            }
+            respond(exchange, 200, "ok");
+        });
+        int port = server.getAddress().getPort();
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("GET").concurrencyLimits(1, 1)
+                .maximumDeadline(Duration.ofSeconds(2)).build();
+        var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), OptionalSecret.none());
+
+        OutboundCall<OutboundHttpResponse> slow = services.outboundHttp().execute(message("tenant-a", null),
+                new OutboundHttpRequest(uri(port, "/slow"), "GET", Map.of(), null,
+                        Duration.ofSeconds(2), null));
+        assertTrue(firstByteSent.await(1, TimeUnit.SECONDS));
+        assertReason(NodePackageServiceException.Reason.ADMISSION_REFUSED,
+                services.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(
+                        uri(port, "/fast"), "GET", Map.of(), null, Duration.ofSeconds(1), null)));
+        assertTrue(slow.cancel());
+        assertReason(NodePackageServiceException.Reason.CANCELLED, slow);
+        releaseSlowResponse.countDown();
+
+        OutboundHttpResponse recovered = null;
+        long recoveryDeadline = System.nanoTime() + Duration.ofSeconds(2).toNanos();
+        while (recovered == null && System.nanoTime() < recoveryDeadline) {
+            try {
+                recovered = await(services.outboundHttp().execute(message("tenant-a", null),
+                        new OutboundHttpRequest(uri(port, "/fast"), "GET", Map.of(), null,
+                                Duration.ofSeconds(1), null)));
+            } catch (CompletionException refusal) {
+                if (!(refusal.getCause() instanceof NodePackageServiceException typed)
+                        || typed.reason() != NodePackageServiceException.Reason.ADMISSION_REFUSED) throw refusal;
+                try {
+                    Thread.sleep(10);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw interrupted;
+                }
+            }
+        }
+        assertEquals("ok", new String(java.util.Objects.requireNonNull(recovered).body(),
+                StandardCharsets.UTF_8));
     }
 
     @Test

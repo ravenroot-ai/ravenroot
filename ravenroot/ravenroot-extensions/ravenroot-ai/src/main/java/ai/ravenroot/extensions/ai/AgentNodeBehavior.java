@@ -6,6 +6,7 @@ import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -19,6 +20,7 @@ import ai.ravenroot.api.node.service.AgentResourceRequest;
 import ai.ravenroot.api.node.service.AgentResourceSession;
 import ai.ravenroot.api.node.service.AgentModelReservation;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.node.service.ToolCallAuthorization;
@@ -88,6 +90,10 @@ import java.util.function.LongSupplier;
  * return one.</p>
  */
 public final class AgentNodeBehavior implements NodeBehavior {
+    private static final CancellationSignal NEVER_CANCELLED = new CancellationSignal() {
+        @Override public boolean cancelled() { return false; }
+        @Override public void onCancel(Runnable listener) { }
+    };
 
     /** The catalog name, preserved from the node formerly published by the core. */
     public static final String BEHAVIOR = "agent";
@@ -312,7 +318,16 @@ public final class AgentNodeBehavior implements NodeBehavior {
             servers.add(server.get());
         }
         Settings settings = Settings.compile(configuration, resolved.get(), skills, List.copyOf(servers));
-        return message -> invoke(message, services, settings);
+        return new NodeAction() {
+            @Override public CompletionStage<NodeResult> handle(NodeMessage message) {
+                return invoke(message, services, settings, NEVER_CANCELLED);
+            }
+            @Override public CompletionStage<NodeResult> handle(
+                    NodeMessage message, CancellationSignal cancellation) {
+                return invoke(message, services, settings,
+                        Objects.requireNonNull(cancellation, "cancellation"));
+            }
+        };
     }
 
     @Override
@@ -460,7 +475,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
     }
 
     private CompletionStage<NodeResult> invoke(NodeMessage message, NodePackageServices services,
-                                               Settings settings) {
+                                               Settings settings, CancellationSignal cancellation) {
+        if (cancellation.cancelled()) {
+            return CompletableFuture.failedFuture(new AgentException(AgentException.Code.DEADLINE_EXCEEDED));
+        }
         // The key pairs the tenant with the profile, and the separator is a character neither can
         // contain: a profile name is masked to [A-Za-z0-9._-] before it is ever resolved.
         Admission.Lease lease = profileAdmission.tryAcquire(
@@ -515,7 +533,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // MCP servers declared, until after discovery, which happens before the first turn. Every
         // lease is idempotent, so a run that fails between two turns releases here exactly once.
         CompletionStage<NodeResult> exposed = cleanupView(result, run, leases, resources, true);
-        run.start(result);
+        cancellation.onCancel(() -> {
+            run.abort();
+            result.completeExceptionally(new AgentException(AgentException.Code.DEADLINE_EXCEEDED));
+        });
+        if (!result.isDone()) run.start(result);
         return exposed;
     }
 
@@ -1114,7 +1136,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
                         Duration.ofMillis(effectiveTimeout),
-                        settings.profile().credentialBinding().orElse(null)));
+                        settings.profile().credentialBinding().orElse(null), null,
+                        ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                                settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
+                                settings.profile().maxResponseBytes(), 100,
+                                Duration.ofMillis(effectiveTimeout), Set.of("application/json"))));
             } catch (RuntimeException failure) {
                 turnBudget.indeterminate();
                 result.completeExceptionally(sanitize(failure));

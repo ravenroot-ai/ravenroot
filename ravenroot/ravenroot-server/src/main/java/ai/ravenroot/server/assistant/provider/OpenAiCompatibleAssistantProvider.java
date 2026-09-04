@@ -1,13 +1,14 @@
 package ai.ravenroot.server.assistant.provider;
 
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.server.assistant.AssistantCredential;
 import ai.ravenroot.server.assistant.AssistantOutcome;
+import ai.ravenroot.core.security.egress.BoundedBodyHandlers;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -109,9 +110,13 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
                     "the adapter could not encode the request", null);
         }
 
-        HttpResponse<InputStream> response;
+        HttpResponse<byte[]> response;
         try {
-            response = httpClient.send(outbound, HttpResponse.BodyHandlers.ofInputStream());
+            response = httpClient.send(outbound, BoundedBodyHandlers.withLimits(
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                            RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
+                            RESPONSE_LIMITS.maxEncodedBytes(), 100, timeout,
+                            java.util.Set.of("application/json"))));
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
             throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
@@ -120,12 +125,16 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
             throw new AssistantProviderException(AssistantOutcome.Reason.EGRESS_REFUSED,
                     "outbound policy refused the provider destination", refused);
         } catch (IOException unavailable) {
+            if (boundedResponseFailure(unavailable)) {
+                throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNREADABLE,
+                        "the provider response exceeded its representation limits", null);
+            }
             throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
                     "the provider could not be reached before the configured timeout", unavailable);
         }
 
         int status = response.statusCode();
-        try (InputStream stream = response.body()) {
+        try {
             if (status >= 300 && status < 400) {
                 throw new AssistantProviderException(AssistantOutcome.Reason.EGRESS_REFUSED,
                         "the provider redirect was refused", null);
@@ -138,10 +147,7 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
                 throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
                         "the provider returned an unavailable status", null);
             }
-            return readTurn(readBounded(stream), request.model());
-        } catch (IOException unreadable) {
-            throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
-                    "the provider response could not be read", unreadable);
+            return readTurn(response.body(), request.model());
         } catch (AssistantProviderException classified) {
             throw classified;
         } catch (RuntimeException defect) {
@@ -151,15 +157,15 @@ public final class OpenAiCompatibleAssistantProvider implements AssistantProvide
         }
     }
 
-    private static byte[] readBounded(InputStream stream)
-            throws IOException, AssistantProviderException {
-        int budget = RESPONSE_LIMITS.maxEncodedBytes();
-        byte[] body = stream.readNBytes(budget + 1);
-        if (body.length > budget) {
-            throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNREADABLE,
-                    "the provider response exceeded the configured response budget", null);
+    private static boolean boundedResponseFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof BoundedBodyHandlers.ResponseTooLargeException
+                    || current instanceof BoundedBodyHandlers.ResponseMediaTypeException
+                    || current instanceof BoundedBodyHandlers.ResponseEncodingException) {
+                return true;
+            }
         }
-        return body;
+        return false;
     }
 
     String writeRequest(Request request) {

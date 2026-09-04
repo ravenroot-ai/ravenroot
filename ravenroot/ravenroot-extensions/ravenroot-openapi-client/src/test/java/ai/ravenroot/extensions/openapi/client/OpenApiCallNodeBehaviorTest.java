@@ -29,6 +29,8 @@ class OpenApiCallNodeBehaviorTest {
         assertEquals("GET", transport.request.get().method());
         assertEquals(List.of("trace-1"), transport.request.get().headers().get("x-trace"));
         assertTrue(transport.request.get().credential().isEmpty());
+        assertEquals(profile.maxResponseBytes(), transport.request.get().limits().maximumOutputBytes());
+        assertEquals(Set.of("application/json"), transport.request.get().limits().acceptedMediaTypes());
         Map<?, ?> output = (Map<?, ?>) result.payload();
         assertEquals("openapi.call.result.v1", output.get("version"));
         assertEquals(200L, output.get("status"));

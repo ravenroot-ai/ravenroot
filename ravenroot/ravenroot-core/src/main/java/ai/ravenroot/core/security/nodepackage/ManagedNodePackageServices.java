@@ -3,6 +3,7 @@ package ai.ravenroot.core.security.nodepackage;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.CredentialLease;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.NodeCredentialService;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
@@ -519,6 +520,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         Map<String, List<String>> headers;
         byte[] body = request.body();
         Duration deadline;
+        ExternalIoLimits limits;
         try {
             headers = validateHeaders(request.headers());
             if (request.credential().isPresent() && request.signing().isPresent()) {
@@ -528,10 +530,16 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 AwsSigV4Signer.requireTransportStableTarget(destination);
                 requireSigningGrant(signing, destination);
             });
-            if (body.length > policy.maximumRequestBytes()) {
+            ExternalIoLimits authority = new ExternalIoLimits(policy.maximumRequestBytes(),
+                    policy.maximumResponseBytes(), policy.maximumResponseBytes(),
+                    policy.maximumResponseBytes(), 100, policy.maximumDeadline(),
+                    Duration.ofSeconds(2), Set.of(), Set.of("identity", "gzip"));
+            limits = request.limits().intersect(authority);
+            if (body.length > limits.maximumRequestBytes()) {
                 return failed(NodePackageServiceException.Reason.REQUEST_TOO_LARGE);
             }
             deadline = policy.deadline(request.deadline());
+            if (limits.maximumDuration().compareTo(deadline) < 0) deadline = limits.maximumDuration();
         } catch (NodePackageServiceException refused) {
             return OutboundCall.failed(refused);
         } catch (IllegalArgumentException invalid) {
@@ -539,20 +547,20 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
         AdmissionController.Lease lease = admission.tryAcquire(tenant);
         if (lease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
-        return submit(deadline, lease, () -> {
+        Duration effectiveDeadline = deadline;
+        return submit(effectiveDeadline, lease, () -> {
             requireResolvable(destination);
             Map<String, List<String>> outgoingHeaders = request.signing()
                     .map(signing -> signRequest(tenant, destination, method, headers, body, signing))
                     .orElse(headers);
-            HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(deadline);
+            HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(effectiveDeadline);
             outgoingHeaders.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
             request.credential().ifPresent(binding -> injectCredential(builder, tenant, destination, binding));
             builder.method(method, body.length == 0
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<byte[]> response;
             try {
-                response = client().send(builder.build(), BoundedBodyHandlers.ofByteArray(
-                        policy.maximumResponseBytes()));
+                response = client().send(builder.build(), BoundedBodyHandlers.withLimits(limits));
             } catch (Throwable failure) {
                 throw mapFailure(failure);
             }
@@ -840,6 +848,10 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
         if (findCause(root, BoundedBodyHandlers.ResponseTooLargeException.class) != null) {
             return refusal(NodePackageServiceException.Reason.RESPONSE_TOO_LARGE);
+        }
+        if (findCause(root, BoundedBodyHandlers.ResponseMediaTypeException.class) != null
+                || findCause(root, BoundedBodyHandlers.ResponseEncodingException.class) != null) {
+            return refusal(NodePackageServiceException.Reason.PROTOCOL_REFUSED);
         }
         if (root instanceof HttpTimeoutException || root instanceof java.util.concurrent.TimeoutException) {
             return refusal(NodePackageServiceException.Reason.DEADLINE_EXCEEDED);

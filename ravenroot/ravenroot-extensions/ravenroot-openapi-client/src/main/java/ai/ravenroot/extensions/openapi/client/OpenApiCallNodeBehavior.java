@@ -12,6 +12,7 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.payload.PayloadJson;
@@ -100,7 +101,10 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
             Duration remaining = Duration.ofNanos(Math.max(1, deadline - System.nanoTime()));
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(prepared.destination,
                     settings.operation.method(), prepared.headers, prepared.body, remaining,
-                    settings.operation.authenticated() ? settings.profile.credential().orElse(null) : null));
+                    settings.operation.authenticated() ? settings.profile.credential().orElse(null) : null,
+                    null, ExternalIoLimits.compressedHttp(Math.max(1, prepared.body.length),
+                            settings.maxResponseBytes, settings.maxResponseBytes, settings.maxResponseBytes,
+                            100, remaining, Set.of("application/json"))));
         } catch (RuntimeException failure) {
             lease.close();
             return CompletableFuture.failedFuture(sanitize(failure, false));

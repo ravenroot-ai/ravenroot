@@ -6,6 +6,7 @@ import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -13,6 +14,7 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 
@@ -60,6 +62,10 @@ import java.util.concurrent.ExecutionException;
  * no code path that could return one -- a stronger statement than "it is careful with it".</p>
  */
 public final class LlmPromptNodeBehavior implements NodeBehavior {
+    private static final CancellationSignal NEVER_CANCELLED = new CancellationSignal() {
+        @Override public boolean cancelled() { return false; }
+        @Override public void onCancel(Runnable listener) { }
+    };
 
     /** The catalog name, unchanged from the one the core used to publish. */
     public static final String BEHAVIOR = "llm-prompt";
@@ -221,12 +227,21 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
 
         @Override
         public CompletionStage<NodeResult> handle(NodeMessage message) {
-            return invoke(message, services, settings);
+            return invoke(message, services, settings, NEVER_CANCELLED);
+        }
+
+        @Override
+        public CompletionStage<NodeResult> handle(NodeMessage message, CancellationSignal cancellation) {
+            return invoke(message, services, settings, Objects.requireNonNull(cancellation, "cancellation"));
         }
     }
 
     private CompletionStage<NodeResult> invoke(NodeMessage message, NodePackageServices services,
-                                               Settings settings) {
+                                               Settings settings, CancellationSignal cancellation) {
+        if (cancellation.cancelled()) {
+            return CompletableFuture.failedFuture(
+                    new LlmPromptException(LlmPromptException.Code.DEADLINE_EXCEEDED));
+        }
         // The key pairs the tenant with the profile, and the separator is a character neither can
         // contain: a profile name is masked to [A-Za-z0-9._-] before it is ever resolved.
         Admission.Lease lease = profileAdmission.tryAcquire(
@@ -251,12 +266,17 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                     settings.profile().endpoint(), "POST",
                     Map.of("content-type", List.of("application/json")), body,
                     Duration.ofMillis(settings.timeoutMs()),
-                    settings.profile().credentialBinding().orElse(null)));
+                    settings.profile().credentialBinding().orElse(null), null,
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                            settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
+                            settings.profile().maxResponseBytes(), 100,
+                            Duration.ofMillis(settings.timeoutMs()), Set.of("application/json"))));
         } catch (RuntimeException failure) {
             lease.close();
             return CompletableFuture.failedFuture(sanitize(failure));
         }
         var result = new CompletableFuture<NodeResult>();
+        cancellation.onCancel(call::cancel);
         call.completion().whenComplete((response, failure) -> {
             try {
                 if (failure != null) {

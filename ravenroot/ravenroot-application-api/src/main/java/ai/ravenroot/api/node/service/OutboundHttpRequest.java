@@ -17,6 +17,7 @@ public final class OutboundHttpRequest {
     private final Duration deadline;
     private final OutboundCredentialBinding credential;
     private final OutboundHttpSigning signing;
+    private final ExternalIoLimits limits;
 
     /**
      * Creates a request without a dynamic signing grant.
@@ -30,7 +31,8 @@ public final class OutboundHttpRequest {
      */
     public OutboundHttpRequest(URI destination, String method, Map<String, List<String>> headers,
                                byte[] body, Duration deadline, OutboundCredentialBinding credential) {
-        this(destination, method, headers, body, deadline, credential, null);
+        this(destination, method, headers, body, deadline, credential, null,
+                ExternalIoLimits.MANAGED_HTTP_DEFAULTS);
     }
 
     /**
@@ -47,6 +49,25 @@ public final class OutboundHttpRequest {
     public OutboundHttpRequest(URI destination, String method, Map<String, List<String>> headers,
                                byte[] body, Duration deadline, OutboundCredentialBinding credential,
                                OutboundHttpSigning signing) {
+        this(destination, method, headers, body, deadline, credential, signing,
+                ExternalIoLimits.MANAGED_HTTP_DEFAULTS);
+    }
+
+    /**
+     * Creates a request with explicit finite per-operation I/O limits.
+     *
+     * @param destination absolute destination to be admitted against operator policy
+     * @param method HTTP method, trimmed; an absent value becomes the empty string
+     * @param headers multi-value request headers copied into an immutable map
+     * @param body request bytes copied defensively; {@code null} becomes empty
+     * @param deadline non-null caller deadline, subject to service policy and {@code limits}
+     * @param credential optional operator-owned credential binding selector
+     * @param signing optional operator-owned signing grant selector, never key material
+     * @param limits finite caller limits, intersected with trusted service policy
+     */
+    public OutboundHttpRequest(URI destination, String method, Map<String, List<String>> headers,
+                               byte[] body, Duration deadline, OutboundCredentialBinding credential,
+                               OutboundHttpSigning signing, ExternalIoLimits limits) {
         this.destination = Objects.requireNonNull(destination, "destination");
         this.method = method == null ? "" : method.strip();
         this.headers = immutableHeaders(headers);
@@ -54,6 +75,7 @@ public final class OutboundHttpRequest {
         this.deadline = Objects.requireNonNull(deadline, "deadline");
         this.credential = credential;
         this.signing = signing;
+        this.limits = Objects.requireNonNull(limits, "limits");
     }
 
     /**
@@ -98,6 +120,12 @@ public final class OutboundHttpRequest {
      * @return optional dynamic-signing selector; no signing key is exposed
      */
     public Optional<OutboundHttpSigning> signing() { return Optional.ofNullable(signing); }
+    /**
+     * Obtains the finite caller-requested I/O limits.
+     *
+     * @return limits that the managed service further intersects with operator authority
+     */
+    public ExternalIoLimits limits() { return limits; }
 
     static Map<String, List<String>> immutableHeaders(Map<String, List<String>> source) {
         if (source == null || source.isEmpty()) {

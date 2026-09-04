@@ -43,6 +43,12 @@ profile's object-byte, time, or concurrency ceilings where the operation exposes
 and retry count are bounded by shipped limits. Graph data cannot replace the profile's origin, bucket,
 root prefix, signing binding or operation allowlist.
 
+Every storage request carries the effective byte ceiling and remaining total deadline into the
+managed HTTP boundary. Object reads accept only the profile's media allowlist, list responses accept
+XML, and mutation responses remain opaque; all storage operations require identity encoding so an
+endpoint cannot introduce an unbudgeted decompression layer. Cancellation is registered before
+handoff and stops any later list retry.
+
 Keys and prefixes are strict UTF-8 relative paths. Empty/dot segments, controls, backslashes,
 literal `%`, query/fragment syntax and paths over 1024 UTF-8 bytes are refused before managed HTTP,
 which prevents traversal and single/double-decoding ambiguity. The core independently enforces the

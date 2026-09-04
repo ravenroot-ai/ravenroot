@@ -5,6 +5,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
@@ -166,7 +167,10 @@ final class StorageRuntime {
             try {
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(request.destination(),
                         request.method(), request.headers(), request.body(), Duration.ofNanos(remaining), null,
-                        new OutboundHttpSigning(profile.signingBindingId())));
+                        new OutboundHttpSigning(profile.signingBindingId()),
+                        ExternalIoLimits.http(Math.max(1, request.body().length),
+                                Math.max(1, request.maxResponseBytes()), Duration.ofNanos(remaining),
+                                responseMediaTypes())));
             } catch (RuntimeException failure) {
                 failedLocked(number, failure);
                 return;
@@ -199,6 +203,14 @@ final class StorageRuntime {
                     }
                 }
             });
+        }
+
+        private Set<String> responseMediaTypes() {
+            if (request.semantics() == Semantics.RETRYABLE_READ) {
+                return Set.of("application/xml", "text/xml");
+            }
+            if (request.semantics() == Semantics.READ) return profile.allowedContentTypes();
+            return Set.of();
         }
 
         private void failedLocked(int number, Throwable failure) {

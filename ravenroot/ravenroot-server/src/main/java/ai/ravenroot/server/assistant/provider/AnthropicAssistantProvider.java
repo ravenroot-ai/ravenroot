@@ -1,5 +1,6 @@
 package ai.ravenroot.server.assistant.provider;
 
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.payload.PayloadException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
@@ -7,9 +8,9 @@ import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.server.assistant.AssistantCredential;
 import ai.ravenroot.server.assistant.AssistantOutcome;
 import ai.ravenroot.server.audit.JsonStrings;
+import ai.ravenroot.core.security.egress.BoundedBodyHandlers;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -54,21 +55,12 @@ import java.util.Objects;
  * <p>A parse-tree budget alone cannot bound a merely enormous response; the transport budget below
  * supplies that separate guarantee.</p>
  *
- * <h2>The response is bounded twice, and the transport bound is the one that can refuse</h2>
- * <p>{@link PayloadJson}'s budget bounds the <em>tree</em>. It cannot bound the <em>bytes</em>,
- * because by the time it is consulted the bytes are already a {@code byte[]} on the heap. This
- * {@code BodyHandlers.ofByteArray()} buffers whatever
- * the provider sends before any budget is read: a response sized between the budget and available
- * heap raised {@link OutOfMemoryError} — an {@link Error}, so it escaped {@link #readTurn}'s
- * {@code catch (RuntimeException)} and left this adapter as an unnamed failure, which is precisely
- * the outcome {@link AssistantOutcome} exists to make impossible.</p>
- * <p>{@link #complete} takes the body as a stream and reads it with
- * {@code readNBytes(budget + 1)} — the same bounded-read idiom the inbound assistant route and
- * {@code JwkSetProvider} already use, deliberately reused rather than reinvented. The {@code + 1} is
- * the whole trick: it is the one byte that distinguishes "exactly at budget" from "over budget"
- * without reading the rest, so the over-budget response is refused having allocated one byte more
- * than the budget and never the megabytes behind it. {@link PayloadJson}'s budget still stands
- * behind it, unchanged; what changed is that something now refuses <em>before</em> it.</p>
+ * <h2>The response is bounded at transport, decoding, and tree projection</h2>
+ * <p>{@link BoundedBodyHandlers} checks the declared and streamed wire bytes, JSON media type,
+ * content encoding, decoded bytes, and gzip expansion before a body is returned. {@link PayloadJson}
+ * then applies the independent tree, nesting, collection, and string limits. The same finite
+ * {@link ExternalIoLimits} deadline and output values are therefore visible at the provider boundary
+ * instead of being re-created after an unbounded allocation.</p>
  */
 public final class AnthropicAssistantProvider implements AssistantProvider {
 
@@ -229,12 +221,13 @@ public final class AnthropicAssistantProvider implements AssistantProvider {
                         "the provider destination was refused", rejected);
             }
 
-            // ofInputStream, never ofByteArray: the byte-array handler buffers the whole response
-            // before any budget of ours is consulted, so the budget could not refuse anything -- by
-            // the time it was read the allocation had happened. See this class's Javadoc.
-            HttpResponse<InputStream> response;
+            HttpResponse<byte[]> response;
             try {
-                response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofInputStream());
+                response = httpClient.send(httpRequest, BoundedBodyHandlers.withLimits(
+                        ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                                RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
+                                RESPONSE_LIMITS.maxEncodedBytes(), 100, timeout,
+                                java.util.Set.of("application/json"))));
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
                 throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
@@ -246,38 +239,32 @@ public final class AnthropicAssistantProvider implements AssistantProvider {
                 throw new AssistantProviderException(AssistantOutcome.Reason.EGRESS_REFUSED,
                         "outbound policy refused the provider destination", refused);
             } catch (IOException transportFailure) {
+                if (boundedResponseFailure(transportFailure)) {
+                    throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNREADABLE,
+                            "the provider response exceeded its response budget", null);
+                }
                 throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
                         "the provider could not be reached", transportFailure);
             }
 
             int status = response.statusCode();
             byte[] responseBody;
-            // The stream is closed on every path out, the rejections included: a status this adapter
-            // refuses is a status whose body it never reads, and abandoning it unclosed would leak the
-            // connection rather than merely discard the bytes.
-            try (InputStream stream = response.body()) {
-                if (status == 401 || status == 403) {
+            if (status == 401 || status == 403) {
                     // ADR 0018 section 4: an authentication rejection is terminal. Never retried here,
                     // and never retried by the caller either -- a loop against a revoked key locks the
                     // account out.
                     throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_REJECTED,
                             "the provider rejected the credential", null);
-                }
-                if (status >= 400 && status < 500) {
+            }
+            if (status >= 400 && status < 500) {
                     throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_REJECTED,
                             "the provider rejected the request with status " + status, null);
-                }
-                if (status >= 500 || status < 200) {
+            }
+            if (status >= 500 || status < 200) {
                     throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
                             "the provider answered with status " + status, null);
-                }
-                responseBody = readBounded(stream);
-            } catch (IOException unreadable) {
-                // A truncated or reset response is a transport failure, not an unreadable document:
-                // the provider may well be fine on the next attempt, and the panel's advice differs.
-                throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE,
-                        "the provider response could not be read from the socket", unreadable);
             }
+            responseBody = response.body();
             return readTurn(responseBody);
         } catch (RuntimeException unexpected) {
             // The outer boundary. Reached only by a RuntimeException none of the catches above was
@@ -290,38 +277,20 @@ public final class AnthropicAssistantProvider implements AssistantProvider {
         }
     }
 
+    private static boolean boundedResponseFailure(Throwable failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            if (current instanceof BoundedBodyHandlers.ResponseTooLargeException
+                    || current instanceof BoundedBodyHandlers.ResponseMediaTypeException
+                    || current instanceof BoundedBodyHandlers.ResponseEncodingException) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // ---------------------------------------------------------------------------------------------
     // Response
     // ---------------------------------------------------------------------------------------------
-
-    /**
-     * Reads at most the response budget, and refuses the response that exceeds it.
-     *
-     * <p>Asks for exactly one byte more than the budget. If it arrives, the response is over budget
-     * and is refused there — the bytes still queued behind it are never read, never allocated, and
-     * cannot exhaust the heap. This is the idiom the inbound assistant route uses on
-     * {@code exchange.getRequestBody()} and {@code JwkSetProvider} uses on its own response; it is
-     * repeated here rather than varied, because a second bounded-read shape in one codebase is how
-     * the first one drifts.</p>
-     *
-     * <p>Refused as {@link AssistantOutcome.Reason#PROVIDER_UNREADABLE} rather than as a transport
-     * failure, and that distinction is load-bearing: the socket did not fail, so telling the author
-     * the provider could not be reached would be false and would advise a retry that reproduces the
-     * same response. This build could not read what arrived — which is what PROVIDER_UNREADABLE
-     * already means for a body that parses no better.</p>
-     */
-    private static byte[] readBounded(InputStream stream)
-            throws IOException, AssistantProviderException {
-        int budget = RESPONSE_LIMITS.maxEncodedBytes();
-        byte[] body = stream.readNBytes(budget + 1);
-        if (body.length > budget) {
-            // The measured size is deliberately absent from the message: it is the one number here
-            // the provider chooses, and this message is authored, never assembled from upstream.
-            throw new AssistantProviderException(AssistantOutcome.Reason.PROVIDER_UNREADABLE,
-                    "the provider response exceeded the " + budget + " byte response budget", null);
-        }
-        return body;
-    }
 
     /**
      * A 2xx becomes a turn, or a named failure. It never becomes empty text.

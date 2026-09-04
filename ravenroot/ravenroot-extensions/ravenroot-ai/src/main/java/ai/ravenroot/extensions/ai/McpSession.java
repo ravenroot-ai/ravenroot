@@ -4,6 +4,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -12,6 +13,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -151,7 +153,11 @@ final class McpSession {
         try {
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                     profile.endpoint(), "POST", headers(), body, Duration.ofMillis(remaining),
-                    profile.credentialBinding().orElse(null)));
+                    profile.credentialBinding().orElse(null), null,
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                            profile.maxResponseBytes(), profile.maxResponseBytes(),
+                            profile.maxResponseBytes(), 100, Duration.ofMillis(remaining),
+                            expectsResult ? Set.of("application/json", "text/event-stream") : Set.of())));
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(refusalFor(failure));
         }

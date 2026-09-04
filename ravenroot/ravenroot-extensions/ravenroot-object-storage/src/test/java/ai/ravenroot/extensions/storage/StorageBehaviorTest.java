@@ -463,6 +463,10 @@ class StorageBehaviorTest {
         assertEquals("assets-s3", http.request.get().signing().orElseThrow().bindingId());
         assertTrue(http.request.get().credential().isEmpty());
         assertFalse(http.request.get().headers().containsKey("authorization"));
+        assertEquals(1024, http.request.get().limits().maximumEncodedResponseBytes());
+        assertEquals(Set.of("text/plain", "application/octet-stream"),
+                http.request.get().limits().acceptedMediaTypes());
+        assertEquals(Set.of("identity"), http.request.get().limits().acceptedContentEncodings());
         assertEquals("tenant-a", http.message.get().tenantId());
         Map<?, ?> output = (Map<?, ?>) result.payload();
         assertEquals("object.get.result.v1", output.get("version"));

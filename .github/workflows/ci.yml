@@ -222,6 +222,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_release_contract
+          python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
           python3 scripts/check_release_configuration.py
       - name: Verify shell tooling contracts
@@ -282,6 +283,7 @@ jobs:
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_release_contract
+          python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
           python3 scripts/check_release_configuration.py
       - name: Verify developer and platform shell contracts

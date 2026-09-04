@@ -361,7 +361,48 @@ public final class GraphRunner implements AutoCloseable {
      * indefinitely — deliberately, because a paused execution an operator can still inspect is the
      * whole point — and {@link #cancelTraversal} is what ends one.</p>
      */
-    private final ConcurrentHashMap<UUID, CompletableFuture<Void>> pausedTraversals = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<UUID, PauseHold> pausedTraversals = new ConcurrentHashMap<>();
+
+    /**
+     * Per-traversal lock, publication identity and lifecycle mark: the three things a control call
+     * cannot get from a traversal id alone.
+     *
+     * <h2>Why a control call needs this at all</h2>
+     * <p>{@link #pauseTraversal} and {@link #resumeTraversal} receive an id and nothing else, but a
+     * published event needs the tenant, the request, the engine, the graph version and the process
+     * instance — the {@code ExecutionIdentity} that {@link #execute} builds and that every other
+     * event on this traversal already travels under. Reconstructing one here would produce a second
+     * identity for the same run, so the identity {@code execute} built is recorded and reused: a
+     * pause event is then attributable to exactly the tenant and request the node events are, which
+     * is what lets the reference monitor decide who may observe it by the rules it already
+     * applies.</p>
+     *
+     * <p>{@code closing} is what stops a hold from being installed on a traversal that has already
+     * begun to end. It is set beside {@code ExecutionState.beginClosing}, which runs <em>before</em>
+     * the terminal event is published, so a pause arriving in the teardown window is refused rather
+     * than published after {@code EXECUTION_COMPLETED} — a transition no observer may ever be
+     * shown.</p>
+     *
+     * <p>The record is also the monitor every mutation of {@code pausedTraversals} is taken under,
+     * which is the property that orders the pause and resume events against each other. That is
+     * argued where it is enforced, in {@link #controlFor}.</p>
+     *
+     * <h2>Lifetime</h2>
+     * <p>Entries are created on first use by {@link #controlFor} and removed by {@link #close()} and
+     * by nothing else, deliberately. Dropping one when the traversal finishes would put a completed
+     * traversal back into the same indistinguishable-from-startup state a pause arriving afterwards
+     * is answered from, and it would be answered {@code ALREADY_PAUSED} again — the exact defect the
+     * startup-window repair removed. Keeping the entry until the runner closes means a late pause
+     * finds {@code closing} and is refused, so the caller is told the traversal is not active, which
+     * is what it is.</p>
+     *
+     * <p>The bound is therefore this runner's own lifetime, the same bound {@code pausedTraversals}
+     * carries and argued in the same place; in the application that is one runner per submission. A
+     * caller composing this runner directly and naming arbitrary traversal ids in control calls pays
+     * one small record per distinct id until the runner closes, which is the same price a gate
+     * installed for an id that never ran already carries.</p>
+     */
+    private final ConcurrentHashMap<UUID, TraversalControl> traversalControls = new ConcurrentHashMap<>();
 
     /**
      * Retry backoffs currently being waited out, per traversal.
@@ -788,6 +829,20 @@ public final class GraphRunner implements AutoCloseable {
             throw new IllegalStateException("Traversal " + traversalId + " is already running on this runner");
         }
         monitor.executionStarted(identity);
+        // The identity reaches the control record AFTER the start event and never before it. A pause
+        // landing between the two takes the same lock, finds no identity yet, and leaves its hold for
+        // the block below to announce -- so EXECUTION_PAUSED can never precede EXECUTION_STARTED.
+        // Setting the identity first would open exactly that window.
+        var executionControl = controlFor(traversalId);
+        synchronized (executionControl) {
+            executionControl.identity = identity;
+            // A hold accepted during the startup window has been waiting for an identity to be
+            // published under. This is that moment, and it is strictly after the start event.
+            PauseHold pending = pausedTraversals.get(traversalId);
+            if (pending != null) {
+                announceLocked(executionControl, pending);
+            }
+        }
         // Nodes no path can reach are dead before anything runs, and a join waiting on one of them
         // would wait for the life of the process. Reported alongside the first dispatch rather than
         // before it, so a join proven impossible fails the traversal instead of being a verdict with
@@ -839,7 +894,10 @@ public final class GraphRunner implements AutoCloseable {
                     // sleeping out a wait whose dispatch is already refused. Without it the traversal
                     // is reported failed to its caller while a thread of it is still scheduled to try
                     // the node again, and only close() would have ended that.
+                    // Marked closing beside the state's own seal, so a pause arriving from here on
+                    // is refused rather than published after this traversal's terminal event.
                     state.beginClosing();
+                    beginClosing(traversalId);
                     cancelBackoffs(traversalId);
                     return release(traversalId, coordinator)
                             .handle((done, cleanupError) -> error != null ? error
@@ -913,6 +971,16 @@ public final class GraphRunner implements AutoCloseable {
         }
         state.reentryStarted();
         monitor.executionStarted(identity);
+        // See the identical block in #execute: the identity reaches the control record after the start
+        // event, so a hold taken in the startup window is announced after it and never before it.
+        var reentryControl = controlFor(traversalId);
+        synchronized (reentryControl) {
+            reentryControl.identity = identity;
+            PauseHold pending = pausedTraversals.get(traversalId);
+            if (pending != null) {
+                announceLocked(reentryControl, pending);
+            }
+        }
         UUID invocationId = identitySource.nextNodeInvocationId();
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
@@ -973,6 +1041,7 @@ public final class GraphRunner implements AutoCloseable {
                     // ExecutionState is discarded at that point and the resume builds a new one, so
                     // nothing it wrote would ever be read.
                     state.beginClosing();
+                    beginClosing(traversalId);
                     cancelBackoffs(traversalId);
                     try {
                         if (failure == null) state.executionCompleted();
@@ -1015,6 +1084,19 @@ public final class GraphRunner implements AutoCloseable {
         }
         state.reentryStarted();
         monitor.executionStarted(identity);
+        // The third entry path, wired exactly as #execute and #executeFrom are. A traversal resumed
+        // after a human task is as pausable as any other -- it is a live traversal with its own hop
+        // sequence -- so leaving it out would make it the one path where a hold is real but silent:
+        // held in `pausedTraversals`, reported by `isPaused`, and announced by nothing, because the
+        // identity every event is published under would never reach its control record.
+        var humanTaskControl = controlFor(traversalId);
+        synchronized (humanTaskControl) {
+            humanTaskControl.identity = identity;
+            PauseHold pending = pausedTraversals.get(traversalId);
+            if (pending != null) {
+                announceLocked(humanTaskControl, pending);
+            }
+        }
         UUID invocationId = identitySource.nextNodeInvocationId();
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
@@ -1037,8 +1119,12 @@ public final class GraphRunner implements AutoCloseable {
                     // Human-task re-entry dispatches the same retrying successor trees as the two
                     // entry paths above. Seal before cancelling and before release wakes a pause
                     // gate, so no abandoned retry can commit or dispatch through this discarded
-                    // re-entry state.
+                    // re-entry state. The runner-side mark goes with it, and its placement is load
+                    // bearing here too: this path publishes its terminal event inside the try below,
+                    // so refusing a new hold from this line on is what keeps EXECUTION_PAUSED from
+                    // following EXECUTION_COMPLETED on a human-task re-entry.
                     state.beginClosing();
+                    beginClosing(traversalId);
                     cancelBackoffs(traversalId);
                     try {
                         if (failure == null) {
@@ -1080,7 +1166,7 @@ public final class GraphRunner implements AutoCloseable {
         // This way the seal above is what stops it, which is the refusal that means something, and
         // reacquire's gate-absence check stays what it is meant to be: the backstop for a retry that
         // reaches admission after this method has returned, on its own thread.
-        releasePauseGate(traversalId, GateRelease.ON_CALLER);
+        releasePauseGate(traversalId, GateRelease.ON_CALLER, GateReleaseReason.ENDED);
         traversalAdmission.release(traversalId);
         CompletionStage<Void> joins = coordinator.terminate().exceptionally(ignored -> null);
         CompletionStage<Void> actors = releaseTraversalInstances(traversalId);
@@ -1166,7 +1252,7 @@ public final class GraphRunner implements AutoCloseable {
         // no hop that has not already started can start -- while the failure propagation the
         // released hop performs, which terminates the coordinator and notifies the monitor
         // synchronously, is no longer charged to whoever called cancel.
-        releasePauseGate(traversalId, release);
+        releasePauseGate(traversalId, release, GateReleaseReason.ENDED);
         // A branch waiting out a retry backoff is parked in neither the gate nor the admission queue,
         // so neither of the two lines above reaches it. Ending the waits here is what makes cancel
         // prompt for a retrying traversal instead of returning success over a branch that will happily
@@ -1235,7 +1321,156 @@ public final class GraphRunner implements AutoCloseable {
         if (cancelledTraversals.contains(traversalId)) {
             return false;
         }
-        return pausedTraversals.putIfAbsent(traversalId, new CompletableFuture<>()) == null;
+        TraversalControl control = controlFor(traversalId);
+        synchronized (control) {
+            if (control.closing) {
+                // The traversal has begun to end. Refusing here is what keeps EXECUTION_PAUSED from
+                // being published after a terminal event: `beginClosing` runs before the terminal
+                // transition, and the caller is answered NOT_ACTIVE, which is the truer answer than
+                // the ALREADY_PAUSED this used to produce over a traversal that was going away.
+                return false;
+            }
+            // The atomic put is the whole of the decision, exactly as it was before this became
+            // observable: whichever caller writes the entry has paused the traversal, and every other
+            // caller has not. It happens under the lock now so the decision and its announcement
+            // cannot be separated -- see #controlFor.
+            var hold = new PauseHold();
+            if (pausedTraversals.putIfAbsent(traversalId, hold) != null) {
+                return false;
+            }
+            announceLocked(control, hold);
+            return true;
+        }
+    }
+
+    /**
+     * This traversal's control record, created on first use.
+     *
+     * <h2>Why it is created on demand rather than only by {@link #execute}</h2>
+     * <p>A traversal is pausable before {@code execute} has built its identity: the application lists
+     * it live one line after accepting it, and two durable writes and a lease separate that from this
+     * runner. So a control call can be the first thing that ever names a traversal here, and if the
+     * record only appeared later there would be no lock to take at the moment the decision is made.
+     * Creating it here means <strong>every</strong> mutation of {@code pausedTraversals}, and every
+     * pause or resume publication for one traversal, happens under one monitor — which is what gives
+     * those operations a total order.</p>
+     *
+     * <p>That total order is the mechanism, and locking only where a record already existed did not
+     * deliver it. With the removal outside the lock, a resume could remove its hold, a pause could
+     * then install a fresh one and announce it, and the resume could publish afterwards — leaving
+     * {@code PAUSED, PAUSED, RESUMED} on the stream over a traversal that was still holding, which
+     * every reader of that sequence concludes is running. Under one lock the two admissible orders
+     * are {@code PAUSED, RESUMED, PAUSED} for a traversal that is holding, and a second pause that
+     * loses to the hold still in the map and is answered {@code ALREADY_PAUSED}.</p>
+     *
+     * <p>The identity is filled in later, by {@code execute}, because that is when it exists. A hold
+     * taken before then is left unannounced and is announced by {@code execute} under this same lock,
+     * immediately after the start event and never before it.</p>
+     *
+     * @param traversalId the traversal to obtain a control record for
+     * @return that traversal's control record, never {@code null}
+     */
+    private TraversalControl controlFor(UUID traversalId) {
+        return traversalControls.computeIfAbsent(traversalId, id -> new TraversalControl());
+    }
+
+    /**
+     * Publishes {@code EXECUTION_PAUSED} for a hold: at most once, and never before the traversal has
+     * an identity to be published under.
+     *
+     * <h2>Why there is no "has this hold been withdrawn?" check</h2>
+     * <p>There was one, and it could not fire. Every caller of this method obtains its hold under the
+     * same monitor the caller is holding — three of them from {@code pausedTraversals} inside the
+     * lock, the fourth from a {@code putIfAbsent} that just succeeded inside it — and
+     * {@link #releasePauseGate} removes from that map under that same monitor. A hold that reaches
+     * this method is therefore still in the map by construction, so a withdrawn one cannot arrive
+     * here. The flag was removed rather than documented, because a dead guard that reads as a live
+     * one invites the next reader to lean on it, and the property it appeared to provide is delivered
+     * by the removal happening inside the lock. That is pinned by
+     * {@code PausedExecutionObservabilityTest}, which fails if the removal moves back out.</p>
+     *
+     * <h2>Why {@link PauseHold#announced} is nevertheless kept</h2>
+     * <p>Not because it can fire. It cannot, and an earlier version of this note claimed otherwise:
+     * it said a re-entry path could meet a hold this runner had already announced. Reaching that
+     * needs two entry-path invocations for one traversal on one runner, and {@code coordinators}'
+     * {@code putIfAbsent} refuses the second until {@link #release} has run — which removes the hold
+     * first. So the state this guard excludes is not reachable, and removing the guard breaks no
+     * test.</p>
+     *
+     * <p>It stays because of <em>what</em> makes it unreachable, which is the opposite of the case
+     * for the withdrawn flag above. That one was excluded by a property this class enforces here and
+     * a test now pins. This one is excluded by the coordinator interlock — a different invariant, in
+     * a different part of this class, that no pause test covers and that a future change to re-entry
+     * could weaken without any of them noticing. A one-line idempotence guard on a publish, standing
+     * behind an unpinned invariant, is worth its cost; the same guard standing behind a pinned one
+     * was not.</p>
+     *
+     * <p>The field itself is load bearing on the other side and is pinned there:
+     * {@link #releasePauseGate} reads it to decide whether a release has a pause to pair with, which
+     * is what {@code aHoldWithdrawnBeforeItWasAnnouncedPublishesNeitherEvent} constrains.</p>
+     *
+     * <p>The caller must hold {@code control}'s monitor. Publishing inside it rather than after it is
+     * deliberate: {@link #releasePauseGate} publishes {@code EXECUTION_RESUMED} under the same
+     * monitor, so the lock is what orders the pair. Flagging inside the lock and publishing outside
+     * would leave that ordering to the scheduler, and a resume ahead of the pause it releases is
+     * exactly the impossible transition this pair exists to avoid.</p>
+     *
+     * <p>The lock is per traversal and is taken by control operations only, never on a hop's path, so
+     * it serialises no graph work. Listener delivery is synchronous by the monitor's own contract;
+     * that is unchanged, and it is the same exposure {@code cancelTraversal} already accepts when it
+     * publishes its refusal on the calling thread.</p>
+     *
+     * @param control this traversal's control record, whose monitor the caller holds
+     * @param hold    the hold to announce
+     */
+    private void announceLocked(TraversalControl control, PauseHold hold) {
+        if (control.identity == null) {
+            // Still inside the startup window. `execute` announces this hold once it has an identity,
+            // under this same lock and after the start event.
+            return;
+        }
+        if (hold.announced) {
+            return;
+        }
+        hold.announced = true;
+        monitor.executionPaused(control.identity);
+    }
+
+    /**
+     * Whether a hold is currently installed on this traversal.
+     *
+     * <p>Reads {@code pausedTraversals} directly, which is the same map {@link #pauseTraversal}
+     * writes and {@link #run} parks on, so "reported paused", "answered ALREADY_PAUSED" and "actually
+     * holding" are one fact rather than three projections that can disagree. It is a live read and
+     * deliberately not a snapshot: a caller that reads {@code true} has learned that a hold was in
+     * place at that moment, which is all any observer of a concurrent runtime can be told.</p>
+     *
+     * @param traversalId the traversal to ask about
+     * @return {@code true} while a hold is installed here, {@code false} once it has been released by
+     *         a resume, a cancellation, the traversal's own end or this runner's shutdown, and for a
+     *         traversal this runner has never held
+     */
+    public boolean isPaused(UUID traversalId) {
+        java.util.Objects.requireNonNull(traversalId, "traversalId");
+        return pausedTraversals.containsKey(traversalId);
+    }
+
+    /**
+     * Records that this traversal has begun to end, so no further hold can be installed on it.
+     *
+     * <p>Called beside {@code ExecutionState.beginClosing}, which is before either terminal event is
+     * published and before {@link #release} frees the gate. That ordering is the whole point: it
+     * closes the window in which a pause could be accepted over a traversal whose completion event
+     * was already on its way, which would show an observer a hold beginning after the execution had
+     * finished.</p>
+     *
+     * @param traversalId the traversal that is ending
+     */
+    private void beginClosing(UUID traversalId) {
+        TraversalControl control = controlFor(traversalId);
+        synchronized (control) {
+            control.closing = true;
+        }
     }
 
     /**
@@ -1255,7 +1490,7 @@ public final class GraphRunner implements AutoCloseable {
      */
     public boolean resumeTraversal(UUID traversalId) {
         java.util.Objects.requireNonNull(traversalId, "traversalId");
-        return releasePauseGate(traversalId, GateRelease.OFF_CALLER);
+        return releasePauseGate(traversalId, GateRelease.OFF_CALLER, GateReleaseReason.RESUMED);
     }
 
     /**
@@ -1272,6 +1507,73 @@ public final class GraphRunner implements AutoCloseable {
         ON_CALLER,
         /** The released hop runs on a virtual thread of its own; the releasing thread returns. */
         OFF_CALLER
+    }
+
+    /**
+     * Why a gate is being released, which is a different question from where its hop resumes.
+     *
+     * <h2>Both are needed, and neither implies the other</h2>
+     * <p>{@link GateRelease} says which thread runs the parked hop. This says what an observer should
+     * be told, and the two do not line up: a cancellation releases a gate {@code OFF_CALLER} and a
+     * resume does too, but only one of them means the traversal is running again. Four paths remove a
+     * hold and exactly one of them is a resume — {@link #cancelTraversal}, the completion path's
+     * {@link #release}, and {@link #close()} are the other three, and each of those is ending the
+     * traversal rather than continuing it.</p>
+     *
+     * <p>Publishing {@code EXECUTION_RESUMED} on any of the three would tell a reader the execution
+     * went back to running immediately before it stopped for good. That is not a cosmetic
+     * inaccuracy: an operator watching a held execution being cancelled would see it resume, and
+     * anything counting resumptions would count cancellations among them.</p>
+     */
+    private enum GateReleaseReason {
+        /** An operator released the hold and the traversal is continuing. Published. */
+        RESUMED,
+        /**
+         * The hold was dropped because the traversal is ending — cancelled, finished, or carried off
+         * by this runner's shutdown. Never published: the traversal's own terminal event, or the
+         * cancellation the caller already has, is what says what happened.
+         */
+        ENDED
+    }
+
+    /**
+     * One traversal's hold: the gate a parked hop waits on, and whether the hold has been announced
+     * to the event stream.
+     *
+     * <p>{@code announced} exists because a hold can be installed before this runner has an identity
+     * to publish under — see {@link #traversalControls} — so "held" and "announced as held" are
+     * genuinely different states for a window, and a re-entry path can meet a hold that was already
+     * announced. It is guarded by the traversal's {@link TraversalControl} monitor rather than by
+     * this object's own, because the flag and the map entry have to change together: a hold's
+     * removal and its announcement are two halves of one decision, and guarding them separately is
+     * what let an observer see a release published against a hold a later pause had already
+     * replaced.</p>
+     *
+     * <p>There is deliberately no "withdrawn" companion — see {@link #announceLocked} for why one
+     * could never be observed, and what replaced it.</p>
+     */
+    private static final class PauseHold {
+        /** Completed exactly once, by whichever caller removed this hold from the map. */
+        private final CompletableFuture<Void> gate = new CompletableFuture<>();
+        /** Whether {@code EXECUTION_PAUSED} has been published for this hold. */
+        private boolean announced;
+    }
+
+    /**
+     * The lock that orders one traversal's pause and resume publications, and what those publications
+     * need to know.
+     *
+     * @see #controlFor
+     * @see #traversalControls
+     */
+    private static final class TraversalControl {
+        /**
+         * The identity every event of this traversal is published under, or {@code null} while the
+         * traversal has been named by a control call but has not started. Guarded by this monitor.
+         */
+        private ExecutionMonitor.ExecutionIdentity identity;
+        /** Set when the traversal begins to end; guarded by this monitor. */
+        private boolean closing;
     }
 
     /**
@@ -1352,11 +1654,32 @@ public final class GraphRunner implements AutoCloseable {
      * the required property is delivered by {@code Thread.start()} returning — the request
      * thread is free before the scheduler does anything at all.</p>
      */
-    private boolean releasePauseGate(UUID traversalId, GateRelease release) {
-        CompletableFuture<Void> gate = pausedTraversals.remove(traversalId);
-        if (gate == null) {
-            return false;
+    private boolean releasePauseGate(UUID traversalId, GateRelease release, GateReleaseReason reason) {
+        // The removal and the publication happen under this traversal's one control monitor, the
+        // same monitor a pause installs and announces under. That is what stops a pause from landing
+        // between them -- see #controlFor for the sequence that produced, and the reading it gave an
+        // observer.
+        //
+        // This is not a shape to preserve by convention: PausedExecutionObservabilityTest constructs
+        // the interleaving and fails if either step moves out, so the property is pinned rather than
+        // merely written down here.
+        TraversalControl control = controlFor(traversalId);
+        PauseHold hold;
+        synchronized (control) {
+            hold = pausedTraversals.remove(traversalId);
+            if (hold == null) {
+                return false;
+            }
+            // Only a resume publishes, and only over a hold this stream has already announced. An
+            // unannounced hold never became visible to anyone, so releasing it is not a transition an
+            // observer can be shown -- it would be the release of a pause they were never told about.
+            if (reason == GateReleaseReason.RESUMED && hold.announced) {
+                monitor.executionResumed(control.identity);
+            }
         }
+        // Completed outside the lock: this hands a thread to the parked hop, and that hop's work must
+        // not be serialised behind the next control call on the same traversal.
+        CompletableFuture<Void> gate = hold.gate;
         if (release == GateRelease.ON_CALLER) {
             gate.complete(null);
             return true;
@@ -1478,9 +1801,9 @@ public final class GraphRunner implements AutoCloseable {
         // side of everything else. Re-entering run() on release rather than falling through is
         // deliberate: the traversal may have been cancelled, or paused again, while it was parked,
         // and both are read by the checks at the top rather than by a second copy of them here.
-        CompletableFuture<Void> gate = pausedTraversals.get(identity.traversalId());
-        if (gate != null) {
-            return gate.thenCompose(released -> run(node, payload, attributes, parentInvocationIds, command,
+        PauseHold hold = pausedTraversals.get(identity.traversalId());
+        if (hold != null) {
+            return hold.gate.thenCompose(released -> run(node, payload, attributes, parentInvocationIds, command,
                     causedBy, state, identity, coordinator, iteration));
         }
         NodeRuntimeDefinition definition = runtimeDefinitions.get(node.id());
@@ -2065,8 +2388,8 @@ public final class GraphRunner implements AutoCloseable {
      * stronger guarantee than the ordinary path would be a second semantics to keep in step.</p>
      */
     private CompletionStage<Void> awaitPauseGate(UUID traversalId) {
-        CompletableFuture<Void> gate = pausedTraversals.get(traversalId);
-        return gate == null ? CompletableFuture.completedFuture(null) : gate;
+        PauseHold hold = pausedTraversals.get(traversalId);
+        return hold == null ? CompletableFuture.completedFuture(null) : hold.gate;
     }
 
     /**
@@ -3108,7 +3431,11 @@ public final class GraphRunner implements AutoCloseable {
         // store is closed. In the ordinary case there is no such hop -- a parked hop means execute()
         // ran, and every traversal execute() registered was handled above -- but "in the ordinary
         // case" is the whole of that claim, and completing a gate nobody waits on costs nothing.
-        pausedTraversals.keySet().forEach(traversalId -> releasePauseGate(traversalId, GateRelease.ON_CALLER));
+        pausedTraversals.keySet().forEach(traversalId ->
+                releasePauseGate(traversalId, GateRelease.ON_CALLER, GateReleaseReason.ENDED));
+        // Bounded by this runner exactly as the gates above are, and cleared in the same place for
+        // the same reason: nothing outside this runner holds a reference to either map.
+        traversalControls.clear();
         // Same argument as the line above, for the other place a branch can be parked: the loop over
         // coordinators reaches every traversal this runner registered, and a backoff belonging to one
         // it did not is ended here so no wait outlives the runner that owns it. Ending them is also

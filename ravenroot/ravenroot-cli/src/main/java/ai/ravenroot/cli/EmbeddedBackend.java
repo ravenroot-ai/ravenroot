@@ -111,7 +111,7 @@ final class EmbeddedBackend implements CliBackend {
                 // for the same reason -- ExecutionOutcome already carries it, so dropping it here
                 // would be this projection's own gap, not the remote transport's.
                 yield new ResultView(outcome.executionId().toString(), outcome.status().toString(),
-                        outcome.degraded(), outcome.visitedNodes().stream().sorted().toList(),
+                        outcome.paused(), outcome.degraded(), outcome.visitedNodes().stream().sorted().toList(),
                         outcome.defaultedNodes().stream().sorted().toList(),
                         outcome.bypassedNodes().stream().sorted().toList(),
                         outcome.handledFailure(),
@@ -134,7 +134,7 @@ final class EmbeddedBackend implements CliBackend {
         return application.liveExecutions(requestContext).stream()
                 .map(execution -> new LiveView(execution.processInstanceId().toString(),
                         execution.traversalId().toString(), execution.executionId().toString(),
-                        execution.graphVersion(), execution.startedAt().toString()))
+                        execution.graphVersion(), execution.startedAt().toString(), execution.paused()))
                 .toList();
     }
 

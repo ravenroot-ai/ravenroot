@@ -1334,6 +1334,22 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     /**
+     * Reads the hold straight out of the runner that owns the traversal, through the same
+     * {@link #activeExecutions} entry {@link #pauseTraversal} writes through.
+     *
+     * <p>Two maps are consulted and each answers the part it owns: this one says whether the
+     * traversal is live here at all, and the runner's own pause bookkeeping says whether it is
+     * holding. A traversal absent from this map is not paused <em>here</em> whatever any other
+     * process might think, which is the same scope every other method on this class reports in.</p>
+     */
+    @Override
+    public boolean executionPaused(UUID traversalId) {
+        java.util.Objects.requireNonNull(traversalId, "traversalId");
+        ActiveExecution active = activeExecutions.get(traversalId);
+        return active != null && active.runner.isPaused(traversalId);
+    }
+
+    /**
      * Reads live executions straight out of {@link #activeExecutions} -- the same map
      * {@link #cancelTraversal} mutates and {@link #startGraphMl} populates -- rather than from any
      * projection of published events. A traversal whose behavior has deadlocked stops publishing
@@ -1351,8 +1367,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var result = new ArrayList<LiveExecution>();
         activeExecutions.forEach((traversalId, active) -> {
             if (tenantId.equals(active.tenantId)) {
+                // The hold is read from the runner that owns this traversal, at the moment the row
+                // is built, rather than from a flag kept beside the entry. A cached copy would be a
+                // second source of truth for a fact that changes without this map being touched, and
+                // the two would drift for exactly as long as nobody looked.
                 result.add(new LiveExecution(active.processInstanceId, traversalId, active.graphVersion,
-                        active.startedAt));
+                        active.startedAt, active.runner.isPaused(traversalId)));
             }
         });
         // Deterministic order for callers and tests: earliest-started first, traversal id as the
@@ -1480,7 +1500,18 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
 
     @Override
     public ai.ravenroot.api.application.ExecutionLookup executionResult(String tenantId, UUID executionId) {
-        return executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId));
+        var lookup = executionResults.lookup(new ExecutionResultRegistry.Key(tenantId, executionId));
+        // The pause is applied on the way out and never stored in the registry. The registry holds
+        // an immutable record of what a traversal has done; whether it is holding right now belongs
+        // to the runtime, changes without the registry being written, and would go stale the instant
+        // it was copied there. Only a Found outcome can carry it: an Expired tombstone reports a
+        // terminal status, and a terminal outcome is never paused -- the record's own constructor
+        // enforces that, so this line cannot manufacture the combination either.
+        if (lookup instanceof ai.ravenroot.api.application.ExecutionLookup.Found found
+                && executionPaused(executionId)) {
+            return new ai.ravenroot.api.application.ExecutionLookup.Found(found.outcome().withPaused(true));
+        }
+        return lookup;
     }
 
     @Override

@@ -243,6 +243,14 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
                 orchestrationRetries.add(1, retryAttributes(event));
             }
             case NODE_DEFAULTED -> annotateNode(event, "ravenroot.node.defaulted");
+            // Annotations on the traversal span rather than a start/end pair of their own. A hold is
+            // not a unit of work with a duration this bridge can close: it lasts until an operator
+            // ends it, which may be never, and a span left open for an unbounded human interval is
+            // one the exporter eventually drops or reports as an error. The traversal span already
+            // spans the hold, so marking its start and its release on that span is what makes a gap
+            // in the node timeline explainable -- which is the whole reason a reader looks.
+            case EXECUTION_PAUSED -> annotateTraversal(event, "ravenroot.execution.paused");
+            case EXECUTION_RESUMED -> annotateTraversal(event, "ravenroot.execution.resumed");
             case JOIN_SATISFIED -> annotateJoin(event, "ravenroot.join.satisfied", StatusCode.UNSET);
             case JOIN_FAILED -> annotateJoin(event, "ravenroot.join.failed", StatusCode.ERROR);
             case JOIN_ARRIVAL_DISCARDED -> annotateJoin(event, "ravenroot.join.arrival_discarded", StatusCode.UNSET);
@@ -357,6 +365,26 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
             return;
         }
         pending.span().addEvent(eventName, Attributes.of(ATTR_DETAIL, event.detail()), event.occurredAt());
+    }
+
+    /**
+     * Records a traversal-level transition on the traversal's own span, if one is open.
+     *
+     * <p>No node id and no status write: the events this serves carry neither a node nor a failure,
+     * and a pause is not an error condition — it is somebody deliberately holding their own work.
+     * Marking the span {@code ERROR} for it would put every paused execution into an error dashboard
+     * and teach its readers to ignore the signal.</p>
+     *
+     * <p>A missing traversal span is silently tolerated, exactly as it is for joins: the bridge may
+     * have been attached mid-run, and a pause on a traversal whose start it never saw is not a
+     * defect in either.</p>
+     */
+    private void annotateTraversal(ExecutionEvent event, String eventName) {
+        PendingSpan traversal = traversalSpans.get(event.traversalId());
+        if (traversal != null) {
+            traversal.span().addEvent(eventName, Attributes.of(ATTR_DETAIL, event.detail()),
+                    event.occurredAt());
+        }
     }
 
     /** Joins have no invocation of their own (CORE-03): recorded as an event on the traversal span,

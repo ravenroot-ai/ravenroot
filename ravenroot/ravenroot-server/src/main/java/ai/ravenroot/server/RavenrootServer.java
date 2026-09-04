@@ -2980,12 +2980,19 @@ public final class RavenrootServer implements AutoCloseable {
         json(exchange, 200, body);
     }
 
+    /**
+     * {@code paused} is emitted on every row, including when it is {@code false}, for the reason
+     * {@code defaultedNodes} is always emitted on a result: a field that appears only when it is true
+     * cannot distinguish "this execution is not holding" from "this server does not report holds",
+     * and a client that cannot tell those apart has to assume the worse of the two on every row.
+     */
     private static String liveExecutionJson(ai.ravenroot.api.application.LiveExecution execution) {
         return "{\"processInstanceId\":\"" + execution.processInstanceId()
                 + "\",\"traversalId\":\"" + execution.traversalId()
                 + "\",\"executionId\":\"" + execution.executionId()
                 + "\",\"graphVersion\":\"" + escape(execution.graphVersion())
-                + "\",\"startedAt\":\"" + execution.startedAt() + "\"}";
+                + "\",\"startedAt\":\"" + execution.startedAt()
+                + "\",\"paused\":" + execution.paused() + "}";
     }
 
     /** Query parameters {@link #listProcessInventory} recognises; anything else is refused rather
@@ -3258,7 +3265,11 @@ public final class RavenrootServer implements AutoCloseable {
                 .append("\",\"traversalId\":\"").append(outcome.traversalId())
                 .append("\",\"executionId\":\"").append(outcome.executionId())
                 .append("\",\"status\":\"").append(outcome.status())
-                .append("\",\"degraded\":").append(outcome.degraded())
+                // Beside status rather than inside it: status stays the durable lifecycle value a
+                // consumer already switches over, and this qualifies it. Always present, for the
+                // reason degraded and handledFailure are always present.
+                .append("\",\"paused\":").append(outcome.paused())
+                .append(",\"degraded\":").append(outcome.degraded())
                 .append(",\"handledFailure\":").append(outcome.handledFailure())
                 .append(",\"visitedNodes\":").append(stringArrayJson(outcome.visitedNodes()))
                 .append(",\"defaultedNodes\":").append(stringArrayJson(outcome.defaultedNodes()))

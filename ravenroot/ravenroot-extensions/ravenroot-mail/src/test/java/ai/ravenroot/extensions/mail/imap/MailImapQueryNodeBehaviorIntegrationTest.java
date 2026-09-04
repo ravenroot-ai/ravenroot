@@ -7,6 +7,7 @@ import ai.ravenroot.api.security.CredentialResolver;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import jakarta.mail.Flags;
 import jakarta.mail.Message;
 import jakarta.mail.Session;
@@ -653,7 +654,9 @@ class MailImapQueryNodeBehaviorIntegrationTest {
     private static NodeAction action(DeterministicImapFixture fixture, String host, String mode, Set<String> folders, CredentialResolver credentials, int preview, int maxResults, String graphLimit) throws Exception {
         SSLSocketFactory socketFactory = fixture.trustedSocketFactory();
         return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, fixture.port(), host, mode, folders, preview, maxResults)), credentials,
-                properties -> { properties.put("mail.imaps.ssl.socketFactory", socketFactory); return properties; }).create(configuration(graphLimit));
+                properties -> { properties.put("mail.imaps.ssl.socketFactory", socketFactory); return properties; },
+                task -> Thread.ofVirtual().name("ravenroot-imap-test-", 0).start(task), System::nanoTime,
+                loopbackPolicy(host)).create(configuration(graphLimit));
     }
     /** One profile preview budget and an optional graph-level {@code contentMode} default. */
     private static NodeAction action(DeterministicImapFixture fixture, int previewChars, String graphContentMode) throws Exception {
@@ -673,6 +676,10 @@ class MailImapQueryNodeBehaviorIntegrationTest {
     private static NodeAction localAction(int preview, Set<String> folders, CredentialResolver credentials) { return new MailImapQueryNodeBehavior((tenant, name) -> Optional.of(profile(tenant, name, 1, "localhost", "IMAPS", folders, preview)), credentials).create(configuration()); }
     private static ImapProfile profile(String tenant, String id, int port, String host, String mode, Set<String> folders, int preview) { return new ImapProfile(tenant, id, host, port, mode, "reader", "credential", folders, GENEROUS_TIMEOUT_MS, GENEROUS_TIMEOUT_MS, 2, 10, preview); }
     private static ImapProfile profile(String tenant, String id, int port, String host, String mode, Set<String> folders, int preview, int maxResults) { return new ImapProfile(tenant, id, host, port, mode, "reader", "credential", folders, GENEROUS_TIMEOUT_MS, GENEROUS_TIMEOUT_MS, 2, maxResults, preview); }
+    private static ReservedNetworkPolicy loopbackPolicy(String host) {
+        String destination = host.contains(":") ? "[" + host + "]" : host;
+        return ReservedNetworkPolicy.fromCommaSeparatedExceptions(destination + ":LOOPBACK");
+    }
     private static NodeConfiguration configuration() { return new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR, Map.of("profile", "reader", "folder", "INBOX", "limit", "10", "maxConcurrency", "2")); }
     private static NodeConfiguration configuration(String limit) { return new NodeConfiguration("imap", MailImapQueryNodeBehavior.BEHAVIOR, Map.of("profile", "reader", "folder", "INBOX", "limit", limit, "maxConcurrency", "2")); }
     private static Optional<SecretValue> secret() { return Optional.of(new SecretValue("secret".toCharArray())); }

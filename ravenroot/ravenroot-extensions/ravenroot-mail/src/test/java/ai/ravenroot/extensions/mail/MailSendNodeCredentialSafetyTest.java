@@ -5,6 +5,7 @@ import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.util.LinkedHashMap;
@@ -15,6 +16,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -51,6 +53,31 @@ class MailSendNodeCredentialSafetyTest {
                 () -> nodeAction(ref -> Optional.empty(), 9).handle(message()).toCompletableFuture().join());
         assertEquals(MailSendException.Code.CREDENTIAL_UNAVAILABLE, mailFailure(failure).code());
         assertSecretAbsent(failure);
+    }
+
+    @Test void reservedLiteralFromCustomProfileIsRefusedBeforeCredentialAndExactExceptionReachesTransport() {
+        MailProfile literal = MailTestSupport.profile("t", MailTestSupport.PROFILE, "127.0.0.1", 9,
+                "SMTPS", "smtp-user", "mail-primary", 0);
+        AtomicInteger resolutions = new AtomicInteger();
+        var denied = new MailSendNodeBehavior(reference -> {
+            resolutions.incrementAndGet();
+            return Optional.of(new SecretValue(SENTINEL.toCharArray()));
+        }, (tenant, name) -> Optional.of(literal), SecretValue::copy, String::new,
+                ReservedNetworkPolicy.denyAllReserved()).create(MailTestSupport.configuration(Map.of()));
+        CompletionException refusal = assertThrows(CompletionException.class,
+                () -> denied.handle(message()).toCompletableFuture().join());
+        assertEquals(MailSendException.Code.CONFIGURATION, mailFailure(refusal).code());
+        assertEquals(0, resolutions.get());
+        assertFalse(refusal.toString().contains("127.0.0.1"));
+
+        var allowed = new MailSendNodeBehavior(reference -> {
+            resolutions.incrementAndGet();
+            return Optional.of(new SecretValue(SENTINEL.toCharArray()));
+        }, (tenant, name) -> Optional.of(literal), SecretValue::copy, String::new,
+                ReservedNetworkPolicy.fromCommaSeparatedExceptions("127.0.0.1:LOOPBACK"))
+                .create(MailTestSupport.configuration(Map.of("connectTimeoutMs", "1")));
+        assertThrows(CompletionException.class, () -> allowed.handle(message()).toCompletableFuture().join());
+        assertEquals(1, resolutions.get(), "an exact operator exception must reach credential resolution");
     }
 
     private static ai.ravenroot.api.node.NodeAction nodeAction(ai.ravenroot.api.security.CredentialResolver resolver, int port) {

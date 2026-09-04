@@ -11,6 +11,7 @@ import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.common.errors.AuthenticationException;
@@ -53,6 +54,7 @@ public final class KafkaProduceNodeBehavior implements NodeBehavior {
     private final KafkaProtocol protocol;
     private final KafkaRuntimeControls controls;
     private final LongSupplier ticker;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public KafkaProduceNodeBehavior() { this(new EnvironmentKafkaCredentialResolver(), new EnvironmentKafkaProfileResolver()); }
     public KafkaProduceNodeBehavior(CredentialResolver credentials, KafkaProfileResolver profiles) {
@@ -60,9 +62,16 @@ public final class KafkaProduceNodeBehavior implements NodeBehavior {
     }
     KafkaProduceNodeBehavior(CredentialResolver credentials, KafkaProfileResolver profiles, KafkaProtocol protocol,
                              KafkaRuntimeControls controls, LongSupplier ticker) {
+        this(credentials, profiles, protocol, controls, ticker,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+    KafkaProduceNodeBehavior(CredentialResolver credentials, KafkaProfileResolver profiles, KafkaProtocol protocol,
+                             KafkaRuntimeControls controls, LongSupplier ticker,
+                             ReservedNetworkPolicy destinationPolicy) {
         this.credentials = Objects.requireNonNull(credentials); this.profiles = Objects.requireNonNull(profiles);
         this.protocol = Objects.requireNonNull(protocol); this.controls = Objects.requireNonNull(controls);
         this.ticker = Objects.requireNonNull(ticker);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public NodeTypeDescriptor descriptor() {
@@ -105,7 +114,7 @@ public final class KafkaProduceNodeBehavior implements NodeBehavior {
             KafkaRuntimeControls.Admission admission = null;
             final Settings settings; final Input input;
             try {
-                settings = Settings.from(configuration, profiles, message.tenantId());
+                settings = Settings.from(configuration, profiles, destinationPolicy, message.tenantId());
                 input = Input.from(message.payload(), settings);
                 admission = controls.acquire(message.tenantId(), settings.profile, settings.maxConcurrency, actionGates);
                 if (!admission.acquired()) return CompletableFuture.completedFuture(result("TEMPORARY_FAILURE", "LOCAL_CAPACITY", input, 0, null));
@@ -253,13 +262,17 @@ public final class KafkaProduceNodeBehavior implements NodeBehavior {
     }
 
     private record Settings(KafkaProfile profile, String topic, int timeoutMs, int maxConcurrency, int maxRecordBytes, String correlationId) {
-        static Settings from(NodeConfiguration c, KafkaProfileResolver resolver, String tenant) {
+        static Settings from(NodeConfiguration c, KafkaProfileResolver resolver,
+                             ReservedNetworkPolicy destinationPolicy, String tenant) {
             for (String key : c.properties().keySet()) if (!CONFIG.contains(key)) throw new Refusal("REJECTED", "UNKNOWN_GRAPH_PROPERTY");
             String name = c.property("clusterProfile").orElseThrow(() -> new Refusal("REJECTED", "CLUSTER_PROFILE_REQUIRED"));
             KafkaProfile p;
             try { p = resolver.resolve(tenant, name).orElse(null); } catch (RuntimeException failure) { p = null; }
             if (p == null) throw new Refusal("PERMANENT_FAILURE", "CLUSTER_PROFILE_UNAVAILABLE");
             if (!tenant.equals(p.tenant()) || !name.equals(p.name())) throw new Refusal("REJECTED", "CLUSTER_PROFILE_FORBIDDEN");
+            try { EnvironmentKafkaProfileResolver.requireDestinations(
+                    String.join(",", p.bootstrapServers()), destinationPolicy); }
+            catch (SecurityException refused) { throw new Refusal("PERMANENT_FAILURE", "CLUSTER_PROFILE_UNAVAILABLE"); }
             String topic = c.property("topic", p.defaultTopic()); if (!p.allowsTopic(topic)) throw new Refusal("REJECTED", "TOPIC_FORBIDDEN");
             return new Settings(p, topic, tighten(c,"timeoutMs",p.timeoutMs(),100), tighten(c,"maxConcurrency",p.maxConcurrency(),1),
                     tighten(c,"maxRecordBytes",p.maxRecordBytes(),1), optional(c,"correlationId",128));

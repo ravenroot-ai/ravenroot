@@ -3,6 +3,8 @@ package ai.ravenroot.extensions.mail;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -46,7 +48,7 @@ final class MailTestSupport {
 
     static NodeAction action(CredentialResolver credentials, String host, int port, String mode, int retries) {
         MailProfileResolver profiles = (tenant, name) -> Optional.of(profile(tenant, name, host, port, mode, "", "", retries));
-        return new MailSendNodeBehavior(credentials, profiles).create(configuration(Map.of()));
+        return loopbackBehavior(credentials, profiles, host).create(configuration(Map.of()));
     }
 
     /** {@link #action(CredentialResolver, String, int, String, int)} with an explicit timeout. */
@@ -54,13 +56,24 @@ final class MailTestSupport {
                              int timeoutMs) {
         MailProfileResolver profiles = (tenant, name) ->
                 Optional.of(profile(tenant, name, host, port, mode, "", "", retries, 16, timeoutMs));
-        return new MailSendNodeBehavior(credentials, profiles).create(configuration(Map.of()));
+        return loopbackBehavior(credentials, profiles, host).create(configuration(Map.of()));
     }
 
     static NodeAction authenticatedAction(CredentialResolver credentials, String host, int port, String mode) {
         MailProfileResolver profiles = (tenant, name) -> Optional.of(profile(tenant, name, host, port, mode,
                 "smtp-user", "mail-primary", 0));
-        return new MailSendNodeBehavior(credentials, profiles).create(configuration(Map.of()));
+        return loopbackBehavior(credentials, profiles, host).create(configuration(Map.of()));
+    }
+
+    static MailSendNodeBehavior loopbackBehavior(CredentialResolver credentials,
+                                                  MailProfileResolver profiles, String host) {
+        return new MailSendNodeBehavior(credentials, profiles, SecretValue::copy, String::new,
+                loopbackPolicy(host));
+    }
+
+    static ReservedNetworkPolicy loopbackPolicy(String host) {
+        String destination = host.contains(":") ? "[" + host + "]" : host;
+        return ReservedNetworkPolicy.fromCommaSeparatedExceptions(destination + ":LOOPBACK");
     }
 
     static NodeConfiguration configuration(Map<String, ?> extra) {

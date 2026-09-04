@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.kafka;
 
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.util.List;
 import java.util.Map;
@@ -10,9 +11,11 @@ import java.util.Set;
 /** Resolves opaque consumer profiles; malformed operator configuration fails closed. */
 public final class EnvironmentKafkaConsumerProfileResolver implements KafkaConsumerProfileResolver {
     private final Map<String, String> environment;
+    private final ReservedNetworkPolicy destinationPolicy;
     public EnvironmentKafkaConsumerProfileResolver() { this(System.getenv()); }
     EnvironmentKafkaConsumerProfileResolver(Map<String, String> environment) {
         this.environment = Map.copyOf(environment);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(environment);
     }
     @Override public Optional<KafkaConsumerProfile> resolve(String tenant, String profile) {
         if (!safe(tenant) || !safe(profile)) return Optional.empty();
@@ -24,6 +27,7 @@ public final class EnvironmentKafkaConsumerProfileResolver implements KafkaConsu
         String[] p = raw.split(";", -1);
         if (p.length != 34) return Optional.empty();
         try {
+            EnvironmentKafkaProfileResolver.requireDestinations(p[0], destinationPolicy);
             return Optional.of(new KafkaConsumerProfile(tenant, profile, csvList(p[0]), p[1], bool(p[2]),
                     p[3], p[4], p[5], p[6], p[7], p[8], p[9], csv(p[10]), p[11], csv(p[12]),
                     p[13], p[14], p[15], integer(p[16]), integer(p[17]), integer(p[18]), integer(p[19]),

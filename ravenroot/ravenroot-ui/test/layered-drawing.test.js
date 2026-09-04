@@ -66,6 +66,16 @@ function judged(drawing, inputs) {
 const PEERS = ['product-architecture', 'core-runtime', 'integrations', 'frontend', 'graph-rendering', 'qa',
   'platform', 'ai-agents', 'open-source', 'legal', 'security', 'docs'];
 
+// The fan exemption is bounded at what each drawing produces plus a stated margin: Hierarchical
+// (new) draws none on the bench; Flow (new) draws one, leader -> error beside leader -> audit, for
+// 909 px; on the 200-node synthetic graph each mode draws one, 5035 px (orthogonal) and 4688 px
+// (polyline). A second fan, or a longer one, is a change to be looked at, not absorbed.
+const FAN_BOUNDS = {
+  bench: { 'hierarchical-new': { count: 0, longest: 0 }, 'flow-new': { count: 1, longest: 1000 } },
+  synthetic: { 'hierarchical-new': { count: 1, longest: 5600 }, 'flow-new': { count: 1, longest: 5600 } },
+};
+const longestOf = fans => Math.max(0, ...fans.map(entry => entry.length));
+
 // jsdom swaps the global `URL`, which Node's fs refuses; resolve the fixture from the path string.
 
 // A workflow-shaped synthetic graph: blocks of fan-out and fan-in along a spine, extra edges
@@ -147,6 +157,8 @@ describe('layered drawing', () => {
       expect(verdict.throughBodies).toEqual([]);
       expect(verdict.throughLabels).toEqual([]);
       expect(verdict.piles).toEqual([]);
+      expect(verdict.fans.length).toBeLessThanOrEqual(FAN_BOUNDS.bench[mode].count);
+      expect(longestOf(verdict.fans)).toBeLessThanOrEqual(FAN_BOUNDS.bench[mode].longest);
       expect(verdict.backInsideBand).toEqual([]);
       // Layer discreteness is judged against a layering computed from the graph alone: one
       // column per structural layer, in order, with every forward edge crossing columns forwards.
@@ -218,6 +230,9 @@ describe('layered drawing', () => {
       expect(drawing.positions).toHaveLength(200);
       const verdict = judged(drawing, inputs);
       expect(verdict.labelOverlaps).toEqual([]);
+      expect(verdict.piles).toEqual([]);
+      expect(verdict.fans.length).toBeLessThanOrEqual(FAN_BOUNDS.synthetic[mode].count);
+      expect(longestOf(verdict.fans)).toBeLessThanOrEqual(FAN_BOUNDS.synthetic[mode].longest);
       // ELK's depth-first cycle break and the structural one may reverse different edges of the
       // same cycle, so an edge running against the structural order is acceptable only when the
       // drawing itself routed it as a back edge, outside the band.

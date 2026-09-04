@@ -22,7 +22,8 @@ not read. Edges become long curves that pile up in the middle of the canvas, fai
 over the whole drawing, and neighbouring labels collide. Measured on that graph with the same
 sampler for every arrangement: `Hierarchical` draws 425 edge crossings, 52 edges through node
 bodies and 75 through labels; `Flow` 402 crossings and 20 edges through labels; `Organic` 585
-crossings and 13 colliding labels. Larger spacing constants enlarge the canvas without changing the
+crossings and 13 colliding labels in one sample — it is an unseeded force-directed layout, and a
+later sample measured 507 and 9. Larger spacing constants enlarge the canvas without changing the
 topology of the drawing. A different class of solution was needed, and the owner required it to be
 purely additive: the existing arrangements keep their engines, options, routing, command ids,
 labels, order and tests, and the new ones are added beside them under distinguishing names.
@@ -55,8 +56,13 @@ backwards in a workflow. `Hierarchical (new)` routes orthogonally with small rou
 form yEd and Graphviz readers expect; `Flow (new)` places layers more tightly with polyline routing
 and larger rounded corners, so the drawing keeps its curves without letting them pile up. One
 exception is stated rather than hidden: two edges leaving one node from adjacent ports towards
-distant targets run together for a stretch by construction — a fan, which the acceptance criteria
-allow — and the check for piled edges reports such pairs separately from unrelated ones.
+distant targets, or arriving at one node from adjacent ports, run together for a stretch by
+construction — a fan, which the acceptance criteria allow. The check for piled edges exempts only
+pairs that share their source node or share their target node; two edges chained head to tail
+through a node are judged like any other pair. The exemption is bounded, not open: the tests pin
+the fan count and the longest fan run at what each drawing produces plus a margin — none for
+`Hierarchical (new)` on the test bench, one of at most 1000 px for `Flow (new)` (909 px measured),
+one of at most 5600 px per mode on a 200-node, 400-edge graph (5035 px and 4688 px measured).
 
 **Backward edges are routed by the editor, outside the band.** An edge whose target sits on the
 same or an earlier layer than its source leaves the source's east side from a port of its own,

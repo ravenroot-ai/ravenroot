@@ -14,6 +14,13 @@ const testBench = readFileSync(new URL('../test/fixtures/layout-test-bench.graph
 
 const ESTABLISHED = ['Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic'];
 const LAYERED = ['Arrange — Hierarchical (new)', 'Arrange — Flow (new)'];
+// The fan exemption is bounded at what each drawing produces plus a stated margin: none for
+// Hierarchical (new) on the bench, one of 909 px for Flow (new); one per mode on the 200-node
+// graph, 5035 px (orthogonal) and 4688 px (polyline).
+const FAN_BOUNDS = {
+  bench: new Map([['Arrange — Hierarchical (new)', { count: 0, longest: 0 }], ['Arrange — Flow (new)', { count: 1, longest: 1000 }]]),
+  large: { count: 1, longest: 5600 },
+};
 const COUNTERPART = new Map([
   ['Arrange — Hierarchical (new)', 'Arrange — Hierarchical'],
   ['Arrange — Flow (new)', 'Arrange — Flow'],
@@ -98,7 +105,8 @@ function judge(sample) {
   // Piled edges are judged at the stroke width; the fan a node's adjacent ports form is the one
   // exception the criteria allow, reported apart so it stays visible.
   const runs = sharedRuns(polylines, { minLength: NODE_SIZE, tolerance: 3, ignoreSharedEndpoints: true });
-  const errorNode = sample.nodes.find(node => node.kind === 'ERROR');
+  // A graph without an error node (the large synthetic one) has no failure fan to judge.
+  const errorNode = sample.nodes.find(node => node.kind === 'ERROR') || { id: null, body: { left: 0, right: 0, top: 0, bottom: 0 } };
   const intoError = polylines.filter(edge => edge.target === errorNode.id);
   // An explicit endpoint ("-40px 12px", relative to the node centre) names its side exactly; the
   // established arrangements use symbolic endpoints, so their side is the nearest border to the
@@ -125,6 +133,7 @@ function judge(sample) {
     throughLabels: edgesThroughBoxes(polylines, sample.nodes, labelBoxOf).length,
     piles: runs.length,
     fans: runs.fans.length,
+    longestFan: Math.round(Math.max(0, ...runs.fans.map(entry => entry.length))),
     layerCount: layering.layerCount,
     columns: layering.columns.length,
     splitLayers: layering.splitLayers.length,
@@ -185,6 +194,8 @@ test.describe('Layered arrangements on the test bench', () => {
       expect.soft(verdict.throughBodies, `${label}: edges through node bodies`).toBe(0);
       expect.soft(verdict.throughLabels, `${label}: edges through labels`).toBe(0);
       expect.soft(verdict.piles, `${label}: unrelated edges drawn on top of each other`).toBe(0);
+      expect.soft(verdict.fans, `${label}: fans from one node's adjacent ports`).toBeLessThanOrEqual(FAN_BOUNDS.bench.get(label).count);
+      expect.soft(verdict.longestFan, `${label}: longest fan run in px`).toBeLessThanOrEqual(FAN_BOUNDS.bench.get(label).longest);
       expect.soft(verdict.layered, `${label}: one column per structural layer, edges forward`).toBe(true);
       expect.soft(verdict.columns, `${label}: columns vs structural layers (${verdict.layerCount})`).toBe(verdict.layerCount);
       expect.soft(verdict.peerColumns, `${label}: the twelve peers on one column`).toBe(1);
@@ -328,6 +339,10 @@ test.describe('Layered arrangements on a large graph', () => {
       expect(sample.elapsedMs, `${label}: engine time on 200 nodes / 400 edges`).toBeLessThan(5000);
       expect(sample.edges).toHaveLength(400);
       expect(labelOverlaps(sample.nodes)).toEqual([]);
+      const verdict = judge(sample);
+      expect(verdict.piles, `${label}: unrelated edges drawn on top of each other`).toBe(0);
+      expect(verdict.fans, `${label}: fans on the large graph`).toBeLessThanOrEqual(FAN_BOUNDS.large.count);
+      expect(verdict.longestFan, `${label}: longest fan run on the large graph`).toBeLessThanOrEqual(FAN_BOUNDS.large.longest);
     }
   });
 });

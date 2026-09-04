@@ -149,9 +149,11 @@ function collinearOverlap(p1, p2, q1, q2, tolerance) {
  * the tolerance should reflect the stroke width, not the output.
  *
  * <p>`ignoreSharedEndpoints` states the one exception the acceptance criteria make in the open: two
- * edges leaving one node from adjacent ports towards distant targets run together for a while by
- * construction — that is a fan, not a pile. With it set, pairs that share a source or a target
- * node are reported in `fans` instead of `piles`, so a caller can still see them.</p>
+ * edges leaving one node from adjacent ports towards distant targets (or arriving at one node
+ * from adjacent ports) run together for a while by construction — that is a fan, not a pile. With
+ * it set, pairs that share their source node or share their target node are reported in `fans`
+ * instead of `piles`, so a caller can still see and bound them. Two edges chained head to tail
+ * through a node are not a fan: drawn on the same line they are a pile like any other pair.</p>
  */
 export function sharedRuns(polylines, { minLength, tolerance = 3, ignoreSharedEndpoints = false }) {
   const items = polylines.map(line => ({ ...line, segments: segmentsOf(line.points) }));
@@ -166,8 +168,7 @@ export function sharedRuns(polylines, { minLength, tolerance = 3, ignoreSharedEn
         }
       }
       if (longest <= minLength) continue;
-      const related = items[i].source === items[j].source || items[i].target === items[j].target
-        || items[i].source === items[j].target || items[i].target === items[j].source;
+      const related = items[i].source === items[j].source || items[i].target === items[j].target;
       const entry = { edges: [items[i].id, items[j].id], length: longest };
       if (ignoreSharedEndpoints && related) fans.push(entry);
       else piles.push(entry);
@@ -194,6 +195,8 @@ export function geometryColumns(nodes, { tolerance = 1 } = {}) {
     columns.push({ x, sum: x, count: 1 });
   }
   const centres = columns.map(column => column.x);
+  // Keyed on the stringified id, the same normalisation `structuralLayering` applies, so a
+  // numeric id cannot make every lookup miss and the check pass by finding nothing.
   const columnOf = new Map();
   for (const node of nodes) {
     let best = -1;
@@ -205,7 +208,7 @@ export function geometryColumns(nodes, { tolerance = 1 } = {}) {
         best = index;
       }
     });
-    columnOf.set(node.id, best);
+    columnOf.set(String(node.id), best);
   }
   return { columns: centres, columnOf };
 }
@@ -215,6 +218,9 @@ export function geometryColumns(nodes, { tolerance = 1 } = {}) {
  * broken by a depth-first walk from the START nodes (then from any node not yet reached), the
  * remaining edges are layered by longest path from the sources, and END nodes take the last
  * layer. Nodes are `{ id, kind }`, edges `{ id, source, target }`.
+ *
+ * <p>The walk is recursive: it judges test fixtures of a few hundred nodes and would exhaust the
+ * stack on a chain of tens of thousands. It is not for production input.</p>
  */
 export function structuralLayering(nodes, edges) {
   const ids = nodes.map(node => String(node.id));
@@ -307,7 +313,7 @@ export function backEdgesInsideBand(polylines, nodes, layerOf, { step = 4 } = {}
   const columns = new Map();
   for (const node of nodes) {
     const extent = extentOf(node);
-    const index = layerOf.get(node.id);
+    const index = layerOf.get(String(node.id));
     if (!extent || index == null) continue;
     const column = columns.get(index) || { left: Infinity, right: -Infinity, top: Infinity, bottom: -Infinity };
     column.left = Math.min(column.left, extent.left);
@@ -318,8 +324,8 @@ export function backEdgesInsideBand(polylines, nodes, layerOf, { step = 4 } = {}
   }
   const violations = [];
   for (const line of polylines) {
-    const from = layerOf.get(line.source);
-    const to = layerOf.get(line.target);
+    const from = layerOf.get(String(line.source));
+    const to = layerOf.get(String(line.target));
     if (from == null || to == null || to > from) continue;
     const samples = samplePolyline(line.points, step);
     for (let index = to + 1; index < from; index++) {
@@ -335,7 +341,7 @@ export function backEdgesInsideBand(polylines, nodes, layerOf, { step = 4 } = {}
 
 /** Whether every edge is a back edge or forward edge according to `layerOf`; used to classify. */
 export function isBackEdge(line, layerOf) {
-  const from = layerOf.get(line.source);
-  const to = layerOf.get(line.target);
+  const from = layerOf.get(String(line.source));
+  const to = layerOf.get(String(line.target));
   return from != null && to != null && to <= from;
 }

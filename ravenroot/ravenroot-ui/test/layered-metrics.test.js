@@ -69,11 +69,24 @@ describe('layered metrics', () => {
       line('a', 'hub', 't', { x: 0, y: 0 }, { x: 400, y: 4 }),
       line('b', 'hub', 'u', { x: 0, y: 2 }, { x: 400, y: 6 }),
       line('c', 'w', 'z', { x: 0, y: 3 }, { x: 400, y: 3 }),
+      line('d', 'p', 'sink', { x: 0, y: 30 }, { x: 400, y: 30 }),
+      line('e', 'q', 'sink', { x: 0, y: 32 }, { x: 400, y: 32 }),
     ];
     const judged = sharedRuns(lines, { minLength: 80, tolerance: 3, ignoreSharedEndpoints: true });
-    expect(judged.fans.map(entry => entry.edges)).toEqual([['a', 'b']]);
+    expect(judged.fans.map(entry => entry.edges)).toEqual([['a', 'b'], ['d', 'e']]);
     expect(judged.map(entry => entry.edges)).toEqual([['a', 'c'], ['b', 'c']]);
-    expect(sharedRuns(lines, { minLength: 80, tolerance: 3 })).toHaveLength(3);
+    expect(sharedRuns(lines, { minLength: 80, tolerance: 3 })).toHaveLength(4);
+  });
+
+  it('treats two edges chained head to tail on one line as a pile, never a fan', () => {
+    const lines = [
+      line('ab', 'a', 'b', { x: 0, y: 0 }, { x: 300, y: 0 }),
+      line('bc', 'b', 'c', { x: 100, y: 1 }, { x: 500, y: 1 }),
+    ];
+    const judged = sharedRuns(lines, { minLength: 80, tolerance: 3, ignoreSharedEndpoints: true });
+    expect(judged.fans).toEqual([]);
+    expect(judged.map(entry => entry.edges)).toEqual([['ab', 'bc']]);
+    expect(judged[0].length).toBeCloseTo(200, 5);
   });
 
   it('clusters centres into the columns the geometry shows', () => {
@@ -103,6 +116,18 @@ describe('layered metrics', () => {
     expect([...backEdges]).toEqual(['retry']);
     expect(layerCount).toBe(5);
     expect([...layerOf]).toEqual([['start', 0], ['a', 1], ['b', 2], ['c', 2], ['join', 3], ['end', 4]]);
+  });
+
+  it('rejects a drawing whose columns run backwards even when the ids are numbers', () => {
+    const nodes = [{ id: 1, kind: 'START', x: 200 }, { id: 2, kind: 'PASSTHROUGH', x: 100 }, { id: 3, kind: 'END', x: 0 }];
+    const edges = [{ id: 10, source: 1, target: 2 }, { id: 11, source: 2, target: 3 }];
+    const verdict = layerDiscreteness(nodes, edges);
+    expect(verdict.ok).toBe(false);
+    expect(verdict.nonMonotone).toEqual([10, 11]);
+    expect(verdict.columns).toHaveLength(3);
+    expect(verdict.layerCount).toBe(3);
+    const forwards = layerDiscreteness(nodes.map(node => ({ ...node, x: 200 - node.x })), edges);
+    expect(forwards.ok).toBe(true);
   });
 
   it('accepts a layered placement and rejects a scatter of the same nodes', () => {

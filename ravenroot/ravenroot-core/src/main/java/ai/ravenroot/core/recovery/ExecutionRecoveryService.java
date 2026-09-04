@@ -93,11 +93,41 @@ public final class ExecutionRecoveryService {
     public List<RecoveryOutcome> sweepOnce() {
         var outcomes = new ArrayList<RecoveryOutcome>();
         for (String tenantId : tenantIds) {
-            for (PendingWork item : await(store.claimPendingWork(tenantId, workerId, batchLimit, leaseTtl))) {
-                outcomes.add(recover(item));
-            }
+            outcomes.addAll(sweepOnce(tenantId));
         }
         return List.copyOf(outcomes);
+    }
+
+    /** Runs the same bounded sweep for one configured tenant, used by authenticated decision routes. */
+    public List<RecoveryOutcome> sweepOnce(String tenantId) {
+        if (!tenantIds.contains(Objects.requireNonNull(tenantId, "tenantId"))) return List.of();
+        var outcomes = new ArrayList<RecoveryOutcome>();
+        for (PendingWork.TimerDue timer : await(store.claimDueTimers(
+                tenantId, workerId, batchLimit, leaseTtl))) {
+            outcomes.add(dispatchTimer(timer));
+        }
+        for (PendingWork item : await(store.claimPendingWork(
+                tenantId, workerId, batchLimit, leaseTtl))) {
+            outcomes.add(recover(item));
+        }
+        return List.copyOf(outcomes);
+    }
+
+    /** Drives only timers a trusted dispatcher explicitly recognises, then acknowledges their fence. */
+    private RecoveryOutcome dispatchTimer(PendingWork.TimerDue timer) {
+        if (!dispatcher.canDispatch(timer)) {
+            return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
+                    "no timer dispatcher available");
+        }
+        try {
+            dispatcher.dispatch(timer, timer.workItemId().toString());
+            acknowledge(timer);
+            return new RecoveryOutcome.HandlerDispatched(timer.key(), timer.workItemId(),
+                    timer.traversalId());
+        } catch (RuntimeException unavailable) {
+            return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
+                    "timer dispatch unavailable");
+        }
     }
 
     /**

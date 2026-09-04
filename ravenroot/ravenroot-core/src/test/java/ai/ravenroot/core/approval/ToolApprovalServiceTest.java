@@ -90,7 +90,11 @@ class ToolApprovalServiceTest {
             assertEquals(ToolApprovalStatus.SUCCEEDED,
                     await(store.loadToolApproval(fixture.key, fixture.approvalId)).orElseThrow().status());
 
-            assertTrue(await(store.readJournal(TENANT, 0, 100)).stream()
+            var journal = await(store.readJournal(TENANT, 0, 100));
+            assertTrue(journal.stream().anyMatch(row -> "TOOL_APPROVAL_REDEMPTION_REPLAY"
+                    .equals(row.envelope().eventType())),
+                    "a replayed redemption must leave a sanitized durable audit event");
+            assertTrue(journal.stream()
                     .allMatch(row -> !new String(row.envelope().payload().bytes(), StandardCharsets.UTF_8)
                             .contains("value")), "journal payloads must never contain canonical arguments");
         }
@@ -138,6 +142,20 @@ class ToolApprovalServiceTest {
         }
 
         try (var store = new InMemoryExecutionStore(fixed(NOW))) {
+            Fixture approvedThenCancelled = createRunning(store, NOW.plusSeconds(60), false);
+            var service = new ToolApprovalService(store, fixed(NOW));
+            service.request(approvedThenCancelled.key, approvedThenCancelled.request, "create");
+            ToolApprovalResult approved = service.approve(approver(),
+                    approvedThenCancelled.key.processInstanceId(), approvedThenCancelled.approvalId);
+            UUID existingTrigger = approved.resumeTraversalId();
+            ToolApprovalResult cancelled = service.cancel(requester(),
+                    approvedThenCancelled.key.processInstanceId(), approvedThenCancelled.approvalId);
+            assertEquals(ToolApprovalResult.Code.CANCELLED, cancelled.code());
+            assertEquals(existingTrigger, cancelled.resumeTraversalId(),
+                    "cancellation after approval must preserve the already-resolved handler trigger");
+        }
+
+        try (var store = new InMemoryExecutionStore(fixed(NOW))) {
             Fixture cancelled = createRunning(store, NOW.plusSeconds(60), false);
             var service = new ToolApprovalService(store, fixed(NOW));
             service.request(cancelled.key, cancelled.request, "create");
@@ -152,10 +170,14 @@ class ToolApprovalServiceTest {
             var service = new ToolApprovalService(store, fixed(NOW));
             service.request(revoked.key, revoked.request, "create");
             service.approve(approver(), revoked.key.processInstanceId(), revoked.approvalId);
+            var seenExecution = new java.util.concurrent.atomic.AtomicReference<UUID>();
             assertEquals(ToolApprovalResult.Code.POLICY_REVOKED,
                     service.redeem(revoked.message(), revoked.approvalId, "tool.test", ARGUMENTS,
-                            digest(ARGUMENTS), invocation -> new ToolDecision(
-                                    ToolDecision.Disposition.DENY, "revoked", "")).code());
+                            digest(ARGUMENTS), invocation -> {
+                                seenExecution.set(invocation.executionId());
+                                return new ToolDecision(ToolDecision.Disposition.DENY, "revoked", "");
+                            }).code());
+            assertEquals(revoked.key.processInstanceId(), seenExecution.get());
             assertEquals(ToolApprovalStatus.CANCELLED,
                     await(store.loadToolApproval(revoked.key, revoked.approvalId)).orElseThrow().status());
         }

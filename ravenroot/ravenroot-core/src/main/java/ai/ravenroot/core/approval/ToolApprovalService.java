@@ -23,6 +23,7 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.OpaquePayload;
+import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
@@ -67,6 +68,7 @@ public final class ToolApprovalService {
     private final ExecutionStore store;
     private final Clock clock;
     private final Map<ExecutionKey, ExecutionRecorder> liveRecorders = new ConcurrentHashMap<>();
+    private volatile Set<String> recoverableTenants;
 
     public ToolApprovalService(ExecutionStore store, Clock clock) {
         this.store = Objects.requireNonNull(store, "store");
@@ -95,6 +97,15 @@ public final class ToolApprovalService {
         return () -> liveRecorders.remove(key, recorder);
     }
 
+    /** Production fail-closed tenant allowlist; embedders retain the unrestricted additive default. */
+    public void restrictRecoveryTenants(Set<String> tenantIds) {
+        Set<String> snapshot = Set.copyOf(Objects.requireNonNull(tenantIds, "tenantIds"));
+        if (snapshot.isEmpty() || snapshot.stream().anyMatch(value -> value == null || value.isBlank())) {
+            throw new IllegalArgumentException("recovery tenant ids must be non-empty safe values");
+        }
+        recoverableTenants = snapshot;
+    }
+
     /**
      * Commits the live suspension through the runner's own recorder and fence.
      * Called only by the managed tool authorization implementation.
@@ -106,6 +117,10 @@ public final class ToolApprovalService {
         Objects.requireNonNull(message, "message");
         Objects.requireNonNull(settings, "settings");
         ExecutionKey key = new ExecutionKey(message.security().tenantId(), message.processInstanceId());
+        Set<String> configured = recoverableTenants;
+        if (configured != null && !configured.contains(key.tenantId())) {
+            return new ToolApprovalResult(ToolApprovalResult.Code.UNAVAILABLE, null, null);
+        }
         ExecutionRecorder recorder = liveRecorders.get(key);
         if (recorder == null) {
             return new ToolApprovalResult(ToolApprovalResult.Code.UNAVAILABLE, null, null);
@@ -140,8 +155,10 @@ public final class ToolApprovalService {
             var existing = await(store.loadToolApproval(key, request.approvalId())).orElse(null);
             if (existing != null) {
                 if (!existing.request().sameRequest(request)) {
+                    auditOnly(existing, "TOOL_APPROVAL_DUPLICATE_SCOPE_REFUSED", correlationId);
                     return new ToolApprovalResult(ToolApprovalResult.Code.SCOPE_MISMATCH, existing, null);
                 }
+                auditOnly(existing, "TOOL_APPROVAL_DUPLICATE_REQUEST", correlationId);
                 return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_APPLIED, existing,
                         resumeTraversalOf(key, request.approvalId()));
             }
@@ -226,9 +243,11 @@ public final class ToolApprovalService {
         }
         if (approval.status() == ToolApprovalStatus.CONSUMED
                 || approval.status().terminal()) {
+            auditOnly(approval, "TOOL_APPROVAL_REDEMPTION_REPLAY", message.security().requestId());
             return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, approval, null);
         }
         if (approval.status() != ToolApprovalStatus.APPROVED) {
+            auditOnly(approval, "TOOL_APPROVAL_REDEMPTION_REFUSED", message.security().requestId());
             return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, approval, null);
         }
         if (!currentlyAllowed(approval, message, currentPolicy)) {
@@ -262,6 +281,7 @@ public final class ToolApprovalService {
                 approval.request().approvalId())).orElse(null);
         if (current == null) return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
         if (current.status() != ToolApprovalStatus.APPROVED) {
+            auditOnly(current, "TOOL_APPROVAL_REDEMPTION_REPLAY", correlationId);
             return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, current, null);
         }
         if (!currentlyAllowed(current, currentPolicy)) {
@@ -282,6 +302,59 @@ public final class ToolApprovalService {
             }
             throw expired;
         }
+    }
+
+    /** Recovery redemption committed under the handler claim's exact instance fence. */
+    public ToolApprovalResult redeemStoredFenced(DurableToolApproval approval, ToolPolicy currentPolicy,
+                                                 String correlationId, long fencingToken) {
+        Objects.requireNonNull(approval, "approval");
+        DurableToolApproval current = await(store.loadToolApproval(approval.key(),
+                approval.request().approvalId())).orElse(null);
+        if (current == null) return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
+        if (current.status() != ToolApprovalStatus.APPROVED) {
+            auditOnly(current, "TOOL_APPROVAL_REDEMPTION_REPLAY", correlationId);
+            return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, current, null);
+        }
+        if (!currentlyAllowed(current, currentPolicy)) {
+            return commitSimple(current, new ToolApprovalTransition.Cancelled(current.request().approvalId(),
+                    "ravenroot|SYSTEM|tool-policy"), "TOOL_APPROVAL_POLICY_REVOKED", correlationId,
+                    fencingToken);
+        }
+        return commitSimple(current, new ToolApprovalTransition.Consumed(current.request().approvalId()),
+                "TOOL_APPROVAL_CONSUMED", correlationId, fencingToken);
+    }
+
+    /** Expires only the approval timer whose full stored scope matches this claimed timer. */
+    public boolean expireClaimedTimer(PendingWork.TimerDue timer, String correlationId) {
+        DurableToolApproval approval = await(store.toolApprovals(timer.key())).stream()
+                .filter(candidate -> expiryTimerId(candidate.request().approvalId()).equals(timer.workItemId()))
+                .filter(candidate -> candidate.request().traversalId().equals(timer.traversalId()))
+                .filter(candidate -> candidate.request().invocationId().equals(timer.invocationId()))
+                .findFirst().orElse(null);
+        if (approval == null) return false;
+        try {
+            if (approval.status() == ToolApprovalStatus.APPROVED) {
+                commitSimple(approval, new ToolApprovalTransition.Expired(approval.request().approvalId()),
+                        "TOOL_APPROVAL_EXPIRED", correlationId, timer.fencingToken());
+            } else if (approval.status() == ToolApprovalStatus.PENDING) {
+                commitSettlement(approval, ToolApprovalStatus.EXPIRED, "", correlationId,
+                        timer.fencingToken());
+            } else {
+                auditOnly(approval, "TOOL_APPROVAL_EXPIRY_REPLAY", correlationId);
+            }
+            return true;
+        } catch (ExecutionStoreException notDue) {
+            if (notDue.failure() instanceof ExecutionStoreFailure.ToolApprovalNotResolvable) return false;
+            throw notDue;
+        }
+    }
+
+    /** Whether a claimed timer is the exact stored expiry signal of an approval. */
+    public boolean ownsTimer(PendingWork.TimerDue timer) {
+        return await(store.toolApprovals(timer.key())).stream().anyMatch(candidate ->
+                expiryTimerId(candidate.request().approvalId()).equals(timer.workItemId())
+                        && candidate.request().traversalId().equals(timer.traversalId())
+                        && candidate.request().invocationId().equals(timer.invocationId()));
     }
 
     public ToolApprovalResult complete(ExecutionKey key, UUID approvalId, boolean succeeded,
@@ -329,20 +402,35 @@ public final class ToolApprovalService {
             auditOnly(approval, "TOOL_APPROVAL_SEPARATION_REFUSED", context.requestId());
             return new ToolApprovalResult(ToolApprovalResult.Code.UNAUTHORIZED, approval, null);
         }
+        if (target == ToolApprovalStatus.CANCELLED
+                && approval.status() == ToolApprovalStatus.APPROVED) {
+            ToolApprovalResult cancelled = commitSimple(approval,
+                    new ToolApprovalTransition.Cancelled(approvalId, actor),
+                    "TOOL_APPROVAL_CANCELLED", context.requestId());
+            return new ToolApprovalResult(cancelled.code(), cancelled.approval(),
+                    resumeTraversalOf(key, approvalId));
+        }
         return commitSettlement(approval, target, actor, context.requestId());
     }
 
     private ToolApprovalResult commitSettlement(DurableToolApproval original, ToolApprovalStatus target,
                                                 String actor, String correlationId) {
+        return commitSettlement(original, target, actor, correlationId, null);
+    }
+
+    private ToolApprovalResult commitSettlement(DurableToolApproval original, ToolApprovalStatus target,
+                                                String actor, String correlationId, Long fencingToken) {
         for (int attempt = 1; ; attempt++) {
             DurableToolApproval approval = await(store.loadToolApproval(original.key(),
                     original.request().approvalId())).orElse(null);
             if (approval == null) return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
             if (approval.status() == target) {
+                auditOnly(approval, "TOOL_APPROVAL_DUPLICATE_DECISION", correlationId);
                 return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_APPLIED, approval,
                         resumeTraversalOf(approval.key(), approval.request().approvalId()));
             }
             if (!approval.status().canTransitionTo(target)) {
+                auditOnly(approval, "TOOL_APPROVAL_CONFLICTING_DECISION", correlationId);
                 return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, approval,
                         resumeTraversalOf(approval.key(), approval.request().approvalId()));
             }
@@ -363,8 +451,10 @@ public final class ToolApprovalService {
                 case EXPIRED -> new HandlerTransition.Expired(approval.request().approvalId(), resumeTraversalId);
                 default -> throw new IllegalArgumentException("not a settlement status: " + target);
             };
-            var batch = ExecutionBatch.to(approval.key())
-                    .expecting(RevisionExpectation.exactly(stored.revision()))
+            var builder = ExecutionBatch.to(approval.key())
+                    .expecting(RevisionExpectation.exactly(stored.revision()));
+            if (fencingToken != null) builder.fencedBy(fencingToken);
+            var batch = builder
                     .apply(new ExecutionTransition.AttemptTransitioned(approval.request().traversalId(),
                             approval.request().invocationId(), approval.request().attemptId(),
                             NodeAttemptStatus.RUNNING))
@@ -411,19 +501,28 @@ public final class ToolApprovalService {
 
     private ToolApprovalResult commitSimple(DurableToolApproval original, ToolApprovalTransition transition,
                                             String eventType, String correlationId) {
+        return commitSimple(original, transition, eventType, correlationId, null);
+    }
+
+    private ToolApprovalResult commitSimple(DurableToolApproval original, ToolApprovalTransition transition,
+                                            String eventType, String correlationId, Long fencingToken) {
         for (int attempt = 1; ; attempt++) {
             DurableToolApproval approval = await(store.loadToolApproval(original.key(),
                     original.request().approvalId())).orElse(null);
             if (approval == null) return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
             if (approval.alreadyApplied(transition)) {
+                auditOnly(approval, "TOOL_APPROVAL_DUPLICATE_TRANSITION", correlationId);
                 return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_APPLIED, approval, null);
             }
             if (!approval.status().canTransitionTo(transition.next())) {
+                auditOnly(approval, "TOOL_APPROVAL_REPLAY_REFUSED", correlationId);
                 return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, approval, null);
             }
             StoredProcessInstance stored = load(approval.key());
-            var batch = ExecutionBatch.to(approval.key())
-                    .expecting(RevisionExpectation.exactly(stored.revision()))
+            var builder = ExecutionBatch.to(approval.key())
+                    .expecting(RevisionExpectation.exactly(stored.revision()));
+            if (fencingToken != null) builder.fencedBy(fencingToken);
+            var batch = builder
                     .applyToolApproval(transition)
                     .publish(event(approval.key(), stored, approval.request(), eventType, correlationId,
                             approval.request().traversalId()))
@@ -483,7 +582,7 @@ public final class ToolApprovalService {
             Map<String, Object> arguments = (Map<String, Object>) object.toJava();
             ToolDecision decision = Objects.requireNonNull(policy, "currentPolicy").evaluate(
                     new ToolInvocation(approval.request().requester(),
-                            approval.request().traversalId(), approval.request().nodeId(),
+                            approval.key().processInstanceId(), approval.request().nodeId(),
                             approval.request().tool(), arguments));
             return decision != null && decision.disposition() != ToolDecision.Disposition.DENY;
         } catch (RuntimeException unavailable) {

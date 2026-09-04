@@ -258,7 +258,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             @SuppressWarnings("unchecked")
             Map<String, Object> policyArguments = (Map<String, Object>) arguments.toJava();
             decision = Objects.requireNonNull(toolPolicy.evaluate(new ToolInvocation(delivered.security(),
-                    delivered.executionId(), delivered.nodeId(), tool, policyArguments)),
+                    delivered.processInstanceId(), delivered.nodeId(), tool, policyArguments)),
                     "toolPolicy decision");
         } catch (RuntimeException policyFailure) {
             recordTool(delivered, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED,

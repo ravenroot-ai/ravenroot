@@ -9,6 +9,9 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
+import ai.ravenroot.api.node.ToolCallContinuationAction;
+import ai.ravenroot.api.node.ToolCallContinuationInput;
+import ai.ravenroot.api.node.ToolCallContinuationResult;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
@@ -17,7 +20,9 @@ import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.node.service.ToolCallAuthorization;
 import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -306,6 +311,35 @@ public final class AgentNodeBehavior implements NodeBehavior {
         return message -> invoke(message, services, settings);
     }
 
+    @Override
+    public Optional<ToolCallContinuationAction> createToolCallContinuation(
+            NodeConfiguration configuration, NodePackageServices services) {
+        List<AgentSkill> skills = AgentSkill.declaredOn(configuration);
+        String profileName = NodePropertyDescriptor.adapterIdOf(configuration.properties().get("provider"));
+        LlmProfile profile = profiles.resolve(profileName).orElseThrow(
+                () -> new IllegalStateException("agent continuation provider is unavailable"));
+        List<String> declared = mcpNames(configuration);
+        if (declared.size() > MAX_MCP_SERVERS) {
+            throw new IllegalStateException("agent continuation MCP inventory is invalid");
+        }
+        var servers = new ArrayList<McpProfile>();
+        for (String serverName : declared) {
+            servers.add(mcpProfiles.resolve(serverName).orElseThrow(
+                    () -> new IllegalStateException("agent continuation MCP profile is unavailable")));
+        }
+        Settings settings = Settings.compile(configuration, profile, skills, List.copyOf(servers));
+        return Optional.of(new ToolCallContinuationAction() {
+            @Override public void validate(ToolCallContinuationInput input) {
+                validateContinuation(input);
+            }
+
+            @Override public CompletionStage<ToolCallContinuationResult> resume(
+                    ToolCallContinuationInput input) {
+                return AgentNodeBehavior.this.resume(input, services, settings);
+            }
+        });
+    }
+
     /**
      * The server names an author wrote, in order, without duplicates.
      *
@@ -502,6 +536,151 @@ public final class AgentNodeBehavior implements NodeBehavior {
         return cancellableView(result);
     }
 
+    private CompletionStage<ToolCallContinuationResult> resume(ToolCallContinuationInput input,
+                                                                NodePackageServices services,
+                                                                Settings settings) {
+        RestartCheckpoint checkpoint;
+        try {
+            checkpoint = validateContinuation(input);
+        } catch (RuntimeException invalid) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("invalid agent continuation checkpoint"));
+        }
+        NodeMessage supplied = input.message();
+        NodeMessage restored = new NodeMessage(supplied.security(), supplied.processInstanceId(),
+                supplied.traversalId(), supplied.invocationId(), supplied.attemptId(),
+                supplied.parentInvocationIds(), supplied.nodeId(), null, checkpoint.inboundAttributes(),
+                supplied.command());
+        var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
+        Admission.Lease profile = profileAdmission.tryAcquire(
+                restored.tenantId() + " " + settings.profile().name(), settings.profile().maxConcurrency());
+        if (profile == null) {
+            return CompletableFuture.failedFuture(new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+        }
+        leases.add(profile);
+        for (McpProfile server : settings.mcpServers()) {
+            Admission.Lease held = mcpAdmission.tryAcquire(
+                    restored.tenantId() + " " + server.name(), server.maxConcurrency());
+            if (held == null) {
+                leases.forEach(Admission.Lease::close);
+                return CompletableFuture.failedFuture(
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+            }
+            leases.add(held);
+        }
+        Run run;
+        try {
+            run = new Run(restored, services, settings, checkpoint);
+        } catch (RuntimeException invalid) {
+            leases.forEach(Admission.Lease::close);
+            return CompletableFuture.failedFuture(invalid);
+        }
+        var result = new CompletableFuture<ToolCallContinuationResult>();
+        result.whenComplete((ignored, failure) -> {
+            try { run.abort(); } finally { leases.forEach(Admission.Lease::close); }
+        });
+        run.resume(input, checkpoint, result);
+        return result;
+    }
+
+    private static RestartCheckpoint validateContinuation(ToolCallContinuationInput input) {
+        if (input.version() != 1
+                || !input.checkpointDigest().equals(ToolApprovalRegistration.digest(input.checkpoint()))
+                || !input.argumentsDigest().equals(
+                        ToolApprovalRegistration.digest(input.canonicalArguments()))) {
+            throw new IllegalArgumentException("unsupported or invalid agent continuation");
+        }
+        RestartCheckpoint checkpoint = RestartCheckpoint.read(input.checkpoint());
+        AgentTurn.ToolCall current = checkpoint.calls().get(checkpoint.index());
+        if (!current.name().equals(input.tool())
+                || !java.util.Arrays.equals(canonicalArguments(current.arguments()),
+                        input.canonicalArguments())) {
+            throw new IllegalArgumentException("agent continuation scope mismatch");
+        }
+        return checkpoint;
+    }
+
+    private static byte[] canonicalArguments(String raw) {
+        byte[] supplied = raw == null || raw.isBlank()
+                ? "{}".getBytes(StandardCharsets.UTF_8) : raw.getBytes(StandardCharsets.UTF_8);
+        PayloadValue parsed = PayloadJson.read(supplied, PayloadLimits.DEFAULTS);
+        if (!(parsed instanceof PayloadValue.MapValue)) {
+            throw new IllegalArgumentException("tool arguments are not an object");
+        }
+        return PayloadJson.write(parsed).getBytes(StandardCharsets.UTF_8);
+    }
+
+    private record RestartCheckpoint(List<PayloadValue> messages, List<AgentTurn.ToolCall> calls,
+                                     int index, int turns, int toolCalls, long tokens,
+                                     String finishReason, long remainingMillis,
+                                     Map<String, Object> inboundAttributes, Object provenance) {
+        private static final Set<String> KEYS = Set.of("messages", "calls", "index", "turns",
+                "toolCalls", "tokens", "finishReason", "remainingMillis", "inboundAttributes",
+                "provenance");
+
+        static RestartCheckpoint read(byte[] bytes) {
+            PayloadValue decoded = PayloadJson.read(bytes, PayloadLimits.DEFAULTS);
+            if (!(decoded instanceof PayloadValue.MapValue root) || !root.entries().keySet().equals(KEYS)) {
+                throw new IllegalArgumentException("invalid checkpoint object");
+            }
+            List<PayloadValue> messages = list(root, "messages");
+            var calls = new ArrayList<AgentTurn.ToolCall>();
+            for (PayloadValue value : list(root, "calls")) {
+                if (!(value instanceof PayloadValue.MapValue call)
+                        || !call.entries().keySet().equals(Set.of("id", "name", "arguments"))) {
+                    throw new IllegalArgumentException("invalid checkpoint tool call");
+                }
+                calls.add(new AgentTurn.ToolCall(text(call, "id"), text(call, "name"),
+                        text(call, "arguments")));
+            }
+            int index = exactInt(root, "index");
+            if (calls.isEmpty() || index < 0 || index >= calls.size()) {
+                throw new IllegalArgumentException("invalid checkpoint tool index");
+            }
+            Object attrs = required(root, "inboundAttributes").toJava();
+            if (!(attrs instanceof Map<?, ?> rawAttrs)
+                    || rawAttrs.keySet().stream().anyMatch(key -> !(key instanceof String))) {
+                throw new IllegalArgumentException("invalid checkpoint attributes");
+            }
+            @SuppressWarnings("unchecked") Map<String, Object> inbound = Map.copyOf((Map<String, Object>) rawAttrs);
+            long remaining = exactLong(root, "remainingMillis");
+            if (remaining < 1) throw new IllegalArgumentException("expired checkpoint");
+            return new RestartCheckpoint(List.copyOf(messages), List.copyOf(calls), index,
+                    exactInt(root, "turns"), exactInt(root, "toolCalls"), exactLong(root, "tokens"),
+                    text(root, "finishReason"), remaining, inbound,
+                    required(root, "provenance").toJava());
+        }
+
+        private static PayloadValue required(PayloadValue.MapValue map, String key) {
+            PayloadValue value = map.entries().get(key);
+            if (value == null) throw new IllegalArgumentException("missing checkpoint field");
+            return value;
+        }
+        private static List<PayloadValue> list(PayloadValue.MapValue map, String key) {
+            if (!(required(map, key) instanceof PayloadValue.ListValue value)) {
+                throw new IllegalArgumentException("checkpoint field is not a list");
+            }
+            return value.values();
+        }
+        private static String text(PayloadValue.MapValue map, String key) {
+            if (!(required(map, key) instanceof PayloadValue.TextValue value)) {
+                throw new IllegalArgumentException("checkpoint field is not text");
+            }
+            return value.value();
+        }
+        private static long exactLong(PayloadValue.MapValue map, String key) {
+            if (!(required(map, key) instanceof PayloadValue.IntegerValue value) || value.value() < 0) {
+                throw new IllegalArgumentException("checkpoint field is not a non-negative integer");
+            }
+            return value.value();
+        }
+        private static int exactInt(PayloadValue.MapValue map, String key) {
+            long value = exactLong(map, key);
+            if (value > Integer.MAX_VALUE) throw new IllegalArgumentException("checkpoint integer is too large");
+            return (int) value;
+        }
+    }
+
     /**
      * The stage handed to the caller: everything {@code run} completes, plus cancellation that
      * actually reaches the run.
@@ -629,6 +808,23 @@ public final class AgentNodeBehavior implements NodeBehavior {
             messages.add(AgentTurn.userMessage(objective));
         }
 
+        Run(NodeMessage message, NodePackageServices services, Settings settings,
+            RestartCheckpoint checkpoint) {
+            this.message = message;
+            this.services = services;
+            this.settings = settings;
+            this.loadSkill = new LoadSkillTool(settings.skills());
+            this.tools = List.of(loadSkill);
+            this.deadlineNanos = System.nanoTime()
+                    + Duration.ofMillis(Math.min(settings.deadlineMs(), checkpoint.remainingMillis())).toNanos();
+            this.messages.addAll(checkpoint.messages());
+            this.provenance.restore(checkpoint.provenance());
+            this.turns = checkpoint.turns();
+            this.toolCalls = checkpoint.toolCalls();
+            this.tokens = checkpoint.tokens();
+            this.finishReason = checkpoint.finishReason();
+        }
+
         private String render(String template) {
             return PromptTemplate.render(template, message.payload(), message.attributes(), Map.of());
         }
@@ -692,6 +888,74 @@ public final class AgentNodeBehavior implements NodeBehavior {
                             result.completeExceptionally(sanitize(invalid));
                         }
                     });
+        }
+
+        void resume(ToolCallContinuationInput input, RestartCheckpoint checkpoint,
+                    CompletableFuture<ToolCallContinuationResult> result) {
+            java.util.function.Consumer<List<AgentTool>> continueWith = discovered -> {
+                var all = new ArrayList<AgentTool>(discovered.size() + 1);
+                all.add(loadSkill);
+                all.addAll(discovered);
+                tools = List.copyOf(all);
+                resumeReady(input, checkpoint, result);
+            };
+            if (settings.mcpServers().isEmpty()) {
+                continueWith.accept(List.of());
+                return;
+            }
+            LongSupplier remaining = () -> over || result.isDone() ? 0 : remainingMillis();
+            McpToolset.discover(settings.mcpServers(), services, message, remaining)
+                    .whenComplete((discovered, failure) -> {
+                        if (failure != null) result.completeExceptionally(sanitize(failure));
+                        else if (!over && !result.isDone()) continueWith.accept(discovered);
+                    });
+        }
+
+        private void resumeReady(ToolCallContinuationInput input, RestartCheckpoint checkpoint,
+                                 CompletableFuture<ToolCallContinuationResult> result) {
+            AgentTurn.ToolCall requested = checkpoint.calls().get(checkpoint.index());
+            if (input.decision() != ToolCallContinuationInput.Decision.APPROVED) {
+                appendResumedToolResult(requested,
+                        "The server denied this tool call. It performed no effect.", checkpoint, result, false);
+                return;
+            }
+            AgentTool selected = tools.stream().filter(tool -> tool.name().equals(input.tool()))
+                    .findFirst().orElse(null);
+            if (selected == null) {
+                result.completeExceptionally(new IllegalStateException(
+                        "approved agent tool is unavailable after restart"));
+                return;
+            }
+            try {
+                selected.invoke(new String(input.canonicalArguments(), StandardCharsets.UTF_8))
+                        .whenComplete((toolResult, failure) -> {
+                            boolean succeeded = failure == null && toolResult != null && toolResult.succeeded();
+                            String text = failure == null && toolResult != null ? toolResult.text() : TOOL_FAILED;
+                            appendResumedToolResult(requested, text, checkpoint, result, succeeded);
+                        });
+            } catch (RuntimeException failure) {
+                appendResumedToolResult(requested, TOOL_FAILED, checkpoint, result, false);
+            }
+        }
+
+        private void appendResumedToolResult(AgentTurn.ToolCall requested, String text,
+                                             RestartCheckpoint checkpoint,
+                                             CompletableFuture<ToolCallContinuationResult> result,
+                                             boolean effectSucceeded) {
+            try {
+                String safe = text == null || text.isEmpty() ? TOOL_FAILED : text;
+                messages.add(AgentTurn.toolResultMessage(requested.id(), safe));
+                provenance.add(ModelInputProvenance.Kind.TOOL_RESULT,
+                        "tool-call:" + (checkpoint.index() + 1), safe);
+                var nodeResult = new CompletableFuture<NodeResult>();
+                nodeResult.whenComplete((answer, failure) -> {
+                    if (failure != null) result.completeExceptionally(failure);
+                    else result.complete(new ToolCallContinuationResult(answer, effectSucceeded));
+                });
+                runTools(checkpoint.calls(), checkpoint.index() + 1, nodeResult);
+            } catch (RuntimeException invalid) {
+                result.completeExceptionally(sanitize(invalid));
+            }
         }
 
         void step(CompletableFuture<NodeResult> result) {
@@ -828,7 +1092,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             toolCalls++;
             CompletionStage<String> answering;
             try {
-                answering = run(call);
+                answering = run(call, requested, index);
             } catch (RuntimeException broken) {
                 answering = CompletableFuture.completedFuture(TOOL_FAILED);
             }
@@ -867,7 +1131,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
          * in a tool should cost a turn, not a traversal — and nothing of the throwable reaches the
          * message, because a tool's internals are not content the model was promised.</p>
          */
-        private CompletionStage<String> run(AgentTurn.ToolCall requested) {
+        private CompletionStage<String> run(AgentTurn.ToolCall requested,
+                                            List<AgentTurn.ToolCall> currentCalls, int currentIndex) {
             AgentTool selected = null;
             for (AgentTool tool : tools) {
                 if (tool.name().equals(requested.name())) {
@@ -894,7 +1159,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             }
             if (authorization.disposition() == ToolCallAuthorization.Disposition.REQUIRE_APPROVAL) {
                 return CompletableFuture.failedFuture(new AgentApprovalSuspension(
-                        authorization.suspend(1, checkpoint(requested))));
+                        authorization.suspend(1, checkpoint(currentCalls, currentIndex))));
             }
             String canonicalArguments = new String(authorization.canonicalArguments(),
                     StandardCharsets.UTF_8);
@@ -926,17 +1191,24 @@ public final class AgentNodeBehavior implements NodeBehavior {
         }
 
         /** Version-one restart checkpoint; bounded again by the managed approval service. */
-        private byte[] checkpoint(AgentTurn.ToolCall requested) {
+        private byte[] checkpoint(List<AgentTurn.ToolCall> requested, int index) {
             var root = new LinkedHashMap<String, PayloadValue>();
             root.put("messages", PayloadValue.list(List.copyOf(messages)));
-            root.put("requestedCall", PayloadValue.map(Map.of(
-                    "id", PayloadValue.of(requested.id()),
-                    "name", PayloadValue.of(requested.name()),
-                    "arguments", PayloadValue.of(requested.arguments()))));
+            var calls = new ArrayList<PayloadValue>(requested.size());
+            for (AgentTurn.ToolCall call : requested) {
+                calls.add(PayloadValue.map(Map.of("id", PayloadValue.of(call.id()),
+                        "name", PayloadValue.of(call.name()),
+                        "arguments", PayloadValue.of(call.arguments()))));
+            }
+            root.put("calls", PayloadValue.list(calls));
+            root.put("index", PayloadValue.of(index));
             root.put("turns", PayloadValue.of(turns));
             root.put("toolCalls", PayloadValue.of(toolCalls));
             root.put("tokens", PayloadValue.of(tokens));
             root.put("finishReason", PayloadValue.of(finishReason));
+            root.put("remainingMillis", PayloadValue.of(Math.max(1, remainingMillis())));
+            root.put("inboundAttributes", PayloadValue.fromJava(message.attributes(), PayloadLimits.DEFAULTS));
+            root.put("provenance", PayloadValue.fromJava(provenance.snapshot(), PayloadLimits.DEFAULTS));
             return PayloadJson.write(PayloadValue.map(root)).getBytes(StandardCharsets.UTF_8);
         }
 

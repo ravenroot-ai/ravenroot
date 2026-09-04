@@ -173,6 +173,13 @@ public final class BehaviorRegistry {
         return factory == null ? Optional.empty() : Optional.of(factory.create(node));
     }
 
+    /** Resolves durable re-entry only through the already registered trusted behavior factory. */
+    public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
+        if (node == null || node.behavior() == null) return Optional.empty();
+        var factory = factories.get(node.behavior());
+        return factory == null ? Optional.empty() : factory.createToolCallContinuation(node);
+    }
+
     /**
      * The trusted catalog entry for {@code behavior}, or empty when the behavior is not registered.
      *

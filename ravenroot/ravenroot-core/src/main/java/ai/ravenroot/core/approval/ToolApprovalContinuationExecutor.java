@@ -1,6 +1,8 @@
 package ai.ravenroot.core.approval;
 
 import java.util.concurrent.CompletionStage;
+import ai.ravenroot.api.persistence.PendingWork;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 
 /**
  * Trusted decoder/effect boundary for one bounded, versioned durable tool continuation.
@@ -11,15 +13,17 @@ import java.util.concurrent.CompletionStage;
  */
 public interface ToolApprovalContinuationExecutor {
     /** Whether this process can decode and execute the exact stored continuation version. */
-    boolean supports(String nodeId, int version);
+    boolean supports(DurableToolApproval approval);
 
     /** Executes or resumes from the supplied immutable stored input. */
-    CompletionStage<Boolean> execute(ToolApprovalContinuation continuation);
+    CompletionStage<Boolean> execute(ToolApprovalContinuation continuation,
+                                     PendingWork.HandlerTrigger claim);
 
     /** Fail-closed compatibility implementation for hosts with no continuation executor. */
     ToolApprovalContinuationExecutor NONE = new ToolApprovalContinuationExecutor() {
-        @Override public boolean supports(String nodeId, int version) { return false; }
-        @Override public CompletionStage<Boolean> execute(ToolApprovalContinuation continuation) {
+        @Override public boolean supports(DurableToolApproval approval) { return false; }
+        @Override public CompletionStage<Boolean> execute(ToolApprovalContinuation continuation,
+                                                          PendingWork.HandlerTrigger claim) {
             return java.util.concurrent.CompletableFuture.failedFuture(
                     new IllegalStateException("tool approval continuation unavailable"));
         }

@@ -10,6 +10,7 @@ import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.persistence.ExecutionBatch;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionTransition;
@@ -51,6 +52,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ToolApprovalRestartIntegrationTest {
     private static final String TENANT = "acme";
@@ -93,12 +95,13 @@ class ToolApprovalRestartIntegrationTest {
         try (ExecutionStore store = new SqliteExecutionStore(database, CLOCK)) {
             var approvals = new ToolApprovalService(store, CLOCK);
             ToolApprovalContinuationExecutor executor = new ToolApprovalContinuationExecutor() {
-                @Override public boolean supports(String nodeId, int version) {
-                    return "agent".equals(nodeId) && version == 1;
+                @Override public boolean supports(DurableToolApproval approval) {
+                    return "agent".equals(approval.request().nodeId())
+                            && approval.request().continuationVersion() == 1;
                 }
 
                 @Override public java.util.concurrent.CompletionStage<Boolean> execute(
-                        ToolApprovalContinuation continuation) {
+                        ToolApprovalContinuation continuation, PendingWork.HandlerTrigger claim) {
                     executions.incrementAndGet();
                     observed.set(continuation);
                     return CompletableFuture.completedFuture(true);
@@ -184,6 +187,70 @@ class ToolApprovalRestartIntegrationTest {
         }
     }
 
+    @Test
+    void unsupportedContinuationStaysApprovedAndUnacknowledged(@TempDir Path directory) throws Exception {
+        Path database = directory.resolve("unsupported.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        var clock = new MutableClock(NOW);
+        try (ExecutionStore store = new SqliteExecutionStore(database, clock)) {
+            createRunning(store, key, traversal, invocation, attempt);
+            var service = new ToolApprovalService(store, CLOCK);
+            service.request(key, request(approvalId, traversal, invocation, attempt), "create");
+            service.approve(approver(), key.processInstanceId(), approvalId);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, service, invocationRequest -> new ToolDecision(
+                            ToolDecision.Disposition.REQUIRE_APPROVAL, "unchanged", "policy-v1"),
+                            ToolApprovalContinuationExecutor.NONE));
+            assertTrue(recovery.sweepOnce().stream().anyMatch(RecoveryOutcome.Deferred.class::isInstance));
+            assertEquals(ToolApprovalStatus.APPROVED,
+                    await(store.loadToolApproval(key, approvalId)).orElseThrow().status());
+            clock.now = NOW.plusSeconds(31);
+            assertTrue(await(store.claimPendingWork(TENANT, "worker", 10, Duration.ofSeconds(30)))
+                    .stream().anyMatch(PendingWork.HandlerTrigger.class::isInstance),
+                    "unsupported continuation trigger must remain unacknowledged");
+        }
+    }
+
+    @Test
+    void restartDriverClaimsAndExpiresUntouchedApprovalTimer(@TempDir Path directory) throws Exception {
+        Path database = directory.resolve("expiry.db");
+        var clock = new MutableClock(NOW);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        var expiring = new ToolApprovalRegistration(approvalId, traversal, invocation, attempt,
+                UUID.randomUUID(), "agent", "filesystem.read", ARGUMENTS, digest(ARGUMENTS),
+                requesterIdentity(), new GraphVersionPin("graph-v1"), "policy-v1", NOW.plusSeconds(1),
+                HandlerAuthorization.ofRoles(Role.APPROVER.name()), false, 1, CHECKPOINT,
+                digest(CHECKPOINT));
+        try (ExecutionStore store = new SqliteExecutionStore(database, clock)) {
+            createRunning(store, key, traversal, invocation, attempt);
+            new ToolApprovalService(store, clock).request(key, expiring, "create");
+        }
+        clock.now = NOW.plusSeconds(1);
+        try (ExecutionStore store = new SqliteExecutionStore(database, clock)) {
+            var service = new ToolApprovalService(store, clock);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "timer-worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, service, invocationRequest -> new ToolDecision(
+                            ToolDecision.Disposition.REQUIRE_APPROVAL, "unchanged", "policy-v1"),
+                            ToolApprovalContinuationExecutor.NONE));
+            assertTrue(recovery.sweepOnce().stream()
+                    .anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance));
+            assertEquals(ToolApprovalStatus.EXPIRED,
+                    await(store.loadToolApproval(key, approvalId)).orElseThrow().status());
+            assertTrue(await(store.claimDueTimers(TENANT, "timer-worker", 10,
+                    Duration.ofSeconds(30))).isEmpty());
+        }
+    }
+
     private static ToolApprovalRegistration request(UUID approvalId, UUID traversalId,
                                                     UUID invocationId, UUID attemptId) throws Exception {
         return new ToolApprovalRegistration(approvalId, traversalId, invocationId, attemptId,
@@ -226,5 +293,13 @@ class ToolApprovalRestartIntegrationTest {
 
     private static <T> T await(java.util.concurrent.CompletionStage<T> stage) {
         return stage.toCompletableFuture().join();
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+        private MutableClock(Instant now) { this.now = now; }
+        @Override public java.time.ZoneId getZone() { return ZoneOffset.UTC; }
+        @Override public Clock withZone(java.time.ZoneId zone) { return this; }
+        @Override public Instant instant() { return now; }
     }
 }

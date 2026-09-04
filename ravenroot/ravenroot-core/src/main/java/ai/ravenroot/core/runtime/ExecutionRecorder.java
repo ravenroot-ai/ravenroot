@@ -154,6 +154,29 @@ public final class ExecutionRecorder implements AutoCloseable {
     }
 
     /**
+     * Adopts the instance lease already acquired by a pending-work claim.
+     * The raw claim projection is the authority; this method never issues a second claim that could
+     * advance the fence between approval redemption and its effect.
+     */
+    public static ExecutionRecorder resumeClaimed(ExecutionStore store,
+                                                   ai.ravenroot.api.persistence.PendingWork claimed,
+                                                   String workerId, Duration leaseTtl, long revision) {
+        Objects.requireNonNull(claimed, "claimed");
+        Objects.requireNonNull(workerId, "workerId");
+        var lease = new LeaseHandle(claimed.key(), workerId, claimed.fencingToken(),
+                claimed.leaseExpiresAt().minus(leaseTtl), claimed.leaseExpiresAt());
+        var renewals = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            var thread = new Thread(runnable,
+                    "ravenroot-reentry-lease-" + claimed.key().processInstanceId());
+            thread.setDaemon(true);
+            return thread;
+        });
+        var recorder = new ExecutionRecorder(store, claimed.key(), leaseTtl, lease, revision, renewals);
+        recorder.startRenewing();
+        return recorder;
+    }
+
+    /**
      * Renewal runs on a period well inside the TTL, because its purpose is to keep <em>healthy</em>
      * long-running work out of the recovery sweep's hands. Without it a node that legitimately runs
      * longer than one TTL would have its instance become claimable while it is still executing, and
@@ -291,6 +314,12 @@ public final class ExecutionRecorder implements AutoCloseable {
         return await(store.load(key)).graphVersionPin();
     }
 
+    /** Current fenced aggregate snapshot used to seed a trusted re-entry runner. */
+    public synchronized ai.ravenroot.api.application.ProcessInstance storedState() {
+        requireFence();
+        return await(store.load(key)).state();
+    }
+
     private void loseFence(ExecutionStoreFailure because) {
         fenceLost = true;
         fenceLostBecause = because;
@@ -365,6 +394,12 @@ public final class ExecutionRecorder implements AutoCloseable {
         } catch (RuntimeException expiryWillHandleIt) {
             // A failed release is the crash path, which the store already handles by expiry.
         }
+    }
+
+    /** Stops local renewal while retaining the claim for the caller's subsequent acknowledgement. */
+    public void detachForAcknowledgement() {
+        if (renewalTask != null) renewalTask.cancel(false);
+        renewals.shutdownNow();
     }
 
     private static <T> T await(CompletionStage<T> stage) {

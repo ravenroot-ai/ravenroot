@@ -39,6 +39,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,12 +64,16 @@ class ManagedToolApprovalSuspensionTest {
                             ProcessInstanceStatus.RUNNING, Map.of(traversalId, traversal)),
                             new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join().revision();
             var approvalService = new ToolApprovalService(store, clock);
+            var policyExecutionId = new AtomicReference<UUID>();
             var services = ManagedNodePackageServices.builder("test.package",
                             NodePackageEgressPolicy.builder().build(),
                             (packageId, tenantId, reference) -> java.util.Optional.empty())
                     .grant(NodePackageCapability.TOOL_AUTHORIZATION)
-                    .toolAuthorization(invocationRequest -> new ToolDecision(
-                            ToolDecision.Disposition.REQUIRE_APPROVAL, "approval required", "policy-v1"),
+                    .toolAuthorization(invocationRequest -> {
+                                policyExecutionId.set(invocationRequest.executionId());
+                                return new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                        "approval required", "policy-v1");
+                            },
                             ToolCallAuditSink.discarding())
                     .durableToolApprovals(approvalService, new ToolApprovalSettings("policy-v1",
                             Duration.ofMinutes(5), HandlerAuthorization.ofRoles(Role.APPROVER.name()), false))
@@ -99,6 +104,8 @@ class ManagedToolApprovalSuspensionTest {
                         approval.request().continuationDigest());
                 assertArrayEquals("{\"a\":1,\"b\":2}".getBytes(StandardCharsets.UTF_8),
                         approval.request().canonicalArguments());
+                assertEquals(key.processInstanceId(), policyExecutionId.get(),
+                        "initial managed policy must receive the process instance, not traversal id");
             }
         }
     }

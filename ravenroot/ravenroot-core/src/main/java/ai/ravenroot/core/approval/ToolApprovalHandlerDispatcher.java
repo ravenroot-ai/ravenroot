@@ -31,16 +31,22 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
 
     @Override
     public boolean canDispatch(PendingWork item) {
+        if (item instanceof PendingWork.TimerDue timer) return approvals.ownsTimer(timer);
         if (!(item instanceof PendingWork.HandlerTrigger trigger)
                 || !ToolApprovalService.HANDLER_NAME.equals(trigger.handlerName())) return false;
         DurableToolApproval approval = await(store.loadToolApproval(trigger.key(), trigger.workItemId()))
                 .orElse(null);
-        return approval != null && executor.supports(approval.request().nodeId(),
-                approval.request().continuationVersion());
+        return approval != null && executor.supports(approval);
     }
 
     @Override
     public void dispatch(PendingWork item, String idempotencyKey) {
+        if (item instanceof PendingWork.TimerDue timer) {
+            if (!approvals.expireClaimedTimer(timer, idempotencyKey)) {
+                throw new IllegalStateException("tool approval timer was not due or did not match");
+            }
+            return;
+        }
         if (!(item instanceof PendingWork.HandlerTrigger trigger)
                 || !ToolApprovalService.HANDLER_NAME.equals(trigger.handlerName())) {
             throw new IllegalArgumentException("not a tool approval handler trigger");
@@ -61,7 +67,8 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
             return;
         }
         if (decision == ToolApprovalStatus.APPROVED) {
-            ToolApprovalResult redeemed = approvals.redeemStored(approval, currentPolicy, idempotencyKey);
+            ToolApprovalResult redeemed = approvals.redeemStoredFenced(approval, currentPolicy,
+                    idempotencyKey, trigger.fencingToken());
             if (redeemed.code() != ToolApprovalResult.Code.CONSUMED) return;
             approval = redeemed.approval();
         } else if (decision == ToolApprovalStatus.SUCCEEDED
@@ -79,7 +86,7 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
                 request.continuationVersion(), request.continuation(), request.continuationDigest());
         DurableToolApproval consumed = approval;
         try {
-            Boolean succeeded = await(Objects.requireNonNull(executor.execute(continuation),
+            Boolean succeeded = await(Objects.requireNonNull(executor.execute(continuation, trigger),
                     "continuation execution"));
             if (consumed.status() == ToolApprovalStatus.CONSUMED) {
                 approvals.complete(consumed.key(), consumed.request().approvalId(),

@@ -313,6 +313,7 @@ public final class RavenrootServer implements AutoCloseable {
     private ai.ravenroot.server.ingress.ManagedIngressRegistry managedIngress;
     /** Installed only by the packaged composition before start; absent hosts expose no approval authority. */
     private ai.ravenroot.core.approval.ToolApprovalService toolApprovals;
+    private java.util.function.Consumer<String> toolApprovalSweep = ignored -> { };
     /**
      * Injectable: the narrower constructors below default to the stdout
      * {@link StructuredGraphMlRejectionLogger}/{@code StructuredPayloadRejectionLogger}, but
@@ -950,9 +951,15 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Installs the tenant-scoped durable approval reference monitor before the listener starts. */
     synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals) {
+        installToolApprovals(approvals, ignored -> { });
+    }
+
+    synchronized void installToolApprovals(ai.ravenroot.core.approval.ToolApprovalService approvals,
+                                           java.util.function.Consumer<String> sweep) {
         if (started.get()) throw new IllegalStateException("tool approvals must be installed before start");
         if (toolApprovals != null) throw new IllegalStateException("tool approvals are already installed");
         toolApprovals = java.util.Objects.requireNonNull(approvals, "approvals");
+        toolApprovalSweep = java.util.Objects.requireNonNull(sweep, "sweep");
     }
 
     public int port() {
@@ -2371,6 +2378,7 @@ public final class RavenrootServer implements AutoCloseable {
                 case "cancel" -> service.cancel(context, processId, approvalId);
                 default -> throw new IllegalStateException("unreachable tool approval decision");
             };
+            if (result.accepted()) toolApprovalSweep.accept(context.tenantId());
         } catch (RuntimeException failure) {
             fail(exchange, ErrorCode.INTERNAL_ERROR);
             return;

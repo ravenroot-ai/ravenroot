@@ -19,7 +19,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Shared tenant/profile admission, durable operation ownership, cancellation and sanitized evidence. */
 final class GithubRuntime {
-    private static final ScheduledExecutorService LEASE_KEEPER = Executors.newSingleThreadScheduledExecutor(task -> {
+    private static final ScheduledExecutorService LEASE_KEEPER = Executors.newScheduledThreadPool(4, task -> {
         Thread thread = new Thread(task, "ravenroot-github-lease-keeper"); thread.setDaemon(true); return thread;
     });
     private final java.util.function.Supplier<GithubConfiguration> resolver;
@@ -98,6 +98,12 @@ final class GithubRuntime {
         Task result = new Task(control);
         Thread worker = Thread.ofVirtual().name("ravenroot-github-" + kind).unstarted(() -> {
             LeaseKeeper keeper = new LeaseKeeper(store, operation, control, configuration().store().leaseMs());
+            AtomicBoolean relinquished = new AtomicBoolean();
+            Runnable relinquish = () -> {
+                if (relinquished.compareAndSet(false, true)) {
+                    keeper.close(); gate.permits.release(); release(profile, gate);
+                }
+            };
             try {
                 NodeResult completed;
                 try {
@@ -105,19 +111,23 @@ final class GithubRuntime {
                             () -> { control.check(); store.renew(operation); control.check(); }), operation, control);
                 } catch (GithubException failure) {
                     if (failure.code() == GithubException.Code.CAS_LOST) {
-                        result.completeExceptionally(failure);
+                        relinquish.run(); result.completeExceptionally(failure);
                         return;
                     }
-                    try { persistFailure(store, operation, deadlineEpochMs, kind, failure); result.completeExceptionally(failure); }
+                    try { persistFailure(store, operation, deadlineEpochMs, kind, failure);
+                        relinquish.run(); result.completeExceptionally(failure); }
                     catch (RuntimeException persistence) {
-                        result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                        relinquish.run(); result.completeExceptionally(
+                                new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
                     }
                     return;
                 } catch (RuntimeException failure) {
                     GithubException safe = new GithubException(GithubException.Code.RESPONSE_INVALID);
-                    try { persistFailure(store, operation, deadlineEpochMs, kind, safe); result.completeExceptionally(safe); }
+                    try { persistFailure(store, operation, deadlineEpochMs, kind, safe);
+                        relinquish.run(); result.completeExceptionally(safe); }
                     catch (RuntimeException persistence) {
-                        result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                        relinquish.run(); result.completeExceptionally(
+                                new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
                     }
                     return;
                 }
@@ -129,17 +139,24 @@ final class GithubRuntime {
                     String json = new String(serialized, StandardCharsets.UTF_8);
                     String evidence = GithubValues.sha256(json);
                     boolean terminal = !"WAITING".equals(state);
-                    store.save(operation, state, number(output.get("generation")), number(output.get("attempts")),
-                            deadlineEpochMs, optional(output.get("remoteId")), evidence, json, terminal);
-                    store.audit(operation, state, reason(output), evidence);
-                    if (!terminal) store.release(operation);
-                    result.complete(completed);
+                    long durableDeadline = output.get("retryAtEpochMs") instanceof Long retryAt
+                            ? Math.max(deadlineEpochMs, retryAt) : deadlineEpochMs;
+                    if (terminal) store.saveAndAudit(operation, state, number(output.get("generation")),
+                            number(output.get("attempts")), durableDeadline, optional(output.get("remoteId")),
+                            evidence, json, state, reason(output), evidence);
+                    else {
+                        store.save(operation, state, number(output.get("generation")), number(output.get("attempts")),
+                                durableDeadline, optional(output.get("remoteId")), evidence, json, false);
+                        store.audit(operation, state, reason(output), evidence);
+                        store.release(operation);
+                    }
+                    relinquish.run(); result.complete(completed);
                 } catch (RuntimeException persistence) {
-                    result.completeExceptionally(new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
+                    relinquish.run(); result.completeExceptionally(
+                            new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE));
                 }
             } finally {
-                keeper.close();
-                gate.permits.release(); release(profile, gate);
+                relinquish.run();
             }
         });
         result.worker(worker); worker.start(); return result;
@@ -160,9 +177,9 @@ final class GithubRuntime {
         String json = new String(GithubValues.jsonBytes(output), StandardCharsets.UTF_8);
         String evidence = GithubValues.sha256(kind + ":" + failure.code());
         try {
-            store.save(operation, state, operation.record().generation(), operation.record().attempts(),
-                    deadlineEpochMs, operation.record().remoteId(), evidence, json, true);
-            store.audit(operation, state, failure.code().name(), evidence);
+            store.saveAndAudit(operation, state, operation.record().generation(), operation.record().attempts(),
+                    deadlineEpochMs, operation.record().remoteId(), evidence, json,
+                    state, failure.code().name(), evidence);
         } catch (RuntimeException persistence) {
             throw new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE);
         }

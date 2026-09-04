@@ -33,6 +33,7 @@ actually needs, the request headers `accept`, `content-type`, `user-agent`, and
 | read workflow runs | Actions: read |
 | read repository contents and commits | Contents: read; Metadata: read |
 | update a Project v2 item | Organization Projects: write |
+| discover or add a transition comment | Issues: write (only when a `comment` input is used) |
 
 Use separate profiles/installations when read-only release preparation or workflow observation must
 not inherit review or Project mutation permission.
@@ -78,6 +79,12 @@ Issue or Pull Request from that exact numeric repository; draft and repository-l
 rejected. The configured fields must all occur in the first 100 values and `hasNextPage` must be
 false. Any partial or otherwise non-definitive dispatched mutation response is followed by a full
 snapshot and succeeds only if status, absolute Attempts, and generation all match.
+
+An optional `comment` object freezes a transition annotation as `{kind, body}`. `kind` is one of
+`claim`, `release`, `rework`, `done`, or `block`; `body` is nonblank, control-character-free, and at
+most 4,096 characters. The bundle appends a deterministic hidden marker bound to repository, item,
+issue, generation, kind, and body digest. It discovers that marker before posting and again after an
+uncertain response, so restart reconciliation cannot knowingly create a duplicate comment.
 
 GitHub Project v2 does not expose an atomic conditional field update. This is optimistic CAS safety,
 not a claim of provider-side linearizability. Another writer can race between read and mutation.
@@ -240,9 +247,34 @@ retained operations, and one year of retained package evidence. Profiles may onl
 bounds; graphs cannot change them.
 
 The current Node SDK `NodeTypeDescriptor` exposes behavior identity, properties, capabilities, and
-execution flags, but has no machine-readable input/output payload-schema fields. This bundle
-therefore enforces strict versioned payload shapes at runtime and documents them above; it does not
-claim descriptor-published schemas that the contract cannot represent.
+execution flags, but has no machine-readable input/output payload-schema fields. This bundle instead
+publishes its versioned JSON Schema 2020-12 resources in the JAR. Consumers discover them from the
+stable index `META-INF/ravenroot/github/schema-index.json`; the index maps exactly the five behavior
+identifiers to schemas containing the applicable input, output, event, and receipt definitions.
+
+## Recovery declaration
+
+Core recovery does not infer repeatability from a behavior name and this extension deliberately sets
+no unsafe default. A graph author who wants an ambiguous workflow watch attempt redispatched must set
+the node property `recovery.repeatable` to `repeatable`, for example in the graph's node properties:
+
+```text
+behavior = github-workflow-watch
+githubProfile = automation
+recovery.repeatable = repeatable
+```
+
+The watch is safe to repeat because its exact commit/deadline/run state is bundle-durable and polling
+is read-only. `project-transition` and `github-app-review` may be declared repeatable only when all
+replicas share the configured SQLite operation store: their content-bound operation journal enforces
+reconciliation and a timeout-sized uncertainty grace before another mutation. `release-prepare` is
+GET-only and may also be declared repeatable. Operators should leave the property undeclared when
+those storage and managed-HTTP assumptions do not hold.
+
+`limits.maxConcurrency` is a process-local profile semaphore. SQLite operation-key leases and request
+digests fence the same operation across processes, but the bundle does not implement a distributed
+profile-wide semaphore. Multi-process deployments must enforce their desired aggregate GitHub
+concurrency outside the bundle; this README does not claim cross-process profile admission.
 
 ## Build and install
 

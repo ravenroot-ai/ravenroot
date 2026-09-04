@@ -19,9 +19,11 @@ import java.util.concurrent.CompletionStage;
 /** Optimistic generation-fenced Project transition with absolute Attempts writes and reconciliation. */
 public final class ProjectTransitionBehavior implements NodeBehavior {
     public static final String BEHAVIOR = "project-transition";
+    private static final long MAX_EXACT_INTEGER = 9_007_199_254_740_991L;
     private static final String SNAPSHOT = """
             query($item:ID!){node(id:$item){... on ProjectV2Item{id project{id}
-              content{... on PullRequest{repository{databaseId}} ... on Issue{repository{databaseId}} ... on DraftIssue{id}}
+              content{... on PullRequest{id number repository{databaseId}} ... on Issue{id number repository{databaseId}}
+                ... on DraftIssue{id}}
               fieldValues(first:100){pageInfo{hasNextPage} nodes{
               ... on ProjectV2ItemFieldSingleSelectValue{field{... on ProjectV2SingleSelectField{id}} optionId}
               ... on ProjectV2ItemFieldNumberValue{field{... on ProjectV2FieldCommon{id}} number}
@@ -59,7 +61,7 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         String key = profile.repositoryId() + ":" + input.itemId;
         try {
             return runtime.submit(message, services, profile, BEHAVIOR, key, canonical, deadline,
-                    GithubOperationStore.BeginPolicy.project(input.expectedGeneration),
+                    GithubOperationStore.BeginPolicy.project(input.expectedGeneration, profile.timeoutMs()),
                     (api, operation, control) -> transition(api, profile, input, operation));
         } catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
     }
@@ -69,12 +71,10 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         Snapshot before = snapshot(api, profile, input.itemId);
         long wantedAttempts = input.expectedAttempts + (input.transition().equals(profile.project().claimTransition()) ? 1 : 0);
         long wantedGeneration = input.expectedGeneration + 1;
-        if (before.matches(input.toStatus, wantedAttempts, wantedGeneration)) return result("continue", "already-applied",
-                input, wantedGeneration, wantedAttempts, "");
+        if (before.matches(input.toStatus, wantedAttempts, wantedGeneration))
+            return finish(api, profile, input, before, wantedGeneration, wantedAttempts, "already-applied");
         if (!before.matches(input.fromStatus, input.expectedAttempts, input.expectedGeneration)) return result(
                 "conflict", "cas-lost", input, before.generation, before.attempts, "CAS_LOST");
-        if ("AMBIGUOUS".equals(operation.record().state())) return result("ambiguous", "ambiguous", input,
-                before.generation, before.attempts, "REMOTE_STATE_UNKNOWN");
         String client = GithubValues.sha256(input.itemId + ":" + wantedGeneration + ":" + input.toStatus).substring(0, 32);
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("project", profile.project().projectId()); variables.put("item", input.itemId);
@@ -83,20 +83,64 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         variables.put("attemptsField", profile.project().attemptsFieldId()); variables.put("attempts", wantedAttempts);
         variables.put("generationField", profile.project().generationFieldId()); variables.put("generation", wantedGeneration);
         variables.put("client", client);
-        try { GithubProtocol.graphql(api.graphql(UPDATE, variables)); }
-        catch (GithubProtocol.RateLimited limited) { return result("failed", "rate-limited", input,
-                input.expectedGeneration, input.expectedAttempts, "RATE_LIMITED", limited.retryAt()); }
-        catch (GithubException ambiguous) {
-            if (ambiguous.code() != GithubException.Code.TRANSPORT
-                    && ambiguous.code() != GithubException.Code.RESPONSE_INVALID) throw ambiguous;
+        boolean reconciling = operation.takeover() || "AMBIGUOUS".equals(operation.record().state());
+        Dispatch dispatch = update(api, variables);
+        if (dispatch.uncertain && !reconciling) {
+            Snapshot observed = safeSnapshot(api, profile, input.itemId);
+            if (observed != null && observed.matches(input.toStatus, wantedAttempts, wantedGeneration))
+                return finish(api, profile, input, observed, wantedGeneration, wantedAttempts, "applied");
+            return result("ambiguous", "ambiguous", input,
+                    observed == null ? input.expectedGeneration : observed.generation,
+                    observed == null ? input.expectedAttempts : observed.attempts,
+                    dispatch.retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", dispatch.retryAt);
         }
-        Snapshot after = snapshot(api, profile, input.itemId);
-        if (after.matches(input.toStatus, wantedAttempts, wantedGeneration)) return result("continue", "applied",
-                input, wantedGeneration, wantedAttempts, "");
+        Snapshot after = safeSnapshot(api, profile, input.itemId);
+        if (after == null) return result("ambiguous", "ambiguous", input, input.expectedGeneration,
+                input.expectedAttempts, "REMOTE_STATE_UNKNOWN", dispatch.retryAt);
+        if (after.matches(input.toStatus, wantedAttempts, wantedGeneration))
+            return finish(api, profile, input, after, wantedGeneration, wantedAttempts, "applied");
+        if ((dispatch.partial || reconciling) && after.repairable(input, wantedAttempts)) {
+            Dispatch repair = update(api, variables);
+            if (repair.uncertain) return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
+                    repair.retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", repair.retryAt);
+            Snapshot repaired = safeSnapshot(api, profile, input.itemId);
+            if (repaired == null) return result("ambiguous", "ambiguous", input, after.generation, after.attempts,
+                    "REMOTE_STATE_UNKNOWN");
+            if (repaired.matches(input.toStatus, wantedAttempts, wantedGeneration))
+                return finish(api, profile, input, repaired, wantedGeneration, wantedAttempts, "applied");
+            after = repaired;
+        }
         if (after.generation != input.expectedGeneration || after.attempts != input.expectedAttempts
                 || !after.status.equals(input.fromStatus)) return result("conflict", "cas-lost", input,
                 after.generation, after.attempts, "CAS_LOST");
         return result("ambiguous", "ambiguous", input, after.generation, after.attempts, "REMOTE_STATE_UNKNOWN");
+    }
+
+    private static Dispatch update(GithubApi api, Map<String, Object> variables) {
+        try {
+            GithubApi.Response response = api.graphql(UPDATE, variables);
+            GithubProtocol.requireSuccess(response);
+            Map<String, Object> root = response.object();
+            if (root.get("errors") != null) return new Dispatch(false, true, 0);
+            GithubValues.object(root.get("data"));
+            return new Dispatch(false, false, 0);
+        } catch (GithubProtocol.RateLimited limited) {
+            return new Dispatch(true, false, limited.retryAt());
+        } catch (GithubException failure) {
+            if (failure.code() == GithubException.Code.TRANSPORT
+                    || failure.code() == GithubException.Code.RESPONSE_INVALID)
+                return new Dispatch(true, false, 0);
+            throw failure;
+        }
+    }
+
+    private static Snapshot safeSnapshot(GithubApi api, GithubProfile profile, String itemId) {
+        try { return snapshot(api, profile, itemId); }
+        catch (GithubException failure) {
+            if (failure.code() == GithubException.Code.TRANSPORT
+                    || failure.code() == GithubException.Code.RESPONSE_INVALID) return null;
+            throw failure;
+        }
     }
 
     private static Snapshot snapshot(GithubApi api, GithubProfile profile, String itemId) {
@@ -108,6 +152,8 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         if (!(content.get("repository") instanceof Map<?, ?>)) throw new GithubException(GithubException.Code.FORBIDDEN);
         if (GithubValues.number(GithubValues.object(content.get("repository")).get("databaseId"),
                 1, Long.MAX_VALUE) != profile.repositoryId()) throw new GithubException(GithubException.Code.FORBIDDEN);
+        String subjectId = GithubValues.string(content.get("id"), 128);
+        long issueNumber = GithubValues.number(content.get("number"), 1, Integer.MAX_VALUE);
         String status = ""; long attempts = -1; long generation = -1;
         Map<String, Object> fieldValues = GithubValues.object(node.get("fieldValues"));
         Object hasNextPage = GithubValues.object(fieldValues.get("pageInfo")).get("hasNextPage");
@@ -125,11 +171,71 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
             } else if (field.equals(profile.project().attemptsFieldId())) {
                 attempts = GithubValues.number(value.get("number"), 0, Integer.MAX_VALUE);
             } else if (field.equals(profile.project().generationFieldId())) {
-                generation = GithubValues.number(value.get("number"), 0, Long.MAX_VALUE - 1);
+                generation = GithubValues.number(value.get("number"), 0, MAX_EXACT_INTEGER);
             }
         }
         if (status.isEmpty() || attempts < 0 || generation < 0) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
-        return new Snapshot(status, attempts, generation);
+        return new Snapshot(status, attempts, generation, subjectId, issueNumber);
+    }
+
+    private static NodeResult finish(GithubApi api, GithubProfile profile, Input input, Snapshot snapshot,
+                                     long generation, long attempts, String status) {
+        if (input.comment == null) return result("continue", status, input, generation, attempts, "");
+        String marker = "<!-- ravenroot-project-transition:" + GithubValues.sha256(profile.repositoryId() + ":"
+                + input.itemId + ":" + snapshot.subjectId + ":" + generation + ":" + input.comment.kind
+                + ":" + GithubValues.sha256(input.comment.body)).substring(0, 32) + " -->";
+        if (findComment(api, profile, snapshot.issueNumber, marker))
+            return result("continue", status, input, generation, attempts, "");
+        try {
+            Map<String, Object> posted = GithubProtocol.object(api.post(profile.repositoryPath() + "/issues/"
+                    + snapshot.issueNumber + "/comments", Map.of("body", input.comment.body + "\n\n" + marker)));
+            if (!marker.equals(markerIn(posted)) || !profile.reviewerLogin().equals(commentLogin(posted)))
+                return reconcileComment(api, profile, input, snapshot, generation, attempts, status, marker, 0);
+        } catch (GithubProtocol.RateLimited limited) {
+            return reconcileComment(api, profile, input, snapshot, generation, attempts, status, marker,
+                    limited.retryAt());
+        } catch (GithubException failure) {
+            if (failure.code() == GithubException.Code.TRANSPORT
+                    || failure.code() == GithubException.Code.RESPONSE_INVALID)
+                return reconcileComment(api, profile, input, snapshot, generation, attempts, status, marker, 0);
+            throw failure;
+        }
+        return result("continue", status, input, generation, attempts, "");
+    }
+
+    private static NodeResult reconcileComment(GithubApi api, GithubProfile profile, Input input,
+                                                Snapshot snapshot, long generation, long attempts,
+                                                String status, String marker, long retryAt) {
+        try {
+            if (findComment(api, profile, snapshot.issueNumber, marker))
+                return result("continue", status, input, generation, attempts, "");
+        } catch (RuntimeException ignored) { }
+        return result("ambiguous", "ambiguous", input, generation, attempts,
+                retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);
+    }
+
+    private static boolean findComment(GithubApi api, GithubProfile profile, long issueNumber, String marker) {
+        for (int page = 1; page <= 10; page++) {
+            List<Object> comments = GithubProtocol.list(api.get(profile.repositoryPath() + "/issues/" + issueNumber
+                    + "/comments?per_page=100&page=" + page));
+            for (Object raw : comments) {
+                Map<String, Object> comment = GithubValues.object(raw);
+                if (profile.reviewerLogin().equals(commentLogin(comment)) && marker.equals(markerIn(comment))) return true;
+            }
+            if (comments.size() < 100) return false;
+        }
+        throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+    }
+
+    private static String markerIn(Map<String, Object> comment) {
+        if (!(comment.get("body") instanceof String body) || body.isBlank() || body.length() > 8_320
+                || body.codePoints().anyMatch(character -> character < 0x20 && character != '\n'
+                && character != '\t' || character == 0x7f)) throw GithubValues.invalid();
+        int start = body.lastIndexOf("<!-- ravenroot-project-transition:");
+        return start < 0 ? "" : body.substring(start).strip();
+    }
+    private static String commentLogin(Map<String, Object> comment) {
+        return GithubValues.string(GithubValues.object(comment.get("user")).get("login"), 100);
     }
 
     private static NodeResult result(String outcome, String status, Input input, long generation,
@@ -149,31 +255,54 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
     private static GithubException sanitize(RuntimeException failure) {
         return failure instanceof GithubException safe ? safe : new GithubException(GithubException.Code.INVALID_INPUT);
     }
-    private record Snapshot(String status, long attempts, long generation) {
+    private record Snapshot(String status, long attempts, long generation, String subjectId, long issueNumber) {
         boolean matches(String expectedStatus, long expectedAttempts, long expectedGeneration) {
             return status.equals(expectedStatus) && attempts == expectedAttempts && generation == expectedGeneration;
         }
+        boolean repairable(Input input, long wantedAttempts) {
+            return generation == input.expectedGeneration
+                    && (status.equals(input.fromStatus) || status.equals(input.toStatus))
+                    && (attempts == input.expectedAttempts || attempts == wantedAttempts);
+        }
     }
+    private record Dispatch(boolean uncertain, boolean partial, long retryAt) { }
     private record Input(String itemId, String fromStatus, String toStatus, long expectedGeneration,
-                         long expectedAttempts, String correlationId) {
+                         long expectedAttempts, String correlationId, TransitionComment comment) {
         static Input parse(Object raw) {
             Map<String, Object> value = GithubValues.object(raw);
             GithubValues.exact(value, Set.of("version", "itemId", "fromStatus", "toStatus",
-                    "expectedGeneration", "expectedAttempts", "correlationId"));
+                    "expectedGeneration", "expectedAttempts", "correlationId", "comment"));
             if (!"github.project-transition.v1".equals(value.get("version"))) throw GithubValues.invalid();
             return new Input(GithubValues.string(value.get("itemId"), 128),
                     GithubValues.string(value.get("fromStatus"), 64), GithubValues.string(value.get("toStatus"), 64),
-                    GithubValues.number(value.get("expectedGeneration"), 0, Long.MAX_VALUE - 1),
+                    GithubValues.number(value.get("expectedGeneration"), 0, MAX_EXACT_INTEGER - 1),
                     GithubValues.number(value.get("expectedAttempts"), 0, Integer.MAX_VALUE),
-                    GithubValues.string(value.get("correlationId"), 128));
+                    GithubValues.string(value.get("correlationId"), 128), TransitionComment.parse(value.get("comment")));
         }
         void authorize(GithubProfile.ProjectPolicy policy) {
             if (!policy.statusOptions().containsKey(fromStatus) || !policy.statusOptions().containsKey(toStatus)
                     || !policy.allowedTransitions().contains(transition())) throw new GithubException(GithubException.Code.FORBIDDEN);
         }
         String transition() { return fromStatus + "->" + toStatus; }
-        Map<String, Object> canonical() { return Map.of("version", "github.project-transition.v1", "itemId", itemId,
-                "fromStatus", fromStatus, "toStatus", toStatus, "expectedGeneration", expectedGeneration,
-                "expectedAttempts", expectedAttempts, "correlationId", correlationId); }
+        Map<String, Object> canonical() {
+            Map<String, Object> value = new LinkedHashMap<>(); value.put("version", "github.project-transition.v1");
+            value.put("itemId", itemId); value.put("fromStatus", fromStatus); value.put("toStatus", toStatus);
+            value.put("expectedGeneration", expectedGeneration); value.put("expectedAttempts", expectedAttempts);
+            value.put("correlationId", correlationId);
+            if (comment != null) value.put("comment", Map.of("kind", comment.kind,
+                    "bodyDigest", GithubValues.sha256(comment.body)));
+            return Map.copyOf(value);
+        }
+    }
+    private record TransitionComment(String kind, String body) {
+        private static final Set<String> KINDS = Set.of("claim", "release", "rework", "done", "block");
+        static TransitionComment parse(Object raw) {
+            if (raw == null) return null;
+            Map<String, Object> value = GithubValues.object(raw); GithubValues.exact(value, Set.of("kind", "body"));
+            String kind = GithubValues.string(value.get("kind"), 16);
+            if (!KINDS.contains(kind)) throw GithubValues.invalid();
+            String body = GithubValues.string(value.get("body"), 4_096);
+            return new TransitionComment(kind, body);
+        }
     }
 }

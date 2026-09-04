@@ -83,6 +83,47 @@ class GithubActionBehaviorTest {
         assertEquals(3, http.requests.size());
     }
 
+    @Test void projectCompletesEverySafeSerialPrefixWithAbsoluteAttemptsOnce() {
+        List<Map<String, Object>> prefixes = List.of(snapshot("Todo", 2, 7),
+                snapshot("InProgress", 2, 7), snapshot("InProgress", 3, 7));
+        for (int prefix = 0; prefix < prefixes.size(); prefix++) {
+            var http = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7))
+                    .reply(200, Map.of("data", Map.of(), "errors", List.of(Map.of("message", "partial"))))
+                    .reply(200, prefixes.get(prefix))
+                    .reply(200, Map.of("data", Map.of("generation", Map.of("clientMutationId", "x"))))
+                    .reply(200, snapshot("InProgress", 3, 8));
+            NodeResult result = action(GithubTestSupport.nodePackage(directory.resolve("prefix-" + prefix + ".db")),
+                    "project-transition", http).handle(GithubTestSupport.message(project("prefix-" + prefix)))
+                    .toCompletableFuture().join();
+            assertEquals("continue", result.outcome());
+            assertEquals(3L, GithubValues.object(result.payload()).get("attempts"));
+            assertEquals(2, http.requests.stream().filter(request -> new String(request.body(), StandardCharsets.UTF_8)
+                    .contains("mutation(")).count());
+        }
+    }
+
+    @Test void projectSnapshotFailureAfterMutationPersistsAmbiguityAndReconcilesOnRestart() {
+        Path path = directory.resolve("project-reconcile-restart.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var firstHttp = new GithubTestSupport.HttpHarness().reply(200, snapshot("Todo", 2, 7))
+                .reply(200, Map.of("data", Map.of("generation", Map.of("clientMutationId", "x"))))
+                .reply(500, Map.of("message", "snapshot unavailable"));
+        NodeResult first = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", firstHttp).handle(GithubTestSupport.message(project("snapshot-restart")))
+                .toCompletableFuture().join();
+        assertEquals("ambiguous", first.outcome());
+        clock.advance(30_000);
+        var reopenedHttp = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8));
+        NodeResult reconciled = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", reopenedHttp).handle(GithubTestSupport.message(project("snapshot-restart")))
+                .toCompletableFuture().join();
+        assertEquals("continue", reconciled.outcome());
+        assertEquals(1, reopenedHttp.requests.size());
+    }
+
     @Test void projectOwnershipLossAfterSnapshotPreventsMutationDispatch() {
         Path path = directory.resolve("project-takeover.db");
         MutableClock clock = new MutableClock();
@@ -104,6 +145,45 @@ class GithubActionBehaviorTest {
                 .handle(GithubTestSupport.message(input)).toCompletableFuture();
         assertEquals(GithubException.Code.CAS_LOST, githubFailure(result).code());
         assertEquals(1, http.requests.size());
+    }
+
+    @Test void transitionCommentLostResponseReconcilesAfterRestartWithoutDuplicatePost() {
+        Path path = directory.resolve("project-comment.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var store = new SqliteGithubOperationStore(configuration.store(), clock);
+        Map<String, Object> input = new java.util.LinkedHashMap<>(project("comment-restart"));
+        input.put("comment", Map.of("kind", "claim", "body", "Claimed for bounded processing."));
+        var firstHttp = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8))
+                .reply(200, List.of()).reply(500, Map.of("message", "unknown"))
+                .reply(200, List.of());
+        NodeResult ambiguous = action(new GithubNodePackage(configuration, store), "project-transition", firstHttp)
+                .handle(GithubTestSupport.message(Map.copyOf(input))).toCompletableFuture().join();
+        assertEquals("ambiguous", ambiguous.outcome());
+        assertEquals(1, firstHttp.requests.stream().filter(request -> request.method().equals("POST")
+                && request.destination().getPath().endsWith("/issues/7/comments")).count());
+
+        clock.advance(30_000);
+        String marker = "<!-- ravenroot-project-transition:" + GithubValues.sha256("1234:ITEM_1:ISSUE_1:8:claim:"
+                + GithubValues.sha256("Claimed for bounded processing.")).substring(0, 32) + " -->";
+        String originalPost = firstHttp.requests.stream().filter(request -> request.method().equals("POST")
+                && request.destination().getPath().endsWith("/issues/7/comments")).findFirst()
+                .map(request -> new String(request.body(), StandardCharsets.UTF_8)).orElseThrow();
+        assertTrue(originalPost.contains(marker), originalPost);
+        Map<String, Object> landed = Map.of("id", 77L,
+                "body", "Claimed for bounded processing.\n\n" + marker,
+                "user", Map.of("login", "example-reviewer[bot]"));
+        var restartedHttp = new GithubTestSupport.HttpHarness().reply(200, snapshot("InProgress", 3, 8))
+                .reply(200, List.of(landed));
+        NodeResult reconciled = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "project-transition", restartedHttp).handle(GithubTestSupport.message(Map.copyOf(input)))
+                .toCompletableFuture().join();
+        assertEquals("continue", reconciled.outcome(), restartedHttp.requests.stream()
+                .map(request -> request.method() + " " + request.destination() + " "
+                        + new String(request.body(), StandardCharsets.UTF_8)).toList().toString());
+        assertEquals(0, restartedHttp.requests.stream().filter(request -> request.method().equals("POST")
+                && request.destination().getPath().endsWith("/issues/7/comments")).count());
     }
 
     @Test void staleReviewHeadProducesNoReviewMutation() {
@@ -133,27 +213,164 @@ class GithubActionBehaviorTest {
 
     @Test void ambiguousReviewIsReacquiredAfterRestartAndReconciledWithoutMutation() {
         Path path = directory.resolve("review-restart.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
         Map<String, Object> input = review("review-restart");
         Map<String, Object> canonical = Map.of("version", "github.app-review.v1", "pullNumber", 7L,
                 "commit", GithubTestSupport.SHA, "verdict", "APPROVE",
                 "bodyDigest", GithubValues.sha256("Looks good"), "correlationId", "review-restart");
-        var store = new SqliteGithubOperationStore(GithubTestSupport.configuration(path).store());
+        var store = new SqliteGithubOperationStore(configuration.store(), clock);
         var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-app-review",
                 "7:" + GithubTestSupport.SHA + ":review-restart",
                 GithubValues.sha256(GithubValues.jsonBytes(canonical)), 123,
                 GithubOperationStore.BeginPolicy.ordinary());
         store.save(lease, "AMBIGUOUS", 0, 0, 123, "99", "a".repeat(64),
                 "{\"status\":\"ambiguous\"}", true);
+        clock.advance(5_001);
         String marker = "<!-- ravenroot-review:" + GithubValues.sha256("review-restart:" + GithubTestSupport.SHA
                 + ":APPROVE:" + GithubValues.sha256("Looks good")).substring(0, 32) + " -->";
         var http = new GithubTestSupport.HttpHarness().reply(200, repository())
                 .reply(200, List.of(reviewObject(99, "APPROVED", marker)))
                 .reply(200, pull(GithubTestSupport.SHA));
-        NodeResult result = action(GithubTestSupport.nodePackage(path), "github-app-review", http)
+        NodeResult result = action(new GithubNodePackage(configuration,
+                new SqliteGithubOperationStore(configuration.store(), clock)), "github-app-review", http)
                 .handle(GithubTestSupport.message(input)).toCompletableFuture().join();
         assertEquals("continue", result.outcome());
         assertEquals("already-recorded", GithubValues.object(result.payload()).get("status"));
         assertTrue(http.requests.stream().allMatch(request -> request.method().equals("GET")));
+    }
+
+    @Test void malformedDraftResponseBecomesAmbiguousThenSafelyReattemptsAfterGrace() {
+        Path path = directory.resolve("review-malformed.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        Map<String, Object> input = review("review-malformed");
+        var firstHttp = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, Map.of()).reply(200, List.of());
+        NodeResult first = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "github-app-review", firstHttp).handle(GithubTestSupport.message(input)).toCompletableFuture().join();
+        assertEquals("ambiguous", first.outcome());
+        assertEquals(1, firstHttp.requests.stream().filter(request -> request.method().equals("POST")).count());
+
+        clock.advance(30_000);
+        String marker = reviewMarker("review-malformed");
+        var restarted = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(88, "PENDING", marker))
+                .reply(200, pull(GithubTestSupport.SHA)).reply(200, reviewObject(88, "APPROVED", marker))
+                .reply(200, pull(GithubTestSupport.SHA));
+        NodeResult completed = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "github-app-review", restarted).handle(GithubTestSupport.message(input)).toCompletableFuture().join();
+        assertEquals("continue", completed.outcome());
+        assertEquals(2, restarted.requests.stream().filter(request -> request.method().equals("POST")).count());
+    }
+
+    @Test void everyUncertainDraftResponseIsClassifiedAndReconciledWithoutImmediateDuplicate() {
+        for (String variant : List.of("http-500", "malformed-201", "rate-429")) {
+            var http = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                    .reply(200, pull(GithubTestSupport.SHA));
+            if (variant.equals("http-500")) http.reply(500, Map.of("message", "unknown"));
+            else if (variant.equals("malformed-201")) http.reply(201, Map.of());
+            else http.reply(429, Map.of("retry-after", List.of("2")), Map.of("message", "limited"));
+            http.reply(200, List.of());
+            NodeResult result = action(GithubTestSupport.nodePackage(directory.resolve("draft-" + variant + ".db")),
+                    "github-app-review", http).handle(GithubTestSupport.message(review("draft-" + variant)))
+                    .toCompletableFuture().join();
+            assertEquals("ambiguous", result.outcome(), variant);
+            assertEquals(1, http.requests.stream().filter(request -> request.method().equals("POST")).count(), variant);
+            assertEquals(variant.equals("rate-429") ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN",
+                    GithubValues.object(result.payload()).get("reason"), variant);
+        }
+    }
+
+    @Test void lostSubmitResponseReconcilesLandedFormalReviewWithoutSecondSubmit() {
+        String marker = reviewMarker("review-submit-lost");
+        var http = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(91, "PENDING", marker))
+                .reply(200, pull(GithubTestSupport.SHA)).reply(500, Map.of("message", "unknown"))
+                .reply(200, List.of(reviewObject(91, "APPROVED", marker)))
+                .reply(200, pull(GithubTestSupport.SHA));
+        NodeResult result = action(GithubTestSupport.nodePackage(directory.resolve("review-submit-lost.db")),
+                "github-app-review", http).handle(GithubTestSupport.message(review("review-submit-lost")))
+                .toCompletableFuture().join();
+        assertEquals("continue", result.outcome());
+        assertEquals(2, http.requests.stream().filter(request -> request.method().equals("POST")).count());
+    }
+
+    @Test void everyUncertainSubmitResponseIsClassifiedAndReconciledWithoutSecondSubmit() {
+        for (String variant : List.of("http-500", "malformed-200", "rate-429")) {
+            String correlation = "submit-" + variant;
+            String marker = reviewMarker(correlation);
+            var http = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                    .reply(200, pull(GithubTestSupport.SHA)).reply(201, reviewObject(92, "PENDING", marker))
+                    .reply(200, pull(GithubTestSupport.SHA));
+            if (variant.equals("http-500")) http.reply(500, Map.of("message", "unknown"));
+            else if (variant.equals("malformed-200")) http.reply(200, Map.of());
+            else http.reply(429, Map.of("retry-after", List.of("2")), Map.of("message", "limited"));
+            http.reply(200, List.of(reviewObject(92, "PENDING", marker)));
+            NodeResult result = action(GithubTestSupport.nodePackage(directory.resolve("submit-" + variant + ".db")),
+                    "github-app-review", http).handle(GithubTestSupport.message(review(correlation)))
+                    .toCompletableFuture().join();
+            assertEquals("ambiguous", result.outcome(), variant);
+            assertEquals(2, http.requests.stream().filter(request -> request.method().equals("POST")).count(), variant);
+            assertEquals(variant.equals("rate-429") ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN",
+                    GithubValues.object(result.payload()).get("reason"), variant);
+        }
+    }
+
+    @Test void expiredReviewWriterCannotBeTakenOverDuringOutboundUncertaintyWindow() {
+        Path path = directory.resolve("review-takeover.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var store = new SqliteGithubOperationStore(configuration.store(), clock);
+        Map<String, Object> input = review("review-takeover");
+        Map<String, Object> canonical = Map.of("version", "github.app-review.v1", "pullNumber", 7L,
+                "commit", GithubTestSupport.SHA, "verdict", "APPROVE",
+                "bodyDigest", GithubValues.sha256("Looks good"), "correlationId", "review-takeover");
+        store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-app-review",
+                "7:" + GithubTestSupport.SHA + ":review-takeover",
+                GithubValues.sha256(GithubValues.jsonBytes(canonical)), clock.millis() + 5_000,
+                GithubOperationStore.BeginPolicy.forAmbiguousReconciliation(5_000));
+        clock.advance(1_100);
+        var http = new GithubTestSupport.HttpHarness();
+        CompletableFuture<NodeResult> takeover = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "github-app-review", http).handle(GithubTestSupport.message(input)).toCompletableFuture();
+        assertEquals(GithubException.Code.CAPACITY, githubFailure(takeover).code());
+        assertTrue(http.requests.isEmpty(), "a possibly in-flight draft must not be followed by another mutation");
+    }
+
+    @Test void inFlightDraftPostCannotBeDuplicatedAfterLeaseExpiry() {
+        Path path = directory.resolve("review-live-takeover.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = GithubTestSupport.configuration(path);
+        var store = new SqliteGithubOperationStore(configuration.store(), clock);
+        var firstHttp = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of())
+                .reply(200, pull(GithubTestSupport.SHA));
+        CompletableFuture<OutboundHttpResponse> blocked = new CompletableFuture<>();
+        firstHttp.pending = new OutboundCall<>() {
+            @Override public CompletableFuture<OutboundHttpResponse> completion() { return blocked; }
+            @Override public boolean cancel() { return blocked.cancel(true); }
+        };
+        firstHttp.pendingAtRequest = 4;
+        CompletableFuture<NodeResult> first = action(new GithubNodePackage(configuration, store),
+                "github-app-review", firstHttp).handle(GithubTestSupport.message(review("live-takeover")))
+                .toCompletableFuture();
+        awaitRequests(firstHttp, 4);
+        assertEquals(1, firstHttp.requests.stream().filter(request -> request.method().equals("POST")).count());
+
+        clock.advance(1_100);
+        var secondHttp = new GithubTestSupport.HttpHarness().reply(200, repository()).reply(200, List.of());
+        CompletableFuture<NodeResult> second = action(new GithubNodePackage(configuration,
+                        new SqliteGithubOperationStore(configuration.store(), clock)),
+                "github-app-review", secondHttp).handle(GithubTestSupport.message(review("live-takeover")))
+                .toCompletableFuture();
+        assertEquals(GithubException.Code.CAPACITY, githubFailure(second).code());
+        assertEquals(0, secondHttp.requests.stream().filter(request -> request.method().equals("POST")).count());
+        blocked.complete(new OutboundHttpResponse(201, Map.of(),
+                GithubTestSupport.json(reviewObject(93, "PENDING", reviewMarker("live-takeover")))));
+        githubFailure(first); // join the first worker before TempDir cleanup
     }
 
     @Test void workflowUsesExactShaAndNewestAttempts() {
@@ -207,6 +424,108 @@ class GithubActionBehaviorTest {
                 .handle(GithubTestSupport.message(input)).toCompletableFuture().join();
         assertEquals("continue", result.outcome());
         assertEquals(2L, GithubValues.object(result.payload()).get("polls"));
+        assertEquals(1, http.requests.size());
+    }
+
+    @Test void workflowRestoresFutureRateDeadlineReleasesPermitAndPersistsCancellation() throws Exception {
+        Path path = directory.resolve("workflow-rate-restart.db");
+        MutableClock clock = new MutableClock();
+        GithubConfiguration configuration = withConcurrency(GithubTestSupport.configuration(path), 1);
+        var store = new SqliteGithubOperationStore(configuration.store(), clock);
+        long deadline = clock.millis() + 20_000;
+        long retryAt = clock.millis() + 5_000;
+        Map<String, Object> input = Map.of("version", "github.workflow-watch.v1", "commit", GithubTestSupport.SHA,
+                "deadlineEpochMs", deadline, "correlationId", "watch-rate-restart");
+        var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
+                GithubTestSupport.SHA + ":watch-rate-restart", GithubValues.sha256(GithubValues.jsonBytes(input)),
+                deadline, GithubOperationStore.BeginPolicy.ordinary());
+        Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
+                "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
+                "remoteId", GithubTestSupport.SHA, "reason", "RATE_LIMITED", "retryAtEpochMs", retryAt,
+                "workflows", List.of());
+        store.save(lease, "WAITING", 0, 1, retryAt, GithubTestSupport.SHA, "a".repeat(64),
+                new String(GithubValues.jsonBytes(waiting), StandardCharsets.UTF_8), false);
+        store.release(lease);
+
+        GithubRuntime runtime = new GithubRuntime(configuration, store);
+        ManualScheduler scheduler = new ManualScheduler();
+        var http = new GithubTestSupport.HttpHarness();
+        NodeAction watch = new GithubWorkflowWatchBehavior(runtime, clock, scheduler)
+                .create(GithubTestSupport.node("github-workflow-watch"), http);
+        CompletableFuture<NodeResult> result = watch.handle(GithubTestSupport.message(input)).toCompletableFuture();
+        ManualScheduler.Entry initial = scheduler.take(); assertEquals(0, initial.delayMs); initial.run();
+        ManualScheduler.Entry delayed = scheduler.take();
+        assertEquals(5_000, delayed.delayMs);
+        assertTrue(http.requests.isEmpty(), "restart must not call GitHub before persisted Retry-After");
+
+        GithubProfile profile = configuration.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        NodeResult probe = runtime.submit(GithubTestSupport.message(Map.of()), http, profile, "probe", "probe",
+                Map.of("probe", "permit"), deadline, (api, operation, control) -> NodeResult.continueWith(Map.of(
+                        "status", "done", "generation", 0L, "attempts", 0L, "remoteId", "probe")))
+                .toCompletableFuture().join();
+        assertEquals("continue", probe.outcome(), "waiting watch must release its profile permit");
+
+        assertTrue(result.cancel(true));
+        awaitState(store, "github-workflow-watch", GithubTestSupport.SHA + ":watch-rate-restart", "CANCELLED");
+        ManualScheduler replayScheduler = new ManualScheduler();
+        CompletableFuture<NodeResult> replay = new GithubWorkflowWatchBehavior(runtime, clock, replayScheduler)
+                .create(GithubTestSupport.node("github-workflow-watch"), http)
+                .handle(GithubTestSupport.message(input)).toCompletableFuture();
+        replayScheduler.take().run();
+        assertEquals(GithubException.Code.CANCELLED, githubFailure(replay).code());
+        assertTrue(http.requests.isEmpty());
+    }
+
+    @Test void sameWorkflowIdentityAdvancesAfterReopenToSuccessFailureAndCancellation() {
+        Map<String, String> expected = Map.of("success", "continue", "failure", "failed", "cancelled", "failed");
+        expected.forEach((conclusion, outcome) -> {
+            Path path = directory.resolve("workflow-advance-" + conclusion + ".db");
+            long deadline = System.currentTimeMillis() + 5_000;
+            Map<String, Object> input = Map.of("version", "github.workflow-watch.v1", "commit", GithubTestSupport.SHA,
+                    "deadlineEpochMs", deadline, "correlationId", "advance-" + conclusion);
+            var store = new SqliteGithubOperationStore(GithubTestSupport.configuration(path).store());
+            var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
+                    GithubTestSupport.SHA + ":advance-" + conclusion,
+                    GithubValues.sha256(GithubValues.jsonBytes(input)), deadline,
+                    GithubOperationStore.BeginPolicy.ordinary());
+            Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
+                    "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
+                    "remoteId", GithubTestSupport.SHA, "retryAtEpochMs", System.currentTimeMillis(),
+                    "workflows", List.of(runOutput(1001, 11, 1, "queued", ""),
+                            runOutput(1002, 12, 1, "completed", "success")));
+            store.save(lease, "WAITING", 0, 1, deadline, GithubTestSupport.SHA, "a".repeat(64),
+                    new String(GithubValues.jsonBytes(waiting), StandardCharsets.UTF_8), false);
+            store.release(lease);
+            var http = new GithubTestSupport.HttpHarness().reply(200, Map.of("total_count", 1L,
+                    "workflow_runs", List.of(run(1001, 11, 1, "completed", conclusion))));
+            NodeResult result = action(GithubTestSupport.nodePackage(path), "github-workflow-watch", http)
+                    .handle(GithubTestSupport.message(input)).toCompletableFuture().join();
+            assertEquals(outcome, result.outcome());
+            assertEquals(1, http.requests.size());
+        });
+    }
+
+    @Test void contradictoryTerminalConclusionForSameRunAttemptFailsClosed() {
+        Path path = directory.resolve("workflow-terminal-contradiction.db");
+        long deadline = System.currentTimeMillis() + 5_000;
+        Map<String, Object> input = Map.of("version", "github.workflow-watch.v1", "commit", GithubTestSupport.SHA,
+                "deadlineEpochMs", deadline, "correlationId", "terminal-contradiction");
+        var store = new SqliteGithubOperationStore(GithubTestSupport.configuration(path).store());
+        var lease = store.begin(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, "github-workflow-watch",
+                GithubTestSupport.SHA + ":terminal-contradiction", GithubValues.sha256(GithubValues.jsonBytes(input)),
+                deadline, GithubOperationStore.BeginPolicy.ordinary());
+        Map<String, Object> waiting = Map.of("version", "github.workflow-watch.result.v1", "status", "waiting",
+                "commit", GithubTestSupport.SHA, "polls", 1L, "attempts", 1L, "generation", 0L,
+                "remoteId", GithubTestSupport.SHA, "retryAtEpochMs", System.currentTimeMillis(),
+                "workflows", List.of(runOutput(1001, 11, 1, "completed", "success")));
+        store.save(lease, "WAITING", 0, 1, deadline, GithubTestSupport.SHA, "a".repeat(64),
+                new String(GithubValues.jsonBytes(waiting), StandardCharsets.UTF_8), false);
+        store.release(lease);
+        var http = new GithubTestSupport.HttpHarness().reply(200, Map.of("total_count", 1L,
+                "workflow_runs", List.of(run(1001, 11, 1, "completed", "failure"))));
+        CompletableFuture<NodeResult> result = action(GithubTestSupport.nodePackage(path), "github-workflow-watch", http)
+                .handle(GithubTestSupport.message(input)).toCompletableFuture();
+        assertEquals(GithubException.Code.RESPONSE_INVALID, githubFailure(result).code());
         assertEquals(1, http.requests.size());
     }
 
@@ -273,6 +592,29 @@ class GithubActionBehaviorTest {
         assertTrue(restartedHttp.requests.isEmpty());
     }
 
+    @Test void releasePreparationAcceptsMinorForPreOneBreakingFragment() {
+        var http = releaseReplies("0.1.0", "114.breaking.md");
+        NodeResult result = action(GithubTestSupport.nodePackage(directory.resolve("release-breaking.db")),
+                "release-prepare", http).handle(GithubTestSupport.message(Map.of(
+                        "version", "github.release-prepare.v1", "commit", GithubTestSupport.SHA,
+                        "releaseKind", "minor", "correlationId", "release-breaking")))
+                .toCompletableFuture().join();
+        assertEquals("0.2.0", GithubValues.object(result.payload()).get("nextVersion"));
+        assertTrue(http.requests.stream().allMatch(request -> request.method().equals("GET")));
+    }
+
+    @Test void releasePreparationRejectsNonCanonicalSemver() {
+        for (String version : List.of("01.2.3", "1.2.3-01", "1.2.3-alpha.01")) {
+            var http = releaseReplies(version, "114.feature.md");
+            GithubException failure = githubFailure(action(GithubTestSupport.nodePackage(directory.resolve(
+                            "release-invalid-" + version.replace('.', '-') + ".db")), "release-prepare", http)
+                    .handle(GithubTestSupport.message(Map.of("version", "github.release-prepare.v1",
+                            "commit", GithubTestSupport.SHA, "releaseKind", "minor",
+                            "correlationId", "invalid-" + version))).toCompletableFuture());
+            assertEquals(GithubException.Code.RESPONSE_INVALID, failure.code());
+        }
+    }
+
     private static NodeAction action(GithubNodePackage nodePackage, String behavior, GithubTestSupport.HttpHarness services) {
         return GithubTestSupport.behavior(nodePackage, behavior).create(GithubTestSupport.node(behavior), services);
     }
@@ -282,7 +624,8 @@ class GithubActionBehaviorTest {
     private static Map<String, Object> snapshot(String status, long attempts, long generation,
                                                 long repositoryId, boolean hasNextPage) {
         return Map.of("data", Map.of("node", Map.of("id", "ITEM_1", "project", Map.of("id", "PVT_example"),
-                "content", Map.of("repository", Map.of("databaseId", repositoryId)),
+                "content", Map.of("id", "ISSUE_1", "number", 7L,
+                        "repository", Map.of("databaseId", repositoryId)),
                 "fieldValues", Map.of("pageInfo", Map.of("hasNextPage", hasNextPage), "nodes", List.of(
                         Map.of("field", Map.of("id", "PVTSSF_status"), "optionId", status.equals("Todo") ? "todo-id" : "progress-id"),
                         Map.of("field", Map.of("id", "PVTF_attempts"), "number", attempts),
@@ -307,21 +650,33 @@ class GithubActionBehaviorTest {
         return Map.of("id", id, "state", state, "commit_id", GithubTestSupport.SHA,
                 "body", "Looks good\n\n" + marker, "user", Map.of("login", "example-reviewer[bot]"));
     }
+    private static String reviewMarker(String correlation) {
+        return "<!-- ravenroot-review:" + GithubValues.sha256(correlation + ":" + GithubTestSupport.SHA
+                + ":APPROVE:" + GithubValues.sha256("Looks good")).substring(0, 32) + " -->";
+    }
     private static Map<String, Object> run(long workflow, long id, long attempt, String status, String conclusion) {
         return Map.of("workflow_id", workflow, "id", id, "run_number", id, "run_attempt", attempt,
                 "created_at", "2026-09-04T00:00:00Z", "head_sha", GithubTestSupport.SHA,
                 "status", status, "conclusion", conclusion);
     }
+    private static Map<String, Object> runOutput(long workflow, long id, long attempt,
+                                                 String status, String conclusion) {
+        return Map.of("workflowId", workflow, "runId", id, "runNumber", id, "attempt", attempt,
+                "createdAt", "2026-09-04T00:00:00Z", "status", status, "conclusion", conclusion);
+    }
     private static GithubTestSupport.HttpHarness releaseReplies() {
+        return releaseReplies("0.1.0", "114.feature.md");
+    }
+    private static GithubTestSupport.HttpHarness releaseReplies(String projectVersion, String fragmentName) {
         String version = Base64.getEncoder().encodeToString(("<?xml version=\"1.0\"?><project>"
                 + "<modelVersion>4.0.0</modelVersion><groupId>ai.ravenroot</groupId>"
-                + "<artifactId>ravenroot-parent</artifactId><version>0.1.0</version></project>")
+                + "<artifactId>ravenroot-parent</artifactId><version>" + projectVersion + "</version></project>")
                 .getBytes(StandardCharsets.UTF_8));
         String fragment = Base64.getEncoder().encodeToString("Add GitHub automation.".getBytes(StandardCharsets.UTF_8));
         return new GithubTestSupport.HttpHarness().reply(200, Map.of("object", Map.of("sha", GithubTestSupport.SHA)))
                 .reply(200, Map.of("sha", GithubTestSupport.SHA))
                 .reply(200, Map.of("encoding", "base64", "content", version))
-                .reply(200, List.of(Map.of("type", "file", "name", "114.feature.md", "path", ".changes/114.feature.md")))
+                .reply(200, List.of(Map.of("type", "file", "name", fragmentName, "path", ".changes/" + fragmentName)))
                 .reply(200, Map.of("encoding", "base64", "content", fragment))
                 .reply(200, Map.of("object", Map.of("sha", GithubTestSupport.SHA)));
     }
@@ -333,8 +688,55 @@ class GithubActionBehaviorTest {
         return (GithubException) completion.getCause();
     }
 
+    private static GithubConfiguration withConcurrency(GithubConfiguration base, int concurrency) {
+        GithubProfile old = base.profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        GithubProfile profile = new GithubProfile(old.name(), old.tenantId(), old.apiOrigin(), old.owner(),
+                old.repository(), old.repositoryId(), old.installationId(), old.reviewerLogin(),
+                old.credentialBindingId(), old.credentialReference(), old.webhookSecretReference(), old.route(),
+                old.webhookEvents(), old.project(), old.workflowIds(), old.release(), old.timeoutMs(),
+                old.maxRequestBytes(), old.maxResponseBytes(), concurrency, old.maxPolls(), old.pollIntervalMs());
+        return new GithubConfiguration(base.authority(), base.projection(), base.store(),
+                Map.of(GithubTestSupport.TENANT + "\u0000" + GithubTestSupport.PROFILE, profile));
+    }
+
+    private static void awaitState(GithubOperationStore store, String kind, String key, String state) {
+        long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < limit) {
+            if (store.find(GithubTestSupport.TENANT, GithubTestSupport.PROFILE, kind, key)
+                    .map(record -> state.equals(record.state())).orElse(false)) return;
+            java.util.concurrent.locks.LockSupport.parkNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(2));
+        }
+        fail("operation did not reach " + state);
+    }
+
+    private static void awaitRequests(GithubTestSupport.HttpHarness http, int count) {
+        long limit = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(2);
+        while (System.nanoTime() < limit) {
+            if (http.requests.size() >= count) return;
+            java.util.concurrent.locks.LockSupport.parkNanos(java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(2));
+        }
+        fail("outbound request count did not reach " + count);
+    }
+
+    private static final class ManualScheduler implements GithubWorkflowWatchBehavior.PollScheduler {
+        private final java.util.concurrent.BlockingQueue<Entry> entries = new java.util.concurrent.LinkedBlockingQueue<>();
+        @Override public GithubWorkflowWatchBehavior.ScheduledPoll schedule(Runnable task, long delayMs) {
+            Entry entry = new Entry(task, delayMs); entries.add(entry); return entry::cancel;
+        }
+        Entry take() throws InterruptedException {
+            Entry entry = entries.poll(2, java.util.concurrent.TimeUnit.SECONDS);
+            assertNotNull(entry, "scheduled poll did not arrive"); return entry;
+        }
+        private static final class Entry {
+            private final Runnable task; private final long delayMs; private boolean cancelled;
+            Entry(Runnable task, long delayMs) { this.task = task; this.delayMs = delayMs; }
+            void run() { if (!cancelled) task.run(); }
+            void cancel() { cancelled = true; }
+        }
+    }
+
     private static final class MutableClock extends java.time.Clock {
-        private long millis = 1_000_000;
+        private long millis = System.currentTimeMillis();
         void advance(long amount) { millis += amount; }
         @Override public java.time.ZoneId getZone() { return java.time.ZoneId.of("UTC"); }
         @Override public java.time.Clock withZone(java.time.ZoneId zone) { return this; }

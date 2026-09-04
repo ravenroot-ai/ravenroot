@@ -2,11 +2,13 @@ package ai.ravenroot.extensions.github;
 
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.payload.PayloadJson;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -50,5 +52,29 @@ class GithubBoundaryTest {
         assertFalse(source.contains("api.delete("));
         assertFalse(source.contains("api.graphql("));
         assertTrue(source.contains("api.get("));
+    }
+
+    @Test void versionedSchemasAreDiscoverableForExactlyTheFiveBehaviors() throws Exception {
+        String indexPath = "META-INF/ravenroot/github/schema-index.json";
+        ClassLoader loader = GithubNodePackage.class.getClassLoader();
+        Map<String, Object> index;
+        try (var stream = loader.getResourceAsStream(indexPath)) {
+            assertNotNull(stream);
+            index = GithubValues.object(PayloadJson.read(stream.readAllBytes(), GithubValues.LIMITS).toJava());
+        }
+        assertEquals("ravenroot.github.schemas.v1", index.get("version"));
+        Map<String, Object> schemas = GithubValues.object(index.get("schemas"));
+        assertEquals(Set.of("github-events-source", "project-transition", "github-app-review",
+                "github-workflow-watch", "release-prepare"), schemas.keySet());
+        for (Map.Entry<String, Object> entry : schemas.entrySet()) {
+            String resource = GithubValues.string(entry.getValue(), 256);
+            try (var stream = loader.getResourceAsStream(resource)) {
+                assertNotNull(stream, entry.getKey());
+                Map<String, Object> schema = GithubValues.object(
+                        PayloadJson.read(stream.readAllBytes(), GithubValues.LIMITS).toJava());
+                assertEquals("https://json-schema.org/draft/2020-12/schema", schema.get("$schema"));
+                assertTrue(schema.containsKey("$defs"), entry.getKey());
+            }
+        }
     }
 }

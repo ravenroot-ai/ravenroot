@@ -161,6 +161,24 @@ class GithubOperationStoreTest {
                 GithubOperationStore.BeginPolicy.ordinary()).owner().isEmpty());
     }
 
+    @Test void terminalSaveRollsBackWhenRequiredAuditInsertFails() throws Exception {
+        Path path = directory.resolve("operations.db");
+        var store = new SqliteGithubOperationStore(new GithubConfiguration.StorePolicy(path, 10, 24, 1_000));
+        var lease = store.begin("tenant-a", "profile", "review", "atomic", DIGEST, 123,
+                GithubOperationStore.BeginPolicy.ordinary());
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + path);
+             var statement = connection.createStatement()) {
+            statement.executeUpdate("CREATE TRIGGER reject_audit BEFORE INSERT ON github_operation_audit "
+                    + "BEGIN SELECT RAISE(ABORT, 'injected'); END");
+        }
+        assertEquals(GithubException.Code.DURABILITY_UNAVAILABLE, assertThrows(GithubException.class,
+                () -> store.saveAndAudit(lease, "SUCCEEDED", 0, 0, 123, "", DIGEST, "{}",
+                        "SUCCEEDED", "NONE", DIGEST)).code());
+        GithubOperationStore.Record retained = store.find("tenant-a", "profile", "review", "atomic").orElseThrow();
+        assertFalse(retained.terminal());
+        assertEquals("RUNNING", retained.state());
+    }
+
     private static final class MutableClock extends Clock {
         private long millis = 1_000_000;
         void advance(long amount) { millis += amount; }

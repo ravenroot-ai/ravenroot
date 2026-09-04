@@ -79,7 +79,7 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
         }
         fragments.sort(Comparator.comparing(Fragment::name));
         String highest = highest(fragments);
-        if (!covers(input.kind, highest)) throw new GithubException(GithubException.Code.INVALID_INPUT);
+        if (!covers(input.kind, highest, current)) throw new GithubException(GithubException.Code.INVALID_INPUT);
         List<Map<String, Object>> proposed = fragments.stream().map(fragment -> Map.<String, Object>of(
                 "name", fragment.name, "kind", fragment.kind, "text", fragment.text, "sha256", fragment.sha256)).toList();
         Map<String, Object> output = new LinkedHashMap<>(); output.put("version", "github.release-prepare.result.v1");
@@ -155,7 +155,10 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
     private static String highest(List<Fragment> fragments) {
         return fragments.stream().map(Fragment::kind).max(Comparator.comparingInt(ReleasePrepareBehavior::rank)).orElse("none");
     }
-    private static boolean covers(String selected, String required) { return rank(selected) >= rank(required); }
+    private static boolean covers(String selected, String required, Semver current) {
+        if ("breaking".equals(required) && current.major == 0 && "minor".equals(selected)) return true;
+        return rank(selected) >= rank(required);
+    }
     private static int rank(String kind) {
         return switch (kind) { case "major", "breaking" -> 4; case "minor", "feature" -> 3;
             case "patch", "security", "fix" -> 2; case "other", "docs", "none" -> 1; default -> 0; };
@@ -167,10 +170,15 @@ public final class ReleasePrepareBehavior implements NodeBehavior {
     private record Semver(long major, long minor, long patch, String suffix) {
         static Semver parse(String value) {
             java.util.regex.Matcher match = java.util.regex.Pattern.compile(
-                    "([0-9]+)\\.([0-9]+)\\.([0-9]+)(-[0-9A-Za-z.-]+)?").matcher(value.strip());
+                    "(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)"
+                            + "(?:-([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?").matcher(value.strip());
             if (!match.matches()) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+            if (match.group(4) != null) for (String identifier : match.group(4).split("\\."))
+                if (identifier.length() > 1 && identifier.charAt(0) == '0'
+                        && identifier.chars().allMatch(Character::isDigit))
+                    throw new GithubException(GithubException.Code.RESPONSE_INVALID);
             return new Semver(Long.parseLong(match.group(1)), Long.parseLong(match.group(2)),
-                    Long.parseLong(match.group(3)), match.group(4) == null ? "" : match.group(4));
+                    Long.parseLong(match.group(3)), match.group(4) == null ? "" : "-" + match.group(4));
         }
         Semver bump(String kind) { return switch (kind) {
             case "major" -> new Semver(major + 1, 0, 0, suffix);

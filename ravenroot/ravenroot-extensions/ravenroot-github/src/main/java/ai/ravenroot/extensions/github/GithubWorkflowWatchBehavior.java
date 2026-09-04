@@ -10,6 +10,7 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
 
 import java.time.Instant;
+import java.time.Clock;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -32,8 +33,18 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         Thread thread = new Thread(task, "ravenroot-github-workflow-poll"); thread.setDaemon(true); return thread;
     });
     private final GithubRuntime runtime;
+    private final Clock clock;
+    private final PollScheduler scheduler;
 
-    GithubWorkflowWatchBehavior(GithubRuntime runtime) { this.runtime = runtime; }
+    GithubWorkflowWatchBehavior(GithubRuntime runtime) {
+        this(runtime, Clock.systemUTC(), (task, delay) -> {
+            ScheduledFuture<?> future = POLLS.schedule(task, delay, TimeUnit.MILLISECONDS);
+            return () -> future.cancel(false);
+        });
+    }
+    GithubWorkflowWatchBehavior(GithubRuntime runtime, Clock clock, PollScheduler scheduler) {
+        this.runtime = runtime; this.clock = clock; this.scheduler = scheduler;
+    }
     @Override public Set<NodePackageCapability> requiredServices() { return Set.of(NodePackageCapability.OUTBOUND_HTTP); }
     @Override public NodeTypeDescriptor descriptor() { return GithubBehaviorDescriptors.descriptor(BEHAVIOR,
             "Watch GitHub workflows", "Waits durably for configured workflows on one exact commit.",
@@ -48,7 +59,7 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         final Input input; final GithubProfile profile;
         try {
             input = Input.parse(message.payload()); profile = runtime.requireProfile(message.tenantId(), profileName);
-            long maximum = Math.addExact(System.currentTimeMillis(),
+            long maximum = Math.addExact(clock.millis(),
                     Math.multiplyExact((long) profile.maxPolls(), profile.pollIntervalMs() + (long) profile.timeoutMs()));
             if (input.deadlineEpochMs > maximum) throw GithubValues.invalid();
         } catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
@@ -60,13 +71,13 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         private final NodeMessage message; private final NodePackageServices services;
         private final GithubProfile profile; private final Input input;
         private final AtomicBoolean cancelled = new AtomicBoolean();
-        private volatile ScheduledFuture<?> scheduled; private volatile CompletableFuture<NodeResult> active;
+        private volatile ScheduledPoll scheduled; private volatile CompletableFuture<NodeResult> active;
 
         WatchTask(NodeMessage message, NodePackageServices services, GithubProfile profile, Input input) {
             this.message = message; this.services = services; this.profile = profile; this.input = input;
         }
         void schedule(long delayMs) {
-            if (!isDone()) scheduled = POLLS.schedule(this::poll, Math.max(0, delayMs), TimeUnit.MILLISECONDS);
+            if (!isDone()) scheduled = scheduler.schedule(this::poll, Math.max(0, delayMs));
         }
         private void poll() {
             if (isDone()) return;
@@ -86,13 +97,13 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
                 Map<String, Object> output = GithubValues.object(result.payload());
                 if (!"waiting".equals(output.get("status"))) { complete(result); return; }
                 long retryAt = GithubValues.number(output.get("retryAtEpochMs"), 1, Long.MAX_VALUE);
-                schedule(Math.max(0, retryAt - System.currentTimeMillis()));
+                schedule(Math.max(0, retryAt - clock.millis()));
             });
         }
         @Override public boolean cancel(boolean mayInterruptIfRunning) {
             if (!cancelled.compareAndSet(false, true)) return false;
             boolean changed = super.cancel(mayInterruptIfRunning);
-            ScheduledFuture<?> pending = scheduled; if (pending != null) pending.cancel(false);
+            ScheduledPoll pending = scheduled; if (pending != null) pending.cancel();
             CompletableFuture<NodeResult> running = active;
             if (running != null && !running.isDone()) running.cancel(true);
             else persistCancellation();
@@ -110,15 +121,18 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         }
     }
 
-    private static NodeResult pollOnce(GithubApi api, GithubProfile profile, Input input,
-                                       GithubOperationStore.Lease operation) {
+    private NodeResult pollOnce(GithubApi api, GithubProfile profile, Input input,
+                                GithubOperationStore.Lease operation) {
         int previousPolls = Math.toIntExact(operation.record().attempts());
-        List<Run> previous = restore(operation.record(), input.commit);
-        long now = System.currentTimeMillis();
+        Restored restored = restore(operation.record(), input.commit);
+        List<Run> previous = restored.runs;
+        long now = clock.millis();
         if (now >= input.deadlineEpochMs) return result("timeout", "timeout", input, previous,
                 previousPolls, "DEADLINE_EXCEEDED", 0);
         if (previousPolls >= profile.maxPolls()) return result("timeout", "timeout", input, previous,
                 previousPolls, "POLL_LIMIT", 0);
+        if (restored.retryAtEpochMs > now) return result("continue", "waiting", input, previous,
+                previousPolls, "RATE_LIMITED", Math.min(input.deadlineEpochMs, restored.retryAtEpochMs));
         int polls = previousPolls + 1;
         final Map<String, Object> root;
         try {
@@ -137,11 +151,11 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
                 "WORKFLOW_FAILED", 0);
         long backoff = Math.min(60_000L, (long) profile.pollIntervalMs() * Math.min(8, polls));
         return result("continue", "waiting", input, runs, polls, "",
-                Math.min(input.deadlineEpochMs, System.currentTimeMillis() + backoff));
+                Math.min(input.deadlineEpochMs, clock.millis() + backoff));
     }
 
-    private static List<Run> restore(GithubOperationStore.Record record, String commit) {
-        if (record.resultJson().isEmpty()) return List.of();
+    private static Restored restore(GithubOperationStore.Record record, String commit) {
+        if (record.resultJson().isEmpty()) return new Restored(List.of(), 0);
         try {
             Map<String, Object> result = GithubValues.object(ai.ravenroot.api.payload.PayloadJson.read(
                     record.resultJson().getBytes(java.nio.charset.StandardCharsets.UTF_8), GithubValues.LIMITS).toJava());
@@ -149,7 +163,9 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
             List<Run> restored = new ArrayList<>();
             for (Object raw : GithubValues.list(result.get("workflows")))
                 restored.add(Run.parse(GithubValues.object(raw), commit, false));
-            return List.copyOf(restored);
+            long retryAt = result.get("retryAtEpochMs") == null ? 0
+                    : GithubValues.number(result.get("retryAtEpochMs"), 1, Long.MAX_VALUE);
+            return new Restored(List.copyOf(restored), retryAt);
         } catch (RuntimeException corrupt) { throw new GithubException(GithubException.Code.DURABILITY_UNAVAILABLE); }
     }
 
@@ -167,12 +183,26 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         if (first.id == second.id) {
             if (first.runNumber != second.runNumber || !first.createdAt.equals(second.createdAt))
                 throw new GithubException(GithubException.Code.RESPONSE_INVALID);
-            return second.attempt > first.attempt ? second : first;
+            int attempt = Long.compare(first.attempt, second.attempt);
+            if (attempt != 0) return attempt < 0 ? second : first;
+            if ("completed".equals(first.status) && "completed".equals(second.status)
+                    && !first.conclusion.equals(second.conclusion))
+                throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+            return statusRank(second.status) > statusRank(first.status) ? second : first;
         }
         int order = Long.compare(first.runNumber, second.runNumber);
         if (order == 0) order = first.createdAt.compareTo(second.createdAt);
         if (order == 0) order = Long.compare(first.id, second.id);
         return order < 0 ? second : first;
+    }
+
+    private static int statusRank(String status) {
+        return switch (status) {
+            case "queued", "waiting", "requested", "pending" -> 0;
+            case "in_progress" -> 1;
+            case "completed" -> 2;
+            default -> throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        };
     }
 
     private static List<Run> merge(List<Run> persisted, List<Run> observed) {
@@ -233,6 +263,9 @@ public final class GithubWorkflowWatchBehavior implements NodeBehavior {
         }
     }
     private record Evaluation(String state) { }
+    private record Restored(List<Run> runs, long retryAtEpochMs) { }
+    @FunctionalInterface interface PollScheduler { ScheduledPoll schedule(Runnable task, long delayMs); }
+    @FunctionalInterface interface ScheduledPoll { void cancel(); }
     private record Input(String commit, long deadlineEpochMs, String correlationId) {
         static Input parse(Object raw) {
             Map<String, Object> value = GithubValues.object(raw);

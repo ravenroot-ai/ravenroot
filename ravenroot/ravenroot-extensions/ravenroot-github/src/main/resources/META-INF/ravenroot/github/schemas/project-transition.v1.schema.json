@@ -1,0 +1,7 @@
+{
+  "$schema":"https://json-schema.org/draft/2020-12/schema","$id":"urn:ravenroot:github:project-transition:v1",
+  "$defs":{
+    "input":{"type":"object","additionalProperties":false,"required":["version","itemId","fromStatus","toStatus","expectedGeneration","expectedAttempts","correlationId"],"properties":{"version":{"const":"github.project-transition.v1"},"itemId":{"type":"string","minLength":1,"maxLength":128},"fromStatus":{"type":"string","minLength":1,"maxLength":64},"toStatus":{"type":"string","minLength":1,"maxLength":64},"expectedGeneration":{"type":"integer","minimum":0,"maximum":9007199254740990},"expectedAttempts":{"type":"integer","minimum":0,"maximum":2147483647},"correlationId":{"type":"string","minLength":1,"maxLength":128},"comment":{"type":"object","additionalProperties":false,"required":["kind","body"],"properties":{"kind":{"enum":["claim","release","rework","done","block"]},"body":{"type":"string","minLength":1,"maxLength":4096}}}}},
+    "output":{"type":"object","additionalProperties":false,"required":["version","status","itemId","fromStatus","toStatus","generation","attempts","remoteId"],"properties":{"version":{"const":"github.project-transition.result.v1"},"status":{"type":"string"},"itemId":{"type":"string"},"fromStatus":{"type":"string"},"toStatus":{"type":"string"},"generation":{"type":"integer"},"attempts":{"type":"integer"},"remoteId":{"type":"string"},"reason":{"type":"string"},"retryAtEpochMs":{"type":"integer"}}}
+  }
+}

@@ -79,6 +79,7 @@ final class GithubTestSupport {
         final List<OutboundHttpRequest> requests = new ArrayList<>();
         final java.util.concurrent.CountDownLatch requestArrived = new java.util.concurrent.CountDownLatch(1);
         volatile OutboundCall<OutboundHttpResponse> pending;
+        volatile int pendingAtRequest = -1;
         volatile Runnable onRequest;
 
         HttpHarness reply(int status, Object body) {
@@ -89,7 +90,8 @@ final class GithubTestSupport {
             replies.add(new OutboundHttpResponse(status, headers, json(body))); return this;
         }
 
-        @Override public Set<NodePackageCapability> capabilities() { return Set.of(NodePackageCapability.OUTBOUND_HTTP); }
+        @Override public Set<NodePackageCapability> capabilities() { return Set.of(
+                NodePackageCapability.OUTBOUND_HTTP, NodePackageCapability.CREDENTIAL_RESOLUTION); }
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return (message, reference, deadline) -> OutboundCall.failed(new AssertionError("credential resolution not expected"));
         }
@@ -99,7 +101,7 @@ final class GithubTestSupport {
                 requestArrived.countDown();
                 Runnable hook = onRequest;
                 if (hook != null) { onRequest = null; hook.run(); }
-                if (pending != null) return pending;
+                if (pending != null && (pendingAtRequest < 0 || requests.size() == pendingAtRequest)) return pending;
                 OutboundHttpResponse reply = replies.poll();
                 return reply == null ? OutboundCall.failed(new AssertionError("unexpected " + request.method() + " " + request.destination()))
                         : OutboundCall.completed(reply);

@@ -52,14 +52,23 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
             }
             if (existing != null && existing.terminal() && !rollover) {
                 if ("AMBIGUOUS".equals(existing.state()) && beginPolicy.reconcileAmbiguous()) {
+                    if (now < Math.max(existing.deadlineEpochMs(),
+                            existing.updatedEpochMs() + beginPolicy.takeoverGraceMs())) {
+                        commit(connection); return new Lease(this, tenant, profile, kind, key, "", existing, false);
+                    }
                     acquire(connection, tenant, profile, kind, key, leaseOwner, now, "RECONCILING");
-                    commit(connection); return new Lease(this, tenant, profile, kind, key, leaseOwner, existing);
+                    commit(connection); return new Lease(this, tenant, profile, kind, key, leaseOwner, existing, true);
                 }
-                commit(connection); return new Lease(this, tenant, profile, kind, key, "", existing);
+                commit(connection); return new Lease(this, tenant, profile, kind, key, "", existing, false);
             }
             if (existing != null && !existing.owned()) {
                 rollback(connection); throw new GithubException(GithubException.Code.CAPACITY);
             }
+            if (existing != null && existing.expiredLease()
+                    && now < existing.updatedEpochMs() + beginPolicy.takeoverGraceMs()) {
+                rollback(connection); throw new GithubException(GithubException.Code.CAPACITY);
+            }
+            boolean takeover = existing != null && existing.expiredLease();
             if (existing == null) {
                 if (count(connection, tenant, profile) >= policy.maxOperations()) {
                     rollback(connection); throw new GithubException(GithubException.Code.CAPACITY);
@@ -90,7 +99,7 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
             }
             Record acquired = read(connection, tenant, profile, kind, key, now).orElseThrow();
             commit(connection);
-            return new Lease(this, tenant, profile, kind, key, leaseOwner, acquired);
+            return new Lease(this, tenant, profile, kind, key, leaseOwner, acquired, takeover);
         } catch (GithubException failure) { throw failure; }
         catch (SQLException failure) { throw unavailable(); }
     }
@@ -116,14 +125,34 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
                                              long deadlineEpochMs, String remoteId, String detailDigest,
                                              String resultJson,
                                              boolean terminal) {
-        if (lease.owner().isEmpty()) throw new GithubException(GithubException.Code.CAS_LOST);
-        safe(state, 32); safeOptional(remoteId, 256); safeOptional(detailDigest, 64);
-        if (terminal != SetNames.TERMINAL.contains(state) || terminal && (resultJson == null || resultJson.isEmpty()))
-            throw GithubValues.invalid();
-        if (resultJson != null && resultJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 2 * 1024 * 1024)
-            throw GithubValues.invalid();
-        long now = clock.millis();
-        try (Connection connection = open(); PreparedStatement update = connection.prepareStatement("""
+        validateSave(lease, state, remoteId, detailDigest, resultJson, terminal);
+        try (Connection connection = open()) {
+            update(connection, lease, state, generation, attempts, deadlineEpochMs, remoteId, detailDigest,
+                    resultJson, terminal, clock.millis());
+        } catch (GithubException failure) { throw failure; }
+        catch (SQLException failure) { throw unavailable(); }
+    }
+
+    @Override public synchronized void saveAndAudit(Lease lease, String state, long generation, long attempts,
+                                                      long deadlineEpochMs, String remoteId, String detailDigest,
+                                                      String resultJson, String disposition, String reason,
+                                                      String evidenceDigest) {
+        validateSave(lease, state, remoteId, detailDigest, resultJson, true);
+        safe(disposition, 32); safe(reason, 64); digest(evidenceDigest);
+        try (Connection connection = open()) {
+            beginImmediate(connection);
+            update(connection, lease, state, generation, attempts, deadlineEpochMs, remoteId, detailDigest,
+                    resultJson, true, clock.millis());
+            insertAudit(connection, lease, disposition, reason, evidenceDigest);
+            commit(connection);
+        } catch (GithubException failure) { throw failure; }
+        catch (SQLException failure) { throw unavailable(); }
+    }
+
+    private void update(Connection connection, Lease lease, String state, long generation, long attempts,
+                        long deadlineEpochMs, String remoteId, String detailDigest, String resultJson,
+                        boolean terminal, long now) throws SQLException {
+        try (PreparedStatement update = connection.prepareStatement("""
                 UPDATE github_operations SET state=?,generation=?,attempts=?,deadline_ms=?,remote_id=?,
                   detail_digest=?,result_json=?,lease_owner=?,lease_until_ms=?,updated_ms=?
                 WHERE tenant_id=? AND profile_name=? AND kind=? AND operation_key=? AND lease_owner=?
@@ -136,22 +165,38 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
             bindKey(update, 11, lease.tenant(), lease.profile(), lease.kind(), lease.key());
             update.setString(15, lease.owner());
             if (update.executeUpdate() != 1) throw new GithubException(GithubException.Code.CAS_LOST);
-        } catch (GithubException failure) { throw failure; }
-        catch (SQLException failure) { throw unavailable(); }
+        }
+    }
+
+    private static void validateSave(Lease lease, String state, String remoteId, String detailDigest,
+                                     String resultJson, boolean terminal) {
+        if (lease.owner().isEmpty()) throw new GithubException(GithubException.Code.CAS_LOST);
+        safe(state, 32); safeOptional(remoteId, 256); safeOptional(detailDigest, 64);
+        if (terminal != SetNames.TERMINAL.contains(state) || terminal && (resultJson == null || resultJson.isEmpty()))
+            throw GithubValues.invalid();
+        if (resultJson != null && resultJson.getBytes(java.nio.charset.StandardCharsets.UTF_8).length > 2 * 1024 * 1024)
+            throw GithubValues.invalid();
     }
 
     @Override public synchronized void audit(Lease lease, String disposition, String reason, String evidenceDigest) {
         safe(disposition, 32); safe(reason, 64); digest(evidenceDigest);
-        try (Connection connection = open(); PreparedStatement insert = connection.prepareStatement("""
+        try (Connection connection = open()) {
+            insertAudit(connection, lease, disposition, reason, evidenceDigest);
+        } catch (SQLException failure) { throw unavailable(); }
+    }
+
+    private void insertAudit(Connection connection, Lease lease, String disposition, String reason,
+                             String evidenceDigest) throws SQLException {
+        pruneAudit(connection, lease.tenant(), lease.profile());
+        try (PreparedStatement insert = connection.prepareStatement("""
                 INSERT INTO github_operation_audit
                   (tenant_id,profile_name,kind,operation_key,recorded_ms,disposition,reason,evidence_digest)
                 VALUES(?,?,?,?,?,?,?,?)
                 """)) {
-            pruneAudit(connection, lease.tenant(), lease.profile());
             bindKey(insert, lease.tenant(), lease.profile(), lease.kind(), lease.key());
             insert.setLong(5, clock.millis()); insert.setString(6, disposition); insert.setString(7, reason);
             insert.setString(8, evidenceDigest); insert.executeUpdate();
-        } catch (SQLException failure) { throw unavailable(); }
+        }
     }
 
     @Override public synchronized DeliveryDecision bindDelivery(String tenant, String profile, String deliveryId,
@@ -320,17 +365,18 @@ final class SqliteGithubOperationStore implements GithubOperationStore {
                                   String key, long now) throws SQLException {
         try (PreparedStatement select = connection.prepareStatement("""
                 SELECT state,generation,attempts,deadline_ms,remote_id,detail_digest,result_json,request_digest,
-                       lease_owner,lease_until_ms FROM github_operations
+                       lease_owner,lease_until_ms,updated_ms FROM github_operations
                 WHERE tenant_id=? AND profile_name=? AND kind=? AND operation_key=?
                 """)) {
             bindKey(select, tenant, profile, kind, key);
             try (ResultSet result = select.executeQuery()) {
                 if (!result.next()) return Optional.empty();
                 String leaseOwner = result.getString(9); long leaseUntil = result.getLong(10);
-                boolean owned = leaseOwner.isEmpty() || leaseUntil <= now;
+                boolean expired = !leaseOwner.isEmpty() && leaseUntil <= now;
+                boolean owned = leaseOwner.isEmpty() || expired;
                 return Optional.of(new Record(result.getString(1), result.getLong(2), result.getLong(3),
                         result.getLong(4), result.getString(5), result.getString(6), result.getString(7),
-                        result.getString(8), owned));
+                        result.getString(8), owned, expired, result.getLong(11)));
             }
         }
     }

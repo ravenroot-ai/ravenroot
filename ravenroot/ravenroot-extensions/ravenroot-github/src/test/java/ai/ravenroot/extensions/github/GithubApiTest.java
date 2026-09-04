@@ -24,6 +24,17 @@ class GithubApiTest {
         assertTrue(excessive >= before + 299_000 && excessive <= System.currentTimeMillis() + 300_500);
     }
 
+    @Test void graphqlFloatingNumbersMustBeFiniteExactAndInIeeeIntegerRange() {
+        assertEquals(7L, GithubValues.number(7.0d, 0, 10));
+        assertEquals(9_007_199_254_740_991L,
+                GithubValues.number(9_007_199_254_740_991d, 0, 9_007_199_254_740_991L));
+        assertThrows(GithubException.class, () -> GithubValues.number(7.5d, 0, 10));
+        assertThrows(GithubException.class, () -> GithubValues.number(Double.NaN, 0, 10));
+        assertThrows(GithubException.class, () -> GithubValues.number(Double.POSITIVE_INFINITY, 0, 10));
+        assertThrows(GithubException.class, () -> GithubValues.number(9_007_199_254_740_992d,
+                0, Long.MAX_VALUE));
+    }
+
     private static GithubApi.Response response(int status, Map<String, List<String>> headers) {
         return new GithubApi.Response(status, headers, "{}".getBytes(StandardCharsets.UTF_8));
     }

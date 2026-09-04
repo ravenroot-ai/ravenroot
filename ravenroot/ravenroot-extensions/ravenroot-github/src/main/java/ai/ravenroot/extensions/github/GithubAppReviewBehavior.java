@@ -38,7 +38,7 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         long deadline = System.currentTimeMillis() + profile.timeoutMs();
         String key = input.pullNumber + ":" + input.commit + ":" + input.correlationId;
         try { return runtime.submit(message, services, profile, BEHAVIOR, key, input.canonical(), deadline,
-                GithubOperationStore.BeginPolicy.forAmbiguousReconciliation(),
+                GithubOperationStore.BeginPolicy.forAmbiguousReconciliation(profile.timeoutMs()),
                 (api, operation, control) -> review(api, profile, input, operation)); }
         catch (RuntimeException failure) { return CompletableFuture.failedFuture(sanitize(failure)); }
     }
@@ -62,29 +62,29 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                     existing.id, "");
             return submitPending(api, profile, input, existing.id, marker);
         }
-        if ("AMBIGUOUS".equals(operation.record().state())) return result("ambiguous", "ambiguous", input,
-                parseRemoteId(operation.record().remoteId()), "REMOTE_STATE_UNKNOWN");
         if (!input.commit.equals(head(api, profile, input.pullNumber))) return result("stale", "stale", input, 0, "STALE_HEAD");
-        GithubApi.Response drafted;
-        try { drafted = api.post(path(profile, input.pullNumber, "/reviews"), Map.of(
-                "commit_id", input.commit, "body", input.body + "\n\n" + marker)); }
+        final Map<String, Object> draft;
+        try {
+            GithubApi.Response drafted = api.post(path(profile, input.pullNumber, "/reviews"), Map.of(
+                    "commit_id", input.commit, "body", input.body + "\n\n" + marker));
+            draft = GithubProtocol.object(drafted);
+        } catch (GithubProtocol.RateLimited limited) {
+            return reconcileDraftUncertainty(api, profile, input, marker, limited.retryAt());
+        }
         catch (GithubException failure) {
-            if (failure.code() == GithubException.Code.TRANSPORT) {
-                try {
-                    Existing reconciled = findExisting(api, profile, input, marker);
-                    if (reconciled != null)
-                        return result("ambiguous", "ambiguous", input, reconciled.id, "REMOTE_STATE_UNKNOWN");
-                } catch (RuntimeException ignored) {
-                    // The draft may have landed and reconciliation may also be unavailable. Persist ambiguity.
-                }
-                return result("ambiguous", "ambiguous", input, 0, "REMOTE_STATE_UNKNOWN");
-            }
+            if (failure.code() == GithubException.Code.TRANSPORT
+                    || failure.code() == GithubException.Code.RESPONSE_INVALID)
+                return reconcileDraftUncertainty(api, profile, input, marker, 0);
             throw failure;
         }
-        Map<String, Object> draft = GithubProtocol.object(drafted);
-        long reviewId = GithubValues.number(draft.get("id"), 1, Long.MAX_VALUE);
-        if (!"PENDING".equals(draft.get("state")) || !input.commit.equals(draft.get("commit_id"))
-                || !profile.reviewerLogin().equals(login(draft))) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        final long reviewId;
+        try {
+            reviewId = GithubValues.number(draft.get("id"), 1, Long.MAX_VALUE);
+            if (!"PENDING".equals(draft.get("state")) || !input.commit.equals(draft.get("commit_id"))
+                    || !profile.reviewerLogin().equals(login(draft))) throw GithubValues.invalid();
+        } catch (RuntimeException invalid) {
+            return reconcileDraftUncertainty(api, profile, input, marker, 0);
+        }
         if (!input.commit.equals(head(api, profile, input.pullNumber))) {
             try { GithubProtocol.requireSuccess(api.delete(path(profile, input.pullNumber, "/reviews/" + reviewId))); }
             catch (RuntimeException ignored) { }
@@ -95,34 +95,65 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
 
     private static NodeResult submitPending(GithubApi api, GithubProfile profile, Input input, long reviewId,
                                             String marker) {
-        GithubApi.Response submitted;
-        try { submitted = api.post(path(profile, input.pullNumber, "/reviews/" + reviewId + "/events"),
-                Map.of("event", input.verdict)); }
+        final Map<String, Object> submittedReview;
+        try {
+            GithubApi.Response submitted = api.post(path(profile, input.pullNumber, "/reviews/" + reviewId + "/events"),
+                    Map.of("event", input.verdict));
+            submittedReview = GithubProtocol.object(submitted);
+        }
         catch (GithubProtocol.RateLimited limited) {
-            return result("failed", "rate-limited", input, reviewId, "RATE_LIMITED", limited.retryAt());
+            return reconcileSubmitUncertainty(api, profile, input, reviewId, marker, limited.retryAt());
         } catch (GithubException failure) {
-            if (failure.code() == GithubException.Code.TRANSPORT) {
-                try {
-                    Existing reconciled = findExisting(api, profile, input, marker);
-                    if (reconciled != null && !"PENDING".equals(reconciled.state)) {
-                        boolean current = input.commit.equals(head(api, profile, input.pullNumber));
-                        return result(current ? "continue" : "stale", current ? "submitted" : "stale", input,
-                                reconciled.id, current ? "" : "STALE_HEAD");
-                    }
-                } catch (RuntimeException ignored) { }
-                return result("ambiguous", "ambiguous", input, reviewId, "REMOTE_STATE_UNKNOWN");
-            }
+            if (failure.code() == GithubException.Code.TRANSPORT
+                    || failure.code() == GithubException.Code.RESPONSE_INVALID)
+                return reconcileSubmitUncertainty(api, profile, input, reviewId, marker, 0);
             throw failure;
         }
-        Map<String, Object> submittedReview = GithubProtocol.object(submitted);
-        if (GithubValues.number(submittedReview.get("id"), 1, Long.MAX_VALUE) != reviewId
-                || !input.commit.equals(submittedReview.get("commit_id"))
-                || !profile.reviewerLogin().equals(login(submittedReview))
-                || !expectedState(input.verdict).equals(submittedReview.get("state")))
-            throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        try {
+            if (GithubValues.number(submittedReview.get("id"), 1, Long.MAX_VALUE) != reviewId
+                    || !input.commit.equals(submittedReview.get("commit_id"))
+                    || !profile.reviewerLogin().equals(login(submittedReview))
+                    || !expectedState(input.verdict).equals(submittedReview.get("state")))
+                throw GithubValues.invalid();
+        } catch (RuntimeException invalid) {
+            return reconcileSubmitUncertainty(api, profile, input, reviewId, marker, 0);
+        }
         String currentHead = head(api, profile, input.pullNumber);
         if (!input.commit.equals(currentHead)) return result("stale", "stale", input, reviewId, "STALE_HEAD");
         return result("continue", "submitted", input, reviewId, "");
+    }
+
+    private static NodeResult reconcileDraftUncertainty(GithubApi api, GithubProfile profile, Input input,
+                                                         String marker, long retryAt) {
+        try {
+            Existing existing = findExisting(api, profile, input, marker);
+            if (existing != null) {
+                if ("PENDING".equals(existing.state)) {
+                    if (!input.commit.equals(head(api, profile, input.pullNumber)))
+                        return result("stale", "stale", input, existing.id, "STALE_HEAD");
+                    return submitPending(api, profile, input, existing.id, marker);
+                }
+                boolean current = input.commit.equals(head(api, profile, input.pullNumber));
+                return result(current ? "continue" : "stale", current ? "already-recorded" : "stale",
+                        input, existing.id, current ? "" : "STALE_HEAD");
+            }
+        } catch (RuntimeException ignored) { }
+        return result("ambiguous", "ambiguous", input, 0,
+                retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);
+    }
+
+    private static NodeResult reconcileSubmitUncertainty(GithubApi api, GithubProfile profile, Input input,
+                                                          long reviewId, String marker, long retryAt) {
+        try {
+            Existing existing = findExisting(api, profile, input, marker);
+            if (existing != null && !"PENDING".equals(existing.state)) {
+                boolean current = input.commit.equals(head(api, profile, input.pullNumber));
+                return result(current ? "continue" : "stale", current ? "submitted" : "stale", input,
+                        existing.id, current ? "" : "STALE_HEAD");
+            }
+        } catch (RuntimeException ignored) { }
+        return result("ambiguous", "ambiguous", input, reviewId,
+                retryAt > 0 ? "RATE_LIMITED" : "REMOTE_STATE_UNKNOWN", retryAt);
     }
 
     private static Existing findExisting(GithubApi api, GithubProfile profile, Input input, String marker) {
@@ -160,11 +191,6 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                 || !(profile.owner() + "/" + profile.repository()).equalsIgnoreCase(
                         GithubValues.string(repository.get("full_name"), 201)))
             throw new GithubException(GithubException.Code.FORBIDDEN);
-    }
-    private static long parseRemoteId(String value) {
-        if (value == null || value.isEmpty()) return 0;
-        try { long parsed = Long.parseLong(value); return parsed > 0 ? parsed : 0; }
-        catch (NumberFormatException invalid) { return 0; }
     }
     private static String expectedState(String verdict) {
         return switch (verdict) {

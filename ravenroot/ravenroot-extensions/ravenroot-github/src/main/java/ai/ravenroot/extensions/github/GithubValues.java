@@ -46,7 +46,13 @@ final class GithubValues {
     }
 
     static long number(Object value, long minimum, long maximum) {
-        if (!(value instanceof Long number) || number < minimum || number > maximum) throw invalid();
+        final long number;
+        if (value instanceof Long integer) number = integer;
+        else if (value instanceof Double floating && Double.isFinite(floating)
+                && floating == Math.rint(floating) && Math.abs(floating) <= 9_007_199_254_740_991d)
+            number = floating.longValue();
+        else throw invalid();
+        if (number < minimum || number > maximum) throw invalid();
         return number;
     }
 

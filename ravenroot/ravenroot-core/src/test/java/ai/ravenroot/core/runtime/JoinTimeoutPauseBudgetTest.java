@@ -333,6 +333,15 @@ final class JoinTimeoutPauseBudgetTest {
             // What is leaked is heap the JVM reclaims: one coordinator, one parked future and this
             // traversal's admission entries. The engine's threads are closed by @AfterEach, and the
             // manual scheduler owns none.
+            //
+            // TO UNDO, ONCE THAT DEADLOCK IS FIXED -- and it must be undone, because an exception
+            // like this one outlives the reason for it unless the reason is written down as an
+            // instruction rather than as an explanation:
+            //   1. put `runner` back into the try-with-resources above, beside `store` and `manager`;
+            //   2. delete this entire comment.
+            // Nothing else here changes. This test then becomes the regression test for the fix: it
+            // is the only one in the suite that closes a runner while a branch is parked at a join on
+            // a re-entry path, which is exactly the state that deadlocks today.
             var runner = new GraphRunner(manager, engine, registry, monitor,
                     ExecutionIdentitySource.randomUuids(), joinStore, clock);
 

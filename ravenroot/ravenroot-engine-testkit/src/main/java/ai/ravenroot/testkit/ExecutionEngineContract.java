@@ -1,8 +1,18 @@
 package ai.ravenroot.testkit;
 
+import ai.ravenroot.api.ai.ModelProvider;
+import ai.ravenroot.api.ai.ModelRequest;
+import ai.ravenroot.api.ai.ModelResponse;
+import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionLookup;
+import ai.ravenroot.api.application.ExecutionOutcome;
 import ai.ravenroot.api.application.ExecutionPolicy;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.catalog.NodeOutcomeDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyDescriptor;
+import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.EngineCapability;
 import ai.ravenroot.api.execution.EngineState;
@@ -18,12 +28,14 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.execution.NodeStatus;
 import ai.ravenroot.api.execution.NodeTerminationReason;
 import ai.ravenroot.api.execution.RavenNode;
+import ai.ravenroot.core.ai.ModelProviderRegistry;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.GraphRunner;
 import ai.ravenroot.core.runtime.JoinFailureException;
@@ -35,7 +47,9 @@ import org.junit.jupiter.api.DynamicTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -57,13 +71,45 @@ import java.util.stream.Stream;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** Tests every adapter against the mandatory Ravenroot engine semantics. */
 public abstract class ExecutionEngineContract {
+    private static final String REBINDING_BEHAVIOR = "application-bound-adapter";
+    private static final String REBINDING_PROVIDER = "application-provider";
+    private static final String REBINDING_NODE = "adapter";
+    private static final String REBINDING_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="provider" for="node" attr.name="provider" attr.type="string"/>
+              <key id="prompt" for="node" attr.name="prompt" attr.type="string"/>
+              <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="application-adapter-rebinding" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="adapter">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">application-bound-adapter</data>
+                  <data key="provider">application-provider</data>
+                  <data key="prompt">Process the payload</data>
+                </node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-adapter" source="start" target="adapter">
+                  <data key="outcome">continue</data>
+                </edge>
+                <edge id="adapter-end" source="adapter" target="end">
+                  <data key="outcome">continue</data>
+                </edge>
+              </graph>
+            </graphml>
+            """;
     /**
      * The identity every conformance message and traversal runs as. An engine adapter is not a
      * security boundary — it transports {@code NodeMessage} opaquely — so one fixed context is enough
@@ -140,6 +186,191 @@ public abstract class ExecutionEngineContract {
             assertEquals(1, factoryCalls.get());
             assertEquals(1, handlerCalls.get());
             assertTrue(result.defaultedNodes().isEmpty());
+        }
+    }
+
+    /** A new application submission resolves adapters again without changing an admitted run. */
+    @Test
+    final void aLaterApplicationSubmissionResolvesANewlyRegisteredAdapter() throws Exception {
+        var providers = new ModelProviderRegistry();
+        var providerInvocations = new AtomicInteger();
+        var registry = new BehaviorRegistry().registerFactory(new RebindingFactory(providers));
+        var monitor = new ExecutionMonitor();
+        UUID firstTraversalId = UUID.randomUUID();
+        UUID secondTraversalId = UUID.randomUUID();
+        var firstTerminal = new CompletableFuture<ExecutionEvent>();
+        var secondTerminal = new CompletableFuture<ExecutionEvent>();
+
+        try (var subscription = monitor.subscribe(event -> {
+                 if (event.traversalId().equals(firstTraversalId)
+                         && event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                     firstTerminal.complete(event);
+                 }
+                 if (event.traversalId().equals(secondTraversalId)
+                         && event.type() == ExecutionEventType.EXECUTION_COMPLETED) {
+                     secondTerminal.complete(event);
+                 }
+             });
+             var application = new DefaultRavenrootApplication(engine(), monitor, registry)) {
+            var first = application.startGraphMl(TCK_IDENTITY, firstTraversalId, rebindingGraph(), "first");
+            ExecutionEvent firstFailure = firstTerminal.get(10, TimeUnit.SECONDS);
+            ExecutionOutcome firstOutcome = awaitTerminalOutcome(application, firstTraversalId);
+
+            assertEquals(first.processInstanceId(), firstFailure.processInstanceId());
+            assertEquals(first.traversalId(), firstFailure.traversalId());
+            assertEquals(first.traversalId(), first.executionId());
+            assertEquals(ProcessInstanceStatus.FAILED, firstOutcome.status());
+            assertEquals(first.processInstanceId(), firstOutcome.processInstanceId());
+            assertEquals(first.traversalId(), firstOutcome.traversalId());
+            assertNull(firstOutcome.payload(), "a refused execution must retain no result payload");
+            assertEquals(0, providerInvocations.get(),
+                    "the unavailable adapter must refuse without invoking provider capability");
+            assertEquals(1, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_STARTED,
+                    REBINDING_NODE), "the first submission must reach the bound node");
+            assertEquals(1, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_FAILED,
+                    REBINDING_NODE), "the reached node must refuse the unavailable adapter");
+            assertEquals(0, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_COMPLETED,
+                    REBINDING_NODE), "a refusal must not manufacture a NodeResult");
+            assertEquals(0, eventCount(monitor, firstTraversalId, ExecutionEventType.NODE_DEFAULTED,
+                    REBINDING_NODE), "a refusal must not degrade into an unresolved-node default");
+
+            providers.register(countingProvider(providerInvocations));
+            var second = application.startGraphMl(TCK_IDENTITY, secondTraversalId, rebindingGraph(), "second");
+            ExecutionEvent secondSuccess = secondTerminal.get(10, TimeUnit.SECONDS);
+            ExecutionOutcome secondOutcome = awaitTerminalOutcome(application, secondTraversalId);
+
+            assertEquals(second.processInstanceId(), secondSuccess.processInstanceId());
+            assertEquals(second.traversalId(), secondSuccess.traversalId());
+            assertEquals(second.traversalId(), second.executionId());
+            assertEquals(ProcessInstanceStatus.COMPLETED, secondOutcome.status());
+            assertEquals(second.processInstanceId(), secondOutcome.processInstanceId());
+            assertEquals(second.traversalId(), secondOutcome.traversalId());
+            assertEquals("resolved-second", secondOutcome.payload(),
+                    "the application must retain the newly resolved provider's exact result");
+            assertEquals(first.graphVersion(), second.graphVersion(),
+                    "both submissions must execute the identical graph document");
+            assertFalse(first.graphVersion().isBlank(), "the application must pin a graph version");
+            assertNotEquals(first.processInstanceId(), second.processInstanceId(),
+                    "separate submissions must create separate process instances");
+            assertNotEquals(first.traversalId(), second.traversalId(),
+                    "separate submissions must create separate traversals");
+            assertEquals(1, providerInvocations.get(),
+                    "only the later submission may invoke the newly registered provider");
+            assertEquals(1, eventCount(monitor, secondTraversalId, ExecutionEventType.NODE_COMPLETED,
+                    REBINDING_NODE), "the later submission must run the resolved adapter");
+            assertEquals(0, eventCount(monitor, secondTraversalId, ExecutionEventType.NODE_FAILED,
+                    REBINDING_NODE), "the resolved adapter must not retain the earlier refusal");
+            assertEquals(0, eventCount(monitor, secondTraversalId, ExecutionEventType.NODE_DEFAULTED,
+                    REBINDING_NODE), "the resolved adapter must run rather than default");
+
+            ExecutionEvent firstStarted = onlyEvent(monitor, firstTraversalId,
+                    ExecutionEventType.NODE_STARTED, REBINDING_NODE);
+            ExecutionEvent firstFailed = onlyEvent(monitor, firstTraversalId,
+                    ExecutionEventType.NODE_FAILED, REBINDING_NODE);
+            ExecutionEvent secondStarted = onlyEvent(monitor, secondTraversalId,
+                    ExecutionEventType.NODE_STARTED, REBINDING_NODE);
+            ExecutionEvent secondCompleted = onlyEvent(monitor, secondTraversalId,
+                    ExecutionEventType.NODE_COMPLETED, REBINDING_NODE);
+            assertEquals(first.processInstanceId(), firstStarted.processInstanceId());
+            assertEquals(first.processInstanceId(), firstFailed.processInstanceId());
+            assertEquals(second.processInstanceId(), secondStarted.processInstanceId());
+            assertEquals(second.processInstanceId(), secondCompleted.processInstanceId());
+            assertNotNull(firstStarted.invocationId());
+            assertNotNull(secondStarted.invocationId());
+            assertEquals(firstStarted.invocationId(), firstFailed.invocationId(),
+                    "the first node failure must settle the invocation that started");
+            assertEquals(secondStarted.invocationId(), secondCompleted.invocationId(),
+                    "the second node completion must settle the invocation that started");
+            assertNotEquals(firstStarted.invocationId(), secondStarted.invocationId(),
+                    "the two reached-node attempts must have distinct invocation identities");
+        }
+    }
+
+    private record RebindingFactory(ModelProviderRegistry providers) implements NodeBehaviorFactory {
+        @Override
+        public NodeTypeDescriptor descriptor() {
+            return new NodeTypeDescriptor(REBINDING_BEHAVIOR, "Application-bound adapter", "TCK",
+                    "Adapter resolution across application submissions.", "actor", false, List.of(
+                    NodePropertyDescriptor.adapterId("provider", "Provider", NodePropertyType.STRING,
+                            "Required provider adapter."),
+                    NodePropertyDescriptor.required("prompt", "Prompt", NodePropertyType.TEXT,
+                            "Deterministic test prompt.")), Set.of("external-provider"))
+                    .withOutcomes(NodeOutcomeDescriptor.literal("continue", "The adapter answered."));
+        }
+
+        @Override
+        public NodeHandler create(GraphNode node) {
+            String providerId = NodePropertyDescriptor.adapterIdOf(node.properties().get("provider"));
+            var resolved = providers.find(providerId);
+            if (resolved.isEmpty()) {
+                return message -> CompletableFuture.failedFuture(
+                        new IllegalStateException("No provider configured for node " + node.id()));
+            }
+            ModelProvider provider = resolved.get();
+            return message -> provider.generate(new ModelRequest(message.executionId(), node.id(),
+                            node.properties().get("prompt").toString(), message.payload(), "", "", Map.of()))
+                    .thenApply(response -> new NodeResult("continue", response.payload(), message.attributes()));
+        }
+    }
+
+    private static ModelProvider countingProvider(AtomicInteger invocations) {
+        return new ModelProvider() {
+            @Override
+            public String id() {
+                return REBINDING_PROVIDER;
+            }
+
+            @Override
+            public CompletionStage<ModelResponse> generate(ModelRequest request) {
+                invocations.incrementAndGet();
+                return CompletableFuture.completedFuture(
+                        new ModelResponse("resolved-" + request.payload(), id(), request.model(), Map.of()));
+            }
+        };
+    }
+
+    private static ByteArrayInputStream rebindingGraph() {
+        return new ByteArrayInputStream(REBINDING_GRAPH.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private static long eventCount(ExecutionMonitor monitor, UUID traversalId,
+                                   ExecutionEventType type, String nodeId) {
+        return monitor.eventsAfter(0).stream().filter(event -> event.traversalId().equals(traversalId)
+                && event.type() == type && nodeId.equals(event.nodeId())).count();
+    }
+
+    private static ExecutionEvent onlyEvent(ExecutionMonitor monitor, UUID traversalId,
+                                            ExecutionEventType type, String nodeId) {
+        var matches = monitor.eventsAfter(0).stream().filter(event -> event.traversalId().equals(traversalId)
+                && event.type() == type && nodeId.equals(event.nodeId())).toList();
+        assertEquals(1, matches.size(),
+                () -> "expected exactly one " + type + " event for " + nodeId + " in " + traversalId);
+        return matches.getFirst();
+    }
+
+    private static ExecutionOutcome awaitTerminalOutcome(DefaultRavenrootApplication application,
+                                                          UUID traversalId) throws Exception {
+        var terminal = new CompletableFuture<ExecutionOutcome>();
+        pollTerminalOutcome(application, traversalId, terminal);
+        return terminal.orTimeout(10, TimeUnit.SECONDS).get();
+    }
+
+    private static void pollTerminalOutcome(DefaultRavenrootApplication application, UUID traversalId,
+                                            CompletableFuture<ExecutionOutcome> terminal) {
+        if (terminal.isDone()) {
+            return;
+        }
+        try {
+            if (application.executionResult(TCK_IDENTITY.tenantId(), traversalId)
+                    instanceof ExecutionLookup.Found found
+                    && found.outcome().status().terminal()) {
+                terminal.complete(found.outcome());
+                return;
+            }
+            CompletableFuture.delayedExecutor(1, TimeUnit.MILLISECONDS)
+                    .execute(() -> pollTerminalOutcome(application, traversalId, terminal));
+        } catch (RuntimeException failure) {
+            terminal.completeExceptionally(failure);
         }
     }
 

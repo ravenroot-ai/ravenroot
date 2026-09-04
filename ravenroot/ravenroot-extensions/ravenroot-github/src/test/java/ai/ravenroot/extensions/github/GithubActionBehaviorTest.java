@@ -855,6 +855,57 @@ class GithubActionBehaviorTest {
         assertTrue(malformedDiscovery.requests.stream().allMatch(request -> request.method().equals("GET")));
 
         clock.advance(30_000);
+        var missingReviewHead500 = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of()).reply(500, Map.of("message", "head unavailable"));
+        NodeResult afterMissingReviewHead500 = review(configuration, clock, missingReviewHead500, input);
+        assertEquals("ambiguous", afterMissingReviewHead500.outcome());
+        assertEquals("95", GithubValues.object(afterMissingReviewHead500.payload()).get("remoteId"));
+        assertTrue(missingReviewHead500.requests.stream().allMatch(request -> request.method().equals("GET")));
+
+        clock.advance(30_000);
+        var missingReviewHeadMalformed = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of()).reply(200, Map.of());
+        NodeResult afterMissingReviewHeadMalformed = review(configuration, clock, missingReviewHeadMalformed, input);
+        assertEquals("ambiguous", afterMissingReviewHeadMalformed.outcome());
+        assertEquals("95", GithubValues.object(afterMissingReviewHeadMalformed.payload()).get("remoteId"));
+        assertTrue(missingReviewHeadMalformed.requests.stream().allMatch(request -> request.method().equals("GET")));
+
+        clock.advance(30_000);
+        var missingReviewHeadRate = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of())
+                .reply(429, Map.of("retry-after", List.of("2")), Map.of("message", "limited"));
+        NodeResult afterMissingReviewHeadRate = review(configuration, clock, missingReviewHeadRate, input);
+        assertEquals("ambiguous", afterMissingReviewHeadRate.outcome());
+        assertEquals("95", GithubValues.object(afterMissingReviewHeadRate.payload()).get("remoteId"));
+        assertEquals("RATE_LIMITED", GithubValues.object(afterMissingReviewHeadRate.payload()).get("reason"));
+        assertTrue(GithubValues.object(afterMissingReviewHeadRate.payload()).containsKey("retryAtEpochMs"));
+        assertTrue(missingReviewHeadRate.requests.stream().allMatch(request -> request.method().equals("GET")));
+        var premature = new GithubTestSupport.HttpHarness();
+        NodeResult replay = review(configuration, clock, premature, input);
+        assertEquals(afterMissingReviewHeadRate.payload(), replay.payload());
+        assertTrue(premature.requests.isEmpty(), "rate deadline must suppress premature reconciliation I/O");
+
+        clock.advance(30_000);
+        var omittedReview = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of()).reply(200, pull(GithubTestSupport.SHA));
+        NodeResult afterOmission = review(configuration, clock, omittedReview, input);
+        assertEquals("ambiguous", afterOmission.outcome());
+        assertEquals("95", GithubValues.object(afterOmission.payload()).get("remoteId"));
+        assertEquals("REMOTE_STATE_UNKNOWN", GithubValues.object(afterOmission.payload()).get("reason"));
+        assertTrue(omittedReview.requests.stream().allMatch(request -> request.method().equals("GET")),
+                "eventual omission must not authorize a replacement draft");
+
+        clock.advance(30_000);
+        var conflictingIdentity = new GithubTestSupport.HttpHarness().reply(200, repository())
+                .reply(200, List.of(reviewObject(105, "PENDING", marker)));
+        NodeResult afterIdentityConflict = review(configuration, clock, conflictingIdentity, input);
+        assertEquals("ambiguous", afterIdentityConflict.outcome());
+        assertEquals("95", GithubValues.object(afterIdentityConflict.payload()).get("remoteId"));
+        assertEquals("REVIEW_ID_CONFLICT", GithubValues.object(afterIdentityConflict.payload()).get("reason"));
+        assertTrue(conflictingIdentity.requests.stream().allMatch(request -> request.method().equals("GET")),
+                "same marker under a different ID must not be mutated");
+
+        clock.advance(30_000);
         var headTransport = new GithubTestSupport.HttpHarness().reply(200, repository())
                 .reply(200, List.of(reviewObject(95, "PENDING", marker)));
         headTransport.pending = OutboundCall.failed(new IllegalStateException("head transport unavailable"));

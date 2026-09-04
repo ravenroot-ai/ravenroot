@@ -64,6 +64,8 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
             throw failure;
         }
         if (existing != null) {
+            if (reconciling && priorReviewId > 0 && existing.id != priorReviewId)
+                return result("ambiguous", "ambiguous", input, priorReviewId, "REVIEW_ID_CONFLICT");
             final String currentHead;
             try { currentHead = head(api, profile, input.pullNumber); }
             catch (GithubProtocol.RateLimited limited) {
@@ -86,7 +88,20 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
                     input, existing.id, "");
             return result("conflict", "conflict", input, existing.id, "REVIEW_STATE_CONFLICT");
         }
-        if (!input.commit.equals(head(api, profile, input.pullNumber))) return result("stale", "stale", input, 0, "STALE_HEAD");
+        final String preDraftHead;
+        try { preDraftHead = head(api, profile, input.pullNumber); }
+        catch (GithubProtocol.RateLimited limited) {
+            if (reconciling) return result("ambiguous", "ambiguous", input, priorReviewId,
+                    "RATE_LIMITED", limited.retryAt());
+            throw limited;
+        } catch (GithubException failure) {
+            if (reconciling && uncertainRead(failure)) return result("ambiguous", "ambiguous", input,
+                    priorReviewId, "REMOTE_STATE_UNKNOWN");
+            throw failure;
+        }
+        if (!input.commit.equals(preDraftHead)) return result("stale", "stale", input, 0, "STALE_HEAD");
+        if (reconciling && priorReviewId > 0)
+            return result("ambiguous", "ambiguous", input, priorReviewId, "REMOTE_STATE_UNKNOWN");
         final Map<String, Object> draft;
         try {
             GithubApi.Response drafted = api.post(path(profile, input.pullNumber, "/reviews"), Map.of(

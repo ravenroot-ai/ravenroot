@@ -564,6 +564,28 @@
         }
       }
     },
+    "/v1/executions/{id}/manifest": {
+      "get": {
+        "summary": "Reports the identity of the dependency set one process instance was accepted against, and whether this deployment still resolves it (#153). {id} is a processInstanceId, like GET /v1/executions/{id}/traversals and unlike every other /v1/executions sub-route. The body carries manifestFormatVersion, manifestDigest, the pinned graphVersion, graphId and graphVersionId, pinnedAt, a compatible verdict, an incompatibleDimensions list of dimension names and dimensionsTruncated. It deliberately carries no value from the pinned dependency set -- no capability set, no execution limit, no node-package identity and no package count -- because those describe the deployment rather than the caller's execution; the comparison's own values stay in the server-side diagnostic a refused recovery raises. 404 when no manifest is pinned for the instance, when it belongs to another tenant, and when it was accepted before this deployment began recording them -- all three indistinguishable by design. 501 when this deployment composed no manifest store, and when a stored manifest no longer verifies.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "id", "in": "path", "required": true, "schema": {"type": "string"}}
+        ],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_PROCESS_INSTANCE"},
+          "501": {"description": "PROCESS_INVENTORY_UNAVAILABLE"}
+        }
+      }
+    },
     "/v1/executions/{id}/pause": {
       "post": {
         "summary": "Pauses a traversal (#488): the node in flight finishes and nothing after it is dispatched until the traversal is resumed. 200 with a PauseResult body distinguishing PAUSED, ALREADY_PAUSED and NOT_ACTIVE; unknown ownership fails closed as 403, not a distinct outcome. A paused traversal is still live: it keeps its state, still appears in GET /v1/executions/live -- with paused true -- and is still cancellable. A pause that takes effect publishes EXECUTION_PAUSED once; ALREADY_PAUSED changed nothing and publishes nothing. A traversal that has begun to end refuses a new hold and answers NOT_ACTIVE, so no pause is ever reported after the execution's terminal event.",

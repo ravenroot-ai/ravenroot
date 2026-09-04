@@ -318,6 +318,11 @@ public final class RavenrootServer implements AutoCloseable {
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
     /** Installed only by the packaged composition when durable agent authority is enabled. */
+    /**
+     * The manifest projection, or {@code null} when this host composes no manifest store and the
+     * route below answers {@code 501} rather than inventing a state it cannot observe.
+     */
+    private ai.ravenroot.core.manifest.ExecutionManifestService executionManifests;
     private ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentAuthorityControl;
     private ai.ravenroot.api.application.ExecutionControlAuditSink agentAuthorityControlAudit;
     /**
@@ -978,6 +983,22 @@ public final class RavenrootServer implements AutoCloseable {
         if (humanTasks != null) throw new IllegalStateException("human tasks are already installed");
         humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
         humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
+    }
+
+    /**
+     * Installs the execution-manifest projection before listener start.
+     *
+     * <p>Installed rather than constructed, for the reason the tool-approval and human-task
+     * authorities are: a host that composes no manifest store must not have to name one, and every
+     * existing constructor must keep working unchanged.</p>
+     */
+    synchronized void installExecutionManifests(
+            ai.ravenroot.core.manifest.ExecutionManifestService manifests) {
+        if (started.get()) throw new IllegalStateException("execution manifests must be installed before start");
+        if (executionManifests != null) {
+            throw new IllegalStateException("execution manifests are already installed");
+        }
+        executionManifests = java.util.Objects.requireNonNull(manifests, "manifests");
     }
 
     /** Installs the authenticated store-global agent-authority control before listener start. */
@@ -2380,6 +2401,16 @@ public final class RavenrootServer implements AutoCloseable {
                 controlExecution(exchange, segments[1], segments[2]);
                 return;
             }
+            if (segments.length == 3 && !segments[1].isBlank() && "manifest".equals(segments[2])) {
+                // {id} names a process instance here, exactly as it does for "traversals" and for the
+                // same reason: a manifest is pinned per process instance, which is the granularity at
+                // which the graph version pin is already write-once.
+                if (!method(exchange, "GET")) {
+                    return;
+                }
+                readExecutionManifest(exchange, segments[1]);
+                return;
+            }
             if (segments.length == 3 && !segments[1].isBlank() && "traversals".equals(segments[2])) {
                 // Issue 154: unlike every other sub-route under /v1/executions, {id} here names a
                 // durable process instance id, not a traversal/execution id -- see
@@ -3256,6 +3287,117 @@ public final class RavenrootServer implements AutoCloseable {
 
     private static String optionalStringJson(java.util.Optional<String> value) {
         return value.map(present -> "\"" + escape(present) + "\"").orElse("null");
+    }
+
+    /**
+     * {@code GET /v1/executions/{id}/manifest}: the identity of the dependency set one process
+     * instance was accepted against, and whether this runtime still resolves it.
+     *
+     * <p><strong>Identity and state, never the pinned configuration and never a value from it.</strong>
+     * The response carries the manifest's format version, its digest, the graph content address it
+     * pins, when it was pinned, and a compatibility verdict whose differences are reported as
+     * dimension names alone. It carries no capability set, no execution limit, no package identity
+     * and no package count: all of those describe the deployment rather than the caller's execution,
+     * an authenticated tenant has no claim on them, and none of them is needed to act on the verdict.
+     * The comparison's own values remain available to an operator through the server-side diagnostic
+     * a refusal raises; see {@link ai.ravenroot.api.persistence.ExecutionManifestDifference}.</p>
+     *
+     * <p>Every value in the response is a digest, a closed enum name or a bounded token, because that
+     * is all a manifest can hold; there is no field a credential could have reached, so no redaction
+     * pass stands between this projection and the record it renders.</p>
+     *
+     * <p>404 {@link ErrorCode#UNKNOWN_PROCESS_INSTANCE} when no manifest is pinned for the instance,
+     * when it belongs to another tenant, and when it was accepted before manifests were recorded —
+     * all three indistinguishable by design, exactly as the traversal listing already is for its own
+     * id space. 501 {@link ErrorCode#PROCESS_INVENTORY_UNAVAILABLE} when this host composes no
+     * manifest store at all, so an absent route is never mistaken for an absent manifest.</p>
+     */
+    private void readExecutionManifest(HttpExchange exchange, String rawId) throws IOException {
+        var principal = AuthenticatedPrincipalAttribute.require(exchange);
+        if (executionManifests == null) {
+            fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+            return;
+        }
+        java.util.UUID processInstanceId;
+        try {
+            processInstanceId = java.util.UUID.fromString(rawId);
+        } catch (IllegalArgumentException malformed) {
+            fail(exchange, ErrorCode.INVALID_REQUEST);
+            return;
+        }
+        // The tenant comes from the authenticated principal and participates in the key, so a read
+        // scoped to another tenant's instance reports absence rather than a denial. That is the whole
+        // authorization check for this route: the store cannot be used as a cross-tenant oracle
+        // because the address it is asked for is one this caller could only have guessed.
+        var key = new ai.ravenroot.api.persistence.ExecutionKey(principal.tenantId(), processInstanceId);
+        try {
+            var stored = executionManifests.store().load(key).toCompletableFuture().join();
+            var report = executionManifests.describe(stored,
+                    ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
+            json(exchange, 200, executionManifestJson(stored, report));
+        } catch (java.util.concurrent.CompletionException wrapped) {
+            var failure = ai.ravenroot.api.persistence.ExecutionManifestStoreException.unwrap(wrapped);
+            if (failure == null) {
+                throw wrapped;
+            }
+            failExecutionManifest(exchange, failure.failure());
+        } catch (ai.ravenroot.api.persistence.ExecutionManifestStoreException failure) {
+            failExecutionManifest(exchange, failure.failure());
+        }
+    }
+
+    /**
+     * Maps a manifest-store failure onto the two outcomes this route distinguishes.
+     *
+     * <p>An absent manifest and one that no longer verifies are deliberately <em>not</em> the same
+     * answer: the first is an execution this deployment never recorded, the second is a stored record
+     * an operator has to investigate. Collapsing them would hide a corrupted row behind a 404.</p>
+     */
+    private void failExecutionManifest(HttpExchange exchange,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStoreFailure failure)
+            throws IOException {
+        if (failure instanceof ai.ravenroot.api.persistence.ExecutionManifestStoreFailure.NotFound) {
+            fail(exchange, ErrorCode.UNKNOWN_PROCESS_INSTANCE);
+            return;
+        }
+        fail(exchange, ErrorCode.PROCESS_INVENTORY_UNAVAILABLE);
+    }
+
+    /**
+     * The caller's own execution identity and a verdict, and nothing about this deployment.
+     *
+     * <p><strong>Dimension names only.</strong> A difference also carries the two values that
+     * disagree, and those describe the deployment rather than the execution: a node-package
+     * difference's values are an installed package's identity, and the engine, store and limits
+     * dimensions compare digests of operator configuration. Rendering them here would answer "what is
+     * installed on your servers" to any authenticated tenant that submitted one graph. The dimension
+     * alone answers the question this route exists for — can my execution still be reproduced, and
+     * along which axis has it stopped being reproducible — and the dimension vocabulary already
+     * distinguishes a package that is missing from one that changed.</p>
+     *
+     * <p>The count of pinned node packages is left out for the same reason: how many packages a
+     * deployment has installed is an inventory fact, and a number is still an answer.</p>
+     *
+     * <p>What remains is the caller's: the format version and digest of its own manifest, the graph
+     * address it already submitted or was handed back, when it was pinned, and the verdict.</p>
+     */
+    private static String executionManifestJson(
+            ai.ravenroot.api.persistence.StoredExecutionManifest stored,
+            ai.ravenroot.api.persistence.ExecutionManifestCompatibility report) {
+        var manifest = stored.manifest();
+        var differences = report.dimensions().stream()
+                .map(dimension -> "\"" + dimension + "\"")
+                .collect(java.util.stream.Collectors.joining(",", "[", "]"));
+        return "{\"manifestFormatVersion\":" + manifest.formatVersion()
+                + ",\"manifestDigest\":\"" + stored.digest().value()
+                + "\",\"graphVersion\":\"" + manifest.graphContentId().value()
+                + "\",\"graphId\":\"" + escape(manifest.graphIdentity().graphId())
+                + "\",\"graphVersionId\":\"" + escape(manifest.graphIdentity().versionId())
+                + "\",\"pinnedAt\":\"" + manifest.pinnedAt()
+                + "\",\"compatible\":" + report.compatible()
+                + ",\"incompatibleDimensions\":" + differences
+                + ",\"dimensionsTruncated\":" + report.truncated()
+                + "}";
     }
 
     /**

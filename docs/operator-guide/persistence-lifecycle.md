@@ -17,7 +17,7 @@ Accepting an execution durably stores the exact canonical GraphML document it wi
 
 Definitions are stored with execution state, so they are inside the same backup and come back with the same restore. They are scoped to one tenant, and two executions share one stored document only when the documents are byte-identical and belong to the same tenant. Definitions hold graph content and non-secret references only; credentials are supplied at execution time and are never stored with a definition.
 
-Storing the document is what this release adds. **Ravenroot does not yet read it back to resume work**: no runtime reconstructs a graph from a stored definition, and reclaiming stored definitions is not yet an exposed operator command. Both arrive in a following change. Until then, treat these definitions as retained evidence that an accepted execution's graph is recoverable, not as a recovery procedure you can run today.
+Retained definitions are read back on the continuation paths that resume durably paused work, human-task continuations and tool-approval continuations, each of which reconstructs the graph from the stored document rather than from a copy held in memory. Reclaiming stored definitions is still not an exposed operator command. Outside those paths, treat a retained definition as the authoritative record of what an execution was accepted to run, not as a recovery procedure you can invoke directly.
 
 ## Execution manifests
 

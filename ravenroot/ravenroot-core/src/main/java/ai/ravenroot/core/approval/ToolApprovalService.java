@@ -151,7 +151,7 @@ public final class ToolApprovalService {
                                String correlationId) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(request, "request");
-        for (int attempt = 1; ; attempt++) {
+        for (int attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
             var existing = await(store.loadToolApproval(key, request.approvalId())).orElse(null);
             if (existing != null) {
                 if (!existing.request().sameRequest(request)) {
@@ -194,6 +194,7 @@ public final class ToolApprovalService {
                 throw conflict;
             }
         }
+        throw new IllegalStateException("tool approval request retry budget exhausted");
     }
 
     public ToolApprovalResult approve(RequestContext context, UUID processInstanceId, UUID approvalId) {
@@ -448,34 +449,22 @@ public final class ToolApprovalService {
 
     private ToolApprovalResult commitSettlement(DurableToolApproval original, ToolApprovalStatus target,
                                                 String actor, String correlationId, Long fencingToken) {
-        for (int attempt = 1; ; attempt++) {
+        for (int attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
             DurableToolApproval approval = await(store.loadToolApproval(original.key(),
                     original.request().approvalId())).orElse(null);
             if (approval == null) return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
-            if (approval.status() == target) {
-                auditOnly(approval, "TOOL_APPROVAL_DUPLICATE_DECISION", correlationId);
-                return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_APPLIED, approval,
-                        resumeTraversalOf(approval.key(), approval.request().approvalId()));
-            }
-            if (!approval.status().canTransitionTo(target)) {
-                auditOnly(approval, "TOOL_APPROVAL_CONFLICTING_DECISION", correlationId);
-                return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, approval,
-                        resumeTraversalOf(approval.key(), approval.request().approvalId()));
-            }
+            ToolApprovalResult currentOutcome = settleCurrentState(
+                    approval, target, actor, correlationId, fencingToken);
+            if (currentOutcome != null) return currentOutcome;
             StoredProcessInstance stored = load(approval.key());
             DurableToolApproval confirmed = await(store.loadToolApproval(approval.key(),
                     approval.request().approvalId())).orElse(null);
             if (confirmed == null) {
                 return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
             }
-            if (confirmed.status() != approval.status() || !confirmed.actor().equals(approval.actor())) {
-                // The aggregate and approval are separate reads. If another decision landed between
-                // them, building lifecycle transitions from the old PENDING value against the new
-                // completed aggregate would be invalid rather than a useful CAS attempt. Re-enter
-                // through the state checks above. A decision landing after this confirmation bumps
-                // the aggregate revision and is caught by the batch expectation instead.
-                continue;
-            }
+            ToolApprovalResult refreshedOutcome = settleCurrentState(
+                    confirmed, target, actor, correlationId, fencingToken);
+            if (refreshedOutcome != null) return refreshedOutcome;
             UUID resumeTraversalId = UUID.randomUUID();
             ToolApprovalTransition approvalTransition = switch (target) {
                 case APPROVED -> new ToolApprovalTransition.Approved(approval.request().approvalId(), actor);
@@ -531,23 +520,58 @@ public final class ToolApprovalService {
                 if (conflict.failure() instanceof ExecutionStoreFailure.InvalidRequest) {
                     DurableToolApproval winner = await(store.loadToolApproval(approval.key(),
                             approval.request().approvalId())).orElse(null);
-                    if (winner != null && !winner.status().canTransitionTo(target)) {
-                        // A decision may have completed the invocation after our approval read but
-                        // before our process read. Reclassify only when the approval now proves that
-                        // exact race; otherwise InvalidRequest remains a caller defect.
-                        continue;
+                    if (winner != null) {
+                        ToolApprovalResult winnerOutcome = settleCurrentState(
+                                winner, target, actor, correlationId, fencingToken);
+                        if (winnerOutcome != null) return winnerOutcome;
                     }
+                    // A still-PENDING approval proves this was not a concurrent settlement race.
+                    throw conflict;
                 }
                 if (conflict.failure() instanceof ExecutionStoreFailure.ToolApprovalNotResolvable refusal) {
                     if (refusal.requested() == ToolApprovalStatus.EXPIRED
-                            && target != ToolApprovalStatus.EXPIRED) {
-                        return commitSettlement(approval, ToolApprovalStatus.EXPIRED, "", correlationId);
+                            && target != ToolApprovalStatus.EXPIRED
+                            && attempt < MAX_WRITE_ATTEMPTS) {
+                        target = ToolApprovalStatus.EXPIRED;
+                        actor = "";
+                        continue;
                     }
                     if (attempt < MAX_WRITE_ATTEMPTS) continue;
                 }
                 throw conflict;
             }
         }
+        throw new IllegalStateException("tool approval settlement retry budget exhausted");
+    }
+
+    /**
+     * Dispatches a freshly read state that must not repeat the one-time PENDING lifecycle batch.
+     * Returns {@code null} only when that batch is still the valid next operation.
+     */
+    private ToolApprovalResult settleCurrentState(DurableToolApproval approval,
+                                                  ToolApprovalStatus target, String actor,
+                                                  String correlationId, Long fencingToken) {
+        if (approval.status() == target) {
+            auditOnly(approval, "TOOL_APPROVAL_DUPLICATE_DECISION", correlationId);
+            return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_APPLIED, approval,
+                    resumeTraversalOf(approval.key(), approval.request().approvalId()));
+        }
+        if (approval.status() == ToolApprovalStatus.PENDING) return null;
+        if (approval.status() == ToolApprovalStatus.APPROVED
+                && (target == ToolApprovalStatus.CANCELLED || target == ToolApprovalStatus.EXPIRED)) {
+            ToolApprovalTransition transition = target == ToolApprovalStatus.CANCELLED
+                    ? new ToolApprovalTransition.Cancelled(approval.request().approvalId(), actor)
+                    : new ToolApprovalTransition.Expired(approval.request().approvalId());
+            String eventType = target == ToolApprovalStatus.CANCELLED
+                    ? "TOOL_APPROVAL_CANCELLED" : "TOOL_APPROVAL_EXPIRED";
+            ToolApprovalResult transitioned = commitSimple(
+                    approval, transition, eventType, correlationId, fencingToken);
+            return new ToolApprovalResult(transitioned.code(), transitioned.approval(),
+                    resumeTraversalOf(approval.key(), approval.request().approvalId()));
+        }
+        auditOnly(approval, "TOOL_APPROVAL_CONFLICTING_DECISION", correlationId);
+        return new ToolApprovalResult(ToolApprovalResult.Code.ALREADY_SETTLED, approval,
+                resumeTraversalOf(approval.key(), approval.request().approvalId()));
     }
 
     private ToolApprovalResult commitSimple(DurableToolApproval original, ToolApprovalTransition transition,
@@ -557,7 +581,7 @@ public final class ToolApprovalService {
 
     private ToolApprovalResult commitSimple(DurableToolApproval original, ToolApprovalTransition transition,
                                             String eventType, String correlationId, Long fencingToken) {
-        for (int attempt = 1; ; attempt++) {
+        for (int attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
             DurableToolApproval approval = await(store.loadToolApproval(original.key(),
                     original.request().approvalId())).orElse(null);
             if (approval == null) return new ToolApprovalResult(ToolApprovalResult.Code.NOT_FOUND, null, null);
@@ -591,6 +615,7 @@ public final class ToolApprovalService {
                 throw conflict;
             }
         }
+        throw new IllegalStateException("tool approval transition retry budget exhausted");
     }
 
     private void auditOnly(DurableToolApproval approval, String eventType, String correlationId) {

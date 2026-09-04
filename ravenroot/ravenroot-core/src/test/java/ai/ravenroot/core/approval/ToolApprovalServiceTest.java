@@ -25,13 +25,17 @@ import ai.ravenroot.api.security.Role;
 import ai.ravenroot.api.security.SecurityContext;
 import ai.ravenroot.api.security.ToolDecision;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Proxy;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
@@ -135,36 +139,14 @@ class ToolApprovalServiceTest {
     }
 
     @Test
-    void stalePendingReadCannotApplyLifecycleAfterAnotherDecisionWins() throws Exception {
-        try (var store = new InMemoryExecutionStore(fixed(NOW));
-             var staleReader = Executors.newSingleThreadExecutor(r ->
-                     new Thread(r, "stale-approval-reader"))) {
-            Fixture fixture = createRunning(store, NOW.plusSeconds(60), false);
-            var pendingRead = new CountDownLatch(1);
-            var winnerCommitted = new CountDownLatch(1);
-            var intercepted = new AtomicBoolean();
-            ExecutionStore raced = pauseFirstApprovalRead(store, pendingRead, winnerCommitted,
-                    intercepted);
-            var service = new ToolApprovalService(raced, fixed(NOW));
-            service.request(fixture.key, fixture.request, "create");
+    void refreshedSettlementStateDispatchesSafelyInMemory() throws Exception {
+        assertRefreshedSettlementRaces((clock, name) -> new InMemoryExecutionStore(clock));
+    }
 
-            var staleApproval = CompletableFuture.supplyAsync(() ->
-                    service.approve(approver(), fixture.key.processInstanceId(), fixture.approvalId),
-                    staleReader);
-            assertTrue(pendingRead.await(5, TimeUnit.SECONDS));
-            ToolApprovalResult winner = service.deny(
-                    approver(), fixture.key.processInstanceId(), fixture.approvalId);
-            winnerCommitted.countDown();
-            ToolApprovalResult loser = staleApproval.get(5, TimeUnit.SECONDS);
-
-            assertEquals(ToolApprovalResult.Code.DENIED, winner.code());
-            assertEquals(ToolApprovalResult.Code.ALREADY_SETTLED, loser.code());
-            assertEquals(ToolApprovalStatus.DENIED,
-                    await(store.loadToolApproval(fixture.key, fixture.approvalId)).orElseThrow().status());
-            assertTrue(await(store.readJournal(TENANT, 0, 100)).stream().anyMatch(row ->
-                    "TOOL_APPROVAL_CONFLICTING_DECISION".equals(row.envelope().eventType())),
-                    "the stale losing decision remains durably audited");
-        }
+    @Test
+    void refreshedSettlementStateDispatchesSafelyInSqlite(@TempDir Path directory) throws Exception {
+        assertRefreshedSettlementRaces((clock, name) ->
+                new SqliteExecutionStore(directory.resolve(name + ".db"), clock));
     }
 
     @Test
@@ -269,20 +251,101 @@ class ToolApprovalServiceTest {
         return Clock.fixed(instant, ZoneOffset.UTC);
     }
 
-    private static ExecutionStore pauseFirstApprovalRead(
-            ExecutionStore delegate, CountDownLatch pendingRead, CountDownLatch winnerCommitted,
+    private static void assertRefreshedSettlementRaces(StoreFactory stores) throws Exception {
+        for (RaceTarget target : RaceTarget.values()) {
+            var clock = new MutableClock(NOW);
+            Instant expiry = target.expires() ? NOW.plusSeconds(1) : NOW.plusSeconds(60);
+            try (ExecutionStore store = stores.open(clock, target.name().toLowerCase());
+                 var staleReader = Executors.newSingleThreadExecutor(r ->
+                         new Thread(r, "stale-settlement-reader"))) {
+                Fixture fixture = createRunning(store, expiry, false);
+                var service = new ToolApprovalService(store, clock);
+                service.request(fixture.key, fixture.request, "create");
+                PendingWork.TimerDue timer = null;
+                if (target == RaceTarget.FENCED_TIMER_EXPIRY) {
+                    clock.now = expiry;
+                    timer = await(store.claimDueTimers(TENANT, "timer-worker", 10,
+                            Duration.ofSeconds(30))).getFirst();
+                    clock.now = NOW;
+                }
+
+                var processSnapshotRead = new CountDownLatch(1);
+                var winnerCommitted = new CountDownLatch(1);
+                ExecutionStore racedStore = pauseFirstProcessSnapshot(
+                        store, processSnapshotRead, winnerCommitted, new AtomicBoolean());
+                var racedService = new ToolApprovalService(racedStore, clock);
+                PendingWork.TimerDue claimedTimer = timer;
+                var losingOperation = CompletableFuture.supplyAsync(() -> switch (target) {
+                    case DENIAL -> racedService.deny(
+                            approver(), fixture.key.processInstanceId(), fixture.approvalId);
+                    case CANCELLATION -> racedService.cancel(
+                            requester(), fixture.key.processInstanceId(), fixture.approvalId);
+                    case EXPIRY -> racedService.expire(fixture.key, fixture.approvalId, "expiry-race");
+                    case FENCED_TIMER_EXPIRY -> racedService.expireClaimedTimer(
+                            claimedTimer, "timer-expiry-race");
+                }, staleReader);
+
+                assertTrue(processSnapshotRead.await(5, TimeUnit.SECONDS),
+                        "losing operation did not reach the inner process snapshot for " + target);
+                ToolApprovalResult winner;
+                try {
+                    winner = racedService.approve(
+                            approver(), fixture.key.processInstanceId(), fixture.approvalId);
+                    if (target.expires()) clock.now = expiry;
+                } finally {
+                    winnerCommitted.countDown();
+                }
+                Object loser = losingOperation.get(5, TimeUnit.SECONDS);
+
+                assertEquals(ToolApprovalResult.Code.APPROVED, winner.code());
+                ToolApprovalStatus expected = switch (target) {
+                    case DENIAL -> ToolApprovalStatus.APPROVED;
+                    case CANCELLATION -> ToolApprovalStatus.CANCELLED;
+                    case EXPIRY, FENCED_TIMER_EXPIRY -> ToolApprovalStatus.EXPIRED;
+                };
+                assertEquals(expected, await(store.loadToolApproval(
+                        fixture.key, fixture.approvalId)).orElseThrow().status());
+                if (target == RaceTarget.DENIAL) {
+                    assertEquals(ToolApprovalResult.Code.ALREADY_SETTLED,
+                            ((ToolApprovalResult) loser).code());
+                    assertTrue(await(store.readJournal(TENANT, 0, 100)).stream().anyMatch(row ->
+                            "TOOL_APPROVAL_CONFLICTING_DECISION".equals(row.envelope().eventType())));
+                } else if (target == RaceTarget.FENCED_TIMER_EXPIRY) {
+                    assertEquals(Boolean.TRUE, loser);
+                } else {
+                    assertEquals(ToolApprovalResult.Code.valueOf(expected.name()),
+                            ((ToolApprovalResult) loser).code());
+                }
+                var handler = await(store.loadHandler(fixture.key, fixture.approvalId)).orElseThrow();
+                assertEquals(winner.resumeTraversalId(), handler.resumeTraversalId(),
+                        "a refreshed transition must preserve the winner's trigger for " + target);
+                assertEquals(2, await(store.load(fixture.key)).state().traversals().size(),
+                        "only PENDING may create a resume traversal for " + target);
+                String worker = target == RaceTarget.FENCED_TIMER_EXPIRY ? "timer-worker" : "worker";
+                List<PendingWork> pending = await(store.claimPendingWork(
+                        TENANT, worker, 10, Duration.ofSeconds(30)));
+                assertEquals(1, pending.stream().filter(PendingWork.HandlerTrigger.class::isInstance).count());
+                assertEquals(fixture.approvalId, pending.stream()
+                        .filter(PendingWork.HandlerTrigger.class::isInstance)
+                        .findFirst().orElseThrow().workItemId());
+            }
+        }
+    }
+
+    private static ExecutionStore pauseFirstProcessSnapshot(
+            ExecutionStore delegate, CountDownLatch processSnapshotRead, CountDownLatch winnerCommitted,
             AtomicBoolean intercepted) {
         return (ExecutionStore) Proxy.newProxyInstance(ToolApprovalServiceTest.class.getClassLoader(),
                 new Class<?>[] {ExecutionStore.class}, (proxy, method, arguments) -> {
                     try {
                         Object result = method.invoke(delegate, arguments);
-                        if ("loadToolApproval".equals(method.getName())
-                                && Thread.currentThread().getName().equals("stale-approval-reader")
+                        if ("load".equals(method.getName())
+                                && Thread.currentThread().getName().equals("stale-settlement-reader")
                                 && intercepted.compareAndSet(false, true)) {
                             @SuppressWarnings("unchecked")
                             CompletionStage<Object> loaded = (CompletionStage<Object>) result;
-                            return loaded.thenApply(value -> {
-                                pendingRead.countDown();
+                            return loaded.thenApplyAsync(value -> {
+                                processSnapshotRead.countDown();
                                 try {
                                     if (!winnerCommitted.await(5, TimeUnit.SECONDS)) {
                                         throw new IllegalStateException("winning decision did not commit");
@@ -299,6 +362,22 @@ class ToolApprovalServiceTest {
                         throw invoked.getCause();
                     }
                 });
+    }
+
+    private enum RaceTarget {
+        DENIAL,
+        CANCELLATION,
+        EXPIRY,
+        FENCED_TIMER_EXPIRY;
+
+        boolean expires() {
+            return this == EXPIRY || this == FENCED_TIMER_EXPIRY;
+        }
+    }
+
+    @FunctionalInterface
+    private interface StoreFactory {
+        ExecutionStore open(Clock clock, String name) throws Exception;
     }
 
     private static String digest(String value) throws Exception {

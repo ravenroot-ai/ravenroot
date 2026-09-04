@@ -142,7 +142,7 @@ events fail before release credentials are available.
 
 ### Publication boundary
 
-Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains 31
+Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains 32
 coordinates:
 
 - `ravenroot-parent`, `ravenroot-application-api`, `ravenroot-core`,
@@ -156,7 +156,7 @@ coordinates:
   `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-github`, `ravenroot-jdbc`,
   `ravenroot-kafka`, `ravenroot-mail`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
-  `ravenroot-openapi-server`, `ravenroot-spel`, `ravenroot-telegram`, and
+  `ravenroot-openapi-server`, `ravenroot-slack`, `ravenroot-spel`, `ravenroot-telegram`, and
   `ravenroot-websocket` extensions.
 
 The example node project, sandbox-supervisor conformance fixture, optional Akka build, development

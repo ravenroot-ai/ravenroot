@@ -60,6 +60,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-plugin-bundle",
     "ravenroot-programming-graalvm",
     "ravenroot-server",
+    "ravenroot-slack",
     "ravenroot-spel",
     "ravenroot-telegram",
     "ravenroot-websocket",

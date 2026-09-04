@@ -25,6 +25,7 @@ import java.util.concurrent.CompletableFuture;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -245,6 +246,79 @@ class NodePackageRegistrationTest {
                 return CompletableFuture.completedFuture(
                         NodeResult.continueWith(shout ? text.toUpperCase(java.util.Locale.ROOT) : text));
             };
+        }
+    }
+
+    // ------------------------------------------------------------- what a package may declare
+
+    /**
+     * The Node SDK contract has never constrained {@code version()} or {@code sdkContract()}, and
+     * describes the version as being for diagnostics. Registration must therefore keep accepting a
+     * value that is neither a token nor present at all.
+     *
+     * <p>This is a regression assertion with a specific shape in mind. Recording a package's identity
+     * in an execution manifest tempts a validating record, and a validating record would fire here —
+     * inside plugin activation, at start-up, after earlier packages have already registered — turning
+     * an upgrade into a deployment that will not boot. The pinned identity is a digest precisely so
+     * that this test can pass.</p>
+     */
+    @Test
+    void aPackageMayDeclareAVersionThatIsNotATokenOrNoVersionAtAll() {
+        assertDoesNotThrow(() -> NodePackages.register(new BehaviorRegistry(),
+                        new LooseVersionPackage("1.0 beta", NodeSdk.CONTRACT, "loose.spaced")),
+                "a spaced version is what the SDK contract has always permitted");
+        assertDoesNotThrow(() -> NodePackages.register(new BehaviorRegistry(),
+                        new LooseVersionPackage(null, NodeSdk.CONTRACT, "loose.absent")),
+                "and a package that declares no version at all still registers");
+        assertDoesNotThrow(() -> NodePackages.register(new BehaviorRegistry(),
+                        new LooseVersionPackage("", NodeSdk.CONTRACT, "loose.empty")));
+    }
+
+    /** Two builds a manifest must still be able to tell apart, whatever their versions look like. */
+    @Test
+    void looselyShapedVersionsAreStillDistinguishedFromOneAnother() {
+        var first = NodePackages.register(new BehaviorRegistry(),
+                new LooseVersionPackage("1.0 beta", NodeSdk.CONTRACT, "loose.compare"))
+                .nodePackageIdentities();
+        var second = NodePackages.register(new BehaviorRegistry(),
+                new LooseVersionPackage("1.0 rc", NodeSdk.CONTRACT, "loose.compare"))
+                .nodePackageIdentities();
+        var absent = NodePackages.register(new BehaviorRegistry(),
+                new LooseVersionPackage(null, NodeSdk.CONTRACT, "loose.compare"))
+                .nodePackageIdentities();
+
+        assertEquals(1, first.size());
+        assertEquals(first.get(0).packageId(), second.get(0).packageId());
+        assertNotEquals(first.get(0).identityDigest(), second.get(0).identityDigest(),
+                "two builds differing only in an unconstrained version are still two identities");
+        assertNotEquals(first.get(0).identityDigest(), absent.get(0).identityDigest(),
+                "and declaring no version is a third one, not a match for either");
+        assertFalse(first.get(0).toString().contains("1.0 beta"),
+                "the declared string is digested rather than retained, so nothing downstream has to "
+                        + "decide whether it is safe to render");
+    }
+
+    private record LooseVersionPackage(String declaredVersion, String contract, String packageId)
+            implements NodePackage {
+
+        @Override
+        public String id() {
+            return packageId;
+        }
+
+        @Override
+        public String version() {
+            return declaredVersion;
+        }
+
+        @Override
+        public String sdkContract() {
+            return contract;
+        }
+
+        @Override
+        public List<NodeBehavior> behaviors() {
+            return List.of(new GreetingBehavior(packageId + ".behavior"));
         }
     }
 

@@ -29,6 +29,9 @@ is checked against the compiled operation. Path values are typed and percent-enc
 empty, dot, slash and percent-bearing path segments are refused. Query order is deterministic.
 Bodies and responses use bounded canonical JSON and the supported schema subset: object properties,
 required/additional-properties, arrays, JSON scalar types, enum, numeric bounds and size bounds.
+The operation supplies explicit per-call request, encoded, decoded, and canonical-output ceilings to
+the managed transport. JSON is the only accepted non-empty response media type; identity and one
+bounded gzip member are accepted, while ambiguous or stacked encodings fail closed.
 
 Success returns `openapi.call.result.v1` with operation id, status, approved headers and a validated
 body. Stable exceptions never contain the remote body, URL, header values or credential reference.

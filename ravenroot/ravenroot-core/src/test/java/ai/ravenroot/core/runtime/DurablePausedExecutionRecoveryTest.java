@@ -36,6 +36,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -277,6 +279,43 @@ final class DurablePausedExecutionRecoveryTest {
             assertFalse(restarted.application().executionPaused(TENANT, held.traversalId()));
             assertEquals(TraversalStatus.COMPLETED,
                     stores.load(held.key()).state().traversals().get(held.traversalId()).status());
+        }
+    }
+
+    /**
+     * The hold path's verification hook, driven through the operator's own resume rather than through
+     * the service.
+     *
+     * <p>The contrast with the test above is the whole assertion: identical hold, identical restart,
+     * identical resume call, and the only difference is a restarted process that records manifests
+     * and has none for work accepted before it did. The resume must refuse with the typed failure
+     * rather than continue the traversal against dependencies nothing recorded, and the hold must
+     * still be held afterwards — a refused resume settles nothing.</p>
+     */
+    @Test
+    void resumeRefusesAnInheritedHoldWhoseManifestThisRuntimeDoesNotHave() throws Exception {
+        var stores = new DurableStores();
+        Held held = holdAndStop(stores);
+
+        try (var manifests = new ai.ravenroot.core.persistence.InMemoryExecutionManifestStore(
+                java.time.Clock.systemUTC());
+             Restarted restarted = stores.restartRecordingManifests(manifests)) {
+
+            var refused = assertThrows(
+                    ai.ravenroot.api.persistence.ExecutionManifestStoreException.class,
+                    () -> restarted.application().resumeTraversal(TENANT, held.traversalId()));
+            assertInstanceOf(ai.ravenroot.api.persistence.ExecutionManifestStoreFailure.NotFound.class,
+                    refused.failure(),
+                    "an execution accepted before this deployment recorded manifests has none, and "
+                            + "resuming it would mean resolving today's dependencies for yesterday's "
+                            + "acceptance");
+
+            assertEquals(List.of(), restarted.effects(),
+                    "the node the hold withheld did not run");
+            assertEquals(ExecutionPauseStatus.HELD,
+                    stores.pause(held.key(), stores.anyPauseId(held.key())).status(),
+                    "and the hold is still held: a refused resume settles nothing");
+            assertTrue(stores.heldPause(held.traversalId()).isPresent());
         }
     }
 
@@ -772,6 +811,13 @@ final class DurablePausedExecutionRecoveryTest {
                     Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS);
         }
 
+        /** A restart that records manifests, and has none for work accepted before it did. */
+        private Restarted restartRecordingManifests(
+                ai.ravenroot.api.persistence.ExecutionManifestStore manifests) {
+            return new Restarted(forApplication(), definitions,
+                    Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS, manifests);
+        }
+
         private StoredProcessInstance load(ExecutionKey key) {
             return executions.load(key).toCompletableFuture().join();
         }
@@ -841,6 +887,12 @@ final class DurablePausedExecutionRecoveryTest {
 
         private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
                           List<String> effects, String graphMl) {
+            this(executions, definitions, effects, graphMl, null);
+        }
+
+        private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
+                          List<String> effects, String graphMl,
+                          ai.ravenroot.api.persistence.ExecutionManifestStore manifests) {
             this.effects = effects;
             this.graphMl = graphMl;
             var registry = new BehaviorRegistry()
@@ -854,7 +906,8 @@ final class DurablePausedExecutionRecoveryTest {
             this.application = new DefaultRavenrootApplication(engine, monitor, registry,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), executions, 8,
-                    UnknownBehaviorPolicy.passThrough(), definitions);
+                    UnknownBehaviorPolicy.passThrough(), definitions, null, null,
+                    GraphExecutionLimits.DEFAULTS, null, manifests);
             this.self.set(application);
             this.subscription = monitor.subscribe(event -> {
                 if (event.type() == ExecutionEventType.EXECUTION_PAUSED) {

@@ -311,7 +311,7 @@ public final class ProjectTransitionBehavior implements NodeBehavior {
         output.put("toStatus", input.toStatus); output.put("generation", generation); output.put("attempts", attempts);
         output.put("remoteId", input.itemId); if (!reason.isEmpty()) output.put("reason", reason);
         if (retryAt > 0) output.put("retryAtEpochMs", retryAt);
-        return new NodeResult(outcome, Map.copyOf(output), Map.of());
+        return GithubValues.result(outcome, Map.copyOf(output), Map.of());
     }
 
     private static GithubException sanitize(RuntimeException failure) {

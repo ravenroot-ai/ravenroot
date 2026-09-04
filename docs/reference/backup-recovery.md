@@ -23,12 +23,12 @@ Backup and restore acquire the same persistent maintenance lock as the server an
 | Entry | Contract |
 |---|---|
 | `MANIFEST.txt` | Canonical UTF-8 inventory with byte length and SHA-256 digest |
-| `execution-store.db` | SQLite-native `VACUUM INTO` snapshot, including the canonical graph definitions accepted executions are pinned to |
+| `execution-store.db` | SQLite-native `VACUUM INTO` snapshot, including the canonical graph definitions accepted executions are pinned to and the dependency-set records those executions were accepted against |
 | `audit/` | Every selected `.audit.jsonl` and `.audit.head` pair |
 
 The destination must not already exist. Publication uses a sibling staging directory and atomic rename.
 
-The canonical graph definition every accepted execution is pinned to is held in the execution store and is therefore inside the snapshot. Restoring a bundle restores the definitions together with the executions that name them, so the document an execution was accepted to run survives a restore. Reading a definition back to resume work is not yet part of any command or endpoint. External artifact source is still not a bundle payload; preserve it in its owning repository.
+The canonical graph definition every accepted execution is pinned to is held in the execution store and is therefore inside the snapshot. Restoring a bundle restores the definitions together with the executions that name them, so the document an execution was accepted to run survives a restore. Retained definitions are read back on the continuation paths that resume durably paused work, human-task continuations and tool-approval continuations; reclaiming them is still not an exposed operator command. The record of the dependency set each execution was accepted against lives in the same store and is inside the same snapshot, so a restored execution is restored together with the description a recovery will check it against. Restoring into a deployment that resolves a different dependency set — different limits, a different engine capability set, node packages at different versions — makes the restored work refuse to resume rather than resume differently; match the deployment to the bundle before promoting it. External artifact source is still not a bundle payload; preserve it in its owning repository.
 
 The manifest records `authenticity: not-provided` and `encryption: none`. Protect the complete bundle with access control, encrypted storage, and an independently authenticated transfer channel.
 

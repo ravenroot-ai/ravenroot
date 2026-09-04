@@ -313,6 +313,55 @@ class GraalVmProgramRuntimeTest {
         assertEquals(1, cancelled.terminations); assertTrue(cancelled.reaped);
     }
 
+    @Test void cancellationDuringLaunchRetainsAdmissionUntilThePublishedSessionIsReaped() throws Exception {
+        var supervisor = new FakeSupervisor();
+        supervisor.launchEntered = new java.util.concurrent.CountDownLatch(1);
+        supervisor.releaseLaunch = new java.util.concurrent.CountDownLatch(1);
+        var admission = TestAdmission.of(artifact("() => 1", ArtifactState.ACTIVE));
+        var future = runtime(supervisor, Duration.ofSeconds(5)).execute(admission, request("x"))
+                .toCompletableFuture();
+        assertTrue(supervisor.launchEntered.await(2, TimeUnit.SECONDS));
+
+        assertTrue(future.cancel(true));
+        assertEquals(0, admission.closes.get(),
+                "a cancelled public future must not release admission while launch can still publish a session");
+        supervisor.releaseLaunch.countDown();
+        for (int attempt = 0; attempt < 100 && admission.closes.get() == 0; attempt++) {
+            Thread.onSpinWait();
+            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(2));
+        }
+        assertEquals(1, supervisor.terminations);
+        assertTrue(supervisor.reaped);
+        assertEquals(1, admission.closes.get());
+    }
+
+    @Test void sandboxPolicyExposesTheSameFiniteInputOutputDeadlineAndCancellationBoundsItEnforces() {
+        var limits = policy(Duration.ofMillis(750)).externalIoLimits();
+        assertEquals(GraalVmProgramRuntime.MAX_REQUEST_BYTES, limits.maximumRequestBytes());
+        assertEquals(2 * 1024 * 1024, limits.maximumEncodedResponseBytes());
+        assertEquals(2 * 1024 * 1024, limits.maximumDecodedResponseBytes());
+        assertEquals(2 * 1024 * 1024, limits.maximumOutputBytes());
+        assertEquals(Duration.ofMillis(750), limits.maximumDuration());
+        assertEquals(GraalVmProgramRuntime.REAP_TIMEOUT, limits.cancellationBound());
+        assertEquals(java.util.Set.of("identity"), limits.acceptedContentEncodings());
+    }
+
+    @Test void aggregateProgramRequestIsRefusedWhileStreamingBeforeSupervisorInputCanGrowUnbounded() {
+        var supervisor = new FakeSupervisor();
+        supervisor.response = FakeSupervisor.wellFormedValidateResponse();
+        String chunk = "x".repeat(1024 * 1024 - 1);
+        ProgramRequest oversized = request(java.util.Collections.nCopies(9, chunk));
+
+        ExecutionException failure = assertThrows(ExecutionException.class, () -> runtime(supervisor,
+                Duration.ofSeconds(5)).test(artifact("() => 1", ArtifactState.VALIDATED), oversized)
+                .toCompletableFuture().get(10, TimeUnit.SECONDS));
+
+        assertTrue(String.valueOf(failure.getCause().getMessage()).contains("SANDBOX_INPUT_LIMIT"),
+                String.valueOf(failure.getCause()));
+        assertEquals(1, supervisor.terminations);
+        assertTrue(supervisor.reaped);
+    }
+
     /**
      * FIX-29 for the worker-failure half; FIX-27 for the oversized-response half.
      * Distinct from {@code JoinSemanticsTest} and {@code SseLeaseRevalidationIntegrationTest}.

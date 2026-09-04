@@ -6,6 +6,7 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptorValidator;
 import ai.ravenroot.api.catalog.NodeCatalogSource;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.publication.PublicationAuditSink;
 import ai.ravenroot.api.publication.PublicationPolicyResolver;
 import ai.ravenroot.core.graph.GraphNode;
@@ -27,6 +28,23 @@ public final class BehaviorRegistry {
      */
     private final Map<String, NodeTypeDescriptor> resolvedDescriptors = new ConcurrentHashMap<>();
     private final Map<String, NodeCatalogSource> catalogSources = new ConcurrentHashMap<>();
+    /**
+     * The full identity of every node package that registered a behavior here, keyed by package id.
+     *
+     * <p>{@link NodeCatalogSource} carries a bundle id and nothing else, and it is a published
+     * catalog projection, so widening it would change a response shape for a reason unrelated to the
+     * catalog. This map is held beside it instead, and records — as a digest, never as text — the two
+     * facts a package declares about itself that the registry previously read and discarded: its own
+     * build version, and the Node SDK contract it was compiled against. Both are needed to say
+     * whether an execution's packages are the packages it was admitted with; a bundle id alone cannot
+     * distinguish two builds. Nothing here constrains what a package may declare; see
+     * {@link PinnedNodePackage} for why that is not a detail.</p>
+     *
+     * <p>Keyed by package id rather than by behavior name because a package is the versioned unit —
+     * the same reason {@link ai.ravenroot.api.node.NodePackage} states for versioning the package and
+     * not the individual behavior.</p>
+     */
+    private final Map<String, PinnedNodePackage> nodePackageIdentities = new ConcurrentHashMap<>();
 
     public static BehaviorRegistry standard() {
         return standard(BehaviorEnvironment.safeDefaults());
@@ -105,8 +123,14 @@ public final class BehaviorRegistry {
         return registerFactory(factory, NodeCatalogSource.bundle("application"));
     }
 
-    BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId) {
-        return registerFactory(factory, NodeCatalogSource.bundle(packageId));
+    BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId,
+                                            PinnedNodePackage pinned) {
+        registerFactory(factory, NodeCatalogSource.bundle(packageId));
+        // Recorded after the registration succeeds, so a refused behavior never leaves an identity
+        // claiming a package contributed something it did not. The identity itself was built during
+        // planning, so nothing about it can fail here.
+        nodePackageIdentities.put(packageId, pinned);
+        return this;
     }
 
     private BehaviorRegistry registerFactory(NodeBehaviorFactory factory, NodeCatalogSource source) {
@@ -274,6 +298,20 @@ public final class BehaviorRegistry {
     }
 
     public Map<String, NodeCatalogSource> catalogSources() { return Map.copyOf(catalogSources); }
+
+    /**
+     * The identity of every node package that contributed a behavior to this registry.
+     *
+     * <p>Sorted, so a manifest built from this list is stable across registration orders. Built-in
+     * behaviors contribute nothing here: they are part of the runtime rather than an installed
+     * dependency, and their identity is the build's, which a manifest pins through the format
+     * versions it already records.</p>
+     *
+     * @return immutable, sorted package identities; empty when only built-ins are registered.
+     */
+    public List<PinnedNodePackage> nodePackageIdentities() {
+        return nodePackageIdentities.values().stream().sorted().toList();
+    }
 
     private record LegacyNodeBehaviorFactory(String name, NodeHandler handler) implements NodeBehaviorFactory {
         @Override

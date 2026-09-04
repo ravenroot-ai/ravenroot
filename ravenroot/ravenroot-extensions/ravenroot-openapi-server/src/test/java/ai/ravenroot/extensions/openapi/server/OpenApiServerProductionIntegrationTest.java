@@ -6,12 +6,14 @@ import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphManager;
 import ai.ravenroot.core.graph.GraphNode;
+import ai.ravenroot.core.graph.JoinSemantics;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.server.OpenApiServerProductionHarness;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -19,6 +21,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -66,6 +72,60 @@ class OpenApiServerProductionIntegrationTest {
                 assertTrue(harness.readinessDetail().contains(":1:ACTIVE"));
                 assertEquals(202, harness.post("tenant-a:alice", "application/json", "winner").statusCode());
             }
+        }
+    }
+
+    @Test void synchronousRequestReplyTraversesTheDeclaredRespondCommandOverProductionHttp() throws Exception {
+        OpenApiServerNodePackage nodePackage = new OpenApiServerNodePackage(
+                () -> Optional.of(OpenApiServerTestSupport.configuration()));
+        try (var harness = OpenApiServerProductionHarness.start(nodePackage, synchronousGraph(), OWNER,
+                temporaryDirectory.resolve("request-reply"))) {
+            harness.startGraph();
+            var response = harness.post("tenant-a:alice", "application/json", "sync");
+            assertEquals(200, response.statusCode());
+            assertEquals("production", response.headers().firstValue("result-id").orElseThrow());
+            assertEquals("{\"result\":\"accepted\"}", response.body());
+        }
+    }
+
+    @Test void retiringManagedIngressCancelsAPendingSynchronousExchangeAndReplacementRemainsUsable()
+            throws Exception {
+        OpenApiServerNodePackage nodePackage = new OpenApiServerNodePackage(
+                () -> Optional.of(OpenApiServerTestSupport.configuration()));
+        try (var harness = OpenApiServerProductionHarness.start(nodePackage, synchronousGraph(), OWNER,
+                temporaryDirectory.resolve("request-reply-retirement"))) {
+            harness.startGraph();
+            harness.holdResponse();
+            CompletableFuture<java.net.http.HttpResponse<String>> pending = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return harness.post("tenant-a:alice", "application/json", "retiring");
+                } catch (Exception failure) {
+                    throw new CompletionException(failure);
+                }
+            });
+            CompletableFuture<Void> retirement;
+            try {
+                harness.awaitHeldResponse();
+                retirement = CompletableFuture.runAsync(() -> {
+                    try {
+                        harness.stopGraph();
+                    } catch (Exception failure) {
+                        throw new CompletionException(failure);
+                    }
+                });
+                try {
+                    assertTrue(pending.get(5, TimeUnit.SECONDS).statusCode() >= 500);
+                } catch (ExecutionException disconnected) {
+                    assertTrue(disconnected.getCause() instanceof IOException,
+                            () -> disconnected.getCause().getClass().getName());
+                }
+            } finally {
+                harness.releaseResponse();
+            }
+            retirement.get(5, TimeUnit.SECONDS);
+
+            harness.restartGraph();
+            assertEquals(200, harness.post("tenant-a:alice", "application/json", "replacement").statusCode());
         }
     }
 
@@ -198,6 +258,28 @@ class OpenApiServerProductionIntegrationTest {
         var definition = new GraphDefinition(List.of(GraphNode.start("start"), source,
                         GraphNode.error("error"), GraphNode.end("end")),
                 List.of(GraphEdge.to("start", "openapi"), GraphEdge.to("openapi", "end")));
+        try (var manager = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {
+            manager.writeGraphMl(output);
+            return output.toByteArray();
+        }
+    }
+
+    private static byte[] synchronousGraph() throws Exception {
+        GraphNode source = new GraphNode("openapi", NodeKind.BEHAVIOR,
+                OpenApiRequestReplyNodeBehavior.BEHAVIOR,
+                Map.of("apiProfile", "orders", "operations", "createOrder",
+                        JoinSemantics.POLICY_PROPERTY, JoinSemantics.EACH_POLICY));
+        GraphNode responder = new GraphNode("responder", NodeKind.BEHAVIOR,
+                "test.openapi-response", Map.of());
+        var definition = new GraphDefinition(List.of(GraphNode.start("start"), source, responder,
+                        GraphNode.error("error"), GraphNode.end("end")),
+                List.of(GraphEdge.to("start", "openapi"), new GraphEdge("openapi", "responder", "continue",
+                                Map.of(GraphManager.COMMAND, "process")),
+                        new GraphEdge("responder", "openapi", "continue",
+                                Map.of(GraphManager.COMMAND, "respond")),
+                        new GraphEdge("openapi", "end", "responded",
+                                Map.of(GraphManager.COMMAND, "process"))),
+                Map.of(JoinSemantics.MARKER_PROPERTY, JoinSemantics.DECLARED));
         try (var manager = GraphManager.from(definition); var output = new ByteArrayOutputStream()) {
             manager.writeGraphMl(output);
             return output.toByteArray();

@@ -1,9 +1,11 @@
 package ai.ravenroot.extensions.github;
 
 import ai.ravenroot.api.execution.NodeMessage;
+import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 
@@ -13,12 +15,14 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Minimal GitHub wire adapter; every request still passes through Ravenroot's managed HTTP authority. */
@@ -29,6 +33,7 @@ final class GithubApi {
     private final GithubProfile profile;
     private final CallControl control;
     private final Runnable fence;
+    private final AtomicLong effectiveMaximumOutputBytes = new AtomicLong(Long.MAX_VALUE);
 
     GithubApi(NodePackageServices services, NodeMessage message, GithubProfile profile, CallControl control,
               Runnable fence) {
@@ -54,12 +59,18 @@ final class GithubApi {
         OutboundCall<OutboundHttpResponse> call;
         try {
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(profile.rest(path), method,
-                    headers, body, Duration.ofMillis(profile.timeoutMs()), profile.credential()));
+                    headers, body, Duration.ofMillis(profile.timeoutMs()), profile.credential(), null,
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length), profile.maxResponseBytes(),
+                            profile.maxResponseBytes(), profile.maxResponseBytes(), 100,
+                            Duration.ofMillis(profile.timeoutMs()), Set.of("application/json",
+                                    "application/vnd.github+json")),
+                    ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             control.attach(call);
         } catch (RuntimeException failure) { throw sanitize(failure); }
         try {
             OutboundHttpResponse response = call.completion().toCompletableFuture()
                     .get(profile.timeoutMs(), TimeUnit.MILLISECONDS);
+            effectiveMaximumOutputBytes.accumulateAndGet(response.effectiveMaximumOutputBytes(), Math::min);
             control.detach(call); control.check(); fence.run(); control.check();
             if (response.body().length > profile.maxResponseBytes()) throw new GithubException(GithubException.Code.RESPONSE_INVALID);
             return new Response(response.statusCode(), response.headers(), response.body());
@@ -71,6 +82,11 @@ final class GithubApi {
             control.check(); throw new GithubException(GithubException.Code.CANCELLED);
         } catch (ExecutionException failure) { throw sanitize(failure.getCause()); }
         finally { control.detach(call); }
+    }
+
+    NodeResult requireOutput(NodeResult result) {
+        return GithubValues.requireResult(result,
+                Math.min(GithubValues.LIMITS.maxEncodedBytes(), effectiveMaximumOutputBytes.get()));
     }
 
     static GithubException sanitize(Throwable raw) {

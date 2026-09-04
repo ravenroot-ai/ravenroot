@@ -34,8 +34,9 @@ class StorageBoundaryTest {
         assertFalse(distribution.contains("ai.ravenroot.extensions.storage"));
     }
 
-    @Test void packageExposesOnlyGetAndPut() {
-        assertEquals(Set.of("object.get", "object.put"), new StorageNodePackage().behaviors().stream()
+    @Test void packageExposesOnlyTheFourBoundedObjectOperations() {
+        assertEquals(Set.of("object.get", "object.put", "object.list", "object.delete"),
+                new StorageNodePackage().behaviors().stream()
                 .map(behavior -> behavior.descriptor().behavior()).collect(java.util.stream.Collectors.toSet()));
     }
 }

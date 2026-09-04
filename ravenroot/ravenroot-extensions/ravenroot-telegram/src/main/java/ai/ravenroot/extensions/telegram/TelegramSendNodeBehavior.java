@@ -11,6 +11,7 @@ import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -51,6 +52,11 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
     TelegramSendNodeBehavior(CredentialResolver credentials, TelegramProfileResolver profiles, HttpClient client, URI origin,
                              RuntimeControls controls) {
         this(profiles, new TelegramBotApiClient(credentials, client, origin), controls);
+    }
+    TelegramSendNodeBehavior(CredentialResolver credentials, TelegramProfileResolver profiles,
+                             HttpClient client, URI origin, RuntimeControls controls,
+                             ReservedNetworkPolicy destinationPolicy) {
+        this(profiles, new TelegramBotApiClient(credentials, ignored -> client, origin, destinationPolicy), controls);
     }
     private TelegramSendNodeBehavior(TelegramProfileResolver profiles, TelegramBotApiClient botApi,
                                      TelegramRuntimeControls controls) {
@@ -97,7 +103,7 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
             final Payload payload;
             final TelegramRuntimeControls.Admission admission;
             try {
-                settings = Settings.from(configuration, profiles, message.tenantId());
+                settings = Settings.from(configuration, profiles, botApi.destinationPolicy(), message.tenantId());
                 payload = Payload.from(message.payload(), settings);
                 admission = controls.acquire(message.tenantId(), settings.profile, settings.maxConcurrency, actions);
                 if (!admission.acquired()) return CompletableFuture.failedFuture(
@@ -161,8 +167,10 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
     }
 
     private record Settings(TelegramProfile profile, int requestTimeoutMs, int maxTextChars, int maxMediaBytes,
-                            int maxButtons, int maxConcurrency, int retries) {
-        static Settings from(NodeConfiguration configuration, TelegramProfileResolver resolver, String tenant) {
+                            int maxButtons, int maxConcurrency, int retries,
+                            ReservedNetworkPolicy destinationPolicy) {
+        static Settings from(NodeConfiguration configuration, TelegramProfileResolver resolver,
+                             ReservedNetworkPolicy destinationPolicy, String tenant) {
             String name = configuration.property("botProfile").orElseThrow(() -> new TelegramSendException(
                     TelegramSendException.Code.CONFIGURATION, "Telegram bot profile is required"));
             final TelegramProfile profile;
@@ -184,7 +192,7 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
                     tighten(configuration, "maxMediaBytes", profile.maxMediaBytes(), 1),
                     tighten(configuration, "maxButtons", profile.maxButtons(), 0),
                     tighten(configuration, "maxConcurrency", profile.maxConcurrency(), 1),
-                    tighten(configuration, "retries", profile.retries(), 0));
+                    tighten(configuration, "retries", profile.retries(), 0), destinationPolicy);
         }
         private static int tighten(NodeConfiguration configuration, String name, int ceiling, int minimum) {
             String raw = configuration.property(name, "");
@@ -225,7 +233,8 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
             String business = optionalString(map.get("businessConnectionId"), 128);
             if (business != null && !settings.profile.allowBusiness()) throw invalid("Telegram business authority is not allowed");
             List<List<Map<String, Object>>> keyboard = TelegramSendNodeBehavior.keyboard(
-                    map.get("inlineKeyboard"), settings.maxButtons, settings.profile);
+                    map.get("inlineKeyboard"), settings.maxButtons, settings.profile,
+                    settings.destinationPolicy);
             return new Payload(chat, positiveLong(map.get("messageThreadId")), business, text, photo, parseMode, entities,
                     bool(map.get("disableNotification")), bool(map.get("protectContent")), positiveLong(map.get("replyToMessageId")),
                     keyboard, optionalString(map.get("correlationId"), 128) == null ? "" : optionalString(map.get("correlationId"), 128));
@@ -308,7 +317,8 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
         return List.copyOf(out);
     }
 
-    static List<List<Map<String, Object>>> keyboard(Object raw, int maxButtons, TelegramProfile profile) {
+    static List<List<Map<String, Object>>> keyboard(Object raw, int maxButtons, TelegramProfile profile,
+                                                    ReservedNetworkPolicy destinationPolicy) {
         if (raw == null) return List.of(); if (!(raw instanceof List<?> rows) || rows.size() > 20) throw invalid("Telegram keyboard is invalid");
         int count = 0; List<List<Map<String, Object>>> out = new ArrayList<>();
         for (Object rowValue : rows) {
@@ -324,7 +334,9 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
                 if (callback != null) { int bytes = callback.getBytes(StandardCharsets.UTF_8).length; if (bytes < 1 || bytes > 64) throw invalid("Telegram callback exceeds 64 bytes"); item.put("callback_data", callback); }
                 else { URI uri; try { uri = URI.create(url); } catch (RuntimeException malformed) { throw invalid("Telegram button URL is invalid"); }
                     if (!"https".equalsIgnoreCase(uri.getScheme()) || uri.getHost() == null || uri.getUserInfo() != null
-                            || !profile.allowsUrlHost(uri.getHost())) throw invalid("Telegram button URL is not allowed"); item.put("url", uri.toString()); }
+                            || !profile.allowsUrlHost(uri.getHost())
+                            || !literalDestinationAllowed(uri.getHost(), destinationPolicy))
+                        throw invalid("Telegram button URL is not allowed"); item.put("url", uri.toString()); }
                 outputRow.add(item);
             }
             out.add(List.copyOf(outputRow));
@@ -335,6 +347,14 @@ public final class TelegramSendNodeBehavior implements NodeBehavior {
     static boolean validChat(String value) {
         if (value.matches("@[A-Za-z][A-Za-z0-9_]{4,31}")) return true;
         try { return Long.parseLong(value) != 0; } catch (NumberFormatException invalid) { return false; }
+    }
+    static boolean literalDestinationAllowed(String host, ReservedNetworkPolicy destinationPolicy) {
+        try {
+            destinationPolicy.requireAllowedLiteral(host);
+            return true;
+        } catch (SecurityException refused) {
+            return false;
+        }
     }
     private static void requireWellFormed(String value) {
         if (value == null) return;

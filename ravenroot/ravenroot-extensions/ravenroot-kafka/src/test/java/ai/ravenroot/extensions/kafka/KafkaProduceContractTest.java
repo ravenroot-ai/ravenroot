@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.kafka;
 
 import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -10,6 +11,16 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 
 class KafkaProduceContractTest {
+    @Test void reservedLiteralProfileIsRefusedBeforeCredentialOrClientAndExactExceptionReachesClient(){
+        KafkaProfile base=KafkaTestSupport.profile();
+        KafkaProfile literal=new KafkaProfile(base.tenant(),base.name(),java.util.List.of("127.1:9093"),base.clientDnsLookup(),base.tls(),base.saslMechanism(),base.username(),base.credentialRef(),base.clientId(),base.defaultTopic(),base.topics(),base.headers(),base.allowPartition(),base.maxPartition(),base.allowTimestamp(),base.compression(),base.acks(),base.idempotence(),base.retries(),base.maxInFlight(),base.allowAutoCreate(),base.maxConcurrency(),base.maxPerSecond(),base.timeoutMs(),base.maxRecordBytes(),base.bufferMemoryBytes());
+        AtomicInteger credentials=new AtomicInteger();var deniedProtocol=new KafkaTestSupport.FakeProtocol(KafkaTestSupport.Event.ACK);
+        var denied=new KafkaProduceNodeBehavior(ref->{credentials.incrementAndGet();return Optional.of(new SecretValue("secret".toCharArray()));},(tenant,name)->Optional.of(literal),deniedProtocol,new KafkaRuntimeControls(System::nanoTime,Runnable::run,8,8,32),System::nanoTime,ReservedNetworkPolicy.denyAllReserved());
+        assertEquals("PERMANENT_FAILURE",KafkaTestSupport.output(denied.create(KafkaTestSupport.configuration()),KafkaTestSupport.payload()).get("status"));assertEquals(0,credentials.get());assertEquals(0,deniedProtocol.creates.get());
+        var allowedProtocol=new KafkaTestSupport.FakeProtocol(KafkaTestSupport.Event.ACK);
+        var allowed=new KafkaProduceNodeBehavior(ref->Optional.of(new SecretValue("secret".toCharArray())),(tenant,name)->Optional.of(literal),allowedProtocol,new KafkaRuntimeControls(System::nanoTime,Runnable::run,8,8,32),System::nanoTime,ReservedNetworkPolicy.fromCommaSeparatedExceptions("127.1:LOOPBACK"));
+        assertEquals("ACKNOWLEDGED",KafkaTestSupport.output(allowed.create(KafkaTestSupport.configuration()),KafkaTestSupport.payload()).get("status"));assertEquals(1,allowedProtocol.creates.get());
+    }
     @Test void acknowledgesOnceWithSanitizedMetadataAndNeverResubmits(){var p=new KafkaTestSupport.FakeProtocol(KafkaTestSupport.Event.ACK);var out=KafkaTestSupport.output(KafkaTestSupport.behavior(p).create(KafkaTestSupport.configuration()),KafkaTestSupport.payload());assertEquals("ACKNOWLEDGED",out.get("status"));assertEquals(1,out.get("attemptCount"));assertEquals(42L,out.get("offset"));assertEquals(1,p.sends.get());assertEquals(1,p.flushes.get());assertEquals(1,p.closes.get());assertFalse(out.toString().contains(KafkaTestSupport.SECRET));}
     @Test void supportsBoundedKeyJsonValueBase64HeadersPartitionAndTimestamp(){var p=new KafkaTestSupport.FakeProtocol(KafkaTestSupport.Event.ACK);var payload=new LinkedHashMap<String,Object>();payload.put("version","kafka.produce.v1");payload.put("keyJson",Map.of("a",1));payload.put("valueBase64","AAEC");payload.put("partition",3);payload.put("timestamp",5L);payload.put("headers",Map.of("trace","abc"));assertEquals("ACKNOWLEDGED",KafkaTestSupport.output(KafkaTestSupport.behavior(p).create(KafkaTestSupport.configuration()),payload).get("status"));var r=p.records.getFirst();assertEquals(3,r.partition());assertEquals(5L,r.timestamp());assertArrayEquals(new byte[]{0,1,2},r.value());assertEquals("abc",new String(r.headers().get("trace"),java.nio.charset.StandardCharsets.UTF_8));}
     @Test void rejectsUnknownAuthorityAndOversizeBeforeCredentialOrClient(){AtomicInteger credentials=new AtomicInteger();var p=new KafkaTestSupport.FakeProtocol();var b=new KafkaProduceNodeBehavior(ref->{credentials.incrementAndGet();return Optional.of(new SecretValue("x".toCharArray()));},(t,n)->Optional.of(KafkaTestSupport.profile()),p,new KafkaRuntimeControls(System::nanoTime,Runnable::run,8,8,32),System::nanoTime);var payload=new LinkedHashMap<>(KafkaTestSupport.payload());payload.put("topic","forbidden");assertEquals("REJECTED",KafkaTestSupport.output(b.create(KafkaTestSupport.configuration()),payload).get("status"));assertEquals(0,credentials.get());assertEquals(0,p.creates.get());payload=new LinkedHashMap<>(KafkaTestSupport.payload());payload.put("headers",Map.of("forbidden","x"));assertEquals("REJECTED",KafkaTestSupport.output(b.create(KafkaTestSupport.configuration()),payload).get("status"));assertEquals(0,credentials.get());}

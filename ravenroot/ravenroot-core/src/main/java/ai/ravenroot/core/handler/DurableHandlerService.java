@@ -230,7 +230,8 @@ public final class DurableHandlerService {
 
     /** Tool approvals are settled only by their dedicated scope-checking reference monitor. */
     private static boolean reserved(String handlerName) {
-        return ai.ravenroot.core.approval.ToolApprovalService.HANDLER_NAME.equals(handlerName);
+        return ai.ravenroot.core.approval.ToolApprovalService.HANDLER_NAME.equals(handlerName)
+                || ai.ravenroot.core.humantask.HumanTaskService.HANDLER_NAME.equals(handlerName);
     }
 
     // ---------------------------------------------------------------- durable write

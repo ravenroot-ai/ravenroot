@@ -30,6 +30,11 @@ public final class ExecutionBatch {
     private final List<HandlerTransition> handlerTransitions;
     private final List<ToolApprovalRegistration> toolApprovalsToRegister;
     private final List<ToolApprovalTransition> toolApprovalTransitions;
+    private final List<AgentBudgetOperation> agentBudgetOperations;
+    private final List<HumanTaskRegistration> humanTasksToRegister;
+    private final List<HumanTaskTransition> humanTaskTransitions;
+    private final List<ExecutionPauseRegistration> executionPausesToRegister;
+    private final List<ExecutionPauseTransition> executionPauseTransitions;
 
     private ExecutionBatch(Builder builder) {
         this.key = builder.key;
@@ -45,6 +50,11 @@ public final class ExecutionBatch {
         this.handlerTransitions = List.copyOf(builder.handlerTransitions);
         this.toolApprovalsToRegister = List.copyOf(builder.toolApprovalsToRegister);
         this.toolApprovalTransitions = List.copyOf(builder.toolApprovalTransitions);
+        this.agentBudgetOperations = List.copyOf(builder.agentBudgetOperations);
+        this.humanTasksToRegister = List.copyOf(builder.humanTasksToRegister);
+        this.humanTaskTransitions = List.copyOf(builder.humanTaskTransitions);
+        this.executionPausesToRegister = List.copyOf(builder.executionPausesToRegister);
+        this.executionPauseTransitions = List.copyOf(builder.executionPauseTransitions);
         // Every operation category is named here, and the guard has to grow with each one. An origin
         // counts as an operation: recording a deployment, workload or correlation identity changes
         // stored state and is a legitimate write on its own, which is what lets a caller that learns
@@ -55,7 +65,10 @@ public final class ExecutionBatch {
                 && idempotency == null && events.isEmpty() && origin.isEmpty()
                 && handlersToRegister.isEmpty() && handlerTransitions.isEmpty()
                 && toolApprovalsToRegister.isEmpty()
-                && toolApprovalTransitions.isEmpty()) {
+                && toolApprovalTransitions.isEmpty()
+                && humanTasksToRegister.isEmpty() && humanTaskTransitions.isEmpty()
+                && executionPausesToRegister.isEmpty() && executionPauseTransitions.isEmpty()
+                && agentBudgetOperations.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -247,14 +260,62 @@ public final class ExecutionBatch {
         return handlerTransitions;
     }
 
-    /** Tool approvals registered atomically with this batch's execution changes. */
+    /**
+     * Tool approvals registered atomically with this batch's execution changes.
+     * @return immutable registrations in insertion order
+     */
     public List<ToolApprovalRegistration> toolApprovalsToRegister() {
         return toolApprovalsToRegister;
     }
 
-    /** Tool-approval lifecycle changes applied atomically with this batch. */
+    /**
+     * Tool-approval lifecycle changes applied atomically with this batch.
+     * @return immutable transitions in insertion order
+     */
     public List<ToolApprovalTransition> toolApprovalTransitions() {
         return toolApprovalTransitions;
+    }
+
+    /**
+     * Agent authority and budget mutations applied atomically with this batch.
+     * @return immutable operations in insertion order
+     */
+    public List<AgentBudgetOperation> agentBudgetOperations() { return agentBudgetOperations; }
+
+    /**
+     * Human tasks registered atomically with this batch's execution changes.
+     *
+     * @return immutable registrations in insertion order.
+     */
+    public List<HumanTaskRegistration> humanTasksToRegister() {
+        return humanTasksToRegister;
+    }
+
+    /**
+     * Human-task lifecycle changes applied atomically with this batch.
+     *
+     * @return immutable transitions in insertion order.
+     */
+    public List<HumanTaskTransition> humanTaskTransitions() {
+        return humanTaskTransitions;
+    }
+
+    /**
+     * Operator holds committed atomically with this batch's execution changes.
+     *
+     * @return immutable registrations in insertion order.
+     */
+    public List<ExecutionPauseRegistration> executionPausesToRegister() {
+        return executionPausesToRegister;
+    }
+
+    /**
+     * Hold settlements applied atomically with this batch.
+     *
+     * @return immutable transitions in insertion order.
+     */
+    public List<ExecutionPauseTransition> executionPauseTransitions() {
+        return executionPauseTransitions;
     }
 
 /**
@@ -274,6 +335,11 @@ public final class ExecutionBatch {
         private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
         private final List<ToolApprovalRegistration> toolApprovalsToRegister = new ArrayList<>();
         private final List<ToolApprovalTransition> toolApprovalTransitions = new ArrayList<>();
+        private final List<AgentBudgetOperation> agentBudgetOperations = new ArrayList<>();
+        private final List<ExecutionPauseRegistration> executionPausesToRegister = new ArrayList<>();
+        private final List<ExecutionPauseTransition> executionPauseTransitions = new ArrayList<>();
+        private final List<HumanTaskRegistration> humanTasksToRegister = new ArrayList<>();
+        private final List<HumanTaskTransition> humanTaskTransitions = new ArrayList<>();
 
         private Builder(ExecutionKey key) {
             if (key == null) throw new IllegalArgumentException("key cannot be null");
@@ -408,17 +474,84 @@ public final class ExecutionBatch {
             return this;
         }
 
-        /** Registers one exact tool-approval request in this transaction. */
+        /**
+         * Registers one exact tool-approval request in this transaction.
+         * @param registration immutable approval request
+         * @return this builder
+         */
         public Builder registerToolApproval(ToolApprovalRegistration registration) {
             if (registration == null) throw new IllegalArgumentException("registration cannot be null");
             toolApprovalsToRegister.add(registration);
             return this;
         }
 
-        /** Applies one tool-approval lifecycle transition in this transaction. */
+        /**
+         * Applies one tool-approval lifecycle transition in this transaction.
+         * @param transition transition to apply
+         * @return this builder
+         */
         public Builder applyToolApproval(ToolApprovalTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             toolApprovalTransitions.add(transition);
+            return this;
+        }
+
+        /**
+         * Adds one ordered agent authority/budget mutation to this transaction.
+         * @param operation operation to apply
+         * @return this builder
+         */
+        public Builder applyAgentBudget(AgentBudgetOperation operation) {
+            if (operation == null) throw new IllegalArgumentException("operation cannot be null");
+            agentBudgetOperations.add(operation);
+            return this;
+        }
+
+        /**
+         * Registers one first-class durable human task in this transaction.
+         *
+         * @param registration immutable task registration.
+         * @return this builder.
+         */
+        public Builder registerHumanTask(HumanTaskRegistration registration) {
+            if (registration == null) throw new IllegalArgumentException("registration cannot be null");
+            humanTasksToRegister.add(registration);
+            return this;
+        }
+
+        /**
+         * Applies one generation-fenced human-task transition in this transaction.
+         *
+         * @param transition generation-fenced lifecycle transition.
+         * @return this builder.
+         */
+        public Builder applyHumanTask(HumanTaskTransition transition) {
+            if (transition == null) throw new IllegalArgumentException("transition cannot be null");
+            humanTaskTransitions.add(transition);
+            return this;
+        }
+
+        /**
+         * Commits one durable operator hold in this transaction.
+         *
+         * @param registration immutable hold registration.
+         * @return this builder.
+         */
+        public Builder registerExecutionPause(ExecutionPauseRegistration registration) {
+            if (registration == null) throw new IllegalArgumentException("registration cannot be null");
+            executionPausesToRegister.add(registration);
+            return this;
+        }
+
+        /**
+         * Settles one durable operator hold in this transaction.
+         *
+         * @param transition compare-and-set hold settlement.
+         * @return this builder.
+         */
+        public Builder applyExecutionPause(ExecutionPauseTransition transition) {
+            if (transition == null) throw new IllegalArgumentException("transition cannot be null");
+            executionPauseTransitions.add(transition);
             return this;
         }
 

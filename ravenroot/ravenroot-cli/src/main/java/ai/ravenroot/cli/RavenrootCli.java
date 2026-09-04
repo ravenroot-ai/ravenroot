@@ -212,6 +212,12 @@ public final class RavenrootCli {
         var view = backend.result(args[1]);
         output.println("execution-id=" + view.executionId());
         output.println("status=" + view.status());
+        // Printed unconditionally, beside status rather than folded into it, for the reason
+        // ExecutionOutcome#paused's own Javadoc gives: status alone cannot say a RUNNING execution is
+        // deliberately holding rather than merely in progress, and a reader who cannot tell the two
+        // apart needs an always-present line, not one that appears only on the surprising case. Always
+        // false once status is terminal, matching that same contract.
+        output.println("paused=" + view.paused());
         output.println("degraded=" + view.degraded());
         // Degraded must stay visible even when nobody thought to ask: unresolved pass-through defaults
         // are a correctness signal, not a footnote, so they get their own line whenever there are any.
@@ -276,7 +282,8 @@ public final class RavenrootCli {
                     + "\tprocess-instance-id=" + execution.processInstanceId()
                     + "\texecution-id=" + execution.executionId()
                     + "\tgraph-version=" + sanitizeForConsole(execution.graphVersion())
-                    + "\tstarted-at=" + execution.startedAt());
+                    + "\tstarted-at=" + execution.startedAt()
+                    + "\tpaused=" + execution.paused());
         }
         return 0;
     }

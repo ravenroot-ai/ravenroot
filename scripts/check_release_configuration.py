@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.central_registry import PUBLISHABLE_ARTIFACTS, publishable_artifacts
+from scripts.check_extension_pack import check_pack
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,7 @@ def required_text(root: ET.Element, path: str, expected: str) -> None:
 
 
 def check_pom() -> None:
+    check_pack()
     project = ET.parse(ROOT / "ravenroot/pom.xml").getroot()
     required_text(project, "m:url", "https://ravenroot.ai")
     required_text(project, "m:licenses/m:license/m:name", "Apache License, Version 2.0")
@@ -131,6 +133,8 @@ def check_workflows() -> None:
         raise ValueError("ordinary CI must not possess release credentials or package authority")
     if ci.count("python3 -m unittest scripts.tests.test_release_registries") != 2:
         raise ValueError("OCI, Central, and GitHub Release reconciliation tests must run in both CI tiers")
+    if ci.count("python3 -m unittest scripts.tests.test_extension_pack") != 2:
+        raise ValueError("the extension-pack membership contract must run in both CI tiers")
 
     authorize = workflows["authorize-release.yml"]
     if "secrets." in authorize or "environment:" in authorize or "pull_request_target" in authorize:
@@ -165,6 +169,7 @@ def check_workflows() -> None:
         "central_registry.py validate-bundle",
         "central_registry.py build-bundle",
         "central_registry.py publish-bundle",
+        "check_extension_pack.py --sbom",
         "oci_registry.py validate-local",
         "oci_registry.py reconcile",
         "oci_registry.py verify-public",

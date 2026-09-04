@@ -534,7 +534,121 @@ final class SqliteSchema {
                 )
                 """,
                 "CREATE INDEX tool_approval_pending_expiry ON tool_approval "
-                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")));
+                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")),
+                new SchemaMigration(9, "first-class durable human tasks", List.of(
+                """
+                CREATE TABLE human_task (
+                    tenant_id               TEXT    NOT NULL,
+                    process_instance_id     TEXT    NOT NULL,
+                    task_id                 TEXT    NOT NULL,
+                    traversal_id            TEXT    NOT NULL,
+                    invocation_id           TEXT    NOT NULL,
+                    attempt_id              TEXT    NOT NULL,
+                    node_id                 TEXT    NOT NULL,
+                    correlation_key         TEXT    NOT NULL,
+                    deduplication_key       TEXT    NOT NULL,
+                    title                   TEXT    NOT NULL,
+                    description             TEXT    NOT NULL,
+                    response_content_type   TEXT    NOT NULL,
+                    response_schema         TEXT    NOT NULL,
+                    response_schema_version TEXT    NOT NULL,
+                    response_kind           TEXT    NOT NULL,
+                    response_max_bytes      INTEGER NOT NULL,
+                    required_roles          TEXT    NOT NULL,
+                    required_scopes         TEXT    NOT NULL,
+                    requester_request_id    TEXT    NOT NULL,
+                    requester_subject       TEXT    NOT NULL,
+                    requester_principal_type TEXT   NOT NULL,
+                    requester_issuer        TEXT    NOT NULL,
+                    graph_version_pin       TEXT    NOT NULL,
+                    escalate_at_epoch_second INTEGER,
+                    escalate_at_nano         INTEGER,
+                    expires_at_epoch_second INTEGER NOT NULL,
+                    expires_at_nano         INTEGER NOT NULL,
+                    resolved_outcome        TEXT    NOT NULL,
+                    denied_outcome          TEXT    NOT NULL,
+                    expired_outcome         TEXT    NOT NULL,
+                    cancelled_outcome       TEXT    NOT NULL,
+                    status                  TEXT    NOT NULL,
+                    actor                   TEXT    NOT NULL,
+                    generation              INTEGER NOT NULL,
+                    revision                INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, task_id),
+                    UNIQUE (tenant_id, deduplication_key),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                "CREATE UNIQUE INDEX human_task_live_correlation ON human_task "
+                        + "(tenant_id, correlation_key) WHERE status IN ('WAITING', 'ESCALATED')",
+                "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")),
+                // A hold is a child of its process instance and dies with it, like every other
+                // durable decision record here. It carries its own continuation because a handler
+                // by contract carries none, and the continuation is the only reason a held
+                // traversal can be continued at all by a process that did not take the hold.
+                new SchemaMigration(10, "durable operator holds on traversals", List.of(
+                """
+                CREATE TABLE execution_pause (
+                    tenant_id                TEXT    NOT NULL,
+                    process_instance_id      TEXT    NOT NULL,
+                    pause_id                 TEXT    NOT NULL,
+                    position                 INTEGER NOT NULL,
+                    traversal_id             TEXT    NOT NULL,
+                    after_invocation_id      TEXT    NOT NULL,
+                    node_id                  TEXT    NOT NULL,
+                    command_directive        TEXT    NOT NULL,
+                    command_name             TEXT    NOT NULL,
+                    requester_request_id     TEXT    NOT NULL,
+                    requester_subject        TEXT    NOT NULL,
+                    requester_principal_type TEXT    NOT NULL,
+                    requester_issuer         TEXT    NOT NULL,
+                    graph_version_pin        TEXT    NOT NULL,
+                    continuation_version     INTEGER NOT NULL,
+                    continuation             BLOB    NOT NULL,
+                    continuation_digest      TEXT    NOT NULL,
+                    status                   TEXT    NOT NULL,
+                    actor                    TEXT    NOT NULL,
+                    revision                 INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, pause_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                // The uniqueness that makes "is this traversal held" a single deterministic answer
+                // for a process that has just started and knows only a traversal id. Settled holds
+                // are excluded so a traversal resumed and held again resolves to its current hold
+                // rather than to its history.
+                "CREATE UNIQUE INDEX execution_pause_held_traversal ON execution_pause "
+                        + "(tenant_id, traversal_id) WHERE status = 'HELD'",
+                "CREATE INDEX execution_pause_by_traversal ON execution_pause "
+                        + "(tenant_id, traversal_id)")),
+                new SchemaMigration(11, "process-rooted agent authority budgets", List.of(
+                """
+                CREATE TABLE agent_authority_budget (
+                    tenant_id            TEXT NOT NULL,
+                    process_instance_id  TEXT NOT NULL,
+                    aggregate            BLOB NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """)),
+                new SchemaMigration(12, "store-global agent authority control epoch", List.of(
+                """
+                CREATE TABLE agent_authority_control (
+                    singleton             INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    state                 TEXT    NOT NULL CHECK(state IN ('ACTIVE', 'KILLED')),
+                    epoch                 INTEGER NOT NULL CHECK(epoch >= 0),
+                    changed_at_epoch_second INTEGER NOT NULL,
+                    changed_at_nano         INTEGER NOT NULL
+                )
+                """,
+                "INSERT INTO agent_authority_control "
+                        + "(singleton, state, epoch, changed_at_epoch_second, changed_at_nano) "
+                        + "VALUES (1, 'ACTIVE', 0, 0, 0)")),
+                new SchemaMigration(13, "agent authority kill release aggregate", List.of(
+                "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
+                        + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")));
     }
 
     static int currentVersion() {

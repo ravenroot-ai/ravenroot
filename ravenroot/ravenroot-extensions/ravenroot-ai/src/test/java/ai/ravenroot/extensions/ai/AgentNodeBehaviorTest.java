@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.ai;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageCapability;
+import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
@@ -12,11 +13,15 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,7 +55,8 @@ class AgentNodeBehaviorTest {
     @DisplayName("the behavior requires managed HTTP and server-side tool authorization")
     void theBehaviorRequiresManagedBoundaries() {
         assertEquals(java.util.Set.of(NodePackageCapability.OUTBOUND_HTTP,
-                        NodePackageCapability.TOOL_AUTHORIZATION),
+                        NodePackageCapability.TOOL_AUTHORIZATION,
+                        NodePackageCapability.AGENT_RESOURCES),
                 new AgentNodeBehavior().requiredServices());
     }
 
@@ -93,6 +99,84 @@ class AgentNodeBehaviorTest {
         assertEquals(1, result.attributes().get("agent.turns"));
         assertEquals(0, result.attributes().get("agent.toolCalls"));
         assertEquals(0, behavior.admissionEntries());
+    }
+
+    @Test
+    @DisplayName("a provider usage breach fails before its generated answer can leave the node")
+    void aProviderUsageBreachNeverReturnsTheOverBudgetAnswer() {
+        var resources = new AiTestSupport.TrackingAgentResources().failingSettlement(
+                new NodePackageServiceException(NodePackageServiceException.Reason.BUDGET_EXHAUSTED));
+        var http = new AiTestSupport.ScriptedHttp().then(
+                AiTestSupport.answersUsing("must-not-escape", 101, 20));
+        http.resources(resources);
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        AgentException refusal = failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(AgentException.Code.TOKEN_BUDGET_EXHAUSTED, refusal.code());
+        assertEquals(1, http.calls());
+        assertEquals(0, resources.completes.get());
+        assertEquals(1, resources.failedAttempts.get());
+    }
+
+    @Test
+    @DisplayName("the exposed result waits for durable resource terminalization")
+    void resultCompletionFollowsResourceCompletion() throws Exception {
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var resources = new AiTestSupport.TrackingAgentResources().blockingCompletion(entered, release);
+        var http = new AiTestSupport.ScriptedHttp().then(AiTestSupport.answers("done"));
+        http.resources(resources);
+        NodeAction action = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)))
+                .create(configuration(Map.of("provider", "local", "instructions", "be terse",
+                        "objective", "say hi")), http);
+
+        CompletableFuture<NodeResult> observed = CompletableFuture.supplyAsync(
+                        () -> action.handle(AiTestSupport.message("a payload")))
+                .thenCompose(java.util.function.Function.identity()).toCompletableFuture();
+        assertTrue(entered.await(5, TimeUnit.SECONDS));
+        assertFalse(observed.isDone(),
+                "the runner must not observe node completion before durable resources terminate");
+        release.countDown();
+        assertEquals("done", observed.get(5, TimeUnit.SECONDS).payload());
+        assertEquals(1, resources.completes.get());
+    }
+
+    @Test
+    @DisplayName("the durable permit tightens max tokens and HTTP timeout before model egress")
+    void durablePermitBoundsTheActualOutboundRequest() throws Exception {
+        var resources = new AiTestSupport.TrackingAgentResources(7, Duration.ofMillis(123));
+        var http = new AiTestSupport.ScriptedHttp()
+                .resources(resources)
+                .then(AiTestSupport.answers("done"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        resultOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi",
+                "maxTokens", 64L, "timeoutMs", 5_000)), http));
+
+        var request = (PayloadValue.MapValue) PayloadJson.read(http.bodies().getFirst(), PayloadLimits.DEFAULTS);
+        assertEquals(PayloadValue.of(7L), request.entries().get("max_tokens"));
+        assertEquals(Duration.ofMillis(123), http.deadlines().getFirst());
+    }
+
+    @Test
+    @DisplayName("local request preparation failure releases the held permit without model egress")
+    void localPreparationFailureReleasesBeforeDispatch() {
+        var resources = new AiTestSupport.TrackingAgentResources(7, Duration.ZERO);
+        var http = new AiTestSupport.ScriptedHttp()
+                .resources(resources)
+                .then(AiTestSupport.answers("must not be sent"));
+        var behavior = new AgentNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)));
+
+        failureOf(behavior.create(configuration(Map.of(
+                "provider", "local", "instructions", "be terse", "objective", "say hi")), http));
+
+        assertEquals(0, http.calls());
+        assertEquals(0, resources.modelDispatches.get());
+        assertEquals(1, resources.modelReleases.get());
+        assertEquals(0, resources.modelIndeterminate.get());
     }
 
     @Test
@@ -286,9 +370,14 @@ class AgentNodeBehaviorTest {
 
         // PromptTemplate is shared with llm-prompt and speaks that node's vocabulary. A reader of an
         // agent failure must never have to know the other node exists, so it is translated.
+        var resources = new AiTestSupport.TrackingAgentResources();
+        http.resources(resources);
         AgentException refusal = failureOf(behavior.create(configuration(Map.of("provider", "local",
                 "instructions", "be terse", "objective", "summarise {{payload.missing}}")), http));
         assertEquals(AgentException.Code.TEMPLATE_UNRENDERABLE, refusal.code());
+        assertEquals(1, resources.admissions.get());
+        assertEquals(1, resources.cancels.get(),
+                "a constructor-time refusal must cancel its already-admitted durable grant");
     }
 
     @Test

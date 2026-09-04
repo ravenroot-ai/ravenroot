@@ -8,6 +8,7 @@ import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 import jakarta.mail.Address;
 import jakarta.mail.Message;
@@ -51,6 +52,7 @@ public final class MailSendNodeBehavior implements NodeBehavior {
     private final MailProfileResolver profiles;
     private final SecretCopy secretCopy;
     private final PasswordString passwordString;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public MailSendNodeBehavior() { this(new EnvironmentMailCredentialResolver(), new EnvironmentMailProfileResolver()); }
     public MailSendNodeBehavior(CredentialResolver credentials) { this(credentials, new EnvironmentMailProfileResolver()); }
@@ -59,10 +61,17 @@ public final class MailSendNodeBehavior implements NodeBehavior {
     }
     MailSendNodeBehavior(CredentialResolver credentials, MailProfileResolver profiles,
                          SecretCopy secretCopy, PasswordString passwordString) {
+        this(credentials, profiles, secretCopy, passwordString,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+    MailSendNodeBehavior(CredentialResolver credentials, MailProfileResolver profiles,
+                         SecretCopy secretCopy, PasswordString passwordString,
+                         ReservedNetworkPolicy destinationPolicy) {
         this.credentials = credentials;
         this.profiles = profiles;
         this.secretCopy = secretCopy;
         this.passwordString = passwordString;
+        this.destinationPolicy = java.util.Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public NodeTypeDescriptor descriptor() {
@@ -122,7 +131,7 @@ public final class MailSendNodeBehavior implements NodeBehavior {
         return message -> {
             final Settings settings;
             try {
-                settings = Settings.from(configuration, profiles, message.tenantId());
+                settings = Settings.from(configuration, profiles, destinationPolicy, message.tenantId());
                 if (!MAIL_SLOTS.tryAcquire()) return CompletableFuture.failedFuture(new MailSendException(MailSendException.Code.CAPACITY_UNAVAILABLE, "Mail delivery capacity is unavailable"));
                 Admission admission = Admission.acquire(message.tenantId(), settings, actionSlots);
                 if (!admission.acquired()) { MAIL_SLOTS.release(); return CompletableFuture.failedFuture(new MailSendException(MailSendException.Code.CAPACITY_UNAVAILABLE, "Mail delivery capacity is unavailable")); }
@@ -345,11 +354,17 @@ public final class MailSendNodeBehavior implements NodeBehavior {
                             int maxRecipients, int maxHeaders, int maxAttachments, int maxAttachmentBytes, int maxTotalAttachmentBytes,
                             int maxEncodedAttachmentBytes, int maxBodyChars, int maxHeaderChars, int maxConcurrency) {
         static Settings from(NodeConfiguration c, MailProfileResolver profiles, String tenant) {
+            return from(c, profiles, ReservedNetworkPolicy.fromEnvironment(System.getenv()), tenant);
+        }
+        static Settings from(NodeConfiguration c, MailProfileResolver profiles,
+                             ReservedNetworkPolicy destinationPolicy, String tenant) {
             if (!safeId(tenant)) throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail tenant is invalid");
             String profileName = c.property("mailProfile").orElseThrow(() -> new MailSendException(MailSendException.Code.CONFIGURATION, "A mail profile is required"));
             if (!safeId(profileName)) throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile is invalid");
             MailProfile profile = profiles.resolve(tenant, profileName).orElseThrow(() -> new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile is unavailable"));
             if (!profile.tenant().equals(tenant) || !profile.name().equals(profileName)) throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile binding is invalid");
+            try { destinationPolicy.requireAllowedLiteral(profile.host()); }
+            catch (SecurityException refused) { throw new MailSendException(MailSendException.Code.CONFIGURATION, "Mail profile is unavailable"); }
             if (profile.securityMode().equals("SMTP") && (!profile.allowPlaintext() || !profile.authUsername().isBlank()
                     || !Set.of("localhost", "127.0.0.1", "::1").contains(profile.host())))
                 throw new MailSendException(MailSendException.Code.CONFIGURATION, "Plain SMTP is restricted to an unauthenticated local profile");

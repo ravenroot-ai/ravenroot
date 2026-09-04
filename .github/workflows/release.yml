@@ -157,6 +157,7 @@ jobs:
           output_timestamp=$(git show -s --format=%cI '${{ needs.validate.outputs.commit }}')
           mvn -B --no-transfer-progress -Prelease -DskipTests -Dgpg.signer=bc \
             -Dravenroot.release.outputTimestamp="$output_timestamp" clean verify
+          python3 ../scripts/check_extension_pack.py --sbom target/ravenroot-sbom.json
           python3 ../scripts/central_registry.py build-bundle \
             --version '${{ needs.validate.outputs.version }}' \
             --bundle target/central-publishing/central-bundle.zip

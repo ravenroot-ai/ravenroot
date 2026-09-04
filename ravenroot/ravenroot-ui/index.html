@@ -763,6 +763,15 @@
   </div>
 </dialog>
 
+<dialog id="close-all-documents-dialog" class="unsaved-document-dialog close-all-documents-dialog"
+        aria-labelledby="close-all-documents-title" aria-describedby="close-all-documents-description">
+  <h2 id="close-all-documents-title"></h2>
+  <p id="close-all-documents-description"></p>
+  <ul id="close-all-documents-list" class="close-all-documents-list"></ul>
+  <p id="close-all-documents-status" class="close-all-documents-status" aria-live="polite"></p>
+  <div id="close-all-documents-actions" class="unsaved-document-actions"></div>
+</dialog>
+
 <!-- Closing a document is NOT Stop: the process-local deployment (or source-session listener)
      this document started keeps running in this server process, owned by the server, until an
      explicit Stop. Without this dialog that distinction lived only in a code comment on

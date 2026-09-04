@@ -158,10 +158,26 @@ public final class RavenrootServerMain {
         // never be allowed to replace the real diagnosis with an unrelated audit failure. See
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
+        var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
         ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
+                ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
+                        approvalStore, java.time.Clock.systemUTC(),
+                        ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration
+                                .fromEnvironment(System.getenv()),
+                        agentBudgetTelemetry)
+                : null;
         ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
                 ? new ai.ravenroot.core.approval.ToolApprovalService(
+                        approvalStore, java.time.Clock.systemUTC(), agentBudgets == null
+                                ? ai.ravenroot.core.approval.ToolApprovalBudgetHooks.none()
+                                : agentBudgets) : null;
+        ai.ravenroot.core.humantask.HumanTaskService humanTasks = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.HUMAN_TASKS)
+                ? new ai.ravenroot.core.humantask.HumanTaskService(
                         approvalStore, java.time.Clock.systemUTC()) : null;
         ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings = toolApprovals == null
                 ? null : ai.ravenroot.server.approval.ToolApprovalConfiguration
@@ -169,7 +185,7 @@ public final class RavenrootServerMain {
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
-                toolApprovals, toolApprovalSettings);
+                toolApprovals, toolApprovalSettings, agentBudgets, humanTasks);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -222,26 +238,38 @@ public final class RavenrootServerMain {
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
-                executionStoreOwner.graphDefinitionStore(), toolApprovals);
+                executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks, agentBudgets);
         final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
-        if (toolApprovals == null) {
+        if (toolApprovals == null && humanTasks == null) {
             approvalRecovery = null;
         } else {
             var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
                     .fromEnvironment(System.getenv());
-            toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
-            String recoveryWorker = "ravenroot-tool-approval-" + java.util.UUID.randomUUID();
-            var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
-                    executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals,
-                    engine, behaviors, monitor,
-                    executionIdentities, recoveryWorker, recoveryConfiguration.leaseTtl());
-            var approvalDispatcher = new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
-                    executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor);
+            String recoveryWorker = "ravenroot-durable-decision-" + java.util.UUID.randomUUID();
+            var dispatchers = new java.util.ArrayList<ai.ravenroot.core.recovery.RecoveryDispatcher>();
+            if (toolApprovals != null) {
+                toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
+                var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
+                        executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
+                        engine, behaviors, monitor, executionIdentities, recoveryWorker,
+                        recoveryConfiguration.leaseTtl(), agentBudgets);
+                dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
+                        executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor));
+            }
+            if (humanTasks != null) {
+                humanTasks.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
+                var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
+                        executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
+                        engine, behaviors, monitor, executionIdentities, recoveryWorker,
+                        recoveryConfiguration.leaseTtl(), agentBudgets);
+                dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
+                        executionStore, humanTasks, continuationExecutor));
+            }
             var recoveryService = new ai.ravenroot.core.recovery.ExecutionRecoveryService(
                     executionStore, recoveryConfiguration.tenantIds(), recoveryWorker,
                     recoveryConfiguration.batchLimit(), recoveryConfiguration.leaseTtl(),
                     ai.ravenroot.core.recovery.RepeatabilityDeclarations.NONE_DECLARED,
-                    approvalDispatcher);
+                    new ai.ravenroot.core.recovery.CompositeRecoveryDispatcher(dispatchers));
             approvalRecovery = new ai.ravenroot.server.approval.ToolApprovalRecoveryDriver(
                     recoveryService, recoveryConfiguration.interval());
         }
@@ -353,6 +381,12 @@ public final class RavenrootServerMain {
                 if (toolApprovals != null) {
                     server.installToolApprovals(toolApprovals, approvalRecovery::sweepTenant);
                 }
+                if (humanTasks != null) {
+                    server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant);
+                }
+                if (agentBudgets != null) {
+                    server.installAgentAuthorityControl(agentBudgets);
+                }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(
                             ai.ravenroot.server.ingress.ManagedIngressRegistry ingress) {
@@ -385,7 +419,8 @@ public final class RavenrootServerMain {
         java.util.Optional<AutoCloseable> telemetry;
         try {
             telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
-                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor);
+                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor,
+                    agentBudgetTelemetry);
         } catch (RuntimeException | Error telemetryFailure) {
             startupHandle.close();
             userCredentials.close();
@@ -566,13 +601,18 @@ public final class RavenrootServerMain {
             AuditTrailPluginActivationSink auditSink,
             ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
             ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
-            ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings) {
+            ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+            ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
                     new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
-                    toolAuditSink, toolApprovals, toolApprovalSettings);
+                    toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
-                    BehaviorRegistry.standard(environment), System.getenv(), services);
+                    BehaviorRegistry.standard(environment,
+                            ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
+                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), humanTasks),
+                    System.getenv(), services);
         } catch (RuntimeException activationFailed) {
             var diagnosis = PluginActivationDiagnostics.diagnose(activationFailed);
             System.err.println(diagnosis.consoleMessage());

@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.mail.imap;
 
 import ai.ravenroot.api.security.EnvironmentKeyCodec;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -138,7 +139,7 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
         CREDENTIAL_REF_BLANK, DUPLICATE_FOLDER, FOLDERS_EMPTY, CONNECT_TIMEOUT_FORMAT,
         CONNECT_TIMEOUT_RANGE, READ_TIMEOUT_FORMAT, READ_TIMEOUT_RANGE, CONCURRENCY_FORMAT,
         CONCURRENCY_RANGE, MAX_RESULTS_FORMAT, MAX_RESULTS_RANGE, PREVIEW_CHARS_FORMAT,
-        PREVIEW_CHARS_RANGE, RECORD_POLICY
+        PREVIEW_CHARS_RANGE, RESERVED_DESTINATION, RECORD_POLICY
     }
 
     /** Mirrors {@link ImapProfile}'s own membership test exactly, including its case sensitivity. */
@@ -147,10 +148,14 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
     private static final System.Logger LOGGER = System.getLogger("ai.ravenroot.mail.imap.profile.rejected");
 
     private final Map<String, String> env;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public EnvironmentImapProfileResolver() { this(System.getenv()); }
 
-    EnvironmentImapProfileResolver(Map<String, String> env) { this.env = Map.copyOf(env); }
+    EnvironmentImapProfileResolver(Map<String, String> env) {
+        this.env = Map.copyOf(env);
+        this.destinationPolicy = ReservedNetworkPolicy.fromEnvironment(env);
+    }
 
     @Override public Optional<ImapProfile> resolve(String tenant, String profile) {
         if (!safe(tenant) || !safe(profile)) return Optional.empty();
@@ -165,6 +170,8 @@ public final class EnvironmentImapProfileResolver implements ImapProfileResolver
         if (p.length != FIELDS) return rejected(tenant, profile, Rejection.FIELD_COUNT);
 
         if (p[0].isBlank()) return rejected(tenant, profile, Rejection.HOST_BLANK);
+        try { destinationPolicy.requireAllowedLiteral(p[0]); }
+        catch (SecurityException refused) { return rejected(tenant, profile, Rejection.RESERVED_DESTINATION); }
         int port;
         try { port = Integer.parseInt(p[1]); }
         catch (NumberFormatException notNumeric) { return rejected(tenant, profile, Rejection.PORT_FORMAT); }

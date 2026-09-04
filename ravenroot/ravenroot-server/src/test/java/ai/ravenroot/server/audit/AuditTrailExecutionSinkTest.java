@@ -68,8 +68,34 @@ class AuditTrailExecutionSinkTest {
     }
 
     /**
+     * Pause and resume are deliberately not decisional here, and this is where that stays decided.
+     *
+     * <p>They are control actions over somebody's work, so they plainly belong in an audit trail —
+     * and they are already in one. {@code AuthorizedRavenrootApplication} audits every pause and
+     * resume at the point it authorizes them, with the acting principal's own identity attached.
+     * This sink cannot match that: no subject reaches {@link ExecutionEvent}, so it records
+     * {@link AuditTrailExecutionSink#PRINCIPAL_NOT_CARRIED} in place of one. Admitting these types
+     * here would therefore write a second, weaker record of an act that is already recorded properly,
+     * and an investigator reading the trail would find two entries per pause of which one cannot say
+     * who did it.</p>
+     *
+     * <p>Pinned as its own test rather than left to the count above, because a count is satisfied by
+     * any four types and would not notice these two being swapped in for two others.</p>
+     */
+    @Test
+    void pauseAndResumeAreNotDecisionalBecauseTheAuthorizedControlPathAlreadyAuditsThemWithAPrincipal() {
+        try (var trail = trail()) {
+            var sink = new AuditTrailExecutionSink(trail);
+            sink.accept(eventOf(ExecutionEventType.EXECUTION_PAUSED));
+            sink.accept(eventOf(ExecutionEventType.EXECUTION_RESUMED));
+            assertEquals(List.of(), trail.read(TENANT, 0, 100),
+                    "a pause is audited by the control path that authorized it, not a second time here");
+        }
+    }
+
+    /**
      * The other half of "adds a destination, does not move one": a plain collector registered on the
-     * same stream as the audit sink must see every event, including the six the audit sink discards.
+     * same stream as the audit sink must see every event, including every type the audit sink discards.
      * Nothing about subscribing the new sink may suppress what another subscriber receives —
      * {@code ExecutionMonitor}'s own fan-out already guarantees this structurally, and this test is
      * what makes that guarantee checkable for this specific pairing rather than assumed.

@@ -161,6 +161,13 @@ public record NodePropertyDescriptor(
      * place as {@code required}, {@code type} and {@code allowedValues}, and lets any node package
      * that genuinely has a deployment-configured adapter say so, instead of the property being a
      * privilege of two built-ins.</p>
+     *
+     * <h4>Behavior obligation</h4>
+     * <p>Because blank is admitted deliberately, the behavior must still construct an action for a
+     * blank binding. Reaching that action must return an exceptionally completed stage without a
+     * {@code NodeResult}; returning fallback content would turn “unconfigured” into an implicit
+     * grant. {@code NodeBehaviorContract} discovers adapter bindings from this flag and checks that
+     * rule for every node package.</p>
      * @param name stable schema key
      * @param displayName editor-facing label
      * @param type expected identifier representation

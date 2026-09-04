@@ -25,6 +25,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -37,6 +38,7 @@ public final class StorageManagedServicesHarness {
         NodePackageEgressPolicy.Origin origin = new NodePackageEgressPolicy.Origin("https", "localhost", 443);
         NodePackageEgressPolicy policy = NodePackageEgressPolicy.builder()
                 .allowOrigin("https", "localhost", 443).allowHttpMethod("GET").allowHttpMethod("PUT")
+                .allowHttpMethod("DELETE")
                 .allowRequestHeader("content-type").allowRequestHeader("if-match").allowRequestHeader("if-none-match")
                 .allowResponseHeader("etag").allowResponseHeader("x-amz-version-id")
                 .byteLimits(1024, 1024, 1024).concurrencyLimits(4, 2).maximumDeadline(Duration.ofSeconds(5))
@@ -52,6 +54,27 @@ public final class StorageManagedServicesHarness {
         return new Fixture(services, client, generation, resolution);
     }
 
+    /** Builds the production managed service boundary for a real test S3 origin. */
+    public static NodePackageServices realS3(URI endpoint, HttpClient client,
+                                             String accessKey, String secretKey) {
+        int port = endpoint.getPort() == -1 ? 443 : endpoint.getPort();
+        NodePackageEgressPolicy.Origin origin = new NodePackageEgressPolicy.Origin(
+                endpoint.getScheme(), endpoint.getHost(), port);
+        NodePackageEgressPolicy policy = NodePackageEgressPolicy.builder()
+                .allowOrigin(endpoint.getScheme(), endpoint.getHost(), port)
+                .allowHttpMethod("GET").allowHttpMethod("PUT").allowHttpMethod("DELETE")
+                .allowRequestHeader("content-type").allowRequestHeader("if-match")
+                .allowRequestHeader("if-none-match").allowResponseHeader("etag")
+                .allowResponseHeader("x-amz-version-id")
+                .byteLimits(16 * 1024 * 1024, 16 * 1024 * 1024, 1024)
+                .concurrencyLimits(8, 8).maximumDeadline(Duration.ofSeconds(10))
+                .bindAwsSigV4("assets-s3", origin, "credential/storage", "us-east-1", "s3").build();
+        return ManagedNodePackageServices.builder("ai.ravenroot.extensions.storage", policy,
+                        (packageId, tenant, reference) -> Optional.of(
+                                new SecretValue((accessKey + "\n" + secretKey).toCharArray())))
+                .grant(NodePackageCapability.OUTBOUND_HTTP).clientFactory(() -> client).build();
+    }
+
     public record Fixture(NodePackageServices services, CapturingClient client, AtomicInteger generation,
                           AtomicReference<String> resolution) {
         public void rotate() { generation.incrementAndGet(); }
@@ -59,7 +82,10 @@ public final class StorageManagedServicesHarness {
 
     public static final class CapturingClient extends HttpClient {
         private final AtomicReference<HttpRequest> request = new AtomicReference<>();
+        private final List<HttpRequest> requests = new CopyOnWriteArrayList<>();
+        private final AtomicInteger deletes = new AtomicInteger();
         public HttpRequest request() { return request.get(); }
+        public List<HttpRequest> requests() { return List.copyOf(requests); }
 
         @Override public Optional<CookieHandler> cookieHandler() { return Optional.empty(); }
         @Override public Optional<Duration> connectTimeout() { return Optional.empty(); }
@@ -75,7 +101,8 @@ public final class StorageManagedServicesHarness {
         @Override @SuppressWarnings("unchecked")
         public <T> HttpResponse<T> send(HttpRequest sent, HttpResponse.BodyHandler<T> handler) {
             request.set(sent);
-            return (HttpResponse<T>) response(sent);
+            requests.add(sent);
+            return (HttpResponse<T>) response(sent, deletes);
         }
         @Override public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
                 HttpResponse.BodyHandler<T> handler) { return CompletableFuture.failedFuture(new UnsupportedOperationException()); }
@@ -84,10 +111,33 @@ public final class StorageManagedServicesHarness {
             return CompletableFuture.failedFuture(new UnsupportedOperationException());
         }
 
-        private static HttpResponse<byte[]> response(HttpRequest request) {
-            byte[] body = request.method().equals("GET") ? "managed".getBytes(StandardCharsets.UTF_8) : new byte[0];
+        private static HttpResponse<byte[]> response(HttpRequest request, AtomicInteger deletes) {
+            int status = 200;
+            byte[] body;
+            if (request.method().equals("DELETE")) {
+                status = deletes.getAndIncrement() == 0 ? 204 : 404;
+                body = status == 404 ? "<Error><Message>remote detail</Message></Error>"
+                        .getBytes(StandardCharsets.UTF_8) : new byte[0];
+            } else if (request.uri().getRawQuery() != null
+                    && request.uri().getRawQuery().contains("list-type=2")) {
+                boolean second = request.uri().getRawQuery().contains("continuation-token=");
+                body = (second ? """
+                        <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                          <IsTruncated>false</IsTruncated>
+                          <Contents><Key>tenant-data/folder/second.txt</Key><Size>2</Size></Contents>
+                        </ListBucketResult>
+                        """ : """
+                        <ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                          <IsTruncated>true</IsTruncated><NextContinuationToken>managed+/=cursor</NextContinuationToken>
+                          <Contents><Key>tenant-data/folder/first.txt</Key><Size>1</Size></Contents>
+                        </ListBucketResult>
+                        """).getBytes(StandardCharsets.UTF_8);
+            } else {
+                body = "managed".getBytes(StandardCharsets.UTF_8);
+            }
+            int responseStatus = status;
             return new HttpResponse<>() {
-                @Override public int statusCode() { return 200; }
+                @Override public int statusCode() { return responseStatus; }
                 @Override public HttpRequest request() { return request; }
                 @Override public Optional<HttpResponse<byte[]>> previousResponse() { return Optional.empty(); }
                 @Override public HttpHeaders headers() { return HttpHeaders.of(Map.of(

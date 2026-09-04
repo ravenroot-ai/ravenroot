@@ -194,7 +194,9 @@ class AiBundleEndToEndTest {
                                 .byteLimits(1024 * 1024, 1024 * 1024, 1024)
                                 .concurrencyLimits(4, 2).maximumDeadline(Duration.ofSeconds(10)).build(),
                         (packageId, tenant, reference) -> Optional.empty())
-                .grant(NodePackageCapability.OUTBOUND_HTTP).build();
+                .grant(NodePackageCapability.OUTBOUND_HTTP)
+                .grant(NodePackageCapability.AGENT_RESOURCES)
+                .agentResources(AiTestSupport.unlimitedTestResources()).build();
 
         assertEquals(LlmPromptException.Code.DESTINATION_REFUSED, failureOf(node(narrowed)).code());
         assertEquals(0, endpoint.calls());
@@ -250,7 +252,9 @@ class AiBundleEndToEndTest {
                                 .byteLimits(1024 * 1024, 1024 * 1024, 1024)
                                 .concurrencyLimits(4, 2).maximumDeadline(Duration.ofSeconds(10)).build(),
                         (packageId, tenant, reference) -> Optional.empty())
-                .grant(NodePackageCapability.OUTBOUND_HTTP).build();
+                .grant(NodePackageCapability.OUTBOUND_HTTP)
+                .grant(NodePackageCapability.AGENT_RESOURCES)
+                .agentResources(AiTestSupport.unlimitedTestResources()).build();
 
         ExecutionException raised = assertThrows(ExecutionException.class,
                 () -> agentWithMcp(narrow).handle(AiTestSupport.message("x"))
@@ -279,6 +283,8 @@ class AiBundleEndToEndTest {
                         (packageId, tenant, reference) -> Optional.empty())
                 .grant(NodePackageCapability.OUTBOUND_HTTP)
                 .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .grant(NodePackageCapability.AGENT_RESOURCES)
+                .agentResources(AiTestSupport.unlimitedTestResources())
                 .toolAuthorization(invocation -> new ToolDecision(
                         ToolDecision.Disposition.ALLOW, "test", ""), event -> { })
                 .build();
@@ -358,6 +364,8 @@ class AiBundleEndToEndTest {
                         (packageId, tenant, reference) -> Optional.empty())
                 .grant(NodePackageCapability.OUTBOUND_HTTP)
                 .grant(NodePackageCapability.TOOL_AUTHORIZATION)
+                .grant(NodePackageCapability.AGENT_RESOURCES)
+                .agentResources(AiTestSupport.unlimitedTestResources())
                 .toolAuthorization(invocation -> new ToolDecision(
                         ToolDecision.Disposition.ALLOW, "test", ""), event -> { })
                 .build();

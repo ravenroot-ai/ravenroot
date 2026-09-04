@@ -50,4 +50,23 @@ class StorageUriTest {
         assertDoesNotThrow(() -> StorageUri.destination(profile, "b".repeat(23)));
         assertThrows(StorageException.class, () -> StorageUri.destination(profile, "b".repeat(24)));
     }
+
+    @Test void listAndVersionDeleteKeepProfileScopeAndEncodeQueryComponentsOnce() {
+        StorageProfile profile = StorageTestSupport.profile(Set.of(StorageProfile.Operation.LIST,
+                StorageProfile.Operation.DELETE, StorageProfile.Operation.DELETE_VERSION), 2, 10);
+        assertEquals("https://s3.example.test/bucket-a?list-type=2&max-keys=7"
+                        + "&prefix=tenant-data%2Ffolder&continuation-token=t%2B%2F%3D",
+                StorageUri.listDestination(profile, "folder", 7, "t+/=").toASCIIString());
+        assertEquals("https://s3.example.test/bucket-a/tenant-data/folder/object.txt?versionId=v%2B%2F%3D",
+                StorageUri.deleteDestination(profile, "folder/object.txt", "v+/=").toASCIIString());
+    }
+
+    @Test void listPrefixSharesTheSingleS3KeyByteBudgetWithTheProfilePrefix() {
+        StorageProfile profile = new StorageProfile("assets", URI.create("https://s3.example.test"),
+                "eu-west-1", "bucket-a", "a".repeat(1000), StorageProfile.AddressingStyle.PATH, "sign",
+                Set.of(StorageProfile.Operation.LIST), Set.of(), false, false, 100, 1000, 1, 1);
+        assertDoesNotThrow(() -> StorageUri.listDestination(profile, "b".repeat(23), 1, null));
+        assertThrows(StorageException.class,
+                () -> StorageUri.listDestination(profile, "b".repeat(24), 1, null));
+    }
 }

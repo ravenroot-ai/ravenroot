@@ -48,6 +48,7 @@ import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.GraphVersionSnapshot;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.persistence.InMemoryJoinStore;
+import ai.ravenroot.core.humantask.DurableHumanTaskSuspension;
 import ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension;
 
 import java.time.Clock;
@@ -899,6 +900,9 @@ public final class GraphRunner implements AutoCloseable {
                     if (unwrap(outcome) instanceof VerifiedToolApprovalSuspension verified) {
                         return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
                     }
+                    if (unwrap(outcome) instanceof VerifiedHumanTaskSuspension verified) {
+                        return CompletableFuture.<GraphExecutionResult>failedFuture(verified.signal());
+                    }
                     if (outcome == null) {
                         try {
                             state.executionCompleted();
@@ -992,6 +996,10 @@ public final class GraphRunner implements AutoCloseable {
                                 && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
                             throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
                         }
+                        if (cause instanceof DurableHumanTaskSuspension suspension
+                                && state.acceptsHumanTaskSuspension(suspension.taskId(), delivered)) {
+                            throw new CompletionException(new VerifiedHumanTaskSuspension(suspension));
+                        }
                         state.nodeFailed(invocationId, attemptId, startedEventId);
                         throw new CompletionException(cause);
                     }
@@ -1024,15 +1032,106 @@ public final class GraphRunner implements AutoCloseable {
                     cancelBackoffs(traversalId);
                     try {
                         if (failure == null) state.executionCompleted();
-                        else if (!(outcome instanceof VerifiedToolApprovalSuspension)) state.executionFailed();
+                        else if (!(outcome instanceof VerifiedToolApprovalSuspension)
+                                && !(outcome instanceof VerifiedHumanTaskSuspension)) state.executionFailed();
                     } finally {
                         release(traversalId, coordinator).toCompletableFuture().join();
                     }
                     if (outcome instanceof VerifiedToolApprovalSuspension verified) {
                         throw new CompletionException(verified.signal());
                     }
+                    if (outcome instanceof VerifiedHumanTaskSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
                     if (failure != null) throw new CompletionException(outcome);
                     return succeeded;
+                });
+    }
+
+    /**
+     * Resumes after a settled human task without invoking the task node again. The synthetic
+     * invocation records the durable disposition on the fresh traversal and then enters the same
+     * successor-routing machinery as an ordinary completed node.
+     */
+    public CompletionStage<Void> executeAfterHumanTask(SecurityContext security, UUID processInstanceId,
+                                                       UUID traversalId, String nodeId, String graphVersion,
+                                                       ExecutionRecorder recorder, NodeResult result) {
+        return CompletableFuture.failedFuture(new GraphExecutionContinuationCheckpointException(
+                GraphExecutionContinuationCheckpointException.Reason.LEGACY_BUDGET_UNAVAILABLE));
+    }
+
+    /** Restores the exact pre-suspension graph budget before routing a human decision. */
+    public CompletionStage<Void> executeAfterHumanTask(SecurityContext security, UUID processInstanceId,
+                                                       UUID traversalId, String nodeId, String graphVersion,
+                                                       ExecutionRecorder recorder, NodeResult result,
+                                                       GraphExecutionBudgetSnapshot budgetSnapshot) {
+        java.util.Objects.requireNonNull(result, "result");
+        GraphNode node = graph.node(nodeId);
+        var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
+                processInstanceId, traversalId, nodeCatalogKeys, null, null);
+        ExecutionBudget budget = ExecutionBudget.restore(executionLimits,
+                java.util.Objects.requireNonNull(budgetSnapshot, "budgetSnapshot"));
+        ExecutionBudget.Hop resumedHop = budget.resumeReservedHop();
+        var state = new ExecutionState(processInstanceId, traversalId, node.id(),
+                new BranchLiveness(node.id()), recorder, identity, identitySource, clock,
+                recorder.storedState(), budget);
+        var coordinator = new JoinCoordinator(joinStore, engine.scheduler(), monitor, identity,
+                joinSpecs, clock, timeoutRelinquishedObserver);
+        if (coordinators.putIfAbsent(traversalId, coordinator) != null) {
+            resumedHop.close();
+            return CompletableFuture.failedFuture(
+                    new IllegalStateException("Traversal is already running on this runner"));
+        }
+        activeBudgets.put(traversalId, new ActiveBudget(processInstanceId, budget));
+        state.reentryStarted();
+        monitor.executionStarted(identity);
+        UUID invocationId = identitySource.nextNodeInvocationId();
+        UUID attemptId = identitySource.nextNodeAttemptId();
+        UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
+                NodeCommand.PROCESS, state.traversalAcceptedEventId());
+        monitor.nodeStarted(identity, node.id(), invocationId, attemptId, 0);
+        UUID completedEventId = state.nodeCompleted(invocationId, attemptId, startedEventId, false, false);
+        monitor.nodeCompleted(identity, node.id(), invocationId, attemptId, false,
+                result.outcome(), 0, null);
+        NodeMessage delivered = new NodeMessage(security, processInstanceId, traversalId,
+                invocationId, attemptId, Set.of(), node.id(), result.payload(), result.attributes(),
+                NodeCommand.PROCESS);
+        List<GraphEdge> next = graph.nextEdges(node.id(), result.outcome());
+        if (next.isEmpty() && !"continue".equals(result.outcome())) {
+            next = graph.nextEdges(node.id(), "continue");
+        }
+        resumedHop.close();
+        return dispatchSuccessors(next, node, result, measure(result), delivered, completedEventId,
+                state, identity, coordinator, IterationContext.EMPTY)
+                .handle((ignored, failure) -> {
+                    Throwable outcome = unwrap(failure);
+                    // Human-task re-entry dispatches the same retrying successor trees as the two
+                    // entry paths above. Seal before cancelling and before release wakes a pause
+                    // gate, so no abandoned retry can commit or dispatch through this discarded
+                    // re-entry state.
+                    state.beginClosing();
+                    cancelBackoffs(traversalId);
+                    resumedHop.close();
+                    try {
+                        if (failure == null) {
+                            state.executionCompleted();
+                            monitor.executionCompleted(identity, state.handledFailureNodes());
+                        } else if (!(outcome instanceof VerifiedHumanTaskSuspension)
+                                && !(outcome instanceof VerifiedToolApprovalSuspension)) {
+                            state.executionFailed();
+                            monitor.executionFailed(identity, outcome);
+                        }
+                    } finally {
+                        release(traversalId, coordinator).toCompletableFuture().join();
+                    }
+                    if (outcome instanceof VerifiedHumanTaskSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
+                    if (outcome instanceof VerifiedToolApprovalSuspension verified) {
+                        throw new CompletionException(verified.signal());
+                    }
+                    if (failure != null) throw new CompletionException(outcome);
+                    return null;
                 });
     }
 
@@ -1666,6 +1765,10 @@ public final class GraphRunner implements AutoCloseable {
                         if (failure instanceof DurableToolApprovalSuspension suspension
                                 && state.acceptsApprovalSuspension(suspension.approvalId(), delivered)) {
                             throw new CompletionException(new VerifiedToolApprovalSuspension(suspension));
+                        }
+                        if (failure instanceof DurableHumanTaskSuspension suspension
+                                && state.acceptsHumanTaskSuspension(suspension.taskId(), delivered)) {
+                            throw new CompletionException(new VerifiedHumanTaskSuspension(suspension));
                         }
                         // What the connector said about its own internal loop, read once and reported
                         // on whichever settlement this failure produces. Never inferred: a connector
@@ -2496,6 +2599,21 @@ public final class GraphRunner implements AutoCloseable {
         }
 
         private DurableToolApprovalSuspension signal() {
+            return signal;
+        }
+    }
+
+    /** Marker created only after the recorder confirms this exact human-task wait. */
+    private static final class VerifiedHumanTaskSuspension extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        private final DurableHumanTaskSuspension signal;
+
+        private VerifiedHumanTaskSuspension(DurableHumanTaskSuspension signal) {
+            super(null, null, false, false);
+            this.signal = signal;
+        }
+
+        private DurableHumanTaskSuspension signal() {
             return signal;
         }
     }
@@ -3830,6 +3948,11 @@ public final class GraphRunner implements AutoCloseable {
         /** Accepts a suspension only when this exact delivered invocation is durably waiting. */
         private boolean acceptsApprovalSuspension(UUID approvalId, NodeMessage delivered) {
             return recorder != null && recorder.confirmsToolApproval(approvalId, delivered);
+        }
+
+        /** Accepts only the core signal whose exact delivered attempt is durably waiting. */
+        private boolean acceptsHumanTaskSuspension(UUID taskId, NodeMessage delivered) {
+            return recorder != null && recorder.confirmsHumanTask(taskId, delivered);
         }
 
         /**

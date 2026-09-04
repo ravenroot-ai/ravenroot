@@ -10,6 +10,7 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
@@ -29,6 +30,14 @@ import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.LeaseHandle;
@@ -47,6 +56,7 @@ import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
@@ -2009,6 +2019,9 @@ public abstract class ExecutionStoreContract {
                 new ExecutionStoreFailure.OutcomeUnknown(key, "timed out").retryability());
         assertEquals(Retryability.DETERMINISTIC_REJECT,
                 new ExecutionStoreFailure.Corrupted(key, "bad state").retryability());
+        assertEquals(Retryability.DETERMINISTIC_REJECT,
+                new ExecutionStoreFailure.HumanTaskNotResolvable(UUID.randomUUID(),
+                        HumanTaskStatus.WAITING, HumanTaskStatus.RESOLVED, 1L, 2L).retryability());
 
         // The distinction ADR 0010 section 12 says must never collapse now survives coarsening, per
         // the section 12.1 amendment: a caller dispatching purely on retryability() -- not only one
@@ -2289,6 +2302,188 @@ public abstract class ExecutionStoreContract {
 
     private record ToolApprovalFixture(ExecutionKey key, UUID approvalId,
                                        ToolApprovalRegistration registration) {
+    }
+
+    // ============================================== first-class durable human tasks
+
+    @Test
+    final void humanTaskRoundTripsBoundedPublicContractAndTenantScope() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        HumanTaskFixture fixture = waitingHumanTask(newKey(), UUID.randomUUID(), "human-dedup-1",
+                "human-correlation-1");
+
+        DurableHumanTask stored = await(store().loadHumanTask(
+                fixture.key().tenantId(), fixture.registration().taskId())).orElseThrow();
+        assertEquals(HumanTaskStatus.WAITING, stored.status());
+        assertEquals(1L, stored.generation());
+        assertEquals(fixture.registration(), stored.request());
+        assertTrue(await(store().loadHumanTask("another-tenant", fixture.registration().taskId())).isEmpty(),
+                "another tenant must not learn whether the task exists");
+    }
+
+    @Test
+    final void humanTaskRegistrationIsExactlyOnceAndDeduplicationIsTenantWide() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        HumanTaskFixture fixture = waitingHumanTask(newKey(), UUID.randomUUID(), "human-dedup-1",
+                "human-correlation-1");
+        StoredProcessInstance before = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(before.revision()))
+                .registerHumanTask(fixture.registration()).build()));
+
+        HumanTaskRegistration changed = copyHumanTask(fixture.registration(), UUID.randomUUID(),
+                "human-dedup-1", "human-correlation-2");
+        HumanTaskFixture secondProcess = runningHumanTaskFixture(newKey(), changed);
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(secondProcess.key())
+                        .expecting(RevisionExpectation.exactly(
+                                await(store().load(secondProcess.key())).revision()))
+                        .registerHumanTask(secondProcess.registration()).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+    }
+
+    @Test
+    final void humanTaskTransitionsAreGenerationFencedReplaySafeAndStoreTimed() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        HumanTaskFixture fixture = waitingHumanTask(newKey(), UUID.randomUUID(), "human-dedup-1",
+                "human-correlation-1");
+
+        ExecutionStoreFailure early = failureOf(() -> transitionHumanTask(fixture,
+                new HumanTaskTransition.Escalated(fixture.registration().taskId(), 1L)));
+        assertInstanceOf(ExecutionStoreFailure.HumanTaskNotResolvable.class, early);
+
+        clock().advance(Duration.ofMinutes(1));
+        transitionHumanTask(fixture,
+                new HumanTaskTransition.Escalated(fixture.registration().taskId(), 1L));
+        transitionHumanTask(fixture,
+                new HumanTaskTransition.Resolved(fixture.registration().taskId(), 2L,
+                        "issuer|USER|responder"));
+        transitionHumanTask(fixture,
+                new HumanTaskTransition.Resolved(fixture.registration().taskId(), 2L,
+                        "issuer|USER|responder"));
+
+        DurableHumanTask resolved = await(store().loadHumanTask(
+                fixture.key().tenantId(), fixture.registration().taskId())).orElseThrow();
+        assertEquals(HumanTaskStatus.RESOLVED, resolved.status());
+        assertEquals(3L, resolved.generation(), "an exact replay must not advance generation");
+
+        ExecutionStoreFailure conflict = failureOf(() -> transitionHumanTask(fixture,
+                new HumanTaskTransition.Denied(fixture.registration().taskId(), 3L,
+                        "issuer|USER|other")));
+        assertInstanceOf(ExecutionStoreFailure.HumanTaskNotResolvable.class, conflict);
+    }
+
+    @Test
+    final void humanTaskInboxIsBoundedFilteredAndCursorBased() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        String tenant = "human-inbox-tenant";
+        waitingHumanTask(keyFor(tenant), UUID.fromString("00000000-0000-0000-0000-000000000001"),
+                "human-dedup-1", "human-correlation-1");
+        HumanTaskFixture terminal = waitingHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                "human-dedup-2", "human-correlation-2");
+        transitionHumanTask(terminal, new HumanTaskTransition.Denied(
+                terminal.registration().taskId(), 1L, "issuer|USER|responder"));
+        waitingHumanTask(keyFor(tenant), UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                "human-dedup-3", "human-correlation-3");
+
+        HumanTaskPage outstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(10)));
+        assertEquals(2, outstanding.items().size());
+        HumanTaskPage boundedOutstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(1)));
+        assertEquals(1, boundedOutstanding.items().size());
+        assertTrue(boundedOutstanding.nextCursor().isPresent(),
+                "filtered-out terminal rows must not consume the bounded page lookahead");
+        HumanTaskPage nextOutstanding = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.outstanding(1).after(boundedOutstanding.nextCursor().orElseThrow())));
+        assertEquals(UUID.fromString("00000000-0000-0000-0000-000000000003"),
+                nextOutstanding.items().getFirst().request().taskId());
+        assertTrue(nextOutstanding.nextCursor().isEmpty());
+        HumanTaskPage first = await(store().listHumanTasks(tenant, HumanTaskQuery.everything(1)));
+        assertEquals(1, first.items().size());
+        assertTrue(first.nextCursor().isPresent());
+        HumanTaskPage rest = await(store().listHumanTasks(tenant,
+                HumanTaskQuery.everything(10).after(first.nextCursor().orElseThrow())));
+        assertEquals(2, rest.items().size());
+
+        ExecutionStoreFailure oversized = failureOf(() -> await(store().listHumanTasks(tenant,
+                HumanTaskQuery.everything(store().maxHumanTaskPageSize() + 1))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, oversized);
+    }
+
+    private HumanTaskFixture waitingHumanTask(ExecutionKey key, UUID taskId, String deduplicationKey,
+                                              String correlationKey) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING)).build()));
+        HumanTaskRegistration registration = humanTaskRegistration(key, taskId, traversalId, invocationId,
+                attemptId, deduplicationKey, correlationKey);
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .registerHumanTask(registration).build()));
+        return new HumanTaskFixture(key, registration);
+    }
+
+    private HumanTaskFixture runningHumanTaskFixture(ExecutionKey key, HumanTaskRegistration template) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId, attemptId,
+                NodeCommand.PROCESS);
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING)).build()));
+        return new HumanTaskFixture(key, new HumanTaskRegistration(template.taskId(), traversalId,
+                invocationId, attemptId, template.nodeId(), template.correlationKey(),
+                template.deduplicationKey(), template.metadata(), template.responseSchema(),
+                template.responderRequirements(),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
+                template.reentryMapping(), template.continuationVersion(), template.continuation(),
+                template.continuationDigest()));
+    }
+
+    private HumanTaskRegistration humanTaskRegistration(ExecutionKey key, UUID taskId, UUID traversalId,
+                                                        UUID invocationId, UUID attemptId,
+                                                        String deduplicationKey, String correlationKey) {
+        return new HumanTaskRegistration(taskId, traversalId, invocationId, attemptId, "human-review",
+                correlationKey, deduplicationKey,
+                new HumanTaskMetadata("Review this request", "Confirm the public request details."),
+                new HumanTaskResponseSchema("application/json", "urn:ravenroot:test:human-response",
+                        "1", PayloadKind.MAP, 4096),
+                HandlerAuthorization.ofRoles("REVIEWER"),
+                new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
+                new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
+                clock().instant().plus(Duration.ofMinutes(5)),
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                2, new byte[] {1, 2, 3}, digest(new byte[] {1, 2, 3}));
+    }
+
+    private static HumanTaskRegistration copyHumanTask(HumanTaskRegistration source, UUID taskId,
+                                                       String deduplicationKey, String correlationKey) {
+        return new HumanTaskRegistration(taskId, source.traversalId(), source.invocationId(),
+                source.attemptId(), source.nodeId(), correlationKey, deduplicationKey, source.metadata(),
+                source.responseSchema(), source.responderRequirements(), source.requester(),
+                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping(),
+                source.continuationVersion(), source.continuation(), source.continuationDigest());
+    }
+
+    private void transitionHumanTask(HumanTaskFixture fixture, HumanTaskTransition transition) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .applyHumanTask(transition).build()));
+    }
+
+    private record HumanTaskFixture(ExecutionKey key, HumanTaskRegistration registration) {
     }
 
     // ============================================== PERS-05: durable handlers, wait and re-entry

@@ -1,7 +1,6 @@
-package ai.ravenroot.core.approval;
+package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
-import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -10,15 +9,16 @@ import java.io.DataOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
 
-/** Core-owned envelope around a package checkpoint and its trusted graph-budget snapshot. */
-final class GraphExecutionContinuationCheckpoint {
-    static final int VERSION = 2;
+/** Core-owned envelope shared by durable graph continuations and their trusted budget snapshot. */
+public final class GraphExecutionContinuationCheckpoint {
+    public static final int VERSION = 2;
     private static final int MAGIC = 0x52524232; // RRB2
     private static final int FORMAT = 1;
 
     private GraphExecutionContinuationCheckpoint() { }
 
-    static byte[] write(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget) {
+    /** Encodes a package checkpoint and the exact graph budget active at suspension. */
+    public static byte[] write(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget) {
         if (innerVersion < 1) throw new IllegalArgumentException("inner continuation version must be positive");
         java.util.Objects.requireNonNull(inner, "inner");
         java.util.Objects.requireNonNull(budget, "budget");
@@ -37,24 +37,22 @@ final class GraphExecutionContinuationCheckpoint {
                 output.write(inner);
             }
             byte[] encoded = bytes.toByteArray();
-            if (encoded.length > ToolApprovalRegistration.MAX_CONTINUATION_BYTES) {
-                throw new ToolApprovalContinuationCheckpointException(
-                        ToolApprovalContinuationCheckpointException.Reason.MALFORMED);
-            }
+            if (encoded.length > ToolApprovalRegistration.MAX_CONTINUATION_BYTES) throw malformed();
             return encoded;
         } catch (IOException impossible) {
             throw new IllegalStateException("in-memory checkpoint encoding failed", impossible);
         }
     }
 
-    static Decoded read(int version, byte[] encoded) {
+    /** Strictly decodes the shared envelope; legacy checkpoints cannot safely reconstruct budgets. */
+    public static Decoded read(int version, byte[] encoded) {
         if (version == 1) {
-            throw new ToolApprovalContinuationCheckpointException(
-                    ToolApprovalContinuationCheckpointException.Reason.LEGACY_BUDGET_UNAVAILABLE);
+            throw new GraphExecutionContinuationCheckpointException(
+                    GraphExecutionContinuationCheckpointException.Reason.LEGACY_BUDGET_UNAVAILABLE);
         }
         if (version != VERSION) {
-            throw new ToolApprovalContinuationCheckpointException(
-                    ToolApprovalContinuationCheckpointException.Reason.UNKNOWN_VERSION);
+            throw new GraphExecutionContinuationCheckpointException(
+                    GraphExecutionContinuationCheckpointException.Reason.UNKNOWN_VERSION);
         }
         if (encoded == null || encoded.length > ToolApprovalRegistration.MAX_CONTINUATION_BYTES) {
             throw malformed();
@@ -66,8 +64,8 @@ final class GraphExecutionContinuationCheckpoint {
             var budget = new GraphExecutionBudgetSnapshot(input.readLong(), input.readLong(), input.readLong(),
                     input.readInt(), input.readInt());
             if (budget.inFlightHops() != 1) {
-                throw new ToolApprovalContinuationCheckpointException(
-                        ToolApprovalContinuationCheckpointException.Reason.UNSAFE_REENTRY_STATE);
+                throw new GraphExecutionContinuationCheckpointException(
+                        GraphExecutionContinuationCheckpointException.Reason.UNSAFE_REENTRY_STATE);
             }
             int length = input.readInt();
             if (length < 0 || length > ToolApprovalRegistration.MAX_CONTINUATION_BYTES
@@ -78,20 +76,22 @@ final class GraphExecutionContinuationCheckpoint {
         } catch (EOFException truncated) {
             throw malformed();
         } catch (IOException | IllegalArgumentException invalid) {
-            if (invalid instanceof ToolApprovalContinuationCheckpointException typed) throw typed;
+            if (invalid instanceof GraphExecutionContinuationCheckpointException typed) throw typed;
             throw malformed();
         }
     }
 
-    private static ToolApprovalContinuationCheckpointException malformed() {
-        return new ToolApprovalContinuationCheckpointException(
-                ToolApprovalContinuationCheckpointException.Reason.MALFORMED);
+    private static GraphExecutionContinuationCheckpointException malformed() {
+        return new GraphExecutionContinuationCheckpointException(
+                GraphExecutionContinuationCheckpointException.Reason.MALFORMED);
     }
 
-    record Decoded(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget) {
-        Decoded {
+    /** Decoded immutable package checkpoint and graph budget. */
+    public record Decoded(int innerVersion, byte[] inner, GraphExecutionBudgetSnapshot budget) {
+        public Decoded {
             inner = inner.clone();
         }
+
         @Override public byte[] inner() { return inner.clone(); }
     }
 }

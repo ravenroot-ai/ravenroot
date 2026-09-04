@@ -1,6 +1,8 @@
 package ai.ravenroot.core.approval;
 
 import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpointException;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -26,28 +28,28 @@ class GraphExecutionContinuationCheckpointTest {
 
     @Test
     void legacyUnknownMalformedAndUnsafeReentryStatesFailClosedWithTypedReasons() {
-        assertReason(ToolApprovalContinuationCheckpointException.Reason.LEGACY_BUDGET_UNAVAILABLE,
+        assertReason(GraphExecutionContinuationCheckpointException.Reason.LEGACY_BUDGET_UNAVAILABLE,
                 () -> GraphExecutionContinuationCheckpoint.read(1, new byte[] {1}));
-        assertReason(ToolApprovalContinuationCheckpointException.Reason.UNKNOWN_VERSION,
+        assertReason(GraphExecutionContinuationCheckpointException.Reason.UNKNOWN_VERSION,
                 () -> GraphExecutionContinuationCheckpoint.read(99, new byte[] {1}));
 
         byte[] valid = GraphExecutionContinuationCheckpoint.write(1, new byte[] {7},
                 new GraphExecutionBudgetSnapshot(1, 0, 1, 1, 0));
-        assertReason(ToolApprovalContinuationCheckpointException.Reason.MALFORMED,
+        assertReason(GraphExecutionContinuationCheckpointException.Reason.MALFORMED,
                 () -> GraphExecutionContinuationCheckpoint.read(
                         GraphExecutionContinuationCheckpoint.VERSION,
                         java.util.Arrays.copyOf(valid, valid.length - 1)));
 
         byte[] noReservedHop = GraphExecutionContinuationCheckpoint.write(1, new byte[] {7},
                 new GraphExecutionBudgetSnapshot(1, 0, 1, 0, 0));
-        assertReason(ToolApprovalContinuationCheckpointException.Reason.UNSAFE_REENTRY_STATE,
+        assertReason(GraphExecutionContinuationCheckpointException.Reason.UNSAFE_REENTRY_STATE,
                 () -> GraphExecutionContinuationCheckpoint.read(
                         GraphExecutionContinuationCheckpoint.VERSION, noReservedHop));
     }
 
-    private static void assertReason(ToolApprovalContinuationCheckpointException.Reason expected,
+    private static void assertReason(GraphExecutionContinuationCheckpointException.Reason expected,
                                      org.junit.jupiter.api.function.Executable executable) {
         assertEquals(expected,
-                assertThrows(ToolApprovalContinuationCheckpointException.class, executable).reason());
+                assertThrows(GraphExecutionContinuationCheckpointException.class, executable).reason());
     }
 }

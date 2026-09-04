@@ -37,9 +37,18 @@ public final class StandardBehaviorFactories {
     public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
                                                 PublicationPolicyResolver publicationPolicies,
                                                 PublicationAuditSink publicationAudit) {
+        return all(environment, publicationPolicies, publicationAudit, null);
+    }
+
+    /** Core catalog optionally armed with the durable human-task reference monitor. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit,
+                                                ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         return List.of(
                 new LogNodeBehaviorFactory(),
                 new DelayNodeBehaviorFactory(),
+                new HumanTaskNodeBehaviorFactory(humanTasks),
                 new TemplateNodeBehaviorFactory(),
                 new JsonParseNodeBehaviorFactory(),
                 new CelTransformNodeBehaviorFactory(),

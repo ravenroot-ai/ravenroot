@@ -39,6 +39,7 @@ import ai.ravenroot.api.security.ToolInvocation;
 import ai.ravenroot.api.security.ToolPolicy;
 import ai.ravenroot.core.runtime.ExecutionRecorder;
 import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;

@@ -54,11 +54,28 @@ import java.util.concurrent.CopyOnWriteArrayList;
 final class ThreadRecordingExecutionStore implements ExecutionStore {
 
     private final ExecutionStore delegate;
+    private final Set<StoreCapability> withheld;
     private final List<String> writingThreads = new CopyOnWriteArrayList<>();
     private final List<String> holdSettlementThreads = new CopyOnWriteArrayList<>();
+    private final java.util.concurrent.atomic.AtomicBoolean failNextSettlement =
+            new java.util.concurrent.atomic.AtomicBoolean();
 
     ThreadRecordingExecutionStore(ExecutionStore delegate) {
+        this(delegate, Set.of());
+    }
+
+    /**
+     * Wraps {@code delegate} while hiding capabilities it really has.
+     *
+     * <p>Hiding rather than substituting a different store, because the point of such a test is that
+     * everything else about the store is unchanged: an adapter that has not implemented a capability
+     * is not a broken adapter, and the runtime's behaviour against it has to be the ordinary
+     * behaviour minus that one thing. The reads behind a withheld capability keep delegating, so a
+     * test can still assert what the underlying store does or does not hold.</p>
+     */
+    ThreadRecordingExecutionStore(ExecutionStore delegate, Set<StoreCapability> withheld) {
         this.delegate = delegate;
+        this.withheld = Set.copyOf(withheld);
     }
 
     /** How many durable writes of any kind were issued from the thread with this name. */
@@ -81,12 +98,28 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
         return List.copyOf(writingThreads);
     }
 
+    /** Refuses the next hold settlement, and only that: every other batch still commits. */
+    void failNextHoldSettlement() {
+        failNextSettlement.set(true);
+    }
+
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
         String thread = Thread.currentThread().getName();
         writingThreads.add(thread);
         if (!batch.executionPauseTransitions().isEmpty()) {
             holdSettlementThreads.add(thread);
+            if (failNextSettlement.compareAndSet(true, false)) {
+                // Refused narrowly on purpose. A revision conflict or a lost fence would fail every
+                // later write too, so a test using one could not tell "the settlement was refused"
+                // apart from "nothing could be written at all" -- and it is exactly the first that
+                // the caller has to survive.
+                var refused = new java.util.concurrent.CompletableFuture<StoredProcessInstance>();
+                refused.completeExceptionally(new ai.ravenroot.api.persistence.ExecutionStoreException(
+                        new ai.ravenroot.api.persistence.ExecutionStoreFailure.Unavailable(
+                                "hold settlement refused by the fixture")));
+                return refused;
+            }
         }
         return delegate.apply(batch);
     }
@@ -95,7 +128,9 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
 
     @Override
     public Set<StoreCapability> capabilities() {
-        return delegate.capabilities();
+        var declared = new java.util.LinkedHashSet<>(delegate.capabilities());
+        declared.removeAll(withheld);
+        return Set.copyOf(declared);
     }
 
     @Override
@@ -255,6 +290,24 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
     @Override
     public CompletionStage<Long> purgeExpiredProcessInstances(String tenantId) {
         return delegate.purgeExpiredProcessInstances(tenantId);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            loadExecutionPause(ExecutionKey key, java.util.UUID pauseId) {
+        return delegate.loadExecutionPause(key, pauseId);
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            executionPauses(ExecutionKey key) {
+        return delegate.executionPauses(key);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            findHeldExecutionPause(String tenantId, java.util.UUID traversalId) {
+        return delegate.findHeldExecutionPause(tenantId, traversalId);
     }
 
     @Override

@@ -8,6 +8,8 @@ import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionStore;
+import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
@@ -25,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
@@ -87,6 +90,57 @@ final class DurablePausedExecutionRecoveryTest {
                 <edge id="e1" source="start" target="first"><data key="edge-outcome">continue</data></edge>
                 <edge id="e2" source="first" target="second"><data key="edge-outcome">continue</data></edge>
                 <edge id="e3" source="second" target="end"><data key="edge-outcome">continue</data></edge>
+              </graph>
+            </graphml>
+            """;
+
+    /**
+     * Two mutually exclusive routes converging on a declared fan-in.
+     *
+     * <p>Exclusive on purpose: only one route is ever taken, so no node ever dispatches two
+     * successors and the traversal never fans out. That is what lets these tests isolate the fan-in
+     * and iteration clauses from the fan-out clause, which any ordinary diamond would also trip.
+     * {@code joinPolicy=any} makes the single arrival satisfy the merge rather than wait forever for
+     * a branch the routing decision already excluded.</p>
+     */
+    private static final String EXCLUSIVE_MERGE = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="node-behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="node-joinPolicy" for="node" attr.name="joinPolicy" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="exclusive-merge" edgedefault="directed">
+                <node id="start"><data key="node-kind">START</data></node>
+                <node id="first">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">first</data>
+                </node>
+                <node id="taken">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">second</data>
+                </node>
+                <node id="untaken">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">third</data>
+                </node>
+                <node id="merge">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">merge</data>
+                  <data key="node-joinPolicy">any</data>
+                </node>
+                <node id="after">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">after</data>
+                </node>
+                <node id="end"><data key="node-kind">END</data></node>
+                <edge id="e1" source="start" target="first"><data key="edge-outcome">continue</data></edge>
+                <edge id="e2" source="first" target="taken"><data key="edge-outcome">left</data></edge>
+                <edge id="e3" source="first" target="untaken"><data key="edge-outcome">right</data></edge>
+                <edge id="e4" source="taken" target="merge"><data key="edge-outcome">continue</data></edge>
+                <edge id="e5" source="untaken" target="merge"><data key="edge-outcome">continue</data></edge>
+                <edge id="e6" source="merge" target="after"><data key="edge-outcome">continue</data></edge>
+                <edge id="e7" source="after" target="end"><data key="edge-outcome">continue</data></edge>
               </graph>
             </graphml>
             """;
@@ -400,6 +454,247 @@ final class DurablePausedExecutionRecoveryTest {
         }
     }
 
+    /**
+     * A store that does not keep holds takes the hold and writes nothing, which is exactly the
+     * behaviour that shipped before holds were durable.
+     *
+     * <p>The capability is withheld from a store that otherwise has it, so everything else about the
+     * run is identical to the tests above and the only difference is the declaration. The traversal
+     * still holds — the withheld node not running is what proves it — and still releases.</p>
+     */
+    @Test
+    void aStoreThatDoesNotKeepHoldsTakesTheHoldWithoutWritingItDown() throws Exception {
+        var stores = new DurableStores(Set.of(StoreCapability.EXECUTION_PAUSES));
+        UUID traversalId = UUID.randomUUID();
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        try (Restarted running = stores.open(effects)) {
+            var submitter = new Thread(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"), "no-capability-hold");
+            running.pauseFromFirstNode(traversalId);
+            submitter.start();
+
+            assertTrue(running.awaitPaused(BOUND), "the hold must be announced");
+            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertEquals(List.of("first"), running.effects(),
+                    "the withheld node must not have run: " + running.effects());
+            assertTrue(stores.heldPause(traversalId).isEmpty(),
+                    "a store that does not declare that it keeps holds must not be asked to write one");
+
+            assertTrue(running.application().resumeTraversal(TENANT, traversalId),
+                    "and the process-local hold must still be releasable");
+            assertTrue(running.awaitTerminal(BOUND));
+            submitter.join(BOUND.toMillis());
+            assertEquals(List.of("first", "second"), running.effects());
+        }
+    }
+
+    /**
+     * A payload the type model cannot represent takes the hold and writes nothing.
+     *
+     * <p>The alternative would be to write a lossy encoding, which produces the worst outcome this
+     * design has: a resume that continues silently with a different value than the hold withheld.
+     * The node returns a plain {@code Object}, which is what an in-process behaviour handing on an
+     * arbitrary Java value looks like.</p>
+     */
+    @Test
+    void aPayloadTheTypeModelCannotRepresentIsNotWrittenDown() throws Exception {
+        var stores = new DurableStores();
+        UUID traversalId = UUID.randomUUID();
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        try (Restarted running = stores.open(effects)) {
+            running.emitOpaquePayloadFromFirstNode();
+            var submitter = new Thread(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"), "opaque-payload-hold");
+            running.pauseFromFirstNode(traversalId);
+            submitter.start();
+
+            assertTrue(running.awaitPaused(BOUND), "the hold must be announced");
+            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertEquals(List.of("first"), running.effects(),
+                    "the withheld node must not have run: " + running.effects());
+            assertTrue(stores.heldPause(traversalId).isEmpty(),
+                    "a payload that cannot be represented has no encoding, and a lossy one would "
+                            + "resume with a value the hold never withheld");
+
+            assertTrue(running.application().resumeTraversal(TENANT, traversalId));
+            assertTrue(running.awaitTerminal(BOUND));
+            submitter.join(BOUND.toMillis());
+            assertEquals(List.of("first", "second"), running.effects(),
+                    "and the released hop still carries the real value, losing nothing");
+        }
+    }
+
+    /**
+     * A hold landing on the traversal's own first node writes nothing, because there is no completed
+     * invocation for a continuation to sit behind.
+     *
+     * <p>Reaching that boundary means holding a traversal that has been admitted and has not
+     * dispatched its start node, which is a real window and not a contrived one: the submission is
+     * suspended at its first durable write, exactly as {@code PausedExecutionObservabilityTest}
+     * enters the same window, and the hold is taken there.</p>
+     */
+    @Test
+    void aHoldAtTheTraversalsFirstNodeIsNotWrittenDown() throws Exception {
+        var stores = new DurableStores();
+        var gate = stores.suspendFirstWrite();
+        UUID traversalId = UUID.randomUUID();
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        try (Restarted running = stores.open(effects)) {
+            var submitter = new Thread(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"), "first-node-hold");
+            submitter.start();
+
+            assertTrue(gate.awaitFirstWrite(BOUND), "the submission must reach the startup window");
+            assertTrue(running.application().pauseTraversal(traversalId),
+                    "a traversal admitted and not yet started must accept a hold");
+            gate.releaseFirstWrite();
+
+            assertTrue(running.awaitPaused(BOUND), "the hold must be announced once the traversal starts");
+            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertTrue(effects.isEmpty(), "no node may run behind the hold: " + effects);
+            assertTrue(stores.heldPause(traversalId).isEmpty(),
+                    "the start node has no predecessor invocation to anchor a continuation to");
+
+            assertTrue(running.application().resumeTraversal(TENANT, traversalId));
+            assertTrue(running.awaitTerminal(BOUND));
+            submitter.join(BOUND.toMillis());
+            assertEquals(List.of("first", "second"), running.effects());
+        }
+    }
+
+    /**
+     * A hop entering a fan-in writes nothing: continuing one arrival of a correlation the join store
+     * owns would present that arrival to the join twice.
+     *
+     * <p>The routing is exclusive, so this traversal never fans out and the fan-out clause is not
+     * what refuses the boundary. Two clauses do refuse it together — a hop that has passed a firing
+     * also carries that firing's lap — and the assertion here is over the behaviour rather than over
+     * which of them acted; the lap clause is isolated by the test below it and the fan-in clause by
+     * {@code PauseBoundaryAdmissionTest}.</p>
+     */
+    @Test
+    void aHoldEnteringAFanInIsNotWrittenDown() throws Exception {
+        var stores = new DurableStores();
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        UUID traversalId = UUID.randomUUID();
+        try (Restarted running = stores.open(effects, EXCLUSIVE_MERGE)) {
+            var submitter = new Thread(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"), "fan-in-hold");
+            running.pauseFromNode("second");
+            running.pauseFromFirstNode(traversalId);
+            submitter.start();
+
+            assertTrue(running.awaitPaused(BOUND), "the hold must be announced");
+            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertEquals(List.of("first", "second"), running.effects(),
+                    "the hold must sit on the hop entering the merge: " + running.effects());
+            assertTrue(stores.heldPause(traversalId).isEmpty(),
+                    "an arrival at a fan-in is not a boundary a one-hop continuation can carry");
+
+            assertTrue(running.application().resumeTraversal(TENANT, traversalId));
+            assertTrue(running.awaitTerminal(BOUND));
+            submitter.join(BOUND.toMillis());
+            assertTrue(running.effects().containsAll(List.of("merge", "after")),
+                    "and the released traversal passes the merge: " + running.effects());
+        }
+    }
+
+    /**
+     * A hold taken after a fan-in has fired writes nothing, because the withheld dispatch carries
+     * that firing's lap and a lap lives only in the runner.
+     *
+     * <p>This is the isolated iteration case: the withheld node is an ordinary one with a single
+     * completed predecessor on a traversal that never fanned out, so the lap is the only thing
+     * refusing the boundary.</p>
+     */
+    @Test
+    void aHoldInsideAnIterationIsNotWrittenDown() throws Exception {
+        var stores = new DurableStores();
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        UUID traversalId = UUID.randomUUID();
+        try (Restarted running = stores.open(effects, EXCLUSIVE_MERGE)) {
+            var submitter = new Thread(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"), "lap-hold");
+            running.pauseFromNode("merge");
+            running.pauseFromFirstNode(traversalId);
+            submitter.start();
+
+            assertTrue(running.awaitPaused(BOUND), "the hold must be announced");
+            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertEquals(List.of("first", "second", "merge"), running.effects(),
+                    "the hold must sit on the hop after the merge fired: " + running.effects());
+            assertTrue(stores.heldPause(traversalId).isEmpty(),
+                    "a dispatch carrying a lap is not a boundary this runtime writes down");
+
+            assertTrue(running.application().resumeTraversal(TENANT, traversalId));
+            assertTrue(running.awaitTerminal(BOUND));
+            submitter.join(BOUND.toMillis());
+            assertTrue(running.effects().contains("after"),
+                    "and the released hop runs: " + running.effects());
+        }
+    }
+
+    /**
+     * A cancellation whose hold settlement the store refuses still ends the traversal.
+     *
+     * <h2>The interaction this pins, which neither half suggests on its own</h2>
+     * <p>A refused settlement on a traversal that is ending must not refuse the release — the parked
+     * hop and the teardown waiting on it would be stranded. But the flag that suppresses a held
+     * traversal's terminal write is the same flag the settlement would have cleared, so letting the
+     * release proceed while keeping the flag set means the teardown writes <em>nothing</em>: the
+     * stored traversal stays {@code WAITING} behind a hold that stays {@code HELD}, while the caller
+     * is told the execution was cancelled. After a restart an authorized resume would then run work
+     * the operator had been told was stopped.</p>
+     *
+     * <p>The refusal is narrow by construction — the fixture fails the settlement batch and nothing
+     * else — so this test cannot pass by the traversal being unable to write anything at all.</p>
+     */
+    @Test
+    void aCancellationWhoseSettlementIsRefusedStillEndsTheTraversal() throws Exception {
+        var stores = new DurableStores();
+        var recording = stores.recordWrites();
+        UUID traversalId = UUID.randomUUID();
+        var effects = Collections.synchronizedList(new ArrayList<String>());
+        try (Restarted running = stores.open(effects)) {
+            var submitter = new Thread(() -> running.application().startGraphMl(TestIdentities.TENANT_A,
+                    traversalId, running.graph(), "payload"), "refused-settlement");
+            running.pauseFromFirstNode(traversalId);
+            submitter.start();
+            assertTrue(running.awaitPaused(BOUND));
+            assertFalse(running.awaitTerminal(HELD_BOUND));
+            ExecutionKey key = stores.keyOf(traversalId);
+            assertTrue(stores.heldPause(traversalId).isPresent(), "the hold must be written down");
+
+            recording.failNextHoldSettlement();
+            assertTrue(running.application().cancelTraversal(TENANT, traversalId),
+                    "a cancellation must not be refused because the hold could not be settled");
+            assertTrue(running.awaitTerminal(BOUND),
+                    "and the traversal must reach its terminal event rather than stay parked");
+            submitter.join(BOUND.toMillis());
+
+            assertEquals(TraversalStatus.FAILED,
+                    stores.load(key).state().traversals().get(traversalId).status(),
+                    "the traversal's end must be written even though the hold could not be settled: "
+                            + "leaving it WAITING would let a resume after a restart run work the "
+                            + "caller was told had been cancelled");
+            assertEquals(List.of("first"), running.effects(),
+                    "and nothing after the boundary may run: " + running.effects());
+            assertFalse(running.application().executionPaused(TENANT, traversalId),
+                    "a terminal traversal is never reported as held, whatever the stale row says");
+
+            // The stale row is the residue this trade accepts, and it is settleable rather than
+            // permanent: a later cancellation clears it without asking the aggregate for a second
+            // terminal transition.
+            assertEquals(ExecutionPauseStatus.HELD,
+                    stores.pause(key, stores.anyPauseId(key)).status(),
+                    "the refused settlement leaves the row as it was");
+            assertTrue(running.application().cancelTraversal(TENANT, traversalId),
+                    "and a later cancellation settles it");
+            assertEquals(ExecutionPauseStatus.CANCELLED,
+                    stores.pause(key, stores.anyPauseId(key)).status());
+        }
+    }
+
     // ------------------------------------------------------------------ fixture
 
     /** Runs one traversal up to the boundary, holds it there, and stops the process. */
@@ -430,10 +725,48 @@ final class DurablePausedExecutionRecoveryTest {
     /** The only thing two "processes" in this file share. */
     private static final class DurableStores {
         private final InMemoryExecutionStore executions = new InMemoryExecutionStore();
-        private final InMemoryGraphDefinitionStore definitions = new InMemoryGraphDefinitionStore(java.time.Clock.systemUTC());
+        private final InMemoryGraphDefinitionStore definitions =
+                new InMemoryGraphDefinitionStore(java.time.Clock.systemUTC());
+        private final Set<StoreCapability> withheld;
+        private SuspendFirstWriteExecutionStore firstWriteGate;
+
+        private DurableStores() {
+            this(Set.of());
+        }
+
+        /**
+         * @param withheld capabilities the application is not told about, while the assertions still
+         *                 read the underlying store directly — so "the runtime did not write a hold"
+         *                 and "the store could not have kept one" stay separable
+         */
+        private DurableStores(Set<StoreCapability> withheld) {
+            this.withheld = Set.copyOf(withheld);
+        }
 
         private InMemoryExecutionStore executions() {
             return executions;
+        }
+
+        /** Suspends the next application's first durable write, so a test can stand in the startup window. */
+        private SuspendFirstWriteExecutionStore suspendFirstWrite() {
+            firstWriteGate = new SuspendFirstWriteExecutionStore(executions);
+            return firstWriteGate;
+        }
+
+        private ThreadRecordingExecutionStore recorder;
+
+        /** Wraps the store so a test can refuse one specific write; returns the handle that does it. */
+        private ThreadRecordingExecutionStore recordWrites() {
+            recorder = new ThreadRecordingExecutionStore(executions, withheld);
+            return recorder;
+        }
+
+        private ExecutionStore forApplication() {
+            if (recorder != null) {
+                return recorder;
+            }
+            ExecutionStore base = firstWriteGate != null ? firstWriteGate : executions;
+            return withheld.isEmpty() ? base : new ThreadRecordingExecutionStore(base, withheld);
         }
 
         private Restarted open(List<String> effects) {
@@ -441,11 +774,11 @@ final class DurablePausedExecutionRecoveryTest {
         }
 
         private Restarted open(List<String> effects, String graphMl) {
-            return new Restarted(executions, definitions, effects, graphMl);
+            return new Restarted(forApplication(), definitions, effects, graphMl);
         }
 
         private Restarted restart() {
-            return new Restarted(executions, definitions,
+            return new Restarted(forApplication(), definitions,
                     Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS);
         }
 
@@ -512,33 +845,22 @@ final class DurablePausedExecutionRecoveryTest {
                 new java.util.concurrent.atomic.AtomicReference<>();
 
         private final String graphMl;
+        /** The node whose behaviour issues the hold, so the gate lands on the hop after it. */
+        private volatile String pauseAfterNode = "first";
+        private volatile boolean opaquePayload;
 
-        private Restarted(InMemoryExecutionStore executions, InMemoryGraphDefinitionStore definitions,
+        private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
                           List<String> effects, String graphMl) {
             this.effects = effects;
             this.graphMl = graphMl;
             var registry = new BehaviorRegistry()
-                    .register("first", message -> {
-                        effects.add("first");
-                        UUID holding = pauseWhenFirstRuns;
-                        if (holding != null) {
-                            // Issued from inside the node that precedes the boundary, so the hold
-                            // lands on the hop after it: one completed predecessor, one branch.
-                            self.get().pauseTraversal(holding);
-                        }
-                        return CompletableFuture.completedFuture(
-                                NodeResult.continueWith(message.payload()));
-                    })
-                    .register("second", message -> {
-                        effects.add("second");
-                        return CompletableFuture.completedFuture(
-                                NodeResult.continueWith(message.payload()));
-                    })
-                    .register("third", message -> {
-                        effects.add("third");
-                        return CompletableFuture.completedFuture(
-                                NodeResult.continueWith(message.payload()));
-                    });
+                    // "first" additionally selects the exclusive route in EXCLUSIVE_MERGE, so only
+                    // one of the two branches is ever dispatched and the traversal never fans out.
+                    .register("first", node("first", "left"))
+                    .register("second", node("second", null))
+                    .register("third", node("third", null))
+                    .register("merge", node("merge", null))
+                    .register("after", node("after", null));
             this.application = new DefaultRavenrootApplication(engine, monitor, registry,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), executions, 8,
@@ -567,8 +889,42 @@ final class DurablePausedExecutionRecoveryTest {
             return List.copyOf(effects);
         }
 
+        /**
+         * One behaviour: record that it ran, hold the traversal if this is the node the test holds
+         * from, and hand its payload on.
+         *
+         * <p>The hold is issued from <em>inside</em> a node rather than before the traversal starts,
+         * which is what puts the gate on the hop after that node: one completed predecessor behind
+         * it and nothing else in flight. Which node issues it decides which boundary the hold lands
+         * on, and that is the whole variable these tests turn.</p>
+         */
+        private NodeHandler node(String id, String outcome) {
+            return message -> {
+                effects.add(id);
+                UUID holding = pauseWhenFirstRuns;
+                if (holding != null && id.equals(pauseAfterNode)) {
+                    self.get().pauseTraversal(holding);
+                }
+                Object payload = opaquePayload && "first".equals(id)
+                        // Not representable by the payload type model, which is what an in-process
+                        // behaviour handing on an arbitrary Java value produces.
+                        ? new Object() : message.payload();
+                return CompletableFuture.completedFuture(
+                        new NodeResult(outcome, payload, java.util.Map.of()));
+            };
+        }
+
         private void pauseFromFirstNode(UUID traversalId) {
             pauseWhenFirstRuns = traversalId;
+        }
+
+        /** Holds from inside {@code nodeId} instead of from the traversal's first behaviour node. */
+        private void pauseFromNode(String nodeId) {
+            pauseAfterNode = nodeId;
+        }
+
+        private void emitOpaquePayloadFromFirstNode() {
+            opaquePayload = true;
         }
 
         private boolean awaitPaused(Duration bound) throws InterruptedException {

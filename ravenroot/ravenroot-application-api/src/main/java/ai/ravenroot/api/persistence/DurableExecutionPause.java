@@ -14,7 +14,13 @@ package ai.ravenroot.api.persistence;
  * @param key      tenant-scoped identity of the owning process instance
  * @param request  the caller-authored hold, including its bounded continuation
  * @param status   current lifecycle state of the hold
- * @param actor    audit-stable identity that settled the hold, or the empty string while it is held
+ * @param actor    audit-stable identity of the authority that settled the hold, or the empty string
+ *                 while it is held. Its <em>granularity</em> is whatever the settling surface knows:
+ *                 the shipped control surface authorizes a resume or a cancellation as a tenant and
+ *                 records the tenant here, while the acting principal is recorded at full fidelity
+ *                 in the audit trail, which is the record built for that question. Two operators of
+ *                 one tenant are therefore not distinguishable in this field, and a caller that needs
+ *                 them to be should read the audit trail rather than infer identity from here
  * @param revision the process-instance revision at which this hold last changed
  */
 public record DurableExecutionPause(ExecutionKey key, ExecutionPauseRegistration request,
@@ -69,9 +75,11 @@ public record DurableExecutionPause(ExecutionKey key, ExecutionPauseRegistration
     /**
      * Tests whether this transition has already been applied, so a redelivery is a no-op success.
      *
-     * <p>The acting principal is part of the identity of the settlement: two different principals
-     * asking for the same outcome are two decisions, and answering the second as a duplicate would
-     * record the wrong one in the audit position.</p>
+     * <p>The actor is part of the identity of the settlement: two different authorities asking for
+     * the same outcome are two decisions, and answering the second as a duplicate would record the
+     * wrong one here. What counts as "different" is exactly the granularity {@link #actor()} carries
+     * — see its own note — so two operators of one tenant settling the same hold the same way are one
+     * decision to this record and two entries in the audit trail.</p>
      *
      * @param transition transition offered again.
      * @return whether this hold already carries exactly that settlement.

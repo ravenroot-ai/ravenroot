@@ -257,6 +257,24 @@ final class SuspendFirstWriteExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            loadExecutionPause(ExecutionKey key, java.util.UUID pauseId) {
+        return delegate.loadExecutionPause(key, pauseId);
+    }
+
+    @Override
+    public CompletionStage<List<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            executionPauses(ExecutionKey key) {
+        return delegate.executionPauses(key);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
+            findHeldExecutionPause(String tenantId, java.util.UUID traversalId) {
+        return delegate.findHeldExecutionPause(tenantId, traversalId);
+    }
+
+    @Override
     public void close() {
         delegate.close();
     }

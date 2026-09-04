@@ -286,9 +286,10 @@ public interface CliBackend {
      * {@code bypassedNodes} alone does not -- a node with a plain single {@code continue} edge and
      * one with a branch point behind only custom outcomes are indistinguishable in that list, and only this
      * field tells them apart.</p>
-     * @param paused whether a pause is currently held on this execution -- process-local and never
-     *               durable, so a restart forgets it, and never {@code true} once {@code status} is
-     *               terminal. Mirrors {@code ExecutionOutcome#paused()}; see that method's own Javadoc
+     * @param paused whether a pause is currently held on this execution, read live rather than
+     *               stored, and never {@code true} once {@code status} is terminal. A hold taken at a
+     *               boundary the runtime can write down survives a restart; one taken anywhere else
+     *               does not. Mirrors {@code ExecutionOutcome#paused()}; see that method's own Javadoc
      *               for why this qualifies {@code status} instead of becoming a value of it.
      */
     record ResultView(String executionId, String status, boolean paused, boolean degraded, List<String> visitedNodes,

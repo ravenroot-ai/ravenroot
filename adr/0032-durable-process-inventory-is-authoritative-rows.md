@@ -1,9 +1,9 @@
 # ADR 0032: The durable process inventory is authoritative rows, not a projection
 
-- Status: Accepted
+- Status: Superseded in part
 - Date: 2026-09-03
 - Supersedes: Discovering process instances and traversals only through the process-local live-execution view, with no tenant-scoped record surviving a restart
-- Superseded by: None
+- Superseded by: [ADR 0033](0033-durable-operator-holds.md) for the claim that no durable pause state exists in the product
 - Public references: [Durable process inventory](../docs/architecture/process-inventory.md), [Persistence, lifecycle, and recovery](../docs/operator-guide/persistence-lifecycle.md), [HTTP API and CLI](../docs/reference/api-cli.md), [ADR 0007](0007-process-traversal-invocation-attempt-lifecycle.md), [ADR 0022](0022-ambiguous-work-is-parked.md)
 
 ## Context
@@ -40,10 +40,13 @@ unexpired lease exists, and whether any attempt is parked. It is deliberately no
 Storing it would create a second copy of the lifecycle that can disagree with the first, most
 sharply at a lease's silent expiry: expiry is the passage of time rather than a write, so there is no
 transaction in which a stored classification could have been corrected to match. There is
-deliberately no durable "paused" value in that classification, because no durable pause state exists
-in the product: pause and resume act on process-local runtime state today, and the stored lifecycle
-status has no member for it. Guessing one here would be exactly the kind of value a derived answer
-must not invent.
+deliberately no durable "paused" value in that classification, and the reason given here at the time
+— that no durable pause state exists in the product — is no longer true. [ADR 0033](0033-durable-operator-holds.md)
+made an operator hold durable, and the conclusion survived it unchanged: a held traversal is stored
+as `WAITING`, the same lifecycle value every other durable wait writes, so the derived classification
+reports `WAITING` and the hold record beside the instance says which wait it is. Adding a `PAUSED`
+rank would have been exactly the kind of value a derived answer must not invent — a second copy of a
+fact that is already stored somewhere authoritative.
 
 Pagination orders by `(createdAt descending, processInstanceId descending)`. Both components are
 immutable for the life of a row, so a row cannot move between pages while a scan is in flight; work

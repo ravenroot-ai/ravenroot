@@ -3,6 +3,7 @@ package ai.ravenroot.core.pause;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.execution.NodeCommand;
@@ -112,10 +113,43 @@ public final class DurableExecutionPauseService {
      */
     public Optional<DurableExecutionPause> held(String tenantId, UUID traversalId) {
         if (!available()) return Optional.empty();
+        // Deliberately not wrapped in a catch. An unreadable store is not "this traversal is not
+        // held": answering that would tell an operator during an outage that a hold they took is
+        // gone, which is the one wrong answer this whole mechanism exists to stop the system giving.
+        // Every caller either surfaces the failure or fails closed on it.
+        Optional<DurableExecutionPause> found =
+                executions.findHeldExecutionPause(tenantId, traversalId).toCompletableFuture().join();
+        // A terminal traversal is never held, the same invariant ExecutionOutcome enforces on the
+        // live side. A hold row can outlive its traversal by one narrow path -- a settlement the
+        // store refused while the traversal was ending, which GraphRunner deliberately lets go of so
+        // the end can still be written -- and reporting that row would tell an operator that
+        // finished work is waiting for them.
+        return found.filter(pause -> !terminalTraversal(pause));
+    }
+
+    /**
+     * The stored hold on a traversal, terminal traversal included.
+     *
+     * <p>{@link #held} hides a hold whose traversal has ended, because reporting one would tell an
+     * operator that finished work is waiting for them. Settling one is the opposite: a stale row is
+     * exactly what a cancellation should be able to clear, and filtering it out of the settlement
+     * path as well would make it permanent.</p>
+     */
+    private Optional<DurableExecutionPause> heldIncludingStale(String tenantId, UUID traversalId) {
+        if (!available()) return Optional.empty();
+        return executions.findHeldExecutionPause(tenantId, traversalId).toCompletableFuture().join();
+    }
+
+    private boolean terminalTraversal(DurableExecutionPause pause) {
         try {
-            return executions.findHeldExecutionPause(tenantId, traversalId).toCompletableFuture().join();
-        } catch (RuntimeException unavailable) {
-            return Optional.empty();
+            Traversal traversal = executions.load(pause.key()).toCompletableFuture().join()
+                    .state().traversals().get(pause.request().traversalId());
+            return traversal != null && traversal.status().terminal();
+        } catch (RuntimeException unreadable) {
+            // Unreadable is not terminal. Hiding a hold because the instance could not be read would
+            // turn a transient fault into "there is nothing here", which is the one answer an
+            // operator must not be given about work that is being held.
+            return false;
         }
     }
 
@@ -196,7 +230,7 @@ public final class DurableExecutionPauseService {
      * @return whether a hold was found and settled here.
      */
     public boolean cancel(String tenantId, UUID traversalId, String actor) {
-        Optional<DurableExecutionPause> found = held(tenantId, traversalId);
+        Optional<DurableExecutionPause> found = heldIncludingStale(tenantId, traversalId);
         if (found.isEmpty()) return false;
         DurableExecutionPause pause = found.get();
         ExecutionKey key = pause.key();
@@ -207,10 +241,16 @@ public final class DurableExecutionPauseService {
             boolean lastLiveTraversal = stored.traversals().values().stream()
                     .filter(traversal -> !traversal.traversalId().equals(traversalId))
                     .allMatch(traversal -> traversal.status().terminal());
+            // The traversal transition is skipped when it has already ended, which is the stale-hold
+            // case: the aggregate refuses a second terminal transition, so asking for one would make
+            // the settlement that clears the stale row impossible.
+            Traversal heldTraversal = stored.traversals().get(traversalId);
+            boolean traversalLive = heldTraversal != null && !heldTraversal.status().terminal();
             recorder.settleExecutionPause(
                     new ExecutionPauseTransition.Cancelled(pause.request().pauseId(), actor), traversalId,
-                    TraversalStatus.FAILED,
-                    lastLiveTraversal && !stored.status().terminal() ? ProcessInstanceStatus.FAILED : null);
+                    traversalLive ? TraversalStatus.FAILED : null,
+                    traversalLive && lastLiveTraversal && !stored.status().terminal()
+                            ? ProcessInstanceStatus.FAILED : null);
             return true;
         } finally {
             recorder.close();

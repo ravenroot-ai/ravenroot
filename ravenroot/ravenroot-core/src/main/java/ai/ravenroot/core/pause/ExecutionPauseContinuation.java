@@ -1,5 +1,6 @@
 package ai.ravenroot.core.pause;
 
+import ai.ravenroot.api.payload.PayloadException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -73,7 +74,11 @@ public record ExecutionPauseContinuation(PayloadValue payload, PayloadValue attr
             PayloadValue encodedAttributes = PayloadValue.fromJava(
                     attributes == null ? Map.of() : attributes, LIMITS);
             return Optional.of(new ExecutionPauseContinuation(encodedPayload, encodedAttributes));
-        } catch (RuntimeException notRepresentable) {
+        } catch (PayloadException notRepresentable) {
+            // Narrow on purpose. PayloadException is the type model saying "this value has no
+            // representation", which is an answer; anything else thrown from here is a fault in the
+            // conversion rather than a verdict about the value, and swallowing it would turn a bug
+            // into holds that quietly stopped being durable with nothing to point at.
             return Optional.empty();
         }
     }
@@ -92,7 +97,7 @@ public record ExecutionPauseContinuation(PayloadValue payload, PayloadValue attr
         try {
             encoded = PayloadJson.write(new PayloadValue.MapValue(wrapper))
                     .getBytes(StandardCharsets.UTF_8);
-        } catch (RuntimeException notEncodable) {
+        } catch (PayloadException notEncodable) {
             return Optional.empty();
         }
         return encoded.length > ExecutionPauseRegistration.MAX_CONTINUATION_BYTES

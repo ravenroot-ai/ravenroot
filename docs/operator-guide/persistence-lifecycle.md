@@ -55,7 +55,7 @@ After recovery, prove `/ready`, inspect retained terminal results, resume an eve
 
 One limit to keep in mind when reading the inventory: a traversal admitted through the live request/reply ingress contract is deliberately live and process-local and writes nothing to the execution store, so the inventory is not a complete log of every traversal a deployment has ever admitted — it is complete for the admission paths that do write to the store.
 
-A held traversal reads as `WAITING`, like any other durable wait. Which wait it is comes from the hold itself, described below.
+A held traversal reads as `WAITING`, like any other durable wait, and is therefore not part of the interrupted cohort a restart needs to act on. Which wait it is comes from the hold itself, described under [Paused traversals](#paused-traversals) above.
 
 - [Contract](../architecture/durability-events.md)
 - [Durable process inventory](../architecture/process-inventory.md)

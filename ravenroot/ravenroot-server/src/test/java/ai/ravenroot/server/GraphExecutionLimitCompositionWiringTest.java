@@ -22,10 +22,21 @@ class GraphExecutionLimitCompositionWiringTest {
         assertTrue(source.contains("GraphExecutionLimits.fromEnvironment(System.getenv())"),
                 () -> MAIN + " must read operator graph limits");
         assertEquals(2, source.split(
-                        "recoveryConfiguration\\.leaseTtl\\(\\), graphExecutionLimits, agentBudgets\\)", -1)
-                        .length - 1,
+                        "recoveryConfiguration\\.leaseTtl\\(\\), graphExecutionLimits, agentBudgets,",
+                        -1).length - 1,
                 () -> MAIN + " must give tool and human re-entry the same limits and agent-budget "
                         + "lifecycle as live execution");
+        // The same pinning, one argument further along: re-entry must also verify against the same
+        // manifest service the acceptance path pinned with. A second resolver built beside it would
+        // agree until the day one of the two composition sites was updated and the other was not.
+        assertEquals(2, source.split(
+                        "graphExecutionLimits, agentBudgets,\\s*\\n\\s*executionManifests\\)", -1)
+                        .length - 1,
+                () -> MAIN + " must give tool and human re-entry the application's own manifest "
+                        + "verification service");
+        assertTrue(source.contains("application.executionManifests()"),
+                () -> MAIN + " must take that service from the composed application rather than "
+                        + "building a second resolver beside it");
         assertTrue(source.contains("graphExecutionLimits.maxRecoveryDeliveriesPerAttempt())"),
                 () -> MAIN + " must bound production recovery delivery attempts from operator configuration");
     }

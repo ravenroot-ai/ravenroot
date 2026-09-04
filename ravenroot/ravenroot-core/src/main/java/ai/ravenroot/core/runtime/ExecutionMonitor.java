@@ -212,19 +212,30 @@ public final class ExecutionMonitor {
      * @param attemptId         the attempt that failed, never the one being scheduled
      * @param nextOrdinal       the ordinal the scheduled retry will carry
      * @param delay             how long the runtime will wait before that retry
-     * @param classification    the failure's retry classification, as a bounded classifier token
+     * @param classification    the failure's retry classification, as a bounded classifier token.
+     *                          It occupies {@code publicReason} rather than the failure's class name,
+     *                          which {@code NODE_FAILED} puts there: on a retry the classification is
+     *                          the fact that explains the decision, and the class name is carried in
+     *                          the diagnostic beside it rather than lost
+     * @param error             the failure this attempt produced, whose deepest cause's class and
+     *                          message become the event's diagnostic and its author-facing text
      * @param connectorAttempts connector-level attempts inside the failed attempt, or
      *                          {@link ConnectorRetryReport#NOT_REPORTED}
      * @param liveInstances     live runtime instances of this node, measured by the caller
      */
     void nodeRetryScheduled(ExecutionIdentity identity, String nodeId, UUID invocationId, UUID attemptId,
-                            int nextOrdinal, Duration delay, String classification,
+                            int nextOrdinal, Duration delay, String classification, Throwable error,
                             int connectorAttempts, int liveInstances) {
         int arrivals = decrement(nodeId);
         int failedOrdinal = ordinalOf(attemptId);
+        // The retry facts lead and the failure text follows, deliberately. ExecutionEvent bounds
+        // `detail` at 512 chars with a visible truncation marker, and a node whose exception message
+        // is a page of text would otherwise push the ordinal and the delay off the end -- so the two
+        // facts that are always short and always wanted are the two that always survive.
+        String detail = "retrying as attempt " + nextOrdinal + " after " + delay.toMillis() + "ms: "
+                + failureClass(error) + ": " + message(error);
         publish(identity, invocationId, attemptId, ExecutionEventType.NODE_RETRY_SCHEDULED, nodeId,
-                liveInstances, false,
-                "retrying as attempt " + nextOrdinal + " after " + delay.toMillis() + "ms",
+                liveInstances, false, detail,
                 null, finishAttempt(attemptId), arrivals, classification, null, null,
                 failedOrdinal, connectorAttempts);
     }
@@ -745,7 +756,14 @@ public final class ExecutionMonitor {
                          OutputProjection authorOutput, String edgeId, int attemptOrdinal,
                          int connectorAttempts) {
         TextProjection authorMessage = switch (type) {
-            case NODE_FAILED, JOIN_FAILED, EXECUTION_FAILED -> RuntimeActivityData.message(detail);
+            // NODE_RETRY_SCHEDULED belongs here because it SETTLES an attempt that failed, and it is
+            // the only settlement that attempt ever gets: it replaces NODE_FAILED rather than
+            // preceding it. Without it, a node that fails twice and then succeeds leaves no record
+            // anywhere of what went wrong -- the two diagnostics an author most needs would be the
+            // two the runtime silently dropped, and the successful third attempt would make the
+            // execution look untroubled.
+            case NODE_FAILED, JOIN_FAILED, EXECUTION_FAILED, NODE_RETRY_SCHEDULED ->
+                    RuntimeActivityData.message(detail);
             default -> null;
         };
         var event = new ExecutionEvent(eventSequence.incrementAndGet(), Instant.now(),

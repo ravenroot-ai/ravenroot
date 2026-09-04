@@ -82,6 +82,26 @@ class NodeRetryPropertyTest {
     }
 
     @Test
+    @DisplayName("a fractional millisecond keeps its value instead of being truncated to no wait")
+    void aFractionalNumericWaitIsNotSilentlyTruncatedToZero() {
+        assertEquals(Duration.ofNanos(500_000),
+                NodeRetryProperty.parseDuration(NodeRetryProperty.INITIAL_BACKOFF, 0.5d),
+                "truncating lands on exactly the value that means 'no wait at all', so a policy "
+                        + "written to pause between attempts would retry as fast as the machine can");
+        assertEquals(Duration.ofNanos(1_500_000),
+                NodeRetryProperty.parseDuration(NodeRetryProperty.INITIAL_BACKOFF, 1.5f));
+        assertEquals(Duration.ofMillis(250),
+                NodeRetryProperty.parseDuration(NodeRetryProperty.INITIAL_BACKOFF, 250.0d),
+                "an integral value expressed as a double is still exactly that many milliseconds");
+        assertEquals(Duration.ofMillis(Long.MAX_VALUE),
+                NodeRetryProperty.parseDuration(NodeRetryProperty.INITIAL_BACKOFF, Long.MAX_VALUE),
+                "an integral type takes the exact path, where a double would already have lost bits");
+        assertThrows(IllegalArgumentException.class,
+                () -> NodeRetryProperty.parseDuration(NodeRetryProperty.INITIAL_BACKOFF, Double.NaN),
+                "Math.round maps NaN to zero, which is the same silent 'no wait' this rejects");
+    }
+
+    @Test
     void backoffDefaultsFillInAroundWhateverTheAuthorDeclared() {
         RetryPolicy policy = NodeRetryProperty.read(Map.of(
                 NodeRetryProperty.MAX_ATTEMPTS, "3",

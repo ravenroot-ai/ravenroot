@@ -76,6 +76,20 @@ public final class StructuredExecutionLogger implements Consumer<ExecutionEvent>
                         : "\"" + escape(event.deploymentId()) + "\"")
                 + ",\"workloadId\":" + (event.workloadId() == null ? "null"
                         : "\"" + escape(event.workloadId()) + "\"")
+                // The attempt-scoped counts, trailing for the same field-order reason as the keys
+                // above. Without the ordinal a retry's NODE_STARTED is byte-identical to an initial
+                // attempt's on the one line an operator actually greps, so the audit log could show a
+                // node starting three times and give no way to tell three visits from one visit
+                // retried twice. 0 on both keys reads as "not stated", exactly as it does on the
+                // event: it is not a claim that this was an initial attempt, nor that a connector
+                // tried exactly once.
+                + ",\"attemptOrdinal\":" + event.attemptOrdinal()
+                + ",\"connectorAttempts\":" + event.connectorAttempts()
+                // The bounded classifier, and the only new key here that can be absent. On a retry it
+                // names why the failure was considered repeatable, which is what turns a run of retry
+                // lines from noise into a diagnosis.
+                + ",\"publicReason\":" + (event.publicReason() == null ? "null"
+                        : "\"" + escape(event.publicReason()) + "\"")
                 + "}";
     }
 

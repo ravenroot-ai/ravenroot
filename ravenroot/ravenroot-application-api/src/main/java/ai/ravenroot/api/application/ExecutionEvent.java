@@ -266,8 +266,14 @@ public ExecutionEvent {
         // Absent, never blank: this value becomes a metric label, and "" would be a series
         // that looks like a node type nobody can find in the catalog.
         nodeCatalogKey = nodeCatalogKey == null || nodeCatalogKey.isBlank() ? null : nodeCatalogKey;
+        // NODE_RETRY_SCHEDULED carries author-facing failure text for the same reason the other three
+        // do: it is the settlement of an attempt that failed, and the only one that attempt receives,
+        // because it replaces NODE_FAILED rather than preceding it. Excluding it would delete the
+        // diagnostic for every non-final attempt -- so a node that fails twice and then succeeds
+        // would leave no record of what went wrong anywhere on this surface.
         boolean failureEvent = type == ExecutionEventType.NODE_FAILED || type == ExecutionEventType.JOIN_FAILED
-                || type == ExecutionEventType.EXECUTION_FAILED;
+                || type == ExecutionEventType.EXECUTION_FAILED
+                || type == ExecutionEventType.NODE_RETRY_SCHEDULED;
         if (!failureEvent) authorMessage = null;
         if (type != ExecutionEventType.NODE_COMPLETED || !"log".equals(nodeCatalogKey)) authorOutput = null;
         if (type == ExecutionEventType.EDGE_TRAVERSED) {

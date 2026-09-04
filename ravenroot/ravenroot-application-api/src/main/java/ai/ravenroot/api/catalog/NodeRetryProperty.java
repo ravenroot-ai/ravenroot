@@ -195,7 +195,7 @@ public final class NodeRetryProperty {
             return requireNonNegative(name, duration);
         }
         if (raw instanceof Number number) {
-            return requireNonNegative(name, Duration.ofMillis(number.longValue()));
+            return requireNonNegative(name, millisToDuration(name, number));
         }
         String text = raw == null ? "" : raw.toString().strip();
         if (text.matches("[0-9]+")) {
@@ -255,6 +255,37 @@ public final class NodeRetryProperty {
             }
         }
         return Set.copyOf(names);
+    }
+
+    /**
+     * Converts a numeric millisecond count to a duration without losing a fractional part.
+     *
+     * <p>{@code longValue()} would truncate, and the truncation is silent and lands on the one value
+     * that means "no wait at all": a declared {@code 0.5} became {@code PT0S}, so a policy an author
+     * wrote to pause half a millisecond between attempts retried as fast as the machine could go.
+     * Nanosecond precision is used instead, which is the resolution {@link Duration} carries anyway
+     * and is finer than any wait this property is used to express.</p>
+     *
+     * <p>An integral value takes the exact path, so nothing that worked before goes through the
+     * floating-point one — {@code Long.MAX_VALUE} milliseconds still converts exactly, where a
+     * {@code double} would already have lost precision. A non-finite value is refused rather than
+     * rounded, because {@link Math#round(double)} maps NaN to zero, which is the same silent
+     * "no wait" this method exists to stop producing.</p>
+     */
+    private static Duration millisToDuration(String name, Number number) {
+        if (number instanceof Integer || number instanceof Long || number instanceof Short
+                || number instanceof Byte || number instanceof java.math.BigInteger) {
+            return Duration.ofMillis(number.longValue());
+        }
+        double millis = number.doubleValue();
+        if (!Double.isFinite(millis)) {
+            throw new IllegalArgumentException("invalid " + name + ": '" + number + "'");
+        }
+        double nanos = millis * 1_000_000.0;
+        if (Math.abs(nanos) > (double) Long.MAX_VALUE) {
+            throw new IllegalArgumentException(name + " is out of range: '" + number + "'");
+        }
+        return Duration.ofNanos(Math.round(nanos));
     }
 
     private static int requireInRange(int attempts) {

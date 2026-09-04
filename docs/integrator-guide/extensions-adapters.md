@@ -31,6 +31,9 @@ escapes, base64-encodes, or otherwise expands a response must derive a finite pr
 enforce it at the final `NodeResult` or provider-response boundary. Object storage, for example,
 checks the exact base64-and-metadata size before allocating the encoded value and then checks every
 canonical result payload; a raw-object ceiling is not incorrectly reused as the larger base64 ceiling.
+The managed HTTP response carries the effective operator-intersected output ceiling. A package must
+intersect that value with its locally derived structural ceiling when it creates the final result;
+the request object alone is not evidence of the authority the managed service actually granted.
 
 The managed JDK HTTP bridge cancels the subscription on a streaming breach, signals cancellation to
 the transport, and retains admission until its worker exits. It does not claim forced socket teardown

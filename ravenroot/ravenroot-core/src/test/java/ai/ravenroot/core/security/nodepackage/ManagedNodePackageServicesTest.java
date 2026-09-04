@@ -179,6 +179,7 @@ class ManagedNodePackageServicesTest {
                 .allowRequestHeader("X-Safe")
                 .allowResponseHeader("X-Result")
                 .bindCredential("bearer", origin, "Authorization", "Bearer ")
+                .byteLimits(1024, 17, 1024)
                 .build();
         var services = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP),
                 (packageId, tenant, reference) -> OptionalSecret.of(tenant + ":" + reference)
@@ -196,6 +197,8 @@ class ManagedNodePackageServicesTest {
         assertEquals(List.of("kept"), response.headers().get("x-result"));
         assertFalse(response.headers().containsKey("x-secret-metadata"));
         assertArrayEquals("ok".getBytes(StandardCharsets.UTF_8), response.body());
+        assertEquals(17, response.effectiveMaximumOutputBytes(),
+                "the response carries the output ceiling after operator intersection");
     }
 
     @Test

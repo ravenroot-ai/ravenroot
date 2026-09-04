@@ -157,9 +157,10 @@ final class GithubRuntime {
             };
             try {
                 NodeResult completed;
+                GithubApi api = new GithubApi(services, message, profile, control,
+                        () -> { control.check(); store.renew(operation); control.check(); });
                 try {
-                    completed = work.run(new GithubApi(services, message, profile, control,
-                            () -> { control.check(); store.renew(operation); control.check(); }), operation, control);
+                    completed = work.run(api, operation, control);
                 } catch (GithubProtocol.RateLimited limited) {
                     completed = retry(operation, limited.retryAt());
                 } catch (GithubException failure) {
@@ -178,6 +179,12 @@ final class GithubRuntime {
                 } catch (RuntimeException failure) {
                     GithubException safe = new GithubException(GithubException.Code.RESPONSE_INVALID);
                     finishFailure(store, operation, deadlineEpochMs, kind, result, relinquish, safe);
+                    return;
+                }
+                try {
+                    completed = api.requireOutput(completed);
+                } catch (GithubException failure) {
+                    finishFailure(store, operation, deadlineEpochMs, kind, result, relinquish, failure);
                     return;
                 }
                 try {

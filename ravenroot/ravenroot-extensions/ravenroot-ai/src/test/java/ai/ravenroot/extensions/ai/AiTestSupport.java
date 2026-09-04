@@ -291,6 +291,14 @@ final class AiTestSupport {
             return this;
         }
 
+        /** Adds one response carrying an explicit managed final-output authority. */
+        ScriptedHttp thenWithOutputLimit(String json, long maximumOutputBytes) {
+            script.add(new Step(new OutboundHttpResponse(200,
+                    Map.of("content-type", java.util.List.of("application/json")),
+                    json.getBytes(StandardCharsets.UTF_8), maximumOutputBytes), null));
+            return this;
+        }
+
         /** Adds one response with a chosen status. */
         ScriptedHttp thenStatus(int status, String json) {
             script.add(new Step(response(status, json), null));

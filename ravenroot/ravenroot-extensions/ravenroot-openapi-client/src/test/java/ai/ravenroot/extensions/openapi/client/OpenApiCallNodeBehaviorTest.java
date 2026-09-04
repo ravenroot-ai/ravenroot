@@ -55,6 +55,19 @@ class OpenApiCallNodeBehaviorTest {
         assertEquals(201L, ((Map<?, ?>) result.payload()).get("status"));
     }
 
+    @Test void managedOperatorOutputCeilingCannotBeWidenedByOpenApiProjection() {
+        var transport = new OpenApiClientTestSupport.HttpDouble();
+        transport.response = CompletableFuture.completedFuture(new OutboundHttpResponse(200,
+                Map.of("content-type", List.of("application/json")),
+                "{\"id\":1,\"name\":\"Milo\"}".getBytes(StandardCharsets.UTF_8), 32));
+        var action = behavior(OpenApiClientTestSupport.profile(Set.of("getPet"), 2), "getPet", transport);
+
+        assertFailure(action.handle(OpenApiClientTestSupport.message(input("milo"))),
+                OpenApiClientException.Code.RESPONSE_TOO_LARGE);
+        assertTrue(transport.request.get().limits().maximumOutputBytes() > 32,
+                "the profile request was wider than the managed operator response authority");
+    }
+
     @Test void rejectsUnknownParametersSlashAndSchemaFailuresBeforeTransport() {
         var transport = new OpenApiClientTestSupport.HttpDouble();
         var action = behavior(OpenApiClientTestSupport.profile(Set.of("getPet"), 2), "getPet", transport);

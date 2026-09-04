@@ -55,7 +55,7 @@ final class StorageRuntime {
                         settings.timeoutMs(), settings.maxBytes(), projectedOutputLimit(settings.maxBytes()), 0,
                         put ? Semantics.MUTATION : Semantics.READ,
                         response -> project(settings, body, response,
-                                projectedOutputLimit(settings.maxBytes()))));
+                                effectiveOutputLimit(projectedOutputLimit(settings.maxBytes()), response))));
     }
 
     CompletionStage<NodeResult> execute(NodeMessage message, CancellationSignal cancellation,
@@ -202,8 +202,9 @@ final class StorageRuntime {
                             retryLocked(number);
                             return;
                         }
+                        long outputLimit = effectiveOutputLimit(request.maxOutputBytes(), response);
                         NodeResult projected = request.projector().project(response);
-                        requireProjectedResult(projected, request.maxOutputBytes());
+                        requireProjectedResult(projected, outputLimit);
                         outcome.succeedLocked(projected);
                     } catch (RuntimeException invalid) {
                         outcome.failLocked(invalid instanceof StorageException ? invalid
@@ -307,6 +308,10 @@ final class StorageRuntime {
         } catch (ArithmeticException overflow) {
             return 64L * 1024 * 1024;
         }
+    }
+
+    static long effectiveOutputLimit(long localMaximum, OutboundHttpResponse response) {
+        return Math.min(localMaximum, response.effectiveMaximumOutputBytes());
     }
 
     static void requireProjectedOutput(long projectedBytes, long maximumOutputBytes) {

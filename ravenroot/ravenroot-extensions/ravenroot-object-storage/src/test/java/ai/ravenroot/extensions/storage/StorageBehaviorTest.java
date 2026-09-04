@@ -499,6 +499,22 @@ class StorageBehaviorTest {
                 ((String) ((Map<?, ?>) projected.payload()).get("base64")).length());
     }
 
+    @Test void managedOperatorOutputCeilingCannotBeWidenedByStorageProjection() {
+        StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
+        http.response = CompletableFuture.completedFuture(new OutboundHttpResponse(200,
+                Map.of("etag", List.of("\"etag-1\"")), "hello".getBytes(StandardCharsets.UTF_8), 32));
+        ObjectGetNodeBehavior behavior = new ObjectGetNodeBehavior(new StorageRuntime(name ->
+                java.util.Optional.of(StorageTestSupport.profile(Set.of(StorageProfile.Operation.GET), 1, 10))));
+        NodeAction action = behavior.create(StorageTestSupport.configuration(ObjectGetNodeBehavior.BEHAVIOR), http);
+
+        StorageException refused = failure(action.handle(StorageTestSupport.message(
+                Map.of("version", "object.get.v1"))));
+
+        assertEquals(StorageException.Code.RESPONSE_TOO_LARGE, refused.code());
+        assertTrue(http.request.get().limits().maximumOutputBytes() > 32,
+                "the graph/profile request was wider than the managed operator response authority");
+    }
+
     @Test void putSendsOneBodyAndOnlyProfileAuthorizedConditionals() {
         StorageTestSupport.HttpDouble http = new StorageTestSupport.HttpDouble();
         http.response = CompletableFuture.completedFuture(StorageTestSupport.response(201, new byte[0]));

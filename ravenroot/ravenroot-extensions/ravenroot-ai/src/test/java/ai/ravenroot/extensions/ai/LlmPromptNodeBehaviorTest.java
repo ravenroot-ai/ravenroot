@@ -214,6 +214,24 @@ class LlmPromptNodeBehaviorTest {
     }
 
     @Test
+    @DisplayName("the managed operator output ceiling survives through final node projection")
+    void managedOperatorOutputCeilingCannotBeWidenedByTheProfile() {
+        var services = new AiTestSupport.HttpDouble();
+        services.response = CompletableFuture.completedFuture(
+                new ai.ravenroot.api.node.service.OutboundHttpResponse(200,
+                        Map.of("content-type", List.of("application/json")),
+                        ChatCompletionsDouble.completion("hello").getBytes(StandardCharsets.UTF_8), 32));
+        NodeAction action = new LlmPromptNodeBehavior(AiTestSupport.resolving(AiTestSupport.profile(ENDPOINT)))
+                .create(AiTestSupport.configuration(Map.of("provider", "local", "prompt", "Hi")), services);
+
+        LlmPromptException failure = failureOf(action);
+
+        assertEquals(LlmPromptException.Code.RESPONSE_TOO_LARGE, failure.code());
+        assertTrue(services.request.get().limits().maximumOutputBytes() > 32,
+                "the profile request was wider than the managed operator response authority");
+    }
+
+    @Test
     @DisplayName("a managed-channel refusal is mapped onto this bundle's own closed vocabulary")
     void aManagedChannelRefusalIsMapped() {
         var services = new AiTestSupport.HttpDouble();

@@ -105,6 +105,20 @@ final class GithubValues {
         }
     }
 
+    static NodeResult requireResult(NodeResult result, long maximumOutputBytes) {
+        try {
+            int ceiling = Math.toIntExact(maximumOutputBytes);
+            new PayloadLimits(ceiling, LIMITS.maxDepth(), LIMITS.maxCollectionSize(),
+                    LIMITS.maxValueCount(), Math.min(ceiling, LIMITS.maxTextLength()),
+                    LIMITS.maxKeyLength()).enforceAndMeasure(Map.of(
+                            "outcome", result.outcome(), "payload", result.payload(),
+                            "attributes", result.attributes()));
+            return result;
+        } catch (RuntimeException oversized) {
+            throw new GithubException(GithubException.Code.RESPONSE_INVALID);
+        }
+    }
+
     static String sha256(byte[] bytes) {
         try { return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)); }
         catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }

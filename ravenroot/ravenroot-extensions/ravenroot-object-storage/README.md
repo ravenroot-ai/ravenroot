@@ -47,7 +47,9 @@ Every storage request carries the effective byte ceiling and remaining total dea
 managed HTTP boundary. Object reads accept only the profile's media allowlist, list responses accept
 XML, and mutation responses remain opaque; all storage operations require identity encoding so an
 endpoint cannot introduce an unbudgeted decompression layer. Cancellation is registered before
-handoff and stops any later list retry.
+handoff and stops any later list retry. The managed response carries the effective operator output
+ceiling back to storage, which intersects it again with the operation's derived canonical-result
+ceiling before returning a node result.
 
 Keys and prefixes are strict UTF-8 relative paths. Empty/dot segments, controls, backslashes,
 literal `%`, query/fragment syntax and paths over 1024 UTF-8 bytes are refused before managed HTTP,

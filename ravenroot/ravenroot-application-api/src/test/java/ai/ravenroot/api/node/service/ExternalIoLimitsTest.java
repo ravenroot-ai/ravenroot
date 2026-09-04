@@ -3,6 +3,7 @@ package ai.ravenroot.api.node.service;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.Map;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -63,5 +64,16 @@ class ExternalIoLimitsTest {
         assertTrue(OutboundHttpRepresentationPolicy.ALL_STATUSES.validates(500));
         assertThrows(IllegalArgumentException.class,
                 () -> new OutboundHttpRepresentationPolicy(false, Set.of(99)));
+    }
+
+    @Test
+    void managedResponseCarriesEffectiveOutputAuthorityWithoutBreakingLegacyDoubles() {
+        assertEquals(Long.MAX_VALUE,
+                new OutboundHttpResponse(200, Map.of(), new byte[0]).effectiveMaximumOutputBytes());
+        assertEquals(73,
+                new OutboundHttpResponse(200, Map.of(), new byte[0], 73)
+                        .effectiveMaximumOutputBytes());
+        assertThrows(IllegalArgumentException.class,
+                () -> new OutboundHttpResponse(200, Map.of(), new byte[0], 0));
     }
 }

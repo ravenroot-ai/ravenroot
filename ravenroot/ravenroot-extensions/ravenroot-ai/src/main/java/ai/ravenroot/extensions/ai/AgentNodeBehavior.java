@@ -867,6 +867,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
         private long tokens;
         private String finishReason = "";
         private final AgentResourceSession resources;
+        private long effectiveMaximumOutputBytes;
 
         Run(NodeMessage message, NodePackageServices services, Settings settings,
             AgentResourceSession resources) {
@@ -878,6 +879,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
                     + Duration.ofMillis(settings.deadlineMs()).toNanos();
+            this.effectiveMaximumOutputBytes = settings.profile().maxResponseBytes();
             // Rendered once, here, and inside the try of the caller: a template that cannot render is
             // a property defect and must refuse before any byte leaves.
             String instructions = render(settings.instructions());
@@ -925,6 +927,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             this.toolCalls = checkpoint.toolCalls();
             this.tokens = checkpoint.tokens();
             this.finishReason = checkpoint.finishReason();
+            this.effectiveMaximumOutputBytes = settings.profile().maxResponseBytes();
         }
 
         private String render(String template) {
@@ -1180,6 +1183,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 // and may quote the objective back; the status is the operator-actionable part.
                 throw new AgentException(AgentException.Code.ENDPOINT_REJECTED);
             }
+            effectiveMaximumOutputBytes = Math.min(effectiveMaximumOutputBytes,
+                    response.effectiveMaximumOutputBytes());
             AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
             turnBudget.settle(turn.promptTokens(), turn.completionTokens());
             var modelOutput = new LinkedHashMap<String, Object>();
@@ -1412,10 +1417,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 attributes.put("agent.totalTokens", tokens);
             }
             try {
-                ExternalIoLimits.compressedHttp(1, settings.profile().maxResponseBytes(),
-                        settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(), 100,
-                        Duration.ofMillis(settings.deadlineMs()), Set.of("application/json"))
-                        .requireOutputBytes(turn.answer().getBytes(StandardCharsets.UTF_8).length);
+                int outputLimit = Math.toIntExact(effectiveMaximumOutputBytes);
+                new PayloadLimits(outputLimit, 32, 50_000, 100_000, outputLimit, 4_096)
+                        .enforceAndMeasure(Map.of("payload", turn.answer(),
+                                "attributes", Map.copyOf(attributes)));
             } catch (RuntimeException oversized) {
                 throw new AgentException(AgentException.Code.RESPONSE_TOO_LARGE);
             }

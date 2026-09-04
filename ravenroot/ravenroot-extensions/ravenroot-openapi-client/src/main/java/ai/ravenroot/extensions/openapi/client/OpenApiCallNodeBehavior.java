@@ -176,7 +176,9 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
         output.put("version", "openapi.call.result.v1"); output.put("operationId", settings.operation.id());
         output.put("status", (long) status); output.put("headers", Map.copyOf(projected)); output.put("body", body);
         try {
-            new PayloadLimits(Math.toIntExact(projectedOutputLimit(settings.maxResponseBytes)),
+            long outputLimit = Math.min(projectedOutputLimit(settings.maxResponseBytes),
+                    response.effectiveMaximumOutputBytes());
+            new PayloadLimits(Math.toIntExact(outputLimit),
                     32, 50_000, 100_000, settings.maxResponseBytes, 2_048)
                     .enforceAndMeasure(output);
         } catch (RuntimeException oversized) {

@@ -17,6 +17,7 @@ import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
+import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -322,10 +323,10 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         completion.promptTokens().ifPresent(count -> attributes.put("llm.promptTokens", count));
         completion.completionTokens().ifPresent(count -> attributes.put("llm.completionTokens", count));
         try {
-            ExternalIoLimits.compressedHttp(1, settings.profile().maxResponseBytes(),
-                    settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(), 100,
-                    Duration.ofMillis(settings.timeoutMs()), Set.of("application/json"))
-                    .requireOutputBytes(completion.text().getBytes(java.nio.charset.StandardCharsets.UTF_8).length);
+            int outputLimit = Math.toIntExact(Math.min(settings.profile().maxResponseBytes(),
+                    response.effectiveMaximumOutputBytes()));
+            new PayloadLimits(outputLimit, 32, 50_000, 100_000, outputLimit, 4_096)
+                    .enforceAndMeasure(Map.of("payload", completion.text(), "attributes", Map.copyOf(attributes)));
         } catch (RuntimeException oversized) {
             throw new LlmPromptException(LlmPromptException.Code.RESPONSE_TOO_LARGE);
         }

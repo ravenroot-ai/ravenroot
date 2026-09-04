@@ -179,8 +179,10 @@ final class McpSession {
             if (!expectsResult) {
                 return new PayloadValue.MapValue(Map.of());
             }
+            int outputLimit = Math.toIntExact(Math.min(profile.maxResponseBytes(),
+                    response.effectiveMaximumOutputBytes()));
             return McpProtocol.readResult(response.body(),
-                    header(response.headers(), "content-type"), profile.maxResponseBytes());
+                    header(response.headers(), "content-type"), outputLimit);
         });
     }
 

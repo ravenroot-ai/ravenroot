@@ -566,7 +566,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 throw mapFailure(failure);
             }
             return new OutboundHttpResponse(response.statusCode(), allowedResponseHeaders(response),
-                    response.body());
+                    response.body(), limits.maximumOutputBytes());
         });
     }
 

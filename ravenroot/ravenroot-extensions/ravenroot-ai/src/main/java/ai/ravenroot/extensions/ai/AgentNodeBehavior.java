@@ -487,7 +487,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                     message.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
                 leases.forEach(Admission.Lease::close);
-                resources.cancel();
+                resources.failAttempt();
                 return CompletableFuture.failedFuture(
                         new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
             }
@@ -498,7 +498,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             run = new Run(message, services, settings, resources);
         } catch (RuntimeException failure) {
             leases.forEach(Admission.Lease::close);
-            resources.cancel();
+            resources.failAttempt();
             return CompletableFuture.failedFuture(sanitize(failure));
         }
         var result = new CompletableFuture<NodeResult>();
@@ -522,7 +522,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 if (failure == null) {
                     resources.complete();
                 } else if (!run.suspended()) {
-                    resources.cancel();
+                    // A node failure may still be followed by a durable GraphRunner retry. The
+                    // first-party mediator detaches this attempt while preserving the logical
+                    // grant; the fail-closed SPI default cancels for mediators that cannot prove it.
+                    resources.failAttempt();
                 }
             } finally {
                 // The finally is the whole point, and it was learned the expensive way. Fusing the

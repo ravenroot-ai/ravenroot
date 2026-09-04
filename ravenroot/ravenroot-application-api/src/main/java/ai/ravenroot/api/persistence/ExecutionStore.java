@@ -439,24 +439,65 @@ public interface ExecutionStore extends AutoCloseable {
 
     // ---------------------------------------------------------------- durable tool approvals
 
-    /** Reads one tool approval without exposing another tenant's existence. */
+    /**
+     * Reads one tool approval without exposing another tenant's existence.
+     *
+     * @param key tenant and process scope
+     * @param approvalId approval to load
+     * @return approval when it exists in the supplied scope
+     */
     default CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
                                                                             UUID approvalId) {
         return toolApprovalsUnsupported();
     }
 
-    /** Lists tool approvals retained for one process in registration order. */
+    /**
+     * Lists tool approvals retained for one process in registration order.
+     *
+     * @param key tenant and process scope
+     * @return immutable approval snapshot list
+     */
     default CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
         return toolApprovalsUnsupported();
     }
 
-    /** Loads this process's durable agent authority ledger, when registered. */
+    /**
+     * Loads this process's durable agent authority ledger, when registered.
+     *
+     * @param key tenant and process scope
+     * @return current budget when registered
+     */
     default CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
         if (!supports(StoreCapability.AGENT_AUTHORITY_BUDGETS)) {
             return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
                     new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
         }
         return java.util.concurrent.CompletableFuture.completedFuture(Optional.empty());
+    }
+
+    /**
+     * Reads the store-global agent-authority control epoch.
+     *
+     * @return current durable control state
+     */
+    default CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
+    }
+
+    /**
+     * Atomically advances the store-global control state from the exact expected snapshot.
+     *
+     * @param expectedState state required for the compare-and-set
+     * @param expectedEpoch epoch required for the compare-and-set
+     * @param targetState target state
+     * @return newly committed control snapshot
+     */
+    default CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.AGENT_AUTHORITY_BUDGETS)));
     }
 
     /** Additive fail-closed default for adapters that have not implemented tool approvals. */

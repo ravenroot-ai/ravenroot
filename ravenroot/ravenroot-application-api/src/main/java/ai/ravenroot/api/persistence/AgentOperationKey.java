@@ -12,9 +12,22 @@ import java.util.UUID;
 public final class AgentOperationKey {
     private AgentOperationKey() { }
 
-    public static String of(ExecutionKey root, UUID grantId, String nodeId, UUID invocationId,
+    /**
+     * Derives a stable payload-free operation identity.
+     *
+     * @param root owning process identity
+     * @param grantId charged grant
+     * @param nodeId graph node identity
+     * @param invocationId logical invocation identity
+     * @param attemptId exact execution attempt identity
+     * @param kind operation kind
+     * @param ordinal caller-owned monotonic ordinal
+     * @param discriminator optional stable operation discriminator
+     * @return bounded SHA-256 operation key
+     */
+    public static String of(ExecutionKey root, UUID grantId, String nodeId, UUID invocationId, UUID attemptId,
                             Kind kind, long ordinal, UUID discriminator) {
-        if (root == null || grantId == null || invocationId == null || kind == null) {
+        if (root == null || grantId == null || invocationId == null || attemptId == null || kind == null) {
             throw new IllegalArgumentException("operation-key scope is required");
         }
         if (nodeId == null || nodeId.isBlank() || nodeId.length() > 256 || ordinal < 0) {
@@ -22,12 +35,13 @@ public final class AgentOperationKey {
         }
         try {
             var out = new ByteArrayOutputStream(256);
-            put(out, "ravenroot-agent-operation-v1");
+            put(out, "ravenroot-agent-operation-v2");
             put(out, root.tenantId());
             put(out, root.processInstanceId().toString());
             put(out, grantId.toString());
             put(out, nodeId);
             put(out, invocationId.toString());
+            put(out, attemptId.toString());
             put(out, kind.name());
             out.writeBytes(ByteBuffer.allocate(Long.BYTES).putLong(ordinal).array());
             put(out, discriminator == null ? "" : discriminator.toString());
@@ -44,5 +58,13 @@ public final class AgentOperationKey {
         out.writeBytes(bytes);
     }
 
-    public enum Kind { MODEL_TURN, TOOL_CALL, CHILD_GRANT }
+    /** Supported payload-free operation categories. */
+    public enum Kind {
+        /** One model-provider turn. */
+        MODEL_TURN,
+        /** One model-proposed tool effect. */
+        TOOL_CALL,
+        /** One delegated child grant. */
+        CHILD_GRANT
+    }
 }

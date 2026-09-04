@@ -158,6 +158,7 @@ public final class RavenrootServerMain {
         // never be allowed to replace the real diagnosis with an unrelated audit failure. See
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
+        var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
         ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
         ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
@@ -165,7 +166,7 @@ public final class RavenrootServerMain {
                         approvalStore, java.time.Clock.systemUTC(),
                         ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration
                                 .fromEnvironment(System.getenv()),
-                        ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.discarding())
+                        agentBudgetTelemetry)
                 : null;
         ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
@@ -383,6 +384,9 @@ public final class RavenrootServerMain {
                 if (humanTasks != null) {
                     server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant);
                 }
+                if (agentBudgets != null) {
+                    server.installAgentAuthorityControl(agentBudgets);
+                }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(
                             ai.ravenroot.server.ingress.ManagedIngressRegistry ingress) {
@@ -415,7 +419,8 @@ public final class RavenrootServerMain {
         java.util.Optional<AutoCloseable> telemetry;
         try {
             telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
-                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor);
+                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor,
+                    agentBudgetTelemetry);
         } catch (RuntimeException | Error telemetryFailure) {
             startupHandle.close();
             userCredentials.close();

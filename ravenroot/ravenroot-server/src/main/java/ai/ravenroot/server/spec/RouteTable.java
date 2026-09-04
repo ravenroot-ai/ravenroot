@@ -532,6 +532,22 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/agent-authority",
+                    "Dispatch context for the authenticated durable agent-authority trip/reset controls. "
+                            + "Bare and unknown operations are nondisclosing 404 responses.",
+                    true, true, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/agent-authority/trip",
+                    "Trips the durable store-global first-party agent authority epoch. PLATFORM_ADMIN "
+                            + "only; the response contains only state and epoch.", true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/agent-authority/reset",
+                    "Resets the durable store-global first-party agent authority epoch without reviving "
+                            + "pre-trip grants. PLATFORM_ADMIN only; the response contains only state and epoch.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "

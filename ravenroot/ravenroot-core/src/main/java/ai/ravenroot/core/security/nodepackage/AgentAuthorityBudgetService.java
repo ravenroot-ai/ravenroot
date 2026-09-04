@@ -15,6 +15,8 @@ import ai.ravenroot.api.persistence.AgentAuthorityBinding;
 import ai.ravenroot.api.persistence.AgentAuthorityGrantRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityRootRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityState;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
 import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.AgentBudgetReservation;
 import ai.ravenroot.api.persistence.AgentBudgetVector;
@@ -50,7 +52,6 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicLong;
 
 /** Durable, process-rooted first-party agent authority and budget mediator. */
 public final class AgentAuthorityBudgetService implements AgentResourceService, ToolApprovalBudgetHooks {
@@ -63,12 +64,14 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
     private final ConcurrentHashMap<ExecutionKey, ExecutionRecorder> liveRecorders = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<InvocationKey, UUID> aliases = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<InvocationKey, Session> sessions = new ConcurrentHashMap<>();
-    private final ConcurrentHashMap<ExecutionKey, RootContext> knownRoots = new ConcurrentHashMap<>();
-    private final Object controlMonitor = new Object();
-    private final AtomicLong runtimeEpoch = new AtomicLong();
-    private final AtomicBoolean killed = new AtomicBoolean();
-    private final AtomicBoolean resetAuthorized = new AtomicBoolean();
 
+    /**
+     * Creates the durable first-party authority mediator.
+     * @param store execution store supporting agent-authority budgets
+     * @param clock runtime clock used only for bounded request calculations
+     * @param policy immutable operator policy and rate card
+     * @param telemetry identifier-free aggregate sink
+     */
     public AgentAuthorityBudgetService(ExecutionStore store, Clock clock,
                                        AgentAuthorityBudgetPolicy policy,
                                        AgentBudgetTelemetry telemetry) {
@@ -81,7 +84,12 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         }
     }
 
-    /** Associates all resource writes for one live execution with its current store fence. */
+    /**
+     * Associates all resource writes for one live execution with its current store fence.
+     * @param key execution identity
+     * @param recorder fenced execution writer
+     * @return handle that removes this exact live binding
+     */
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {
         Objects.requireNonNull(key, "key"); Objects.requireNonNull(recorder, "recorder");
         ExecutionRecorder prior = liveRecorders.putIfAbsent(key, recorder);
@@ -89,48 +97,68 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         return () -> liveRecorders.remove(key, recorder);
     }
 
+    /**
+     * Terminates grants still active after the execution has reached its final outcome.
+     * @param key completed execution identity
+     * @param completed whether the execution completed successfully rather than failing or cancelling
+     */
+    public void finishProcess(ExecutionKey key, boolean completed) {
+        ExecutionRecorder recorder = liveRecorders.get(Objects.requireNonNull(key, "key"));
+        DurableAgentAuthorityBudget budget = budget(key).orElse(null);
+        if (recorder == null || budget == null) return;
+        List<AgentBudgetOperation> terminal = budget.grants().values().stream()
+                .filter(grant -> grant.state() == AgentGrantState.ACTIVE)
+                .map(grant -> completed
+                        ? (AgentBudgetOperation) new AgentBudgetOperation.ExhaustGrant(
+                                grant.registration().grantId())
+                        : new AgentBudgetOperation.CancelGrant(grant.registration().grantId()))
+                .toList();
+        if (terminal.isEmpty()) return;
+        recorder.record(List.of(), List.of(), terminal);
+        telemetry.record(AgentBudgetTelemetry.Dimension.TEAM_ACTIVE,
+                AgentBudgetTelemetry.Outcome.RELEASED, terminal.size());
+    }
+
     @Override
     public AgentResourceSession admit(NodeMessage message, AgentResourceRequest request) {
         Objects.requireNonNull(message, "message"); Objects.requireNonNull(request, "request");
-        synchronized (controlMonitor) {
-            requireRuntimeActive();
+        {
+            AgentAuthorityControl control = activeControl();
             ExecutionKey key = key(message);
             ExecutionRecorder recorder = recorder(key);
             DurableAgentAuthorityBudget budget = budget(key).orElse(null);
             var operations = new ArrayList<AgentBudgetOperation>();
             if (budget == null) {
-                operations.add(new AgentBudgetOperation.RegisterRoot(root(message.security(), key, clock.instant())));
+                operations.add(new AgentBudgetOperation.RegisterRoot(
+                        root(message.security(), key, clock.instant()), control.epoch()));
             } else {
                 requireIdentity(budget, message);
-                if (budget.state() == AgentAuthorityState.KILLED) {
-                    if (!resetAuthorized.get()) throw refused();
-                    operations.add(new AgentBudgetOperation.ResetRoot(root(message.security(), key, clock.instant()),
-                            budget.controlEpoch()));
-                } else if (budget.root().bootEpoch() != policy.bootEpoch()) {
-                    Instant deadline = minimum(budget.root().absoluteDeadline(),
-                            clock.instant().plus(policy.rootLifetime()));
-                    operations.add(new AgentBudgetOperation.RebootRoot(
-                            rootAtDeadline(message.security(), key, deadline), budget.controlEpoch()));
-                }
+                requirePolicyCompatible(budget);
+                if (budget.state() != AgentAuthorityState.ACTIVE
+                        || budget.controlEpoch() != control.epoch()) throw refused();
             }
-            UUID grantId = grantId(key, message.invocationId(), policy.bootEpoch(), runtimeEpoch.get());
+            UUID grantId = grantId(key, message.invocationId(), control.epoch());
             DurableAgentAuthorityBudget projected = budget;
             if (projected == null || !projected.grants().containsKey(grantId)) {
                 Set<UUID> parents = parentGrants(projected, message.parentInvocationIds());
                 AgentAuthorityGrantRegistration grant = grant(projected, grantId, parents, request, clock.instant());
-                long controlEpoch = projected == null ? 0 : projected.controlEpoch()
-                        + (operations.stream().anyMatch(AgentBudgetOperation.ResetRoot.class::isInstance)
-                        || operations.stream().anyMatch(AgentBudgetOperation.RebootRoot.class::isInstance) ? 1 : 0);
+                long controlEpoch = control.epoch();
+                long bootEpoch = projected == null ? policy.bootEpoch() : projected.root().bootEpoch();
                 operations.add(new AgentBudgetOperation.RegisterGrant(grant,
                         new AgentAuthorityBinding(grantId, message.nodeId(), message.invocationId(),
-                                message.parentInvocationIds()), policy.bootEpoch(), controlEpoch));
+                                message.parentInvocationIds()), bootEpoch, controlEpoch));
             }
             if (!operations.isEmpty()) {
                 recorder.record(List.of(), List.of(event(message, "AGENT_AUTHORITY_ADMITTED", "RESERVED",
                         AgentBudgetVector.ZERO)), operations);
+                if (operations.stream().anyMatch(AgentBudgetOperation.RegisterGrant.class::isInstance)) {
+                    telemetry.record(AgentBudgetTelemetry.Dimension.TEAM_CUMULATIVE,
+                            AgentBudgetTelemetry.Outcome.USED, 1);
+                    telemetry.record(AgentBudgetTelemetry.Dimension.TEAM_ACTIVE,
+                            AgentBudgetTelemetry.Outcome.RESERVED, 1);
+                }
             }
-            knownRoots.putIfAbsent(key, new RootContext(message, recorder.graphVersionPin().reference()));
-            Session session = new Session(message, request, grantId, runtimeEpoch.get(), recorder);
+            Session session = new Session(message, request, grantId, control.epoch(), recorder);
             InvocationKey invocation = InvocationKey.of(message);
             Session prior = sessions.putIfAbsent(invocation, session);
             if (prior != null) return prior;
@@ -142,7 +170,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
     @Override
     public AgentResourceSession resume(ToolCallContinuationInput continuation, AgentResourceRequest request) {
         Objects.requireNonNull(continuation, "continuation"); Objects.requireNonNull(request, "request");
-        requireRuntimeActive();
+        AgentAuthorityControl control = activeControl();
         NodeMessage current = continuation.message();
         ExecutionKey key = key(current);
         DurableToolApproval approval = await(store.loadToolApproval(key, continuation.approvalId()))
@@ -162,13 +190,14 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         }
         DurableAgentAuthorityBudget budget = budget(key).orElseThrow(this::refused);
         if (!budget.root().runtimeInstanceId().equals(policy.runtimeInstanceId())
-                || budget.root().bootEpoch() != policy.bootEpoch()
-                || !budget.root().security().equals(current.security())) {
+                || !budget.root().security().equals(current.security())
+                || budget.controlEpoch() != control.epoch()) {
             throw refused();
         }
+        requirePolicyCompatible(budget);
         UUID originalGrant = grantFor(key, approval.request().invocationId());
         String operationKey = toolOperationKey(key, originalGrant, approval.request().invocationId(),
-                approval.request().nodeId(), approval.request().callId());
+                approval.request().attemptId(), approval.request().nodeId(), approval.request().callId());
         AgentBudgetReservation reservation = budget.reservations().values().stream()
                 .filter(candidate -> candidate.operationKey().equals(operationKey)).findFirst()
                 .orElseThrow(this::refused);
@@ -178,8 +207,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             throw refused();
         }
         ExecutionRecorder recorder = recorder(key);
-        knownRoots.putIfAbsent(key, new RootContext(current, recorder.graphVersionPin().reference()));
-        Session session = new Session(current, request, reservation.grantId(), runtimeEpoch.get(), recorder);
+        Session session = new Session(current, request, reservation.grantId(), control.epoch(), recorder);
         InvocationKey invocation = InvocationKey.of(current);
         sessions.put(invocation, session);
         aliases.put(invocation, reservation.grantId());
@@ -188,12 +216,12 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
 
     /** Reserves and dispatches a direct model-authorized tool call before its effect. */
     ToolReservation reserveDirectTool(NodeMessage message, UUID callId) {
-        requireRuntimeActive();
+        activeControl();
         ExecutionKey key = key(message);
         UUID grantId = grantFor(message);
         DurableAgentAuthorityBudget budget = budget(key).orElseThrow(this::refused);
         AgentBudgetReservation reservation = toolReservation(key, grantId, message.nodeId(),
-                message.invocationId(), callId);
+                message.invocationId(), message.attemptId(), callId);
         recorder(key).record(List.of(), List.of(event(message, "AGENT_TOOL_RESERVED", "RESERVED",
                         reservation.requested())), List.of(
                 new AgentBudgetOperation.Hold(reservation, budget.root().bootEpoch(), budget.controlEpoch()),
@@ -215,18 +243,18 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         if (budget == null) return Optional.empty();
         UUID grantId = grantFor(key, request.invocationId());
         return Optional.of(new AgentBudgetOperation.Hold(toolReservation(key, grantId, request.nodeId(),
-                request.invocationId(), request.callId()), budget.root().bootEpoch(), budget.controlEpoch()));
+                request.invocationId(), request.attemptId(), request.callId()),
+                budget.root().bootEpoch(), budget.controlEpoch()));
     }
 
     @Override public List<AgentBudgetOperation> dispatch(DurableToolApproval approval) {
-        requireRuntimeActive();
+        activeControl();
         DurableAgentAuthorityBudget budget = budget(approval.key()).orElse(null);
         if (budget == null) return List.of();
         if (budget.state() != AgentAuthorityState.ACTIVE) throw refused();
         AgentBudgetReservation reservation = reservationFor(approval, budget);
         if (reservation == null) return List.of();
         if (reservation.state() != AgentReservationState.HELD
-                || budget.root().bootEpoch() != policy.bootEpoch()
                 || !budget.root().runtimeInstanceId().equals(policy.runtimeInstanceId())) {
             throw refused();
         }
@@ -249,55 +277,46 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                 new AgentBudgetOperation.MarkIndeterminate(reservation.reservationId()));
     }
 
-    /** Authenticated runtime-wide emergency stop. */
+    /**
+     * Applies the authenticated store-global emergency stop idempotently.
+     * @param context authenticated platform-administrator context
+     * @return committed control epoch
+     */
     public long trip(RequestContext context) {
         requireOperator(context);
-        synchronized (controlMonitor) {
-            long next = runtimeEpoch.incrementAndGet();
-            killed.set(true);
-            resetAuthorized.set(false);
-            sessions.values().forEach(Session::cancelForKill);
-            for (Map.Entry<ExecutionKey, RootContext> entry : knownRoots.entrySet()) {
-                ExecutionKey key = entry.getKey();
-                DurableAgentAuthorityBudget budget = budget(key).orElse(null);
-                ExecutionRecorder recorder = liveRecorders.get(key);
-                if (budget == null) continue;
-                EventEnvelope event = event(entry.getValue().message(), "AGENT_KILL_SWITCH_TRIPPED", "KILLED",
-                        AgentBudgetVector.ZERO, entry.getValue().graphVersion());
-                AgentBudgetOperation kill = new AgentBudgetOperation.KillRoot(budget.controlEpoch());
-                if (recorder != null) {
-                    recorder.record(List.of(), List.of(event), List.of(kill));
-                } else {
-                    applyUnfenced(key, event, kill);
-                }
-            }
-            return next;
-        }
+        AgentAuthorityControl next = transitionControl(AgentAuthorityControlState.ACTIVE,
+                AgentAuthorityControlState.KILLED);
+        sessions.values().forEach(Session::cancelForKill);
+        return next.epoch();
     }
 
-    /** Authenticated reset; durable roots are re-evaluated lazily at their next admission. */
+    /**
+     * Resets the authenticated store-global control without reviving old roots.
+     * @param context authenticated platform-administrator context
+     * @return committed control epoch
+     */
     public long reset(RequestContext context) {
         requireOperator(context);
-        synchronized (controlMonitor) {
-            long next = runtimeEpoch.incrementAndGet();
-            for (Map.Entry<ExecutionKey, RootContext> entry : knownRoots.entrySet()) {
-                ExecutionKey key = entry.getKey();
-                DurableAgentAuthorityBudget budget = budget(key).orElse(null);
-                if (budget == null || budget.state() != AgentAuthorityState.KILLED) continue;
-                EventEnvelope event = event(entry.getValue().message(), "AGENT_KILL_SWITCH_RESET", "RESET",
-                        AgentBudgetVector.ZERO, entry.getValue().graphVersion());
-                AgentBudgetOperation advance = new AgentBudgetOperation.KillRoot(budget.controlEpoch());
-                ExecutionRecorder recorder = liveRecorders.get(key);
-                if (recorder != null) {
-                    recorder.record(List.of(), List.of(event), List.of(advance));
-                } else {
-                    applyUnfenced(key, event, advance);
-                }
+        return transitionControl(AgentAuthorityControlState.KILLED,
+                AgentAuthorityControlState.ACTIVE).epoch();
+    }
+
+    private AgentAuthorityControl transitionControl(AgentAuthorityControlState expected,
+                                                     AgentAuthorityControlState target) {
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            AgentAuthorityControl current = await(store.loadAgentAuthorityControl());
+            if (current.state() == target) return current;
+            if (current.state() != expected) throw refused();
+            try {
+                return await(store.transitionAgentAuthorityControl(expected, current.epoch(), target));
+            } catch (RuntimeException stale) {
+                if (ai.ravenroot.api.persistence.ExecutionStoreException.unwrap(stale) == null) throw stale;
+                AgentAuthorityControl winner = await(store.loadAgentAuthorityControl());
+                if (winner.state() == target) return winner;
+                if (attempt == 3) throw stale;
             }
-            resetAuthorized.set(true);
-            killed.set(false);
-            return next;
         }
+        throw refused();
     }
 
     private Optional<AgentBudgetOperation> reservationOperation(DurableToolApproval approval,
@@ -313,22 +332,22 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                                                     DurableAgentAuthorityBudget budget) {
         UUID grantId = grantFor(approval.key(), approval.request().invocationId());
         String operationKey = toolOperationKey(approval.key(), grantId, approval.request().invocationId(),
-                approval.request().nodeId(), approval.request().callId());
+                approval.request().attemptId(), approval.request().nodeId(), approval.request().callId());
         return budget.reservations().values().stream()
                 .filter(candidate -> candidate.operationKey().equals(operationKey)).findFirst().orElse(null);
     }
 
     private AgentBudgetReservation toolReservation(ExecutionKey key, UUID grantId, String nodeId,
-                                                    UUID invocationId, UUID callId) {
-        String operationKey = toolOperationKey(key, grantId, invocationId, nodeId, callId);
+                                                    UUID invocationId, UUID attemptId, UUID callId) {
+        String operationKey = toolOperationKey(key, grantId, invocationId, attemptId, nodeId, callId);
         return new AgentBudgetReservation(UUID.nameUUIDFromBytes(operationKey.getBytes(StandardCharsets.UTF_8)),
                 grantId, operationKey, new AgentBudgetVector(0, 0, 0, 0, 0, 1, 0, 0, 0),
                 AgentBudgetVector.ZERO, AgentReservationState.HELD);
     }
 
-    private static String toolOperationKey(ExecutionKey key, UUID grantId, UUID invocationId,
+    private static String toolOperationKey(ExecutionKey key, UUID grantId, UUID invocationId, UUID attemptId,
                                            String nodeId, UUID callId) {
-        return AgentOperationKey.of(key, grantId, nodeId, invocationId,
+        return AgentOperationKey.of(key, grantId, nodeId, invocationId, attemptId,
                 AgentOperationKey.Kind.TOOL_CALL, 0, callId);
     }
 
@@ -422,8 +441,17 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         }
     }
 
-    private void requireRuntimeActive() {
-        if (killed.get()) throw refused();
+    private AgentAuthorityControl activeControl() {
+        AgentAuthorityControl control = await(store.loadAgentAuthorityControl());
+        if (control.state() != AgentAuthorityControlState.ACTIVE) throw refused();
+        return control;
+    }
+
+    private void requirePolicyCompatible(DurableAgentAuthorityBudget budget) {
+        if (!budget.root().runtimeInstanceId().equals(policy.runtimeInstanceId())
+                || !budget.root().policyVersion().equals(policy.policyVersion())
+                || !budget.root().rateCardVersion().equals(policy.rateCardVersion())
+                || !budget.root().currency().equals(policy.currency())) throw refused();
     }
 
     private ExecutionRecorder recorder(ExecutionKey key) {
@@ -438,7 +466,9 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
 
     private void requireOperator(RequestContext context) {
         Objects.requireNonNull(context, "context");
-        if (!context.roles().contains(Role.PLATFORM_ADMIN) || !context.scopes().contains("agent:kill")) {
+        if (!context.roles().contains(Role.PLATFORM_ADMIN)
+                || !context.scopes().contains(
+                ai.ravenroot.api.security.AuthorizationAction.AGENT_AUTHORITY_CONTROL.requiredScope())) {
             throw new SecurityException("agent authority control denied");
         }
     }
@@ -501,9 +531,9 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         return new ExecutionKey(message.tenantId(), message.processInstanceId());
     }
 
-    private static UUID grantId(ExecutionKey key, UUID invocationId, long bootEpoch, long epoch) {
+    private static UUID grantId(ExecutionKey key, UUID invocationId, long epoch) {
         return UUID.nameUUIDFromBytes((key.tenantId() + ':' + key.processInstanceId() + ':' + invocationId
-                + ':' + bootEpoch + ':' + epoch).getBytes(StandardCharsets.UTF_8));
+                + ':' + epoch).getBytes(StandardCharsets.UTF_8));
     }
 
     private static Instant minimum(Instant a, Instant b) { return a.isBefore(b) ? a : b; }
@@ -536,8 +566,6 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             return new InvocationKey(AgentAuthorityBudgetService.key(message), message.invocationId());
         }
     }
-
-    private record RootContext(NodeMessage message, String graphVersion) { }
 
     @FunctionalInterface
     private interface ReservationOperation {
@@ -612,8 +640,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                     || !parent.registration().authorityScopes().containsAll(childRequest.authorityScopes())) {
                 throw refused();
             }
-            UUID childGrantId = grantId(key(child), child.invocationId(),
-                    current.root().bootEpoch(), admittedRuntimeEpoch);
+            UUID childGrantId = grantId(key(child), child.invocationId(), admittedRuntimeEpoch);
             AgentAuthorityGrantRegistration derived = grant(current, childGrantId, Set.of(grantId),
                     childRequest.resources(), clock.instant());
             derived = new AgentAuthorityGrantRegistration(derived.grantId(), grantId, Set.of(grantId),
@@ -629,6 +656,10 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             } catch (RuntimeException refused) {
                 throw AgentAuthorityBudgetService.this.refused();
             }
+            telemetry.record(AgentBudgetTelemetry.Dimension.TEAM_CUMULATIVE,
+                    AgentBudgetTelemetry.Outcome.USED, 1);
+            telemetry.record(AgentBudgetTelemetry.Dimension.TEAM_ACTIVE,
+                    AgentBudgetTelemetry.Outcome.RESERVED, 1);
             Session childSession = new Session(child, childRequest.resources(), childGrantId,
                     admittedRuntimeEpoch, recorder);
             InvocationKey childKey = InvocationKey.of(child);
@@ -664,7 +695,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             AgentBudgetVector requested = new AgentBudgetVector(1, input, output,
                     elapsed, cost, 0, 0, 0, 0);
             String operationKey = AgentOperationKey.of(key, grantId, message.nodeId(), message.invocationId(),
-                    AgentOperationKey.Kind.MODEL_TURN, ordinal, null);
+                    message.attemptId(), AgentOperationKey.Kind.MODEL_TURN, ordinal, null);
             UUID reservationId = UUID.nameUUIDFromBytes(operationKey.getBytes(StandardCharsets.UTF_8));
             AgentBudgetReservation reservation = new AgentBudgetReservation(reservationId, grantId, operationKey,
                     requested, AgentBudgetVector.ZERO, AgentReservationState.HELD);
@@ -677,6 +708,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
 
         @Override public void complete() { terminate(new AgentBudgetOperation.ExhaustGrant(grantId)); }
         @Override public void cancel() { terminate(new AgentBudgetOperation.CancelGrant(grantId)); }
+        @Override public void failAttempt() { suspend(); }
         @Override public void suspend() {
             if (!terminal.compareAndSet(false, true)) return;
             detach();
@@ -688,6 +720,8 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
             recorder.record(List.of(), List.of(event(message, operation instanceof AgentBudgetOperation.ExhaustGrant
                             ? "AGENT_AUTHORITY_EXHAUSTED" : "AGENT_AUTHORITY_CANCELLED", "RELEASED",
                     AgentBudgetVector.ZERO)), List.of(operation));
+            telemetry.record(AgentBudgetTelemetry.Dimension.TEAM_ACTIVE,
+                    AgentBudgetTelemetry.Outcome.RELEASED, 1);
             detach();
         }
 
@@ -703,7 +737,8 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         }
 
         private void requirePermit() {
-            if (terminal.get() || killed.get() || admittedRuntimeEpoch != runtimeEpoch.get()) throw refused();
+            AgentAuthorityControl control = activeControl();
+            if (terminal.get() || admittedRuntimeEpoch != control.epoch()) throw refused();
         }
     }
 
@@ -753,10 +788,26 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
         @Override public void settle(Optional<Long> inputTokens, Optional<Long> outputTokens) {
             if (!dispatched.get()) throw refused();
             if (!terminal.compareAndSet(false, true)) return;
-            boolean valid = inputTokens != null && inputTokens.isPresent() && inputTokens.get() >= 0
-                    && inputTokens.get() <= requested.inputTokens()
-                    && outputTokens != null && outputTokens.isPresent() && outputTokens.get() >= 0
-                    && outputTokens.get() <= requested.outputTokens();
+            boolean inputKnown = inputTokens != null && inputTokens.isPresent() && inputTokens.get() >= 0;
+            boolean outputKnown = outputTokens != null && outputTokens.isPresent() && outputTokens.get() >= 0;
+            long observedInput = inputKnown ? inputTokens.get() : requested.inputTokens();
+            long observedOutput = outputKnown ? outputTokens.get() : requested.outputTokens();
+            long observedCost = saturatedCost(observedInput, observedOutput);
+            boolean breached = observedInput > requested.inputTokens()
+                    || observedOutput > requested.outputTokens()
+                    || observedCost > requested.costMicros();
+            if (breached) {
+                AgentBudgetVector observed = new AgentBudgetVector(1, observedInput, observedOutput,
+                        requested.elapsedMillis(), observedCost, 0, 0, 0, 0);
+                recorder.record(List.of(), List.of(event(message, "AGENT_MODEL_BREACHED", "BREACHED",
+                                requested)),
+                        List.of(new AgentBudgetOperation.Breach(reservationId, observed)));
+                recordTelemetry(requested, AgentBudgetTelemetry.Outcome.USED);
+                telemetry.record(AgentBudgetTelemetry.Dimension.TURNS,
+                        AgentBudgetTelemetry.Outcome.BREACHED, 1);
+                return;
+            }
+            boolean valid = inputKnown && outputKnown;
             long input = valid ? inputTokens.get() : requested.inputTokens();
             long output = valid ? outputTokens.get() : requested.outputTokens();
             long elapsed = valid ? Math.min(requested.elapsedMillis(), Math.max(0,
@@ -797,6 +848,15 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
                     Math.multiplyExact(output, policy.outputTokenRateMicros()));
         } catch (ArithmeticException overflow) {
             throw refused();
+        }
+    }
+
+    private long saturatedCost(long input, long output) {
+        try {
+            return Math.addExact(Math.multiplyExact(input, policy.inputTokenRateMicros()),
+                    Math.multiplyExact(output, policy.outputTokenRateMicros()));
+        } catch (ArithmeticException overflow) {
+            return Long.MAX_VALUE;
         }
     }
 

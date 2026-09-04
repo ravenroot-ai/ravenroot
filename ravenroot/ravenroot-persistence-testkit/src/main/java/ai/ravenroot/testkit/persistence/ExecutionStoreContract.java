@@ -14,6 +14,7 @@ import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.AgentAuthorityBinding;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
 import ai.ravenroot.api.persistence.AgentAuthorityGrantRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityRootRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityState;
@@ -2517,7 +2518,7 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
-    final void durableBudgetsSurviveReopenAndOldEpochPermitsNeverRevive() {
+    final void durableGlobalControlSurvivesReopenAndOldEpochPermitsNeverRevive() {
         assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
         assumeCapability(StoreCapability.DURABLE);
         AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
@@ -2527,7 +2528,9 @@ public abstract class ExecutionStoreContract {
         reopen();
         assertEquals(before, budget(fixture.key()));
 
-        applyBudget(fixture.key(), new AgentBudgetOperation.KillRoot(0));
+        assertEquals(0, await(store().loadAgentAuthorityControl()).epoch());
+        assertEquals(1, await(store().transitionAgentAuthorityControl(
+                AgentAuthorityControlState.ACTIVE, 0, AgentAuthorityControlState.KILLED)).epoch());
         DurableAgentAuthorityBudget killed = budget(fixture.key());
         assertEquals(AgentAuthorityState.KILLED, killed.state());
         assertEquals(1, killed.controlEpoch());
@@ -2535,14 +2538,39 @@ public abstract class ExecutionStoreContract {
                 new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 0)));
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, staleDispatch);
 
-        AgentAuthorityRootRegistration replacement = root(fixture.key(), 8, largeBudget());
-        applyBudget(fixture.key(), new AgentBudgetOperation.ResetRoot(replacement, 1));
-        DurableAgentAuthorityBudget reset = budget(fixture.key());
-        assertEquals(AgentAuthorityState.ACTIVE, reset.state());
-        assertEquals(2, reset.controlEpoch());
-        ExecutionStoreFailure oldBoot = failureOf(() -> applyBudget(fixture.key(),
+        reopen();
+        assertEquals(AgentAuthorityControlState.KILLED,
+                await(store().loadAgentAuthorityControl()).state());
+        assertEquals(2, await(store().transitionAgentAuthorityControl(
+                AgentAuthorityControlState.KILLED, 1, AgentAuthorityControlState.ACTIVE)).epoch());
+        ExecutionStoreFailure oldEpoch = failureOf(() -> applyBudget(fixture.key(),
                 new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 2)));
-        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, oldBoot);
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, oldEpoch);
+        assertEquals(AgentAuthorityState.KILLED, budget(fixture.key()).state(),
+                "reset must not reactivate roots revoked by the prior epoch");
+    }
+
+    @Test
+    final void providerUsageBreachRetainsObservedOverageAndRevokesAuthority() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
+        AgentBudgetReservation held = hold(fixture, fixture.grantIds().getFirst(), 1,
+                new AgentBudgetVector(1, 10, 10, 10, 20, 0, 0, 0, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 0));
+        AgentBudgetVector observed = new AgentBudgetVector(1, 11, 10, 10, 21, 0, 0, 0, 0);
+        applyBudget(fixture.key(), new AgentBudgetOperation.Breach(held.reservationId(), observed));
+
+        DurableAgentAuthorityBudget breached = budget(fixture.key());
+        assertEquals(AgentReservationState.BREACHED,
+                breached.reservations().get(held.reservationId()).state());
+        assertEquals(observed, breached.reservations().get(held.reservationId()).actual());
+        assertEquals(AgentAuthorityState.CANCELLED, breached.state());
+        assertEquals(AgentGrantState.EXHAUSTED,
+                breached.grants().get(fixture.grantIds().getFirst()).state());
+        ExecutionStoreFailure refused = failureOf(() -> hold(fixture,
+                fixture.grantIds().getFirst(), 2,
+                new AgentBudgetVector(1, 1, 1, 1, 1, 0, 0, 0, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
     }
 
     private Object racingHold(AgentBudgetFixture fixture, UUID grantId, long revision,
@@ -2583,7 +2611,7 @@ public abstract class ExecutionStoreContract {
         var builder = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
                 .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
-                .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root(key, 7, maxima)));
+                .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root(key, 7, maxima), 0));
         var grantIds = new java.util.ArrayList<UUID>();
         var invocationIds = new java.util.ArrayList<UUID>();
         for (int i = 0; i < topLevelGrants; i++) {

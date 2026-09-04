@@ -4,7 +4,19 @@ import java.time.Instant;
 import java.util.Set;
 import java.util.UUID;
 
-/** One immutable, invocation-bound attenuation of process-root authority. */
+/**
+ * One immutable, invocation-bound attenuation of process-root authority.
+ *
+ * @param grantId stable identifier for this grant
+ * @param parentGrantId primary parent grant, or {@code null} for a root-derived grant
+ * @param contributingParentGrantIds every parent whose authority contributes to this grant
+ * @param depth immutable delegation depth
+ * @param dataScopes bounded operator-defined data-scope tokens
+ * @param authorityScopes bounded authority-scope tokens
+ * @param ceilings finite per-dimension resource ceilings
+ * @param maximumTotalTokens combined input-and-output token ceiling
+ * @param absoluteDeadline absolute deadline inherited or tightened from the parent authority
+ */
 public record AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
                                                Set<UUID> contributingParentGrantIds,
                                                long depth, Set<String> dataScopes,
@@ -12,6 +24,18 @@ public record AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
                                                AgentBudgetVector ceilings,
                                                long maximumTotalTokens,
                                                Instant absoluteDeadline) {
+    /**
+     * Creates a grant whose combined-token ceiling is the saturated sum of its input and output ceilings.
+     *
+     * @param grantId stable identifier for this grant
+     * @param parentGrantId primary parent grant, or {@code null}
+     * @param contributingParentGrantIds every contributing parent grant
+     * @param depth immutable delegation depth
+     * @param dataScopes bounded data scopes
+     * @param authorityScopes bounded authority scopes
+     * @param ceilings finite resource ceilings
+     * @param absoluteDeadline absolute grant deadline
+     */
     public AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
             Set<UUID> contributingParentGrantIds, long depth, Set<String> dataScopes,
             Set<String> authorityScopes, AgentBudgetVector ceilings, Instant absoluteDeadline) {
@@ -19,6 +43,7 @@ public record AgentAuthorityGrantRegistration(UUID grantId, UUID parentGrantId,
                 ceilings, combinedTokenCeiling(ceilings), absoluteDeadline);
     }
 
+    /** Validates and snapshots all mutable grant inputs. */
     public AgentAuthorityGrantRegistration {
         if (grantId == null) throw new IllegalArgumentException("grantId is required");
         contributingParentGrantIds = Set.copyOf(contributingParentGrantIds == null

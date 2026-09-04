@@ -52,10 +52,19 @@ All numeric maxima are positive integers; rates are non-negative integers, so an
 known free rate. Currency is an uppercase three-letter code. Scope variables are bounded comma-separated
 opaque tokens. Omitting `runtime:delegate` disables child delegation without disabling top-level agents.
 
-The runtime kill service is not an unauthenticated HTTP control. It requires a `PLATFORM_ADMIN` with
-the `agent:kill` scope and applies to the composed runtime instance across tenants; the request tenant
-is audit identity, not target selection. Trip and reset never revive an already-issued grant or a
-suspended approval permit. A restarted server uses a new boot epoch and re-evaluates fresh admissions.
+The runtime kill service is available only through authenticated `POST /v1/agent-authority/trip` and
+`POST /v1/agent-authority/reset`. It requires a `PLATFORM_ADMIN` with the
+`ravenroot.agent.authority.control` scope and applies to the store-global control domain across
+tenants; the request tenant is audit identity, not target selection. Trip atomically advances the
+durable epoch, refuses new grant/reservation/dispatch operations, releases held work, and records
+already-dispatched work as indeterminate. Reset advances the epoch again but never revives an old
+grant or suspended approval permit. An ordinary server restart at an unchanged control epoch preserves
+a compatible suspended approval and its exact reservation; policy or rate-card drift fails closed.
+
+When OpenTelemetry is enabled, agent accounting publishes numeric aggregate counters labeled only by
+the fixed budget-dimension and outcome enums. Tenant, principal, process, traversal, invocation, node,
+provider, profile, scope, prompt, arguments, credential, endpoint, and checkpoint values are never
+metric labels.
 
 ## Secret handling
 

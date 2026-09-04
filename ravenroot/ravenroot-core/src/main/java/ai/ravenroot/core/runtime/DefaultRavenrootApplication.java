@@ -1152,6 +1152,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             security.tenantId(), processInstanceId), recorder);
             budgetBinding = agentBudgets == null || recorder == null ? null
                     : agentBudgets.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
+                            security.tenantId(), processInstanceId), recorder);
             humanTaskBinding = humanTasks == null || recorder == null ? null
                     : humanTasks.bindLive(new ai.ravenroot.api.persistence.ExecutionKey(
                             security.tenantId(), processInstanceId), recorder);
@@ -1163,14 +1164,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             AutoCloseable resourceBinding = budgetBinding;
             AutoCloseable taskBinding = humanTaskBinding;
             execution.whenComplete((result, error) -> {
+                Throwable terminalFailure = unwrapFailure(error);
                 // This is the seam where the result used to be dropped. `result` was already
                 // in scope and simply unused -- the engine had computed the payload, the visited
                 // nodes and the defaulted nodes, and the lambda ignored all three. Capturing it
                 // first, before any teardown, so a cleanup failure below cannot cost the caller the
                 // answer it is about to ask for.
-                if (unwrapFailure(error) instanceof
+                if (terminalFailure instanceof
                         ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension
-                        || unwrapFailure(error) instanceof
+                        || terminalFailure instanceof
                         ai.ravenroot.core.humantask.DurableHumanTaskSuspension) {
                     // The durable aggregate is WAITING. It is neither a failed result nor live
                     // in-memory work; the handler-trigger path creates the fresh traversal.
@@ -1178,6 +1180,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     executionResults.failed(resultKey, processInstanceId);
                 } else {
                     executionResults.completed(resultKey, result);
+                }
+                if (agentBudgets != null && !(terminalFailure instanceof
+                        ai.ravenroot.core.security.nodepackage.DurableToolApprovalSuspension)
+                        && !(terminalFailure instanceof
+                        ai.ravenroot.core.humantask.DurableHumanTaskSuspension)) {
+                    agentBudgets.finishProcess(new ai.ravenroot.api.persistence.ExecutionKey(
+                            security.tenantId(), processInstanceId), error == null && result != null);
                 }
                 if (recorder != null) {
                     // Orderly shutdown of this traversal's lease: hands the instance back at once

@@ -140,6 +140,15 @@ public final class AuthorizedRavenrootApplication {
         return delegate.runtimeSnapshot();
     }
 
+    /**
+     * Authorizes store-global agent authority control for a platform administrator.
+     * @param context authenticated request context
+     */
+    public void authorizeAgentAuthorityControl(RequestContext context) {
+        require(context, AuthorizationAction.AGENT_AUTHORITY_CONTROL,
+                ProtectedResource.owned("agent-authority-control", "global", DRAIN_RESOURCE_TENANT));
+    }
+
 /**
  * Lists trusted node type descriptors after catalog-read authorization.
  * @param context authenticated request context used for authorization and audit attribution.

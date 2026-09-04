@@ -288,8 +288,10 @@ class AgentAuthorityBudgetServiceTest {
             fixture.budgets.reset(operator());
             assertEquals(AgentAuthorityState.KILLED, fixture.budget().state(),
                     "reset authorizes new admission but never revives an old root or grant");
-            assertEquals(2, fixture.budget().controlEpoch(),
-                    "trip and reset each advance the durable control epoch");
+            assertEquals(1, fixture.budget().controlEpoch(),
+                    "reset must not rewrite or revive the killed root epoch");
+            assertEquals(2, fixture.store.loadAgentAuthorityControl().toCompletableFuture().join().epoch(),
+                    "trip and reset each advance the store-global control epoch");
 
             var approval = fixture.store.loadToolApproval(fixture.key, approvalId)
                     .toCompletableFuture().join().orElseThrow();
@@ -324,18 +326,14 @@ class AgentAuthorityBudgetServiceTest {
                     .toCompletableFuture().join().orElseThrow().status());
             assertEquals(AgentAuthorityState.KILLED, fixture.budget().state());
 
-            restarted.reset(operator());
-            var fresh = restarted.admit(fixture.addFreshTraversalMessage(), resources());
-            assertEquals(AgentAuthorityState.ACTIVE, fixture.budget().state());
-            assertEquals(2, fixture.budget().root().bootEpoch());
-            assertEquals(1, fixture.budget().grants().values().stream()
-                    .filter(grant -> grant.state() == AgentGrantState.ACTIVE).count());
-            fresh.complete();
+            assertThrows(NodePackageServiceException.class,
+                    () -> restarted.admit(fixture.addFreshTraversalMessage(), resources()),
+                    "reset must not revive the killed process root");
         }
     }
 
     @Test
-    void newBootRefusesOldActiveApprovalAndRetiresItsPermitBeforeFreshAdmission() throws Exception {
+    void ordinaryRestartPreservesActiveApprovalAndExactHeldPermit() throws Exception {
         try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
             var oldApprovals = new ToolApprovalService(fixture.store, CLOCK, fixture.budgets);
             UUID approvalId;
@@ -371,9 +369,9 @@ class AgentAuthorityBudgetServiceTest {
                     Duration.ofSeconds(30), revision);
             fixture.binding = restarted.bindLive(fixture.key, fixture.recorder);
             var restartedApprovals = new ToolApprovalService(fixture.store, CLOCK, restarted);
-            assertThrows(NodePackageServiceException.class, () -> restartedApprovals.redeemStored(
-                    approved, invocation -> new ToolDecision(
-                            ToolDecision.Disposition.ALLOW, "allow", "policy-v1"), "recovery"));
+            var redeemed = restartedApprovals.redeemStored(approved, invocation -> new ToolDecision(
+                    ToolDecision.Disposition.ALLOW, "allow", "policy-v1"), "recovery");
+            assertEquals(ToolApprovalStatus.CONSUMED, redeemed.approval().status());
 
             byte[] checkpoint = approved.request().continuation();
             var request = approved.request();
@@ -382,15 +380,70 @@ class AgentAuthorityBudgetServiceTest {
                     request.canonicalArguments(), request.argumentsDigest(),
                     ToolCallContinuationInput.Decision.APPROVED, request.continuationVersion(), checkpoint,
                     request.continuationDigest());
-            assertThrows(NodePackageServiceException.class, () -> restarted.resume(input, resources()));
-
-            var fresh = restarted.admit(fixture.addFreshTraversalMessage(), resources());
-            assertEquals(2, fixture.budget().root().bootEpoch());
-            assertEquals(AgentReservationState.RELEASED,
+            var resumed = restarted.resume(input, resources());
+            assertEquals(1, fixture.budget().root().bootEpoch(),
+                    "boot identity is diagnostic and must not revoke durable authority");
+            assertEquals(AgentReservationState.DISPATCHED,
                     fixture.budget().reservations().values().iterator().next().state());
             assertEquals(1, fixture.budget().grants().values().stream()
                     .filter(grant -> grant.state() == AgentGrantState.ACTIVE).count());
-            fresh.complete();
+            resumed.suspend();
+        }
+    }
+
+    @Test
+    void retryAttemptsUseDistinctOperationsAndChargeOneLogicalGrantCumulatively() throws Exception {
+        try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var first = fixture.budgets.admit(fixture.message, resources());
+            var firstPermit = first.reserveModelTurn(1);
+            UUID firstReservation = fixture.budget().reservations().keySet().iterator().next();
+            firstPermit.dispatch();
+            firstPermit.settle(Optional.of(10L), Optional.of(5L));
+            first.suspend();
+
+            UUID retryAttempt = UUID.randomUUID();
+            var retryMessage = fixture.messageWithAttempt(retryAttempt);
+            var retry = fixture.budgets.admit(retryMessage, resources());
+            var retryPermit = retry.reserveModelTurn(1);
+            var reservations = fixture.budget().reservations();
+            assertEquals(2, reservations.size());
+            UUID retryReservation = reservations.keySet().stream()
+                    .filter(id -> !id.equals(firstReservation)).findFirst().orElseThrow();
+            assertTrue(!retryReservation.equals(firstReservation),
+                    "attempt identity must distinguish the same ordinal on a retry");
+            assertEquals(1, fixture.budget().grants().size(),
+                    "retry must reuse the logical invocation grant");
+            assertEquals(1, fixture.budget().spent().teamCumulative());
+            assertEquals(1, fixture.budget().reserved().teamActive());
+            retryPermit.release();
+            retry.cancel();
+        }
+    }
+
+    @Test
+    void reportedUsageAboveReservationIsPersistedAsBreachAndRefusesFurtherEffects() throws Exception {
+        var seen = new ArrayList<String>();
+        AgentBudgetTelemetry telemetry = (dimension, outcome, amount) -> seen.add(
+                dimension.name() + ':' + outcome.name() + ':' + amount);
+        try (Fixture fixture = new Fixture(policy(1), telemetry)) {
+            var session = fixture.budgets.admit(fixture.message, resources());
+            var permit = session.reserveModelTurn(1);
+            UUID reservationId = fixture.budget().reservations().keySet().iterator().next();
+            permit.dispatch();
+            permit.settle(Optional.of(Long.MAX_VALUE), Optional.of(20L));
+
+            var budget = fixture.budget();
+            var breached = budget.reservations().get(reservationId);
+            assertEquals(AgentReservationState.BREACHED, breached.state());
+            assertEquals(Long.MAX_VALUE, breached.actual().inputTokens(),
+                    "the durable record must retain the provider-reported overage");
+            assertEquals(Long.MAX_VALUE, breached.actual().costMicros(),
+                    "overflowing reported cost must saturate visibly rather than normalize downward");
+            assertEquals(AgentAuthorityState.CANCELLED, budget.state());
+            assertEquals(AgentGrantState.EXHAUSTED,
+                    budget.grants().values().iterator().next().state());
+            assertThrows(NodePackageServiceException.class, () -> session.reserveModelTurn(2));
+            assertTrue(seen.contains("TURNS:BREACHED:1"));
         }
     }
 
@@ -416,7 +469,7 @@ class AgentAuthorityBudgetServiceTest {
         try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
             fixture.budgets.admit(fixture.message, resources());
             RequestContext nonAdmin = new RequestContext("control", "user", PrincipalType.USER, "issuer",
-                    "tenant-a", Set.of(), Set.of("agent:kill"));
+                    "tenant-a", Set.of(), Set.of("ravenroot.agent.authority.control"));
             RequestContext missingScope = new RequestContext("control", "operator", PrincipalType.USER, "issuer",
                     "tenant-a", Set.of(Role.PLATFORM_ADMIN), Set.of());
             assertThrows(SecurityException.class, () -> fixture.budgets.trip(nonAdmin));
@@ -425,7 +478,8 @@ class AgentAuthorityBudgetServiceTest {
             assertEquals(0, fixture.budget().controlEpoch());
 
             RequestContext runtimeAdmin = new RequestContext("control", "operator", PrincipalType.USER,
-                    "issuer", "operator-tenant", Set.of(Role.PLATFORM_ADMIN), Set.of("agent:kill"));
+                    "issuer", "operator-tenant", Set.of(Role.PLATFORM_ADMIN),
+                    Set.of("ravenroot.agent.authority.control"));
             assertEquals(1, fixture.budgets.trip(runtimeAdmin));
             assertEquals(AgentAuthorityState.KILLED, fixture.budget().state());
             assertEquals(1, fixture.budget().controlEpoch());
@@ -448,7 +502,7 @@ class AgentAuthorityBudgetServiceTest {
 
     private static RequestContext operator() {
         return new RequestContext("control", "operator", PrincipalType.USER, "issuer", "tenant-a",
-                Set.of(Role.PLATFORM_ADMIN), Set.of("agent:kill"));
+                Set.of(Role.PLATFORM_ADMIN), Set.of("ravenroot.agent.authority.control"));
     }
 
     private static RequestContext approver() {
@@ -493,6 +547,11 @@ class AgentAuthorityBudgetServiceTest {
 
         private NodeMessage messageWithInvocation(UUID id) {
             return new NodeMessage(security, key.processInstanceId(), traversalId, id, attemptId,
+                    Set.of(), "agent", null, Map.of());
+        }
+
+        private NodeMessage messageWithAttempt(UUID id) {
+            return new NodeMessage(security, key.processInstanceId(), traversalId, invocationId, id,
                     Set.of(), "agent", null, Map.of());
         }
 

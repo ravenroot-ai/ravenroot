@@ -260,17 +260,26 @@ public final class ExecutionBatch {
         return handlerTransitions;
     }
 
-    /** Tool approvals registered atomically with this batch's execution changes. */
+    /**
+     * Tool approvals registered atomically with this batch's execution changes.
+     * @return immutable registrations in insertion order
+     */
     public List<ToolApprovalRegistration> toolApprovalsToRegister() {
         return toolApprovalsToRegister;
     }
 
-    /** Tool-approval lifecycle changes applied atomically with this batch. */
+    /**
+     * Tool-approval lifecycle changes applied atomically with this batch.
+     * @return immutable transitions in insertion order
+     */
     public List<ToolApprovalTransition> toolApprovalTransitions() {
         return toolApprovalTransitions;
     }
 
-    /** Agent authority and budget mutations applied atomically with this batch. */
+    /**
+     * Agent authority and budget mutations applied atomically with this batch.
+     * @return immutable operations in insertion order
+     */
     public List<AgentBudgetOperation> agentBudgetOperations() { return agentBudgetOperations; }
 
     /**
@@ -465,21 +474,33 @@ public final class ExecutionBatch {
             return this;
         }
 
-        /** Registers one exact tool-approval request in this transaction. */
+        /**
+         * Registers one exact tool-approval request in this transaction.
+         * @param registration immutable approval request
+         * @return this builder
+         */
         public Builder registerToolApproval(ToolApprovalRegistration registration) {
             if (registration == null) throw new IllegalArgumentException("registration cannot be null");
             toolApprovalsToRegister.add(registration);
             return this;
         }
 
-        /** Applies one tool-approval lifecycle transition in this transaction. */
+        /**
+         * Applies one tool-approval lifecycle transition in this transaction.
+         * @param transition transition to apply
+         * @return this builder
+         */
         public Builder applyToolApproval(ToolApprovalTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             toolApprovalTransitions.add(transition);
             return this;
         }
 
-        /** Adds one ordered agent authority/budget mutation to this transaction. */
+        /**
+         * Adds one ordered agent authority/budget mutation to this transaction.
+         * @param operation operation to apply
+         * @return this builder
+         */
         public Builder applyAgentBudget(AgentBudgetOperation operation) {
             if (operation == null) throw new IllegalArgumentException("operation cannot be null");
             agentBudgetOperations.add(operation);

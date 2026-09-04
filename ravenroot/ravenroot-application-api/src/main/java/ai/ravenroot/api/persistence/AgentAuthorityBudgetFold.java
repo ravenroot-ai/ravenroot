@@ -15,6 +15,15 @@ import java.util.UUID;
 public final class AgentAuthorityBudgetFold {
     private AgentAuthorityBudgetFold() { }
 
+    /**
+     * Applies one validated operation to an immutable budget snapshot.
+     *
+     * @param key owning execution identity
+     * @param current current snapshot, or {@code null} only for root registration
+     * @param operation operation to fold
+     * @param storeNow authoritative store time
+     * @return next immutable budget snapshot
+     */
     public static DurableAgentAuthorityBudget apply(ExecutionKey key,
                                                      DurableAgentAuthorityBudget current,
                                                      AgentBudgetOperation operation,
@@ -23,7 +32,8 @@ public final class AgentAuthorityBudgetFold {
         Objects.requireNonNull(storeNow, "storeNow");
         if (operation instanceof AgentBudgetOperation.RegisterRoot register) {
             if (current == null) {
-                return new DurableAgentAuthorityBudget(key, register.root(), AgentAuthorityState.ACTIVE, 0,
+                return new DurableAgentAuthorityBudget(key, register.root(), AgentAuthorityState.ACTIVE,
+                        register.controlEpoch(),
                         AgentBudgetVector.ZERO, AgentBudgetVector.ZERO, Map.of(), Map.of());
             }
             if (current.root().equals(register.root())) return current;
@@ -48,6 +58,9 @@ public final class AgentAuthorityBudgetFold {
         if (operation instanceof AgentBudgetOperation.Settle settle) {
             return transitionReservation(current, settle.reservationId(), AgentReservationState.SETTLED,
                     settle.actual());
+        }
+        if (operation instanceof AgentBudgetOperation.Breach breach) {
+            return breach(current, breach.reservationId(), breach.observed());
         }
         if (operation instanceof AgentBudgetOperation.MarkIndeterminate indeterminate) {
             AgentBudgetReservation existing = reservation(current, indeterminate.reservationId());
@@ -269,6 +282,33 @@ public final class AgentAuthorityBudgetFold {
         }
         return replaceReservation(current, new AgentBudgetReservation(existing.reservationId(), existing.grantId(),
                 existing.operationKey(), existing.requested(), charged, target), true);
+    }
+
+    private static DurableAgentAuthorityBudget breach(DurableAgentAuthorityBudget current,
+                                                        UUID reservationId,
+                                                        AgentBudgetVector observed) {
+        AgentBudgetReservation existing = reservation(current, reservationId);
+        if (existing.state() == AgentReservationState.BREACHED && existing.actual().equals(observed)) {
+            return current;
+        }
+        if (existing.state() != AgentReservationState.DISPATCHED
+                || observed.componentwiseAtMost(existing.requested())) {
+            throw new IllegalStateException("agent usage breach is invalid");
+        }
+        AgentBudgetVector remainder = existing.requested().minus(existing.actual());
+        var reservations = new LinkedHashMap<>(current.reservations());
+        reservations.put(existing.reservationId(), new AgentBudgetReservation(existing.reservationId(),
+                existing.grantId(), existing.operationKey(), existing.requested(), observed,
+                AgentReservationState.BREACHED));
+        var grants = new LinkedHashMap<>(current.grants());
+        for (DurableAgentGrant ancestor : ancestors(current,
+                activeOrTerminalGrant(current, existing.grantId()))) {
+            grants.put(ancestor.registration().grantId(), new DurableAgentGrant(ancestor.registration(),
+                    ancestor.binding(), AgentGrantState.EXHAUSTED,
+                    ancestor.spent().plus(remainder), ancestor.reserved().minus(remainder)));
+        }
+        return copy(current, AgentAuthorityState.CANCELLED,
+                current.spent().plus(remainder), current.reserved().minus(remainder), grants, reservations);
     }
 
     private static DurableAgentAuthorityBudget dispatchReservation(DurableAgentAuthorityBudget current,

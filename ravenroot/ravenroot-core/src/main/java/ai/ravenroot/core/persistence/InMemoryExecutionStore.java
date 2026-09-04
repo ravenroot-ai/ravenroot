@@ -11,6 +11,8 @@ import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
 import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
 import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
@@ -148,6 +150,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      */
     private final Map<String, Instant> inventoryRetainedFrom = new LinkedHashMap<>();
     private final AtomicLong revisionSequence = new AtomicLong();
+    private AgentAuthorityControl agentAuthorityControl = new AgentAuthorityControl(
+            AgentAuthorityControlState.ACTIVE, 0, Instant.EPOCH);
     private final Clock clock;
     private final Duration maxLeaseTtl;
     private final int maxPayloadBytes;
@@ -371,6 +375,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
                 DurableAgentAuthorityBudget agentBudget = existing == null ? null : existing.agentBudget;
                 for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+                    requireAgentAuthorityControl(operation);
                     if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
                         NodeInvocation invocation = folded.traversals().values().stream()
                                 .flatMap(traversal -> traversal.invocations().values().stream())
@@ -451,6 +456,60 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return entry == null ? Optional.empty() : Optional.ofNullable(entry.agentBudget);
             }
         });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return complete(() -> {
+            synchronized (monitor) {
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return complete(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            synchronized (monitor) {
+                if (agentAuthorityControl.state() != expectedState
+                        || agentAuthorityControl.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                if (targetState == AgentAuthorityControlState.KILLED) {
+                    for (Entry entry : instances.values()) {
+                        if (entry.agentBudget != null
+                                && entry.agentBudget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                                && entry.agentBudget.controlEpoch() == expectedEpoch) {
+                            entry.agentBudget = AgentAuthorityBudgetFold.apply(entry.agentBudget.key(),
+                                    entry.agentBudget, new AgentBudgetOperation.KillRoot(expectedEpoch),
+                                    clock.instant());
+                        }
+                    }
+                }
+                agentAuthorityControl = new AgentAuthorityControl(targetState,
+                        Math.addExact(expectedEpoch, 1), clock.instant());
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    private void requireAgentAuthorityControl(AgentBudgetOperation operation) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (agentAuthorityControl.state() != AgentAuthorityControlState.ACTIVE
+                || agentAuthorityControl.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid("agent authority control is not active for this epoch"));
+        }
     }
 
     @Override
@@ -2374,7 +2433,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableHandler> handlers;
         /** Registration order, retained for deterministic operator inspection. */
         private final Map<UUID, DurableToolApproval> approvals;
-        private final DurableAgentAuthorityBudget agentBudget;
+        private DurableAgentAuthorityBudget agentBudget;
         /** First-class human tasks retained in registration order within this instance. */
         private final Map<UUID, DurableHumanTask> humanTasks;
         /** Operator holds retained in commit order within this instance. */

@@ -1084,6 +1084,19 @@ public final class GraphRunner implements AutoCloseable {
         }
         state.reentryStarted();
         monitor.executionStarted(identity);
+        // The third entry path, wired exactly as #execute and #executeFrom are. A traversal resumed
+        // after a human task is as pausable as any other -- it is a live traversal with its own hop
+        // sequence -- so leaving it out would make it the one path where a hold is real but silent:
+        // held in `pausedTraversals`, reported by `isPaused`, and announced by nothing, because the
+        // identity every event is published under would never reach its control record.
+        var humanTaskControl = controlFor(traversalId);
+        synchronized (humanTaskControl) {
+            humanTaskControl.identity = identity;
+            PauseHold pending = pausedTraversals.get(traversalId);
+            if (pending != null) {
+                announceLocked(humanTaskControl, pending);
+            }
+        }
         UUID invocationId = identitySource.nextNodeInvocationId();
         UUID attemptId = identitySource.nextNodeAttemptId();
         UUID startedEventId = state.nodeStarted(node.id(), Set.of(), invocationId, attemptId,
@@ -1106,8 +1119,12 @@ public final class GraphRunner implements AutoCloseable {
                     // Human-task re-entry dispatches the same retrying successor trees as the two
                     // entry paths above. Seal before cancelling and before release wakes a pause
                     // gate, so no abandoned retry can commit or dispatch through this discarded
-                    // re-entry state.
+                    // re-entry state. The runner-side mark goes with it, and its placement is load
+                    // bearing here too: this path publishes its terminal event inside the try below,
+                    // so refusing a new hold from this line on is what keeps EXECUTION_PAUSED from
+                    // following EXECUTION_COMPLETED on a human-task re-entry.
                     state.beginClosing();
+                    beginClosing(traversalId);
                     cancelBackoffs(traversalId);
                     try {
                         if (failure == null) {
@@ -1358,8 +1375,23 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /**
-     * Publishes {@code EXECUTION_PAUSED} for a hold: at most once, never after it was withdrawn, and
-     * never before the traversal has an identity to be published under.
+     * Publishes {@code EXECUTION_PAUSED} for a hold: at most once, and never before the traversal has
+     * an identity to be published under.
+     *
+     * <h2>Why there is no "has this hold been withdrawn?" check</h2>
+     * <p>There was one, and it could not fire. Every caller of this method obtains its hold under the
+     * same monitor the caller is holding — three of them from {@code pausedTraversals} inside the
+     * lock, the fourth from a {@code putIfAbsent} that just succeeded inside it — and
+     * {@link #releasePauseGate} removes from that map under that same monitor. A hold that reaches
+     * this method is therefore still in the map by construction, so a withdrawn one cannot arrive
+     * here. The flag was removed rather than documented, because a dead guard that reads as a live
+     * one invites the next reader to lean on it, and the property it appeared to provide is delivered
+     * by the removal happening inside the lock. That is pinned by
+     * {@code PausedExecutionObservabilityTest}, which fails if the removal moves back out.</p>
+     *
+     * <p>{@link PauseHold#announced} is a different matter and is load bearing: a re-entry path
+     * ({@link #executeFrom}, {@link #executeAfterHumanTask}) can find a hold this runner has already
+     * announced, and without the check it would announce it a second time.</p>
      *
      * <p>The caller must hold {@code control}'s monitor. Publishing inside it rather than after it is
      * deliberate: {@link #releasePauseGate} publishes {@code EXECUTION_RESUMED} under the same
@@ -1381,7 +1413,7 @@ public final class GraphRunner implements AutoCloseable {
             // under this same lock and after the start event.
             return;
         }
-        if (hold.announced || hold.withdrawn) {
+        if (hold.announced) {
             return;
         }
         hold.announced = true;
@@ -1489,24 +1521,26 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /**
-     * One traversal's hold: the gate a parked hop waits on, plus whether the hold has been announced
-     * to the event stream and whether it has since been withdrawn.
+     * One traversal's hold: the gate a parked hop waits on, and whether the hold has been announced
+     * to the event stream.
      *
-     * <p>The two flags exist because a hold can be installed before this runner has an identity to
-     * publish under — see {@link #traversalControls} — so "held" and "announced as held" are
-     * genuinely different states for a short window, and a resume can arrive inside it. Both are
-     * guarded by the traversal's {@link TraversalControl} monitor rather than by this object's own,
-     * because the flags and the map entry have to change together: a hold's removal and its
-     * announcement are the two halves of one decision, and guarding them separately is what let an
-     * observer see a release published against a hold that a later pause had already replaced.</p>
+     * <p>{@code announced} exists because a hold can be installed before this runner has an identity
+     * to publish under — see {@link #traversalControls} — so "held" and "announced as held" are
+     * genuinely different states for a window, and a re-entry path can meet a hold that was already
+     * announced. It is guarded by the traversal's {@link TraversalControl} monitor rather than by
+     * this object's own, because the flag and the map entry have to change together: a hold's
+     * removal and its announcement are two halves of one decision, and guarding them separately is
+     * what let an observer see a release published against a hold a later pause had already
+     * replaced.</p>
+     *
+     * <p>There is deliberately no "withdrawn" companion — see {@link #announceLocked} for why one
+     * could never be observed, and what replaced it.</p>
      */
     private static final class PauseHold {
         /** Completed exactly once, by whichever caller removed this hold from the map. */
         private final CompletableFuture<Void> gate = new CompletableFuture<>();
         /** Whether {@code EXECUTION_PAUSED} has been published for this hold. */
         private boolean announced;
-        /** Whether this hold has been removed, so a late announcement must not publish. */
-        private boolean withdrawn;
     }
 
     /**
@@ -1616,12 +1650,10 @@ public final class GraphRunner implements AutoCloseable {
             if (hold == null) {
                 return false;
             }
-            boolean announced = hold.announced;
-            hold.withdrawn = true;
             // Only a resume publishes, and only over a hold this stream has already announced. An
             // unannounced hold never became visible to anyone, so releasing it is not a transition an
             // observer can be shown -- it would be the release of a pause they were never told about.
-            if (reason == GateReleaseReason.RESUMED && announced) {
+            if (reason == GateReleaseReason.RESUMED && hold.announced) {
                 monitor.executionResumed(control.identity);
             }
         }

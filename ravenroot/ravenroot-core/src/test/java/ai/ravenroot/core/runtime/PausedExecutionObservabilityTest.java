@@ -318,6 +318,279 @@ final class PausedExecutionObservabilityTest {
     }
 
     /**
+     * A pause landing between a release's removal and its publication must be impossible.
+     *
+     * <h2>The interleaving, and why code shape alone did not pin it</h2>
+     * <p>{@code releasePauseGate} removes the hold from {@code pausedTraversals} and publishes
+     * {@code EXECUTION_RESUMED} inside one {@code synchronized} block. Move the removal out of that
+     * block — which is how this was first written — and every other test in this file still passes,
+     * because each drives one control operation at a time and the two halves of a release are only
+     * separable when a pause lands between them.</p>
+     *
+     * <p>That is the sequence: a resume removes the hold, a pause immediately installs a fresh one
+     * and announces it, and only then does the resume publish. The stream reads
+     * {@code PAUSED, PAUSED, RESUMED} while the traversal is <em>still holding</em> the second hold,
+     * and every reader of that sequence concludes the execution is running. It is not a lost event or
+     * a duplicate: each event is individually true, and the order makes them collectively false.</p>
+     *
+     * <h2>The interleaving is constructed, not raced for</h2>
+     * <p>Two threads calling pause and resume against each other do reach it, but only about once in
+     * three hundred rounds: with the removal outside the lock the gap between it and the monitor is a
+     * couple of instructions wide, so a test built that way kills the defect perhaps one run in three.
+     * A mutation killer that usually does not is not a guard.</p>
+     *
+     * <p>So the window is held open instead of aimed at. {@code announceLocked} publishes
+     * {@code EXECUTION_PAUSED} <em>while holding</em> the traversal's control monitor, and listener
+     * delivery is synchronous, so a listener for that event runs inside the critical section. This
+     * test stands there and, from inside it:</p>
+     * <ol>
+     *   <li>starts a resume on another thread, and waits until the hold has actually disappeared from
+     *       the runtime. <b>That wait is the discriminator.</b> The hold can only vanish while this
+     *       thread owns the monitor if the removal is not inside it; when the removal is where it
+     *       belongs, the resuming thread is still parked on the monitor and the hold is still there,
+     *       so the wait simply expires;</li>
+     *   <li>then pauses again on this thread, which already owns the monitor and so cannot be
+     *       excluded by anything.</li>
+     * </ol>
+     *
+     * <p>With the removal misplaced that second pause finds an empty map, installs a hold and
+     * announces it, and the resume publishes afterwards — the defective sequence, produced on demand
+     * rather than by luck. With the removal in the right place the same second pause loses its
+     * {@code putIfAbsent} to the hold that is still there, publishes nothing, and the resume's
+     * release is the last word — which is the truth, because nothing is holding. Both outcomes are
+     * decided by the lock rather than by timing, so this test is neither flaky nor probabilistic in
+     * either direction.</p>
+     *
+     * <h2>What is asserted, and why it is this and not an event tally</h2>
+     * <p>Counting will not catch it. The defective run publishes two pauses and one resume, so
+     * "pauses minus resumes equals one while held" is <strong>satisfied</strong> by the defect. Only
+     * the order separates them, so the invariant here is positional: while a traversal has not
+     * reached a terminal event, it is holding if and only if the last pause-or-resume event published
+     * for it was the pause.</p>
+     *
+     * <p>Whether the traversal goes on to terminate is left free, and does not need constraining. The
+     * only way a terminal event could mislead here is by dropping a hold silently, and that needs a
+     * <em>second</em> hold to exist — which happens only when the removal is misplaced, and which then
+     * parks the traversal at its gate so it cannot terminate at all. With the removal in the right
+     * place the second pause loses its {@code putIfAbsent}, no hold survives, and the traversal is
+     * free to run on and complete: {@code held == false} with the release last, which is exactly what
+     * the invariant expects.</p>
+     */
+    @Test
+    void aPauseLandingBetweenAReleasesRemovalAndItsPublicationIsImpossible() throws Exception {
+        int rounds = 5;
+        var monitor = new ExecutionMonitor();
+        // Returns at once. A behaviour that parked would park the *submitting* thread under
+        // SameThreadExecutionEngine, which is the thread the choreography below runs on.
+        var registry = new BehaviorRegistry().register("record-effect", message ->
+                CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));
+
+        var live = new java.util.concurrent.ConcurrentHashMap<UUID, Round>();
+        try (var engine = new SameThreadExecutionEngine();
+             var document = GraphManager.readGraphMlDocument(
+                     new ByteArrayInputStream(ONE_EFFECT.getBytes(StandardCharsets.UTF_8)));
+             var runner = new GraphRunner(document.manager(), engine, registry, monitor);
+             AutoCloseable subscription = monitor.subscribe(event -> {
+                 Round round = live.get(event.traversalId());
+                 if (round == null) {
+                     return;
+                 }
+                 round.events.add(event.type());
+                 // Only the first announcement arms the choreography: the second pause below
+                 // publishes another EXECUTION_PAUSED straight back into this listener on this same
+                 // thread, and without the guard that would recurse without end.
+                 if (event.type() != ExecutionEventType.EXECUTION_PAUSED
+                         || !round.armed.compareAndSet(true, false)) {
+                     return;
+                 }
+                 // Reached while execute() owns this traversal's control monitor.
+                 UUID traversalId = event.traversalId();
+                 var releasing = new CountDownLatch(1);
+                 round.resumer = new Thread(() -> {
+                     releasing.countDown();
+                     runner.resumeTraversal(traversalId);
+                 }, "paused-observability-resumer");
+                 round.resumer.start();
+                 try {
+                     assertTrue(releasing.await(BOUND.toSeconds(), TimeUnit.SECONDS),
+                             "the resuming thread must have started");
+                 } catch (InterruptedException interrupted) {
+                     Thread.currentThread().interrupt();
+                     throw new IllegalStateException(interrupted);
+                 }
+                 // The discriminator. A hold cannot disappear while this thread owns the monitor
+                 // unless the removal happens outside it. When the removal is correctly placed the
+                 // resuming thread is parked on the monitor, the hold stays, and this expires.
+                 long deadline = System.nanoTime() + REMOVAL_WINDOW.toNanos();
+                 while (runner.isPaused(traversalId) && System.nanoTime() < deadline) {
+                     Thread.onSpinWait();
+                 }
+                 // Reentrant: this thread already owns the monitor, so nothing can exclude this pause.
+                 runner.pauseTraversal(traversalId);
+             })) {
+            for (int index = 0; index < rounds; index++) {
+                UUID traversalId = UUID.randomUUID();
+                var round = new Round();
+                live.put(traversalId, round);
+
+                assertTrue(runner.pauseTraversal(traversalId),
+                        "round " + index + ": the initial hold must be accepted");
+                runner.execute(TestIdentities.TENANT_A, traversalId, "payload", "v1");
+                assertFalse(round.armed.get(),
+                        "round " + index + ": the choreography never ran, so this round asserted "
+                                + "nothing about the case it exists for");
+                round.resumer.join(BOUND.toMillis());
+
+                List<ExecutionEventType> lifecycle = lifecycle(round.events);
+                assertEquals(List.of(ExecutionEventType.EXECUTION_STARTED,
+                                ExecutionEventType.EXECUTION_PAUSED),
+                        lifecycle.subList(0, 2),
+                        "round " + index + ": the case starts from one announced hold: " + lifecycle);
+
+                    ExecutionEventType last = null;
+                for (ExecutionEventType type : lifecycle) {
+                    if (type == ExecutionEventType.EXECUTION_PAUSED
+                            || type == ExecutionEventType.EXECUTION_RESUMED) {
+                        last = type;
+                    }
+                }
+                boolean held = runner.isPaused(traversalId);
+                assertEquals(held, last == ExecutionEventType.EXECUTION_PAUSED,
+                        "round " + index + ": a traversal that is "
+                                + (held ? "holding" : "not holding")
+                                + " must not have published " + last + " last. Removing a hold and "
+                                + "publishing its release have to be one step, or a pause lands "
+                                + "between them: " + lifecycle);
+            }
+        }
+    }
+
+    /**
+     * How long the choreography waits for a misplaced removal to become visible.
+     *
+     * <p>Not a timing assumption about the product: it bounds a wait for work that has already been
+     * started and, when the removal is correctly placed, is expected to expire on every round. It is
+     * therefore the test's own cost when the code is right, and generous enough that a loaded machine
+     * cannot turn a real removal into a missed one.</p>
+     */
+    private static final Duration REMOVAL_WINDOW = Duration.ofMillis(300);
+
+    /** One round's recorded events, its re-entrancy guard, and the thread performing its resume. */
+    private static final class Round {
+        private final List<ExecutionEventType> events = Collections.synchronizedList(new ArrayList<>());
+        private final AtomicBoolean armed = new AtomicBoolean(true);
+        private volatile Thread resumer;
+    }
+
+    /**
+     * A traversal resumed after a human task announces its hold like every other traversal.
+     *
+     * <h2>Why a third near-identical test earns its place</h2>
+     * <p>The runtime has three entry paths — an ordinary submission, tool-approval re-entry, and
+     * human-task re-entry — and each builds its own {@code ExecutionIdentity}. The pause machinery
+     * only becomes observable on a path that hands that identity to the traversal's control record,
+     * so a path that forgets to is not partly wired: it holds normally, reports {@code paused}
+     * normally, and publishes <em>nothing</em>. The failure is silent on exactly the surface the
+     * events exist to fill, which is why it is worth a test per path rather than a comment saying the
+     * three are the same.</p>
+     *
+     * <p>This path is the one that could not be covered when the other two were, because it did not
+     * exist yet. It is currently unreachable from the application — its continuation executor builds
+     * a runner of its own and never publishes into the live-execution bookkeeping a pause command
+     * reads — so the assertion is made at the runner, which is where the wiring lives and where the
+     * other two are constrained as well.</p>
+     */
+    @Test
+    void aTraversalResumedAfterAHumanTaskAnnouncesItsHoldAfterTheStartEvent() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var registry = new BehaviorRegistry().register("record-effect", message ->
+                CompletableFuture.completedFuture(NodeResult.continueWith(message.payload())));
+
+        var key = new ai.ravenroot.api.persistence.ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        List<ExecutionEventType> events = Collections.synchronizedList(new ArrayList<>());
+        var terminal = new CountDownLatch(1);
+
+        try (var store = new InMemoryExecutionStore();
+             var engine = new SameThreadExecutionEngine();
+             var document = GraphManager.readGraphMlDocument(
+                     new ByteArrayInputStream(ONE_EFFECT.getBytes(StandardCharsets.UTF_8)));
+             var runner = new GraphRunner(document.manager(), engine, registry, monitor);
+             AutoCloseable subscription = monitor.subscribe(event -> {
+                 if (!traversalId.equals(event.traversalId())) {
+                     return;
+                 }
+                 events.add(event.type());
+                 if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
+                         || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                     terminal.countDown();
+                 }
+             })) {
+            long revision = acceptReentry(store, key, traversalId);
+            try (var recorder = ExecutionRecorder.open(store, key, "human-task-pause", LEASE_TTL, revision)) {
+
+                // The hold is taken before the re-entry runs, which is the case that distinguishes a
+                // wired path from an unwired one: it can only be announced by the entry path itself.
+                assertTrue(runner.pauseTraversal(traversalId), "the hold must be accepted");
+
+                var execution = runner.executeAfterHumanTask(TestIdentities.TENANT_A,
+                        key.processInstanceId(), traversalId, "effect", "v1", recorder,
+                        NodeResult.continueWith("resumed")).toCompletableFuture();
+
+                assertFalse(execution.isDone(), "the re-entered traversal must be parked at its gate");
+                assertEquals(List.of(ExecutionEventType.EXECUTION_STARTED,
+                                ExecutionEventType.EXECUTION_PAUSED),
+                        lifecycle(events),
+                        "a hold on a human-task re-entry is announced, and after the start event: "
+                                + events);
+                assertTrue(runner.isPaused(traversalId), "and the traversal is readable as holding");
+
+                assertTrue(runner.resumeTraversal(traversalId), "the announced hold must be releasable");
+                assertTrue(terminal.await(BOUND.toSeconds(), TimeUnit.SECONDS),
+                        "the released re-entry must reach its terminal event");
+                assertEquals(List.of(ExecutionEventType.EXECUTION_STARTED,
+                                ExecutionEventType.EXECUTION_PAUSED,
+                                ExecutionEventType.EXECUTION_RESUMED,
+                                ExecutionEventType.EXECUTION_COMPLETED),
+                        lifecycle(events),
+                        "the release pairs with the hold on this path exactly as on the other two");
+                assertFalse(runner.isPaused(traversalId), "a finished traversal holds nothing");
+            }
+        }
+    }
+
+    /** Lease bound for the re-entry recorder; long enough that it cannot expire mid-test. */
+    private static final Duration LEASE_TTL = Duration.ofSeconds(30);
+
+    /**
+     * Creates the accepted, running process instance a human-task re-entry resumes into, and returns
+     * the revision its recorder must open against.
+     *
+     * @param store the execution store backing the re-entry
+     * @param key the tenant and process instance being resumed
+     * @param traversalId the re-entry traversal
+     * @return the revision after the instance has been marked running
+     */
+    private static long acceptReentry(ai.ravenroot.api.persistence.ExecutionStore store,
+                                      ai.ravenroot.api.persistence.ExecutionKey key, UUID traversalId) {
+        var traversal = new ai.ravenroot.api.application.Traversal(traversalId, "effect",
+                ai.ravenroot.api.application.TraversalStatus.ACCEPTED, java.util.Map.of());
+        var created = store.apply(ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                .expecting(ai.ravenroot.api.persistence.RevisionExpectation.notPresent())
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessCreated(
+                        new ai.ravenroot.api.application.ProcessInstance(key.processInstanceId(),
+                                ai.ravenroot.api.application.ProcessInstanceStatus.ACCEPTED,
+                                java.util.Map.of(traversalId, traversal)),
+                        new ai.ravenroot.api.persistence.GraphVersionPin("v1")))
+                .build()).toCompletableFuture().join();
+        return store.apply(ai.ravenroot.api.persistence.ExecutionBatch.to(key)
+                .expecting(ai.ravenroot.api.persistence.RevisionExpectation.exactly(created.revision()))
+                .apply(new ai.ravenroot.api.persistence.ExecutionTransition.ProcessTransitioned(
+                        ai.ravenroot.api.application.ProcessInstanceStatus.RUNNING))
+                .build()).toCompletableFuture().join().revision();
+    }
+
+    /**
      * A hold that is withdrawn before it was ever announced publishes neither event.
      *
      * <h2>The interleaving, and why it is not merely tidy</h2>

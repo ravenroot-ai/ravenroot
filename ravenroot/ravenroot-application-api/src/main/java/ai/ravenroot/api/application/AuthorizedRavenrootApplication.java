@@ -784,9 +784,22 @@ public final class AuthorizedRavenrootApplication {
     }
 
     /**
- * Resumes a traversal paused by {@link #pauseExecution}, under the same authority and the
- * same audit. {@code NOT_PAUSED} and {@code NOT_ACTIVE} are separated by the same live read
- * {@link #pauseExecution} uses, and for the same reason.
+ * Resumes a traversal paused by {@link #pauseExecution}, under the same authority and the same
+ * audit.
+ *
+ * <h4>Why this still separates its outcomes by liveness while {@link #pauseExecution} no longer
+ * does</h4>
+ * <p>The two are not symmetric, and the asymmetry is in what each delegate's {@code false} means.
+ * {@link RavenrootApplication#resumeTraversal} answers {@code false} only when it found no hold to
+ * release, so "is it holding?" is already settled here and the one question left is whether the
+ * traversal exists at all — which is exactly what {@link #stillLive} answers. {@code NOT_PAUSED} is
+ * a live traversal that was not holding; {@code NOT_ACTIVE} is one this process is not running.</p>
+ *
+ * <p>{@link #pauseExecution} had the opposite problem: its delegate's {@code false} conflated
+ * "already holding" with "cannot be held", so liveness could not tell those apart and it asks
+ * {@link RavenrootApplication#executionPaused} instead. Reading that same method here would answer a
+ * question this path has already answered, and would not distinguish the two outcomes it does need
+ * to separate.
  * @param context authenticated request context used for authorization and audit attribution.
  * @param traversalId the stable traversal id used to identify the requested resource.
  * @return a resume outcome that states whether the owned traversal resumed, was not held, or was inactive.

@@ -367,8 +367,6 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         pending.span().addEvent(eventName, Attributes.of(ATTR_DETAIL, event.detail()), event.occurredAt());
     }
 
-    /** Joins have no invocation of their own (CORE-03): recorded as an event on the traversal span,
-     * plus a bounded-cardinality duration where one is present. */
     /**
      * Records a traversal-level transition on the traversal's own span, if one is open.
      *
@@ -389,6 +387,8 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable {
         }
     }
 
+    /** Joins have no invocation of their own (CORE-03): recorded as an event on the traversal span,
+     * plus a bounded-cardinality duration where one is present. */
     private void annotateJoin(ExecutionEvent event, String eventName, StatusCode statusIfTraversalKnown) {
         AttributesBuilder attributes = Attributes.builder()
                 .put(ATTR_NODE_ID, event.nodeId())

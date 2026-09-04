@@ -62,7 +62,7 @@ class SqliteJournalTamperFuzzTest {
     // served as authentic. event_type and payload_bytes are already pinned by
     // SqliteJournalIntegrityTest's own hand-picked tests; this property covers the remaining
     // digest-covered text columns those tests do not touch: correlation_id, graph_version,
-    // payload_content_type and traversal_id.
+    // payload_content_type, event_id and traversal_id.
     // ------------------------------------------------------------------------------------------
 
     @Tag("fuzz")
@@ -112,17 +112,11 @@ class SqliteJournalTamperFuzzTest {
         // of the primary key / the readJournal WHERE clause, so tampering them changes which rows
         // are even visible rather than exercising the digest check this property targets.
         //
-        // traversal_id and event_id are ALSO excluded, deliberately, not merely to keep the list
-        // short: this property's own baseline run found that SqliteExecutionStore#readJournalRecord
-        // parses both back with an unguarded UUID.fromString, so a non-UUID tamper on either throws
-        // IllegalArgumentException before the digest check
-        // this property targets ever runs -- a real defect, but a different and much wider one
-        // (the same unguarded UUID.fromString pattern recurs across many columns and read paths in
-        // SqliteExecutionStore and AggregateStorage, not just this table), reported separately
-        // rather than fixed here: fixing it well means auditing every UUID.fromString call site in
-        // the adapter, not the two this property happened to touch, and that is a different task
-        // from fuzzing the digest boundary.
-        return Arbitraries.of("correlation_id", "graph_version", "payload_content_type");
+        // UUID columns are included now that the SQLite boundary maps malformed UUID text to the
+        // same typed corruption failure as a digest mismatch. A direct UUID.fromString restoration
+        // would make these cases leak IllegalArgumentException and fail this property.
+        return Arbitraries.of("correlation_id", "graph_version", "payload_content_type",
+                "event_id", "traversal_id");
     }
 
     @Provide

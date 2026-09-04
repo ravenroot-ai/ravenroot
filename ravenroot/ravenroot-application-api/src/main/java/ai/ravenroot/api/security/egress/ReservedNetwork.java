@@ -76,8 +76,9 @@ public enum ReservedNetwork {
         if (bytes.length != 16) return address;
         for (int i = 0; i < 10; i++) if (bytes[i] != 0) return address;
         boolean mapped = (bytes[10] & 0xff) == 0xff && (bytes[11] & 0xff) == 0xff;
-        boolean compatible = bytes[10] == 0 && bytes[11] == 0
-                && !(bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0);
+        boolean unspecified = bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] == 0;
+        boolean loopback = bytes[12] == 0 && bytes[13] == 0 && bytes[14] == 0 && bytes[15] == 1;
+        boolean compatible = bytes[10] == 0 && bytes[11] == 0 && !unspecified && !loopback;
         if (!mapped && !compatible) return address;
         try {
             return InetAddress.getByAddress(new byte[] {bytes[12], bytes[13], bytes[14], bytes[15]});

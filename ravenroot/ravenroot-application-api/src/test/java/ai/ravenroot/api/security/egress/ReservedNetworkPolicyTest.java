@@ -16,7 +16,7 @@ class ReservedNetworkPolicyTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"127.0.0.1", "127.1", "2130706433", "169.254.169.254",
-            "10.0.0.1", "::1", "[::1]", "::ffff:127.0.0.1", "fe80::1%eth0",
+            "10.0.0.1", "::1", "[::1]", "::0.0.0.2", "::ffff:127.0.0.1", "fe80::1%eth0",
             "[fe80::1%25eth0]", "4294967296", "127..1"})
     void reservedAndMalformedNumericLiteralsFailClosedWithoutDns(String literal) {
         assertFalse(denied.permitsLiteral(literal));

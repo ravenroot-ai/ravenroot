@@ -320,8 +320,18 @@ public final class ToolApprovalService {
                     "ravenroot|SYSTEM|tool-policy"), "TOOL_APPROVAL_POLICY_REVOKED", correlationId,
                     fencingToken);
         }
-        return commitSimple(current, new ToolApprovalTransition.Consumed(current.request().approvalId()),
-                "TOOL_APPROVAL_CONSUMED", correlationId, fencingToken);
+        try {
+            return commitSimple(current, new ToolApprovalTransition.Consumed(current.request().approvalId()),
+                    "TOOL_APPROVAL_CONSUMED", correlationId, fencingToken);
+        } catch (ExecutionStoreException expired) {
+            if (expired.failure() instanceof ExecutionStoreFailure.ToolApprovalNotResolvable refusal
+                    && refusal.requested() == ToolApprovalStatus.EXPIRED) {
+                return commitSimple(current,
+                        new ToolApprovalTransition.Expired(current.request().approvalId()),
+                        "TOOL_APPROVAL_EXPIRED", correlationId, fencingToken);
+            }
+            throw expired;
+        }
     }
 
     /** Expires only the approval timer whose full stored scope matches this claimed timer. */

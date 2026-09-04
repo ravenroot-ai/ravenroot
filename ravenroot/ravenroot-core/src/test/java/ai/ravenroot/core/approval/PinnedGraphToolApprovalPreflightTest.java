@@ -76,6 +76,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.lang.reflect.Proxy;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -135,6 +137,135 @@ class PinnedGraphToolApprovalPreflightTest {
     @Test
     void laterApprovalCannotRelabelFailedRedeemedEffect(@TempDir Path directory) throws Exception {
         assertLaterApprovalPreservesFirstOutcome(directory, false);
+    }
+
+    @Test
+    void deniedDecisionResumesProductionExecutorWithoutEffect(@TempDir Path directory) throws Exception {
+        assertNoEffectDecision(directory, ToolApprovalStatus.DENIED, false);
+    }
+
+    @Test
+    void expiredDecisionResumesProductionExecutorWithoutEffect(@TempDir Path directory) throws Exception {
+        assertNoEffectDecision(directory, ToolApprovalStatus.EXPIRED, false);
+    }
+
+    @Test
+    void cancelledDecisionResumesProductionExecutorWithoutEffect(@TempDir Path directory) throws Exception {
+        assertNoEffectDecision(directory, ToolApprovalStatus.CANCELLED, false);
+    }
+
+    @Test
+    void policyRevocationResumesCancelledProductionContinuationWithoutEffect(@TempDir Path directory)
+            throws Exception {
+        assertNoEffectDecision(directory, ToolApprovalStatus.CANCELLED, true);
+    }
+
+    @Test
+    void auditedReplayBetweenEffectAndOutcomeCannotRelabelSuccess(@TempDir Path directory)
+            throws Exception {
+        var clock = new MutableClock(NOW);
+        var definitions = new InMemoryGraphDefinitionStore(clock);
+        String pin = storeGraph(definitions);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        var decision = new AtomicReference<ToolCallContinuationInput.Decision>();
+        var raced = new AtomicInteger();
+        try (ExecutionStore store = new SqliteExecutionStore(directory.resolve("audit-race.db"), clock);
+             var engine = new InlineExecutionEngine()) {
+            createRunning(store, key, traversal, invocation, attempt, pin);
+            var approvals = new ToolApprovalService(store, clock);
+            approvals.request(key, request(approvalId, traversal, invocation, attempt, pin, 1), "create");
+            approvals.approve(approver(), key.processInstanceId(), approvalId);
+            Runnable auditReplay = () -> {
+                raced.incrementAndGet();
+                approvals.approve(approver(), key.processInstanceId(), approvalId);
+            };
+            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
+                    new DecisionProbePackage(decision, auditReplay, true));
+            var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
+                    engine, behaviors, new ExecutionMonitor(),
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                    "worker", Duration.ofSeconds(30));
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, approvals,
+                            ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "unchanged", "policy-v1"), executor));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    outcomes::toString);
+            assertEquals(1, raced.get(), "the replay must deterministically advance the revision once");
+            assertEquals(ToolCallContinuationInput.Decision.APPROVED, decision.get());
+            assertEquals(ToolApprovalStatus.SUCCEEDED,
+                    store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "revision drift from an audit cannot turn a known successful effect into failure");
+            assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
+                    .toCompletableFuture().join().isEmpty());
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+        }
+    }
+
+    private static void assertNoEffectDecision(Path directory, ToolApprovalStatus expected,
+                                               boolean revokeApproved) throws Exception {
+        var clock = new MutableClock(NOW);
+        var definitions = new InMemoryGraphDefinitionStore(clock);
+        String pin = storeGraph(definitions);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        var observed = new AtomicReference<ToolCallContinuationInput.Decision>();
+        try (ExecutionStore store = new SqliteExecutionStore(
+                directory.resolve(expected.name().toLowerCase() + "-decision.db"), clock);
+             var engine = new InlineExecutionEngine()) {
+            createRunning(store, key, traversal, invocation, attempt, pin);
+            var approvals = new ToolApprovalService(store, clock);
+            approvals.request(key, request(approvalId, traversal, invocation, attempt, pin, 1), "create");
+            if (revokeApproved) {
+                approvals.approve(approver(), key.processInstanceId(), approvalId);
+            } else {
+                switch (expected) {
+                    case DENIED -> approvals.deny(approver(), key.processInstanceId(), approvalId);
+                    case CANCELLED -> approvals.cancel(approver(), key.processInstanceId(), approvalId);
+                    case EXPIRED -> {
+                        clock.now = NOW.plusSeconds(301);
+                        approvals.expire(key, approvalId, "expiry");
+                    }
+                    default -> throw new IllegalArgumentException("not a no-effect decision");
+                }
+            }
+            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
+                    new DecisionProbePackage(observed, () -> { }, false));
+            var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
+                    engine, behaviors, new ExecutionMonitor(),
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                    "worker", Duration.ofSeconds(30));
+            ToolDecision.Disposition disposition = revokeApproved
+                    ? ToolDecision.Disposition.DENY : ToolDecision.Disposition.REQUIRE_APPROVAL;
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, approvals,
+                            ignored -> new ToolDecision(disposition, "current policy", "policy-v1"),
+                            executor));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    outcomes::toString);
+            assertEquals(ToolCallContinuationInput.Decision.valueOf(expected.name()), observed.get());
+            assertEquals(expected, store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                    .orElseThrow().status(), "no-effect continuation must preserve its decision");
+            assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
+                    .toCompletableFuture().join().isEmpty());
+            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+        }
     }
 
     private static void assertLaterApprovalPreservesFirstOutcome(Path directory, boolean effectSucceeded)
@@ -338,6 +469,45 @@ class PinnedGraphToolApprovalPreflightTest {
                         }
                     });
                     return exactEffect;
+                }
+            });
+        }
+    }
+
+    private record DecisionProbePackage(
+            AtomicReference<ToolCallContinuationInput.Decision> observed,
+            Runnable beforeResult, boolean effectSucceeded) implements NodePackage {
+        @Override public String id() { return "test.decision-probe"; }
+        @Override public String version() { return "1"; }
+        @Override public String sdkContract() { return NodeSdk.CONTRACT; }
+        @Override public List<NodeBehavior> behaviors() {
+            return List.of(new DecisionProbeBehavior(observed, beforeResult, effectSucceeded));
+        }
+    }
+
+    private record DecisionProbeBehavior(
+            AtomicReference<ToolCallContinuationInput.Decision> observed,
+            Runnable beforeResult, boolean effectSucceeded) implements NodeBehavior {
+        @Override public NodeTypeDescriptor descriptor() {
+            return new NodeTypeDescriptor("probe", "Probe", "Test", "", "actor", false,
+                    List.of(), Set.of());
+        }
+        @Override public NodeAction create(NodeConfiguration configuration) {
+            return message -> CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+        }
+        @Override public java.util.Optional<ToolCallContinuationAction> createToolCallContinuation(
+                NodeConfiguration configuration, NodePackageServices services) {
+            return java.util.Optional.of(new ToolCallContinuationAction() {
+                @Override public void validate(ToolCallContinuationInput input) {
+                    if (input.version() != 1) throw new IllegalArgumentException("unsupported checkpoint");
+                }
+                @Override public CompletionStage<ToolCallContinuationResult> resume(
+                        ToolCallContinuationInput input) {
+                    observed.set(input.decision());
+                    beforeResult.run();
+                    return CompletableFuture.completedFuture(new ToolCallContinuationResult(
+                            CompletableFuture.completedFuture(NodeResult.continueWith(null)),
+                            effectSucceeded));
                 }
             });
         }

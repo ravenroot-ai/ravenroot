@@ -80,7 +80,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             prepared.action().validate(new ToolCallContinuationInput(original, request.approvalId(),
                     request.traversalId(), request.invocationId(), request.attemptId(), request.tool(),
                     request.canonicalArguments(), request.argumentsDigest(),
-                    ToolCallContinuationInput.Decision.APPROVED, request.continuationVersion(),
+                    decision(approval.status()), request.continuationVersion(),
                     request.continuation(), request.continuationDigest()));
             return true;
         } catch (RuntimeException unavailable) {
@@ -103,11 +103,12 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                     continuation.graphVersionPin().reference(), continuation.nodeId());
             GraphManager manager = prepared.manager();
             long revision = executions.load(claim.key()).toCompletableFuture().join().revision();
-            DurableToolApproval consumed = executions.loadToolApproval(
+            DurableToolApproval storedApproval = executions.loadToolApproval(
                     claim.key(), continuation.approvalId()).toCompletableFuture().join()
-                    .filter(candidate -> candidate.status() == ToolApprovalStatus.CONSUMED)
+                    .filter(candidate -> candidate.status() == continuation.decision())
                     .orElseThrow(() -> new IllegalStateException(
-                            "tool approval is not consumed under the claimed fence"));
+                            "tool approval decision changed before claimed re-entry"));
+            boolean approvedEffect = storedApproval.status() == ToolApprovalStatus.CONSUMED;
             ExecutionRecorder recorder = ExecutionRecorder.resumeClaimed(
                     executions, claim, workerId, leaseTtl, revision);
             var runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
@@ -131,15 +132,20 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                             continuation.canonicalArguments(), continuation.argumentsDigest(),
                             decision(continuation.decision()), continuation.version(),
                             continuation.checkpoint(), continuation.checkpointDigest()),
-                    succeeded -> approvals.completeFenced(recorder, consumed, succeeded,
-                            continuation.approvalId().toString()), prepared.action());
+                    succeeded -> {
+                        if (approvedEffect) {
+                            approvals.completeFenced(recorder, storedApproval, succeeded,
+                                    continuation.approvalId().toString());
+                        }
+                    }, prepared.action());
             CompletionStage<Boolean> effectResult = result.handle((succeeded, failure) -> {
                 DurableToolApproval current = executions.loadToolApproval(
-                        claim.key(), continuation.approvalId()).toCompletableFuture().join().orElse(consumed);
+                        claim.key(), continuation.approvalId()).toCompletableFuture().join()
+                        .orElse(storedApproval);
                 if (current.status() == ToolApprovalStatus.SUCCEEDED) return true;
                 if (current.status() == ToolApprovalStatus.FAILED) return false;
                 if (failure != null) throw new CompletionException(unwrap(failure));
-                return succeeded;
+                return approvedEffect ? succeeded : false;
             });
             return effectResult.whenComplete((ignored, failure) -> {
                 try {

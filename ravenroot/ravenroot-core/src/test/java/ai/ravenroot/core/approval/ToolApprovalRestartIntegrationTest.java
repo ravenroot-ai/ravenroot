@@ -217,6 +217,43 @@ class ToolApprovalRestartIntegrationTest {
     }
 
     @Test
+    void continuationFailureAfterConsumptionIsIndeterminateRatherThanInventedFailure(
+            @TempDir Path directory) throws Exception {
+        Path database = directory.resolve("continuation-failure.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        try (ExecutionStore store = new SqliteExecutionStore(database, CLOCK)) {
+            createRunning(store, key, traversal, invocation, attempt);
+            var service = new ToolApprovalService(store, CLOCK);
+            service.request(key, request(approvalId, traversal, invocation, attempt), "create");
+            service.approve(approver(), key.processInstanceId(), approvalId);
+            ToolApprovalContinuationExecutor unavailableAfterConsume =
+                    new ToolApprovalContinuationExecutor() {
+                        @Override public boolean supports(DurableToolApproval approval) { return true; }
+                        @Override public java.util.concurrent.CompletionStage<Boolean> execute(
+                                ToolApprovalContinuation continuation,
+                                PendingWork.HandlerTrigger claim) {
+                            return CompletableFuture.failedFuture(
+                                    new IllegalStateException("continuation control-plane failure"));
+                        }
+                    };
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, service,
+                            ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "unchanged", "policy-v1"), unavailableAfterConsume));
+
+            assertTrue(recovery.sweepOnce().stream().anyMatch(RecoveryOutcome.Deferred.class::isInstance));
+            assertEquals(ToolApprovalStatus.INDETERMINATE,
+                    await(store.loadToolApproval(key, approvalId)).orElseThrow().status(),
+                    "a continuation exception says nothing about whether the consumed effect succeeded");
+        }
+    }
+
+    @Test
     void restartDriverClaimsAndExpiresUntouchedApprovalTimer(@TempDir Path directory) throws Exception {
         Path database = directory.resolve("expiry.db");
         var clock = new MutableClock(NOW);

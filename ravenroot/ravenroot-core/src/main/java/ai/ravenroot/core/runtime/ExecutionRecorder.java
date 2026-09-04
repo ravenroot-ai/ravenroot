@@ -301,22 +301,30 @@ public final class ExecutionRecorder implements AutoCloseable {
         var transition = succeeded
                 ? new ai.ravenroot.api.persistence.ToolApprovalTransition.Succeeded(approvalId)
                 : new ai.ravenroot.api.persistence.ToolApprovalTransition.Failed(approvalId);
-        var batch = ExecutionBatch.to(key)
-                .expecting(RevisionExpectation.exactly(revision))
-                .fencedBy(lease)
-                .applyToolApproval(transition);
-        if (store.supports(StoreCapability.EVENT_JOURNAL)) {
-            batch.publish(Objects.requireNonNull(event, "event"));
-        }
-        try {
-            StoredProcessInstance applied = await(store.apply(batch.build()));
-            revision = applied.revision();
-        } catch (ExecutionStoreException failed) {
-            if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
-                    || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
-                loseFence(failed.failure());
+        for (int writeAttempt = 1; writeAttempt <= 3; writeAttempt++) {
+            var batch = ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .fencedBy(lease)
+                    .applyToolApproval(transition);
+            if (store.supports(StoreCapability.EVENT_JOURNAL)) {
+                batch.publish(Objects.requireNonNull(event, "event"));
             }
-            throw failed;
+            try {
+                StoredProcessInstance applied = await(store.apply(batch.build()));
+                revision = applied.revision();
+                return;
+            } catch (ExecutionStoreException failed) {
+                if (failed.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
+                        && writeAttempt < 3) {
+                    revision = await(store.load(key)).revision();
+                    continue;
+                }
+                if (failed.failure() instanceof ExecutionStoreFailure.FencedOut
+                        || failed.failure() instanceof ExecutionStoreFailure.LeaseLost) {
+                    loseFence(failed.failure());
+                }
+                throw failed;
+            }
         }
     }
 

@@ -36,7 +36,12 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
                 || !ToolApprovalService.HANDLER_NAME.equals(trigger.handlerName())) return false;
         DurableToolApproval approval = await(store.loadToolApproval(trigger.key(), trigger.workItemId()))
                 .orElse(null);
-        return approval != null && executor.supports(approval);
+        if (approval == null) return false;
+        return switch (approval.status()) {
+            case PENDING -> false;
+            case APPROVED, DENIED, EXPIRED, CANCELLED -> executor.supports(approval);
+            case CONSUMED, SUCCEEDED, FAILED, INDETERMINATE -> true;
+        };
     }
 
     @Override
@@ -69,12 +74,20 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
         if (decision == ToolApprovalStatus.APPROVED) {
             ToolApprovalResult redeemed = approvals.redeemStoredFenced(approval, currentPolicy,
                     idempotencyKey, trigger.fencingToken());
-            if (redeemed.code() != ToolApprovalResult.Code.CONSUMED) return;
+            if (redeemed.approval() == null) return;
             approval = redeemed.approval();
+            decision = approval.status();
         } else if (decision == ToolApprovalStatus.SUCCEEDED
                 || decision == ToolApprovalStatus.FAILED
                 || decision == ToolApprovalStatus.INDETERMINATE) {
             return;
+        }
+        if (decision != ToolApprovalStatus.CONSUMED
+                && decision != ToolApprovalStatus.DENIED
+                && decision != ToolApprovalStatus.EXPIRED
+                && decision != ToolApprovalStatus.CANCELLED) return;
+        if (decision != ToolApprovalStatus.CONSUMED && !executor.supports(approval)) {
+            throw new IllegalStateException("settled tool approval continuation is unavailable");
         }
 
         var request = approval.request();
@@ -84,21 +97,23 @@ public final class ToolApprovalHandlerDispatcher implements RecoveryDispatcher {
                 request.graphVersionPin(), request.nodeId(), request.tool(),
                 request.canonicalArguments(), request.argumentsDigest(), decision,
                 request.continuationVersion(), request.continuation(), request.continuationDigest());
-        DurableToolApproval consumed = approval;
+        DurableToolApproval dispatchedApproval = approval;
         try {
             Boolean succeeded = await(Objects.requireNonNull(executor.execute(continuation, trigger),
                     "continuation execution"));
             DurableToolApproval afterExecution = await(store.loadToolApproval(
-                    consumed.key(), consumed.request().approvalId())).orElse(consumed);
+                    dispatchedApproval.key(), dispatchedApproval.request().approvalId()))
+                    .orElse(dispatchedApproval);
             if (afterExecution.status() == ToolApprovalStatus.CONSUMED) {
-                approvals.complete(consumed.key(), consumed.request().approvalId(),
+                approvals.complete(dispatchedApproval.key(), dispatchedApproval.request().approvalId(),
                         Boolean.TRUE.equals(succeeded), idempotencyKey);
             }
         } catch (RuntimeException failedBeforeReturn) {
             DurableToolApproval afterFailure = await(store.loadToolApproval(
-                    consumed.key(), consumed.request().approvalId())).orElse(consumed);
+                    dispatchedApproval.key(), dispatchedApproval.request().approvalId()))
+                    .orElse(dispatchedApproval);
             if (afterFailure.status() == ToolApprovalStatus.CONSUMED) {
-                approvals.complete(consumed.key(), consumed.request().approvalId(), false, idempotencyKey);
+                approvals.markConsumedIndeterminate(dispatchedApproval.key(), idempotencyKey);
             }
             throw failedBeforeReturn;
         }

@@ -34,7 +34,10 @@ import java.util.UUID;
  * @param traversalId       the caller-facing execution id — the identifier the submitter reserved.
  * @param status            {@code RUNNING} until the traversal reaches a terminal state.
  * @param payload           the result payload, {@code null} while running and on failure.
- * @param visitedNodes      every node the traversal actually entered.
+ * @param visitedNodes      every node the traversal actually entered, as unique membership with
+ *                          unspecified iteration order; it is not visit order. Use {@link
+ *                          NodeInvocation invocation} or {@link ExecutionEvent event} history when
+ *                          ordering or repeated visits matter.
  * @param defaultedNodes    the subset of {@code visitedNodes} that ran as an unresolved default.
  * @param bypassedNodes     the subset of {@code visitedNodes} whose behavior was intentionally not
  *                          invoked. <b>Two different decisions put a node here, and this set does not

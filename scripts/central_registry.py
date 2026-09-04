@@ -38,6 +38,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-application-api",
     "ravenroot-cli",
     "ravenroot-core",
+    "ravenroot-discord",
     "ravenroot-distribution",
     "ravenroot-engine-testkit",
     "ravenroot-extensions",

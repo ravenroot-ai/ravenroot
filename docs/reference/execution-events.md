@@ -22,13 +22,13 @@ The result contains unique node sets rather than an ordered trace:
 | Field | Interpretation |
 |---|---|
 | `paused` | Whether a pause is currently held on this execution; always `false` once the execution is terminal |
-| `visitedNodes` | Nodes entered during traversal |
+| `visitedNodes` | Unique membership of nodes entered during traversal; iteration and wire order are not visit order |
 | `defaultedNodes` | Nodes resolved through default behavior |
 | `bypassedNodes` | Nodes traversed without executing behavior |
 | `handledFailureNodes` | Failures routed through graph handling |
 | `untakenEdges` | Edge identifiers or descriptions not selected |
 
-A handled failure can coexist with an overall successful terminal path. Consumers use events for ordering and result fields for set membership.
+A handled failure can coexist with an overall successful terminal path. Consumers use result fields for set membership only. Their presentation may be stable, but it does not establish traversal chronology. Use invocation or event history when order or repeated visits matter.
 
 ## Pause and resume events
 

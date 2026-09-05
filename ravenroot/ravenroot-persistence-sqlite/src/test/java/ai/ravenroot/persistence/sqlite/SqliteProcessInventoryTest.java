@@ -1,5 +1,6 @@
 package ai.ravenroot.persistence.sqlite;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.NodeAttempt;
 import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocation;
@@ -42,6 +43,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -403,6 +405,57 @@ class SqliteProcessInventoryTest {
                             + "the moment the last purged row was gone");
             assertEquals(Instant.MIN, await(reopened.inventoryRetainedFrom(OTHER_TENANT)),
                     "and only the purged tenant's floor moves");
+        }
+    }
+
+    /**
+     * Retention expiry treats a cancellation exactly like an ordinary failure -- same
+     * {@code terminalRetention} window, same purge call, same permanent removal -- which is the
+     * property this test pins rather than assuming. It also completes the picture the shared
+     * conformance suite's reopen assertions establish: right up until the deadline, the full
+     * aggregate load still distinguishes the cancelled row from the failed one; the purge then
+     * erases both without a trace, and neither resurfaces after a reopen.
+     *
+     * <p>Note what this does <em>not</em> claim: {@link ProcessInventoryEntry} carries no
+     * {@code terminationReason} of its own, so a caller reading the inventory listing rather than
+     * loading the full aggregate sees only {@code FAILED} for both rows even before either is
+     * purged. That is a real limit of the lightweight inventory projection, not of retention -- see
+     * the accompanying report.</p>
+     */
+    @Test
+    void aCancelledInstancePurgesOnTheSameScheduleAsAnOrdinaryFailureAndNeitherResurfacesAfterAReopen() {
+        Path file = databaseDirectory.resolve("retention-cancelled.db");
+        var clock = new MutableClock(EPOCH);
+        var cancelled = new ExecutionKey(TENANT, UUID.randomUUID());
+        var failed = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID cancelledTraversal = UUID.randomUUID();
+        UUID failedTraversal = UUID.randomUUID();
+
+        try (var store = open(file, clock)) {
+            createCancelled(store, cancelled, cancelledTraversal);
+            createFailed(store, failed, failedTraversal);
+
+            // Right up until the purge, the full aggregate still tells them apart; the inventory
+            // entry, read from the same row, does not -- both are FAILED there.
+            StoredProcessInstance loadedCancelled = await(store.load(cancelled));
+            StoredProcessInstance loadedFailed = await(store.load(failed));
+            assertEquals(ExecutionTerminationReason.CANCELLED, loadedCancelled.state().terminationReason());
+            assertNull(loadedFailed.state().terminationReason());
+            assertEquals(ProcessInstanceStatus.FAILED, only(store, cancelled).status());
+            assertEquals(ProcessInstanceStatus.FAILED, only(store, failed).status());
+
+            clock.advance(Duration.ofDays(7).plusSeconds(1));
+            assertEquals(2L, await(store.purgeExpiredProcessInstances(TENANT)),
+                    "a cancellation must not be exempted from retention, nor purged early: it is "
+                            + "removed on the identical schedule an ordinary failure is");
+            assertEquals(Optional.empty(), await(store.findProcessInstance(cancelled)));
+            assertEquals(Optional.empty(), await(store.findProcessInstance(failed)));
+        }
+
+        try (var reopened = open(file, clock)) {
+            assertEquals(Optional.empty(), await(reopened.findProcessInstance(cancelled)),
+                    "a purged cancellation must not resurface after a reopen");
+            assertEquals(Optional.empty(), await(reopened.findProcessInstance(failed)));
         }
     }
 
@@ -806,6 +859,18 @@ class SqliteProcessInventoryTest {
         await(store.apply(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.exactly(created.revision()))
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()));
+    }
+
+    /** The same shape as {@link #createFailed}, qualified as a cancellation rather than a fault. */
+    private void createCancelled(SqliteExecutionStore store, ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store.apply(Fixtures.creationBatch(key, traversalId)));
+        await(store.apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.FAILED,
+                        ExecutionTerminationReason.CANCELLED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        ExecutionTerminationReason.CANCELLED))
                 .build()));
     }
 

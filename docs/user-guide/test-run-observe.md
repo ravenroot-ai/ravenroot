@@ -6,7 +6,7 @@ Choose execution intent explicitly and use state plus event evidence to control 
 
 1. Use **Test** first: it is the UI default and bypasses behavior effects while retaining traversal evidence.
 2. Use **Run** only after reviewing the graph’s connectors, model calls, agent tools, and programs; the UI asks for effect confirmation.
-3. Pause when new dispatch must stop after the active node; resume to reopen dispatch; cancel when the execution should reach a cancellation outcome.
+3. Pause when new dispatch must stop after the active node; resume to reopen dispatch; cancel when the execution should reach a cancellation outcome. A cancelled execution reports `status=FAILED` alongside `terminationReason=CANCELLED` — read the two together, since the status by itself reads the same as an ordinary failure.
 4. Read the execution resource for terminal sets and the event stream for chronological changes.
 
 ## Authority boundary

@@ -102,6 +102,72 @@ class TelemetryBridgeSpanAndMetricTest {
         assertEquals(StatusCode.ERROR, span.getStatus().getStatusCode());
     }
 
+    /**
+     * Regression probe: {@code TelemetryBridge} previously matched only
+     * {@code EXECUTION_COMPLETED}/{@code EXECUTION_FAILED} in its traversal-terminal switch, so
+     * {@code EXECUTION_CANCELLED} fell through as an unhandled type. The traversal span was never
+     * ended, leaking an entry in {@code traversalSpans} and leaving the trace open forever -- and the
+     * active-executions gauge, which is backed by that very map's size, would over-count active work
+     * for as long as the process ran.
+     */
+    @Test
+    void executionCancelledEndsTheTraversalSpanWithNeitherOkNorErrorStatus() {
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        Instant start = Instant.parse("2026-08-10T00:00:00Z");
+
+        bridge.accept(traversalEvent(1, start, processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_STARTED, "execution accepted"));
+        bridge.accept(traversalEvent(2, start.plusSeconds(1), processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_CANCELLED, "cancelled"));
+
+        List<SpanData> finished = spans.getFinishedSpanItems();
+        assertEquals(1, finished.size(), "a cancelled traversal's span must be ended, not leaked open");
+        SpanData span = finished.get(0);
+        assertEquals(StatusCode.UNSET, span.getStatus().getStatusCode(),
+                "a cancellation is neither the success EXECUTION_COMPLETED reports nor the error "
+                        + "EXECUTION_FAILED reports");
+
+        MetricData executionDuration = onlyMetric(metrics, "ravenroot.execution.duration");
+        assertEquals(1, executionDuration.getHistogramData().getPoints().size(),
+                "a cancelled traversal still recorded a real duration");
+    }
+
+    /**
+     * The end-to-end proof for "no cancellation path is counted as an ordinary execution failure
+     * metric" (priority three of this feature): {@code ravenroot.execution.events} is labelled only
+     * by {@code ravenroot.event_type}, so this asserts directly on the label a failure-rate dashboard
+     * would actually query -- the metric must record one {@code EXECUTION_CANCELLED} series and must
+     * not add to (or create) an {@code EXECUTION_FAILED} series, rather than trusting that a distinct
+     * enum value implies a distinct series without ever reading the series back.
+     */
+    @Test
+    void aCancelledExecutionIsCountedUnderItsOwnEventTypeNeverUnderExecutionFailed() {
+        UUID processInstanceId = UUID.randomUUID();
+        UUID traversalId = UUID.randomUUID();
+        Instant start = Instant.parse("2026-08-10T00:00:00Z");
+
+        bridge.accept(traversalEvent(1, start, processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_STARTED, "execution accepted"));
+        bridge.accept(traversalEvent(2, start.plusSeconds(1), processInstanceId, traversalId,
+                ExecutionEventType.EXECUTION_CANCELLED, "cancelled"));
+
+        MetricData events = onlyMetric(metrics, "ravenroot.execution.events");
+        var points = events.getLongSumData().getPoints();
+        var cancelledPoint = points.stream()
+                .filter(point -> "EXECUTION_CANCELLED".equals(
+                        point.getAttributes().get(TelemetryBridge.METRIC_ATTR_EVENT_TYPE)))
+                .findFirst();
+        assertTrue(cancelledPoint.isPresent(), "no EXECUTION_CANCELLED series was recorded at all");
+        assertEquals(1, cancelledPoint.get().getValue());
+
+        boolean anyFailedSeries = points.stream().anyMatch(point -> "EXECUTION_FAILED".equals(
+                point.getAttributes().get(TelemetryBridge.METRIC_ATTR_EVENT_TYPE)));
+        assertFalse(anyFailedSeries,
+                "a cancellation must never add to an EXECUTION_FAILED series -- that is exactly the "
+                        + "failure-rate inflation this event type exists to stop");
+    }
+
     @Test
     void aNodeSpanIsAChildOfItsTraversalSpan() {
         UUID processInstanceId = UUID.randomUUID();

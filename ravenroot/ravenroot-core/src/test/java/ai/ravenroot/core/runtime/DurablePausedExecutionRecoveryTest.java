@@ -2,6 +2,7 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeResult;
@@ -343,6 +344,14 @@ final class DurablePausedExecutionRecoveryTest {
             assertEquals(TraversalStatus.FAILED,
                     stores.load(held.key()).state().traversals().get(held.traversalId()).status());
             assertEquals(ProcessInstanceStatus.FAILED, stores.load(held.key()).state().status());
+            // FAILED alone is exactly what an incident that broke a held traversal would also show;
+            // only the reason says an operator stopped this one, restart included, rather than it
+            // having failed on its own.
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    stores.load(held.key()).state().traversals().get(held.traversalId()).terminationReason(),
+                    "cancelling a hold recovered after a restart must still record why, not merely that");
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    stores.load(held.key()).state().terminationReason());
             assertFalse(restarted.application().executionPaused(TENANT, held.traversalId()));
             assertTrue(restarted.effects().isEmpty(),
                     "cancelling a hold runs nothing: " + restarted.effects());
@@ -706,6 +715,11 @@ final class DurablePausedExecutionRecoveryTest {
                     "the traversal's end must be written even though the hold could not be settled: "
                             + "leaving it WAITING would let a resume after a restart run work the "
                             + "caller was told had been cancelled");
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    stores.load(key).state().traversals().get(traversalId).terminationReason(),
+                    "the terminal write that must land despite the refused hold settlement is the "
+                            + "termination reason too, not only the status -- otherwise the caller who "
+                            + "was told CANCELLED reads back an indistinguishable ordinary failure");
             assertEquals(List.of("first"), running.effects(),
                     "and nothing after the boundary may run: " + running.effects());
             assertFalse(running.application().executionPaused(TENANT, traversalId),
@@ -914,7 +928,8 @@ final class DurablePausedExecutionRecoveryTest {
                     paused.countDown();
                 }
                 if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                        || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                        || event.type() == ExecutionEventType.EXECUTION_FAILED
+                        || event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
                     terminal.countDown();
                 }
             });

@@ -3,6 +3,7 @@ package ai.ravenroot.core.runtime;
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.NodeAttempt;
 import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocation;
@@ -51,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -155,6 +157,9 @@ class OrchestrationRetryTest {
         assertEquals(1, countOf(ExecutionEventType.NODE_FAILED),
                 "only the last attempt settles as NODE_FAILED; the intermediate ones are retries and "
                         + "must not inflate a deployment's failure count");
+        assertNull(soleTraversal(store, key).terminationReason(),
+                "retry exhaustion is an ordinary fault: nothing distinguishes this termination, and "
+                        + "it must not be misread as a cancellation");
     }
 
     // ------------------------------------------------------------------ classification
@@ -243,6 +248,15 @@ class OrchestrationRetryTest {
         List<NodeAttempt> attempts = attemptsOfWorkNode(store, key);
         assertEquals(2, attempts.size());
         assertEquals(NodeAttemptStatus.SCHEDULED, attempts.get(1).status());
+
+        // The neighbouring test above ends on the identical TraversalStatus.FAILED through retry
+        // exhaustion; only the termination reason tells this cancellation apart from that ordinary
+        // fault, and it must survive being made during a backoff rather than at a cleaner boundary.
+        Traversal traversal = soleTraversal(store, key);
+        assertEquals(TraversalStatus.FAILED, traversal.status());
+        assertEquals(ExecutionTerminationReason.CANCELLED, traversal.terminationReason(),
+                "a cancellation raised while a retry is waiting out its backoff must still be recorded "
+                        + "as a cancellation, not fold into an unqualified failure");
     }
 
     @Test
@@ -940,6 +954,11 @@ class OrchestrationRetryTest {
 
     private static NodeInvocation workInvocation(ExecutionStore store, ExecutionKey key) {
         return invocationOf(store, key, "work");
+    }
+
+    /** The one traversal every fixture in this file creates, read back after the run settles. */
+    private static Traversal soleTraversal(ExecutionStore store, ExecutionKey key) {
+        return await(store.load(key)).state().traversals().values().iterator().next();
     }
 
     private static NodeInvocation invocationOf(ExecutionStore store, ExecutionKey key, String nodeId) {

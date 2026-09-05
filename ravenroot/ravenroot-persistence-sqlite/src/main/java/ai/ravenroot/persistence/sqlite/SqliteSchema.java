@@ -705,7 +705,50 @@ final class SqliteSchema {
                 // is additive and carries a default rather than a new status name.
                 new SchemaMigration(16, "recovery records the deliveries it withheld", List.of(
                         "ALTER TABLE attempt ADD COLUMN withheld_through_delivery "
-                                + "INTEGER NOT NULL DEFAULT 0")));
+                                + "INTEGER NOT NULL DEFAULT 0")),
+                // Why a nullable column and not a new status name. A cancelled execution keeps the
+                // status it has always had -- FAILED on both rows -- and gains a reason beside it.
+                //
+                //   Additive on the DATA. No row is rewritten and none needs to be. NULL already
+                //   means exactly what every pre-existing terminal row means: nothing distinguishes
+                //   this termination. There is no backfill because there is no value a backfill
+                //   could honestly write -- a row that ended before a reason could be recorded did
+                //   not secretly carry one, and inferring "not cancelled" from the status would be a
+                //   guess written down as data. So the column is left NULL and read as unstated,
+                //   which is the truth about it. Nothing here rewrites a status, so every reader
+                //   that folds these rows today folds them identically after this migration.
+                //
+                //   NOT additive on the ROLLBACK, and this is the half an earlier version of this
+                //   comment got backwards. Like every step in this file, this one raises
+                //   PRAGMA user_version, and migrate() refuses a database whose version exceeds what
+                //   the binary understands BEFORE it reads a single row. So from the moment this
+                //   step runs, a binary that predates it cannot open the file at all -- the same
+                //   rule migration 6 above already states for the handler tables, and it holds here
+                //   with no exception. The gate is total, immediate, and independent of whether any
+                //   execution was ever cancelled. There is no sense in which an older binary
+                //   "simply does not SELECT the column": it never gets that far.
+                //
+                //   That makes this the STRICTER of the two designs on the rollback axis rather than
+                //   the freer one, so the reason to prefer it has to be stated where it actually
+                //   lives. A CANCELLED member of ProcessInstanceStatus/TraversalStatus would need no
+                //   migration at all -- statuses are stored by name -- so it would not raise
+                //   user_version, and an older binary would still open the file and fail only on the
+                //   first row carrying the unknown name, as Corrupted, per aggregate. Cheaper to
+                //   roll back; far more expensive everywhere else. Those two enums are a lifecycle
+                //   state machine, not just persisted tokens: canTransitionTo and terminal() are
+                //   built on their membership, every exhaustive switch over them here and downstream
+                //   would need a new arm, RequestReplyOutcome's invariant that a FAILED waiter state
+                //   implies a FAILED process status would break at that boundary rather than in
+                //   storage, and every REST, CLI and UI projection would receive a status token it
+                //   has never seen. The column costs one schema gate -- which this store charges for
+                //   every durable change already -- and leaves all of that untouched.
+                //
+                // Unknown NAMES in the column are still refused rather than misread: the reason is
+                // stored by name like every status, so a value from a newer build surfaces as
+                // Corrupted, never as an absent reason on a run that was in fact cancelled.
+                new SchemaMigration(17, "terminated executions record why, beside an unchanged status",
+                        List.of("ALTER TABLE process_instance ADD COLUMN termination_reason TEXT",
+                                "ALTER TABLE traversal ADD COLUMN termination_reason TEXT")));
     }
 
     static int currentVersion() {

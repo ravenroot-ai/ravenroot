@@ -9910,7 +9910,8 @@ async function playGraph(mode = 'test') {
 function handleRuntimeEvent(event) {
   const target = documentForRuntimeEvent(workspace, event);
   if (!target) return;
-  const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED';
+  const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
+    || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
   // The activity log is one panel and follows the active document, so only its events are logged.
   if (isActive) appendActivityEvent(event);
@@ -9938,7 +9939,14 @@ function handleRuntimeEvent(event) {
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
       target.execution.generation, {
+      // The durable contract, unchanged by this event type existing: a cancelled execution is still
+      // reported as FAILED (see ExecutionTerminationReason's own documented rationale), so this is
+      // not a guess -- it is the same status the server itself will report once `fetchOutcome: true`
+      // below fetches the real outcome. `terminationReason` rides along so the one caller that reads
+      // this synthetic object directly (the "recovered from unknown" activity message) does not call
+      // a cancellation an ordinary failure while the real outcome is still in flight.
       status: event.type === 'EXECUTION_COMPLETED' ? 'COMPLETED' : 'FAILED',
+      terminationReason: event.type === 'EXECUTION_CANCELLED' ? 'CANCELLED' : null,
     }, recoveredFromUnknown, { fetchOutcome: true });
     const binding = target.execution.executionId;
     if (isActive && (binding === event.executionId || binding === PENDING_EXECUTION)) {

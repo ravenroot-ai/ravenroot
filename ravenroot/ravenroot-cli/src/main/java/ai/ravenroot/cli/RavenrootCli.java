@@ -212,6 +212,15 @@ public final class RavenrootCli {
         var view = backend.result(args[1]);
         output.println("execution-id=" + view.executionId());
         output.println("status=" + view.status());
+        // Printed only when the terminal status is qualified, following the convention every other
+        // exceptional signal on this command already uses (defaulted-nodes, bypassed-nodes,
+        // handled-failure below): the common case leaves nothing to act on, and a line that appeared
+        // on every clean run would bury the occasions it matters. A cancelled execution reports
+        // status=FAILED above, exactly like an ordinary failure -- this is the line that tells the two
+        // apart, and it must be read beside status, never in place of it.
+        if (view.terminationReason() != null) {
+            output.println("termination-reason=" + view.terminationReason());
+        }
         // Printed unconditionally, beside status rather than folded into it, for the reason
         // ExecutionOutcome#paused's own Javadoc gives: status alone cannot say a RUNNING execution is
         // deliberately holding rather than merely in progress, and a reader who cannot tell the two
@@ -304,6 +313,11 @@ public final class RavenrootCli {
         for (var entry : listing.items()) {
             output.println("process-instance-id=" + entry.processInstanceId()
                     + "\tstatus=" + entry.status()
+                    // Beside status, following the same tab-separated, always-present convention as
+                    // deployment-id/workload-id/correlation-id below: empty rather than absent when
+                    // nothing distinguishes the termination, so a cancelled instance's FAILED status is
+                    // never read as an incident once this is the only place left to ask.
+                    + "\ttermination-reason=" + sanitizeForConsole(entry.terminationReason())
                     + "\tdisposition=" + entry.disposition()
                     + "\tgraph-version=" + sanitizeForConsole(entry.graphVersion())
                     + "\tdeployment-id=" + sanitizeForConsole(entry.deploymentId())
@@ -335,6 +349,7 @@ public final class RavenrootCli {
                     + "\tposition=" + entry.position()
                     + "\tingress-node-id=" + sanitizeForConsole(entry.ingressNodeId())
                     + "\tstatus=" + entry.status()
+                    + "\ttermination-reason=" + sanitizeForConsole(entry.terminationReason())
                     + "\tdisposition=" + entry.disposition()
                     + "\tinvocation-count=" + entry.invocationCount()
                     + "\tparked-attempt-count=" + entry.parkedAttemptCount());

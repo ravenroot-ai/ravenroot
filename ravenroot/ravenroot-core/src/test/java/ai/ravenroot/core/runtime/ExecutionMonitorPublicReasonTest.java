@@ -131,6 +131,35 @@ class ExecutionMonitorPublicReasonTest {
         assertEquals("deepest", failed.detail());
     }
 
+    /**
+     * Regression: {@code message}/{@code failureClass} previously walked to the deepest cause with an
+     * unbounded {@code while (current.getCause() != null)}, on a traversal-completion path with no
+     * timeout above it. {@link Throwable#initCause} only refuses a direct self-reference, not a
+     * longer cycle, so two throwables naming each other as cause used to hang this call forever. The
+     * bound mirrors {@code ExecutionTermination.reasonOf}'s own MAX_CAUSE_DEPTH for the identical
+     * chain. The {@code @Timeout} is the actual assertion: this test failing by timing out, rather
+     * than by a wrong value, is exactly the regression it guards.
+     */
+    @Test
+    @org.junit.jupiter.api.Timeout(5)
+    void aCyclicCauseChainDoesNotHangTheClassifierOrTheMessage() {
+        var monitor = new ExecutionMonitor();
+        var identity = identity();
+        UUID invocationId = UUID.randomUUID();
+
+        var first = new RuntimeException("first");
+        var second = new RuntimeException("second", first);
+        first.initCause(second); // first -> second -> first: a genuine cycle, not a self-reference.
+
+        monitor.nodeStarted(identity, "n", invocationId, invocationId);
+        monitor.nodeFailed(identity, "n", invocationId, invocationId, first);
+
+        var failed = event(monitor, ExecutionEventType.NODE_FAILED);
+        assertEquals("RuntimeException", failed.publicReason());
+        assertTrue(failed.detail().equals("first") || failed.detail().equals("second"),
+                () -> "expected the walk to stop on one of the cycle's own throwables: " + failed.detail());
+    }
+
     @Test
     void anExecutionLimitKeepsItsClosedPublicCodeWhenJoinFailureWrapsIt() {
         var monitor = new ExecutionMonitor();

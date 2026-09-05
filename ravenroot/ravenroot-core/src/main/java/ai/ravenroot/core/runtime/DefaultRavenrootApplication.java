@@ -1303,6 +1303,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // in-memory work; the handler-trigger path creates the fresh traversal.
                     } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
                         executionResults.payloadFailed(resultKey, processInstanceId, rejected);
+                    } else if (ExecutionTermination.isCancellation(terminalFailure)) {
+                        // The distinction the durable aggregate already committed, carried into the
+                        // read-by-id path so the two cannot disagree. Both sides classify the same
+                        // throwable through the same helper -- see ExecutionTermination -- rather
+                        // than each deciding for itself, because a run recorded as cancelled durably
+                        // and as an ordinary failure here reads as correct from either side alone.
+                        // The status stored is still FAILED; only the reason separates them.
+                        executionResults.cancelled(resultKey, processInstanceId);
                     } else if (error != null || result == null) {
                         executionResults.failed(resultKey, processInstanceId);
                     } else {

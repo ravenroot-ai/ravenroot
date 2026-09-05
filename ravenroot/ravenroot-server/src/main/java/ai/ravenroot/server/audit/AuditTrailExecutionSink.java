@@ -9,9 +9,7 @@ import ai.ravenroot.api.audit.AuditTrail;
 import ai.ravenroot.api.persistence.OpaquePayload;
 
 import java.nio.charset.StandardCharsets;
-import java.util.EnumSet;
 import java.util.Objects;
-import java.util.Set;
 import java.util.function.Consumer;
 
 /**
@@ -20,7 +18,7 @@ import java.util.function.Consumer;
  * {@code TelemetryBridge} subscriptions, not in place of either — this class adds a destination, it
  * does not move one, and every non-decisional event it sees is simply not appended anywhere by it.
  *
- * <h2>Exactly four types, and why the excluded ones are not a near miss</h2>
+ * <h2>Exactly five types, and why the excluded ones are not a near miss</h2>
  * <p>A per-node event fires once per node invocation, scaling with nodes &times; traversals, which is
  * the wrong order of
  * magnitude for {@link AuditTrail#append}'s synchronous, per-tenant-serialized, double-fsync write.
@@ -29,12 +27,20 @@ import java.util.function.Consumer;
  * traversal's own admission/terminal facts, plus the one join event with unique diagnostic value:</p>
  * <ul>
  *   <li>{@link ExecutionEventType#EXECUTION_STARTED} — the traversal's admission, recorded as
- *       {@link AuditOutcome#ATTEMPTED} because {@code EXECUTION_COMPLETED}/{@code EXECUTION_FAILED}
- *       is the terminal record that follows, sharing the same correlation id — the same
- *       attempt/terminal pairing {@link AuditTrailArtifactLifecycleSink} already establishes.</li>
+ *       {@link AuditOutcome#ATTEMPTED} because {@code EXECUTION_COMPLETED}/{@code EXECUTION_FAILED}/
+ *       {@code EXECUTION_CANCELLED} is the terminal record that follows, sharing the same correlation
+ *       id — the same attempt/terminal pairing {@link AuditTrailArtifactLifecycleSink} already
+ *       establishes.</li>
  *   <li>{@link ExecutionEventType#EXECUTION_COMPLETED} — the terminal success.</li>
  *   <li>{@link ExecutionEventType#EXECUTION_FAILED} — the terminal failure, the record a security
  *       trail exists for.</li>
+ *   <li>{@link ExecutionEventType#EXECUTION_CANCELLED} — the terminal stop-on-request. It is its own
+ *       action, {@code execution.cancelled}, rather than folded onto {@code execution.failed}: an
+ *       auditor scanning this trail for incidents must not see every operator-issued stop as one. It
+ *       is recorded with {@link AuditOutcome#ALLOWED} rather than {@link AuditOutcome#FAILED} for the
+ *       same reason the event stream carries its own type instead of reusing {@code EXECUTION_FAILED}
+ *       — the request being audited here is "this execution reached a terminal state", and a
+ *       cancellation reaches one exactly as cleanly as a completion does; nothing about it failed.</li>
  *   <li>{@link ExecutionEventType#JOIN_FAILED} — <b>failure has many shapes, success has one.</b> A
  *       join failing is one of several distinct ways a traversal can fail, and CORE-03's own
  *       {@code reason}/{@code arrived}/{@code failed}/{@code outstanding} breakdown, carried in this
@@ -81,10 +87,6 @@ public final class AuditTrailExecutionSink implements Consumer<ExecutionEvent> {
     /** No subject/actor identifier reaches {@link ExecutionEvent} today; see the class Javadoc. */
     public static final String PRINCIPAL_NOT_CARRIED = "-";
 
-    private static final Set<ExecutionEventType> DECISIONAL = EnumSet.of(ExecutionEventType.EXECUTION_STARTED,
-            ExecutionEventType.EXECUTION_COMPLETED, ExecutionEventType.EXECUTION_FAILED,
-            ExecutionEventType.JOIN_FAILED);
-
     private final AuditTrail auditTrail;
 
     public AuditTrailExecutionSink(AuditTrail auditTrail) {
@@ -94,7 +96,7 @@ public final class AuditTrailExecutionSink implements Consumer<ExecutionEvent> {
     @Override
     public void accept(ExecutionEvent event) {
         Objects.requireNonNull(event, "event");
-        if (!DECISIONAL.contains(event.type())) {
+        if (!decisional(event.type())) {
             return;
         }
         // A real JSON blob, escaped with the same JsonStrings every other
@@ -116,11 +118,37 @@ public final class AuditTrailExecutionSink implements Consumer<ExecutionEvent> {
                 OpaquePayload.of(detail.getBytes(StandardCharsets.UTF_8), "application/json")));
     }
 
+    /**
+     * Exactly the five decisional types; see this class's own Javadoc for why these five and no
+     * others.
+     *
+     * <p>Previously a hardcoded {@code EnumSet.of(...)} inclusion list, which is precisely the shape
+     * that let {@link ExecutionEventType#EXECUTION_CANCELLED} fall out of the audit trail entirely
+     * when it was added: {@code DECISIONAL.contains(type)} silently answers {@code false} for a type
+     * nobody remembered to add, so a genuinely new decisional type is indistinguishable from an
+     * ordinary node event at this gate. An exhaustive {@code switch} expression with no
+     * {@code default} does not have that failure mode -- a type added to {@link ExecutionEventType}
+     * without an arm here is a compile error in this one method, not a silent drop from the trail.
+     * {@link #action(ExecutionEventType)} and {@link #outcome(ExecutionEventType)} below already
+     * throw loudly for a non-decisional type reaching them; this method is what keeps a decisional
+     * type from failing to reach them in the first place.</p>
+     */
+    private static boolean decisional(ExecutionEventType type) {
+        return switch (type) {
+            case EXECUTION_STARTED, EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED,
+                    JOIN_FAILED -> true;
+            case NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED, NODE_COMPLETED, EDGE_TRAVERSED,
+                    NODE_FAILED, NODE_RETRY_SCHEDULED, JOIN_SATISFIED, JOIN_ITERATION_BACKLOG,
+                    JOIN_ARRIVAL_DISCARDED, EXECUTION_PAUSED, EXECUTION_RESUMED -> false;
+        };
+    }
+
     private static String action(ExecutionEventType type) {
         return switch (type) {
             case EXECUTION_STARTED -> "execution.started";
             case EXECUTION_COMPLETED -> "execution.completed";
             case EXECUTION_FAILED -> "execution.failed";
+            case EXECUTION_CANCELLED -> "execution.cancelled";
             case JOIN_FAILED -> "execution.join_failed";
             default -> throw new IllegalArgumentException("not a decisional event type: " + type);
         };
@@ -129,7 +157,7 @@ public final class AuditTrailExecutionSink implements Consumer<ExecutionEvent> {
     private static AuditOutcome outcome(ExecutionEventType type) {
         return switch (type) {
             case EXECUTION_STARTED -> AuditOutcome.ATTEMPTED;
-            case EXECUTION_COMPLETED -> AuditOutcome.ALLOWED;
+            case EXECUTION_COMPLETED, EXECUTION_CANCELLED -> AuditOutcome.ALLOWED;
             case EXECUTION_FAILED, JOIN_FAILED -> AuditOutcome.FAILED;
             default -> throw new IllegalArgumentException("not a decisional event type: " + type);
         };

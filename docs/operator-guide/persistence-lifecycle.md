@@ -60,6 +60,37 @@ Only an operator may drain, copy or replace durable state, restore a deployment,
 
 Terminal-retention configuration cannot be set shorter than event-journal retention, so once retention removal is exposed, a terminal instance will never be pruned while its own events are still readable. The default terminal retention is seven days, chosen to span a weekend so a failure late on a Friday is still discoverable when someone looks on Monday — a bound that constrains configuration today but removes nothing until the operation above is reachable.
 
+## Telling a cancellation from a failure
+
+A cancelled execution is recorded, and always has been recorded, with `status == FAILED`. That is
+correct and unlikely to change: cancellation is not a completion, since no end node ran and there is
+no result payload. It means status alone can never tell you whether a `FAILED` run broke or was
+stopped on request — you must read the termination reason beside it, on whichever surface you are
+looking at:
+
+- **`GET /v1/executions/{id}`** (live result, and the `410` body once retention has expired it) — the
+  `terminationReason` field reports `"CANCELLED"`, and the `cancelled` field is the same fact as a
+  boolean. Both are always present, `null`/`false` when nothing distinguishes the termination.
+- **`GET /v1/executions/inventory` and `GET /v1/executions/{id}/traversals`** — the same two fields, on
+  every row, surviving a restart because they are read from the same durable columns as `status`.
+- **`ravenroot result`** — prints `termination-reason=CANCELLED` only when the status is qualified;
+  its absence on a `FAILED` result means an ordinary failure.
+- **`ravenroot inventory` and `ravenroot traversals`** — print `termination-reason=` on every row,
+  unconditionally, matching those commands' own convention for `disposition=` and the other fields.
+- **The live SSE stream (`GET /v1/events`)** — a cancelled traversal publishes `EXECUTION_CANCELLED`,
+  not `EXECUTION_FAILED`. A monitoring rule built before this distinction existed and still matches on
+  `EXECUTION_FAILED` alone will no longer count a cancellation as a failure — update it to include or
+  separately track `EXECUTION_CANCELLED` if you want cancellations visible in the same dashboard.
+- **Metrics (`ravenroot.execution.events`)** — cancellations are counted under the `EXECUTION_CANCELLED`
+  label and are no longer folded into `EXECUTION_FAILED`; a trace span for a cancelled traversal ends
+  with an unset status rather than the error status a fault produces.
+- **The audit trail** — a cancellation is its own action, `execution.cancelled`, recorded as allowed
+  rather than failed; it no longer appears as an ordinary `execution.failed` entry.
+
+Reading `status` alone on any of these surfaces, without its neighboring reason, is the one mistake to
+avoid: it is exactly what previously made an operator's deliberate stop indistinguishable from an
+incident. The decision record below states why the status itself was deliberately left unchanged.
+
 ## Paused traversals
 
 A traversal an operator pauses is held, and a hold now survives the process that took it. The hold is written down at the moment the traversal is actually stopped — between the node that has just finished and the node that has not yet started — together with the small amount of state needed to continue it: the node it was about to enter, the payload and attributes that dispatch was carrying, and the pinned graph version to run them against. It commits in the same transaction that moves the traversal to `WAITING`, so there is no instant at which a traversal is held and nothing records it, or is recorded as waiting with nothing able to release it.
@@ -105,6 +136,7 @@ A held traversal reads as `WAITING`, like any other durable wait, and is therefo
 - [Contract](../architecture/durability-events.md)
 - [Durable process inventory](../architecture/process-inventory.md)
 - [Decision record](../../adr/0031-durable-canonical-graph-definitions.md)
+- [Cancellation decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)
 - [Runbook](../troubleshooting/embed-backup.md)
 - [Bundle format and commands](../reference/backup-recovery.md)
 - [HTTP API and CLI](../reference/api-cli.md)

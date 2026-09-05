@@ -116,7 +116,10 @@ final class EmbeddedBackend implements CliBackend {
                         outcome.bypassedNodes().stream().sorted().toList(),
                         outcome.handledFailure(),
                         outcome.handledFailureNodes().stream().sorted().toList(),
-                        outcome.untakenEdges().stream().sorted().toList(), payload);
+                        outcome.untakenEdges().stream().sorted().toList(), payload,
+                        // The raw enum name, matching RavenrootServer#executionOutcomeJson's own wire
+                        // shape -- CliBackend carries no dependency on ExecutionTerminationReason itself.
+                        outcome.terminationReason() == null ? null : outcome.terminationReason().name());
             }
             // These two IOException messages must match, verbatim, what RemoteBackend.renderError
             // produces for the equivalent 410/404 server responses -- see ErrorCode.EXECUTION_RESULT_EXPIRED
@@ -176,7 +179,8 @@ final class EmbeddedBackend implements CliBackend {
             var traversals = application.processInstanceTraversals(requestContext, id).stream()
                     .map(entry -> new TraversalInventoryView(entry.traversalId().toString(), entry.position(),
                             entry.ingressNodeId(), entry.status().name(), entry.disposition().name(),
-                            entry.invocationCount(), entry.parkedAttemptCount()))
+                            entry.invocationCount(), entry.parkedAttemptCount(),
+                            entry.terminationReason() == null ? null : entry.terminationReason().name()))
                     .toList();
             // Fetched only once the traversal read itself succeeded, so an absent/cross-tenant id
             // stays a plain 404 rather than acquiring a retainedFrom value that a closed-vocabulary
@@ -198,7 +202,8 @@ final class EmbeddedBackend implements CliBackend {
                 entry.disposition().name(), entry.graphVersionPin().reference(),
                 entry.deploymentId().orElse(null), entry.workloadId().orElse(null),
                 entry.correlationId().orElse(null), entry.traversalCount(),
-                entry.createdAt().toString(), entry.updatedAt().toString());
+                entry.createdAt().toString(), entry.updatedAt().toString(),
+                entry.terminationReason() == null ? null : entry.terminationReason().name());
     }
 
     @Override

@@ -350,8 +350,11 @@ public final class RavenrootServerMain {
         // AuditTrailGraphMlRejectionSink's Javadoc for why this satisfies rather than reopens FIX-03
         // and API-01's "server-side sink only" constraint on GraphMlRejectionDetail/PayloadException.
         // AuditTrailExecutionSink is a fifth subscriber alongside the stdout logger
-        // and whatever TelemetrySupport installs below -- see its own Javadoc for exactly which four
-        // ExecutionEventTypes it admits and why the other six stay off the chain.
+        // and whatever TelemetrySupport installs below -- see its own Javadoc, and the exhaustive
+        // switch in its `decisional` method, for which ExecutionEventTypes it admits and why the
+        // rest stay off the chain. Deliberately no count here: the previous wording named one, the
+        // set has grown twice since, and a number in a cross-reference goes stale silently while the
+        // switch it describes cannot.
         var authorization = new ai.ravenroot.api.security.DefaultAuthorizationService(
                 new AuditTrailAuthorizationSink(auditTrail));
         // The durable operator authority the packaged process was missing under the relevant contract. It is a

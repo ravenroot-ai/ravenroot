@@ -1,5 +1,6 @@
 package ai.ravenroot.api.persistence;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.NodeAttempt;
 import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocation;
@@ -70,12 +71,29 @@ public sealed interface ExecutionTransition {
 
 /**
  * Defines the process transitioned contract exposed to Ravenroot integrators.
+ *
+ * <p>{@code terminationReason} rides on the same transition as the status rather than arriving in a
+ * later write, because the two are one decision: a batch that committed {@code FAILED} now and
+ * qualified it as a cancellation afterwards would leave a durable, replayable window in which the
+ * instance reports a fault that never happened. See {@link ExecutionTerminationReason}.</p>
+ *
+ * @param next aggregate state after the transition.
+ * @param terminationReason why this termination is not what its status alone suggests, or
+ *                         {@code null} when nothing distinguishes it.
+ */
+    record ProcessTransitioned(ProcessInstanceStatus next, ExecutionTerminationReason terminationReason)
+            implements ExecutionTransition {
+/**
+ * Compatibility constructor for the shape that predates a recorded termination reason.
  * @param next aggregate state after the transition.
  */
-    record ProcessTransitioned(ProcessInstanceStatus next) implements ExecutionTransition {
+        public ProcessTransitioned(ProcessInstanceStatus next) {
+            this(next, null);
+        }
+
         @Override
         public ProcessInstance applyTo(ProcessInstance current) {
-            return required(current).transitionTo(next);
+            return required(current).transitionTo(next, terminationReason);
         }
     }
 
@@ -92,13 +110,31 @@ public sealed interface ExecutionTransition {
 
 /**
  * Defines the traversal transitioned contract exposed to Ravenroot integrators.
+ *
+ * <p>Carries {@code terminationReason} for the reason {@link ProcessTransitioned} does, and a
+ * cancellation reaches this transition before it reaches that one: a traversal ends when it is
+ * cancelled, while the instance containing it ends only if that was its last live traversal.</p>
+ *
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param next aggregate state after the transition.
+ * @param terminationReason why this termination is not what its status alone suggests, or
+ *                         {@code null} when nothing distinguishes it.
+ */
+    record TraversalTransitioned(UUID traversalId, TraversalStatus next,
+                                 ExecutionTerminationReason terminationReason)
+            implements ExecutionTransition {
+/**
+ * Compatibility constructor for the shape that predates a recorded termination reason.
  * @param traversalId the stable traversal id used to identify the requested resource.
  * @param next aggregate state after the transition.
  */
-    record TraversalTransitioned(UUID traversalId, TraversalStatus next) implements ExecutionTransition {
+        public TraversalTransitioned(UUID traversalId, TraversalStatus next) {
+            this(traversalId, next, null);
+        }
+
         @Override
         public ProcessInstance applyTo(ProcessInstance current) {
-            return required(current).transitionTraversal(traversalId, next);
+            return required(current).transitionTraversal(traversalId, next, terminationReason);
         }
     }
 

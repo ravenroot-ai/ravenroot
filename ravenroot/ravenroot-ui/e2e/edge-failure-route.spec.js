@@ -1,5 +1,21 @@
 import { expect, test } from '@playwright/test';
 
+const DECLARED_ERROR_FIXTURE = `<?xml version="1.0" encoding="UTF-8"?>
+  <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+    <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+    <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+    <key id="fr" for="edge" attr.name="failure.route" attr.type="string"/>
+    <graph id="g" edgedefault="directed">
+      <node id="start"><data key="kind">START</data></node>
+      <node id="dosomething"><data key="kind">PASSTHROUGH</data></node>
+      <node id="error"><data key="kind">ERROR</data></node>
+      <node id="end"><data key="kind">END</data></node>
+      <edge id="e1" source="start" target="dosomething"><data key="outcome">continue</data></edge>
+      <edge id="e2" source="dosomething" target="end"><data key="outcome">continue</data></edge>
+      <edge id="e3" source="dosomething" target="error"><data key="fr">true</data></edge>
+    </graph>
+  </graphml>`;
+
 // Browser coverage for declaring a failure route from the edge inspector and for keeping a failure
 // route visually distinct from an outcome edge named `failed`.
 //
@@ -213,21 +229,7 @@ test('overriding an Error target with an outcome drops the declaration instead o
     await page.locator('#file-inp').setInputFiles({
       name: 'declared-and-implicit.graphml',
       mimeType: 'application/graphml+xml',
-      buffer: Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>
-        <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
-          <key id="kind" for="node" attr.name="kind" attr.type="string"/>
-          <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
-          <key id="fr" for="edge" attr.name="failure.route" attr.type="string"/>
-          <graph id="g" edgedefault="directed">
-            <node id="start"><data key="kind">START</data></node>
-            <node id="dosomething"><data key="kind">PASSTHROUGH</data></node>
-            <node id="error"><data key="kind">ERROR</data></node>
-            <node id="end"><data key="kind">END</data></node>
-            <edge id="e1" source="start" target="dosomething"><data key="outcome">continue</data></edge>
-            <edge id="e2" source="dosomething" target="end"><data key="outcome">continue</data></edge>
-            <edge id="e3" source="dosomething" target="error"><data key="fr">true</data></edge>
-          </graph>
-        </graphml>`),
+      buffer: Buffer.from(DECLARED_ERROR_FIXTURE),
     });
     await expect.poll(() => edgeState(page, 'error'))
       .toMatchObject({ declared: 'true', failureRouteKind: 'declared' });
@@ -245,6 +247,43 @@ test('overriding an Error target with an outcome drops the declaration instead o
       .toMatchObject({ outcome: 'reviewed', declared: undefined, failureRouteKind: '' });
     const xml = await exportedGraphMl(page);
     expect(xml).not.toMatch(/<data key="[^"]*failure[^"]*">/);
+  });
+
+test('an imported Error declaration survives unrelated edits but a later removal stays removed',
+  async ({ page }) => {
+    await startEditableWorkflow(page);
+    await page.locator('#file-inp').setInputFiles({
+      name: 'declared-and-implicit.graphml',
+      mimeType: 'application/graphml+xml',
+      buffer: Buffer.from(DECLARED_ERROR_FIXTURE),
+    });
+    await expect.poll(() => edgeState(page, 'error'))
+      .toMatchObject({ declared: 'true', failureRouteKind: 'declared' });
+    await enableModify(page);
+    await openEdgeInspector(page, 'error');
+
+    // An unrelated autosave must not erase provenance from an imported document.
+    await page.locator('#edge-editor input[name="edgeName"]').fill('Imported failure route');
+    await expect.poll(() => page.evaluate(() =>
+      window.cy.getElementById('e3').data('edgeName'))).toBe('Imported failure route');
+    await expect.poll(() => edgeState(page, 'error'))
+      .toMatchObject({ declared: 'true', failureRouteKind: 'declared' });
+
+    // Once the author removes the declaration on an ordinary target, returning to Error must not
+    // resurrect the imported value from the form's opening snapshot.
+    await page.locator('#edge-editor select[name="target"]').selectOption('end');
+    const control = page.locator('#edge-editor input[name="failureRoute"]');
+    await expect(control).toBeVisible();
+    await expect(control).toBeChecked();
+    await control.uncheck();
+    await expect.poll(() => page.evaluate(() =>
+      window.cy.getElementById('e3').data('properties')['failure.route'])).toBeUndefined();
+    await page.locator('#edge-editor select[name="target"]').selectOption('error');
+    await expect(page.locator('#edge-editor [data-failure-route-control]')).toBeHidden();
+    await expect.poll(() => page.evaluate(() => {
+      const edge = window.cy.getElementById('e3');
+      return { kind: edge.data('failureRouteKind'), declared: edge.data('properties')['failure.route'] };
+    })).toEqual({ kind: 'implicit', declared: undefined });
   });
 
 test('retargeting a declared route onto an Error node keeps it a failure route',

@@ -5143,10 +5143,11 @@ function bindInspectorDraft(form, model, elementType, creating) {
   }
   inspectorDraft = draft;
   form.addEventListener('focusin', event => {
+    if (!event.target.matches('input:not([readonly]), textarea, select')) return;
+    draft.lastFocusControl = event.target;
     if (!event.target.matches('input:not([readonly]):not([type="checkbox"]):not([type="radio"]), textarea')) return;
     if (draft.focusControl !== event.target) {
       draft.focusControl = event.target;
-      draft.lastFocusControl = event.target;
       draft.focusKey = `${elementType}:${model.id}:edit:${++inspectorEditSequence}`;
     }
   });
@@ -7102,7 +7103,8 @@ function readEdgeEditorPatch(form, model) {
     : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
   const declaresFailureRoute = boxGoverns
     ? boxTicked
-    : edgeDeclaresFailureRoute(model) && outcome === DEFAULT_EDGE_OUTCOME;
+    : form.dataset.preserveImplicitFailureDeclaration === 'true'
+      && outcome === DEFAULT_EDGE_OUTCOME;
   setEdgeFailureRoute(custom, declaresFailureRoute);
   return {
     source: String(values.get('source')),
@@ -7162,6 +7164,16 @@ function renderEdgeForm(model, creating) {
   const form = document.getElementById('edge-editor');
   form.elements.source.value = model.source || graphData.nodes[0]?.id || '';
   form.elements.target.value = model.target || graphData.nodes[1]?.id || graphData.nodes[0]?.id || '';
+  form.dataset.preserveImplicitFailureDeclaration = String(
+    declared && graphData.nodeMap?.[model.target]?.kind === 'ERROR',
+  );
+  const forgetOriginalFailureDeclaration = event => {
+    if (event.target.matches('[name="target"], [name="outcome"], [name="failureRoute"]')) {
+      form.dataset.preserveImplicitFailureDeclaration = 'false';
+    }
+  };
+  form.addEventListener('input', forgetOriginalFailureDeclaration);
+  form.addEventListener('change', forgetOriginalFailureDeclaration);
 
   // There are three states an edge can be in. The Inspector STATES which one rather than leaving it
   // to be inferred from a name, so the panel always carries a sentence naming it.
@@ -7190,24 +7202,30 @@ function renderEdgeForm(model, creating) {
   let restorableOutcome = failureRoute
     ? DEFAULT_EDGE_OUTCOME
     : String(model.outcome || DEFAULT_EDGE_OUTCOME);
+  let coupledTarget = String(form.elements.target.value || '');
   function targetIsErrorNode() {
     return graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR';
   }
   function applyFailureRouteCoupling() {
     const errorTarget = targetIsErrorNode();
-    // The checkbox is meaningless against an ERROR target, and a stale tick left over from before
-    // the target changed would silently re-enter the model on submit.
+    const target = String(form.elements.target.value || '');
+    const targetChanged = target !== coupledTarget;
+    coupledTarget = target;
+    // The checkbox is meaningless against an ERROR target. Clear it when an author moves a declared
+    // route there, which normalizes the route to the target's implicit form. Keep an imported
+    // declaration in the hidden control until the author changes routing intent: if they first move
+    // it to an ordinary target, the visible checkbox must faithfully show the document's declaration.
     controlRow.hidden = errorTarget;
-    const clearedByTarget = errorTarget && failureRouteBox.checked;
-    if (errorTarget) failureRouteBox.checked = false;
+    const clearedByTarget = errorTarget && targetChanged && failureRouteBox.checked;
+    if (clearedByTarget) failureRouteBox.checked = false;
     const explicitOutcome = errorTarget
       && String(outcomeField.value || DEFAULT_EDGE_OUTCOME).trim() !== DEFAULT_EDGE_OUTCOME;
     const isFailureRoute = errorTarget ? !explicitOutcome : failureRouteBox.checked;
 
-    if (failureRouteBox.checked && !outcomeField.readOnly) {
+    if (!errorTarget && failureRouteBox.checked && !outcomeField.readOnly) {
       restorableOutcome = String(outcomeField.value || DEFAULT_EDGE_OUTCOME);
     }
-    if (failureRouteBox.checked) {
+    if (!errorTarget && failureRouteBox.checked) {
       outcomeField.value = DEFAULT_EDGE_OUTCOME;
       outcomeField.readOnly = true;
       outcomeField.setAttribute('aria-describedby', 'edge-kind-state');

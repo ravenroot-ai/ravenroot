@@ -143,6 +143,26 @@ test('Autosave OFF and invalid edge drafts use the accessible transition decisio
   await dialog.locator('[data-inspector-unsaved-action="discard"]').click();
 });
 
+test('Autosave OFF Cancel restores an edge checkbox draft, selection, and exact focus', async ({ page }) => {
+  await openEditable(page);
+  await page.locator('#btn-autosave').click();
+  await selectOnly(page, EDGE_ID);
+  const parallel = page.locator('#edge-editor input[name="parallel"]');
+  await expect(parallel).not.toBeChecked();
+
+  await parallel.check();
+  await selectOnly(page, 'start');
+  const dialog = page.locator('#inspector-unsaved-dialog');
+  await expect(dialog).toBeVisible();
+  expect((await edgeState(page)).edge.parallel).toBe(false);
+  await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
+
+  await expect(parallel).toBeChecked();
+  await expect(parallel).toBeFocused();
+  expect(await page.evaluate(() => window.cy.$(':selected').map(element => element.id()))).toEqual([EDGE_ID]);
+  expect((await edgeState(page)).edge.parallel).toBe(false);
+});
+
 test('document switching flushes only the owning edge draft and new-edge creation stays explicit', async ({ page }) => {
   await openEditable(page);
   const ids = await page.evaluate(() => {

@@ -121,13 +121,46 @@ final class EmbeddedBackend implements CliBackend {
                         // shape -- CliBackend carries no dependency on ExecutionTerminationReason itself.
                         outcome.terminationReason() == null ? null : outcome.terminationReason().name());
             }
-            // These two IOException messages must match, verbatim, what RemoteBackend.renderError
-            // produces for the equivalent 410/404 server responses -- see ErrorCode.EXECUTION_RESULT_EXPIRED
-            // and ErrorCode.UNKNOWN_EXECUTION -- so both transports fail the same way for the same caller.
+            // These IOException messages must match, verbatim, what RemoteBackend.renderError produces
+            // for the equivalent 410/404 server responses -- see ErrorCode.EXECUTION_RESULT_EXPIRED,
+            // ErrorCode.EXECUTION_RESULT_REDACTED and ErrorCode.UNKNOWN_EXECUTION -- so both transports
+            // fail the same way, with the same diagnostic detail, for the same caller.
             case ExecutionLookup.Expired expired ->
-                    throw new IOException("410 EXECUTION_RESULT_EXPIRED: the execution result is no longer retained");
+                    throw new IOException("410 EXECUTION_RESULT_EXPIRED: the execution result is no "
+                            + "longer retained" + tombstoneDetail(expired.status(), expired.terminationReason(), null));
+            // Its own message and its own code, distinct from Expired above: this execution's payload
+            // was refused at write time rather than having aged out after being retained. See
+            // RavenrootServer#readExecution and ErrorCode.EXECUTION_RESULT_REDACTED for why the two
+            // are told apart rather than collapsed, and payloadState for which refusal applies.
+            case ExecutionLookup.Redacted redacted ->
+                    throw new IOException("410 EXECUTION_RESULT_REDACTED: the execution result was never "
+                            + "retained" + tombstoneDetail(redacted.status(), redacted.terminationReason(),
+                                    redacted.payloadState()));
             case ExecutionLookup.Unknown unknown -> throw new IOException("404 UNKNOWN_EXECUTION: unknown execution");
         };
+    }
+
+    /**
+     * The parenthesised diagnostic suffix both {@code Expired} and {@code Redacted} append to their
+     * IOException message, and that {@link ai.ravenroot.cli.remote.RemoteBackend#renderError} derives
+     * independently from the same JSON body fields -- see that method's own Javadoc for why the two
+     * must be kept in step by construction rather than by convention. Carries {@code status} and
+     * {@code terminationReason} unconditionally, exactly as {@code RavenrootServer}'s own tombstone
+     * bodies do: reading {@code status} without {@code terminationReason} reports a cancelled
+     * execution as an ordinary failure. {@code payloadState} is appended only when non-null, which is
+     * every {@code Redacted} answer and no {@code Expired} one.
+     */
+    private static String tombstoneDetail(ai.ravenroot.api.application.ProcessInstanceStatus status,
+                                          ai.ravenroot.api.application.ExecutionTerminationReason reason,
+                                          ai.ravenroot.api.persistence.ResultPayloadState payloadState) {
+        var detail = new StringBuilder(" (status=").append(status);
+        if (reason != null) {
+            detail.append(", terminationReason=").append(reason);
+        }
+        if (payloadState != null) {
+            detail.append(", payloadState=").append(payloadState);
+        }
+        return detail.append(')').toString();
     }
 
     /** Tenant scoping is the same {@code requestContext} pass-through every other verb here

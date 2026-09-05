@@ -71,6 +71,25 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public final class DefaultRavenrootApplication implements RavenrootApplication {
+    /**
+     * The channel {@link #recordDurableResult} reports a refused durable write through.
+     *
+     * <p>Not a design choice made lightly: {@link #startGraphMl}'s {@code execution.whenComplete(...)}
+     * return value is never assigned, chained or awaited by anything, and a {@link CompletionStage}
+     * contract is exact about what that means -- an exception thrown from a {@code whenComplete} action
+     * completes <em>the stage that call returns</em> exceptionally, and nothing else. A caller that
+     * never looks at that returned stage never learns the action threw, no matter how loudly it throws.
+     * The old code inside that lambda that eventually re-threw a durable-write refusal was therefore
+     * equivalent, in every deployment this codebase ships, to discarding it silently -- and worse than a
+     * plain discard, because a reader of that code could believe otherwise. A {@link System.Logger} is
+     * the channel every completion-time failure in this class that cannot be handed back to a caller
+     * already uses ({@link ai.ravenroot.core.runtime.builtin.LogNodeBehaviorFactory} for a node's own
+     * diagnostic output is the same JDK facade, one package over), and it is observable the moment the
+     * refusal happens rather than never.</p>
+     */
+    private static final System.Logger LOGGER =
+            System.getLogger("ai.ravenroot.core.runtime.DefaultRavenrootApplication");
+
     private volatile ai.ravenroot.api.ingress.ManagedIngress managedIngress;
     /** Composition-root hook installed before deployment activation. */
     public void installManagedIngress(ai.ravenroot.api.ingress.ManagedIngress managedIngress) {
@@ -175,7 +194,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * and discarded all three. This registry is what makes {@code POST /v1/executions}'s 202 useful
      * rather than terminal.</p>
      */
-    private final ExecutionResultRegistry executionResults = new ExecutionResultRegistry();
+    private final ExecutionResultRegistry executionResults;
+
+    /**
+     * The durable half of the result answer, or {@code null} when the composed store cannot record
+     * one. Resolved once at composition rather than probed per read, so a deployment with no durable
+     * store takes no exception on its common path.
+     */
+    private final DurableExecutionResults durableResults;
 
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -510,6 +536,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             + executionStore.capabilities());
         }
         this.executionStore = executionStore;
+        // The registry becomes a cache in front of the durable record when the store can keep one,
+        // and stays exactly what it was when it cannot. Composed here rather than in a field
+        // initializer because it is the store that decides which of the two this is.
+        this.durableResults = DurableExecutionResults.of(executionStore);
+        this.executionResults = new ExecutionResultRegistry(
+                ExecutionResultRegistry.DEFAULT_MAX_RESULTS,
+                ExecutionResultRegistry.DEFAULT_MAX_TOMBSTONES, this.durableResults);
         if (maxActiveDeployments < 0) {
             throw new IllegalArgumentException(
                     "maxActiveDeployments cannot be negative, got " + maxActiveDeployments);
@@ -1303,6 +1336,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // in-memory work; the handler-trigger path creates the fresh traversal.
                     } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
                         executionResults.payloadFailed(resultKey, processInstanceId, rejected);
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED, null, null, null,
+                                rejected);
                     } else if (ExecutionTermination.isCancellation(terminalFailure)) {
                         // The distinction the durable aggregate already committed, carried into the
                         // read-by-id path so the two cannot disagree. Both sides classify the same
@@ -1311,10 +1347,24 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // and as an ordinary failure here reads as correct from either side alone.
                         // The status stored is still FAILED; only the reason separates them.
                         executionResults.cancelled(resultKey, processInstanceId);
+                        // No failure classifier. A deliberate stop is not a fault, and the exception
+                        // type that carried it is a control-flow detail; the termination reason beside
+                        // an unchanged FAILED status is what separates the two, and recording a class
+                        // name as well would invite a reader to treat the stop as an incident.
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED,
+                                ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED, null,
+                                null, null);
                     } else if (error != null || result == null) {
                         executionResults.failed(resultKey, processInstanceId);
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED, null, null, null,
+                                terminalFailure);
                     } else {
                         executionResults.completed(resultKey, result);
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.COMPLETED, null,
+                                result.payload(), result, null);
                     }
                 } catch (RuntimeException resultFailure) {
                     cleanupFailure = resultFailure;
@@ -1369,6 +1419,136 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             throw startupFailure;
         }
         return new ExecutionSubmission(processInstanceId, traversalId, graphVersion);
+    }
+
+    /**
+     * Writes one terminal execution's canonical result through to the durable record, and does
+     * nothing when no store can keep one.
+     *
+     * <p>Called from the completion seam beside the in-memory registry update, which already happened
+     * by the time this runs and is never undone here -- see below for why. It is deliberately not
+     * called from the startup-failure path: a submission that never started has no process instance
+     * row, and a result naming an instance that does not exist is the dangling row the store refuses
+     * by design.</p>
+     *
+     * <p>The payload boundary is crossed here and only here on this path.
+     * {@link DurableExecutionResult#of} projects the engine's {@code Object} onto the closed payload
+     * model, bounded by the cap the composed adapter publishes, and reports what became of it rather
+     * than handing back an absence that could mean four different things.</p>
+     *
+     * <h2>A traversal that terminated on its payload has no output to project</h2>
+     * <p>There is one terminal shape with no {@code Object} to hand over: the run failed
+     * <em>because</em> a payload was rejected, so the engine surfaced a
+     * {@link ai.ravenroot.api.payload.PayloadException} and produced no result. Projecting the
+     * {@code null} that path arrives with would record
+     * {@link ai.ravenroot.api.persistence.ResultPayloadState#NONE}, whose own documentation forbids
+     * exactly that use — it is the positive statement "there was nothing to
+     * keep", and a rejected payload is something that existed and was refused. A reader could not
+     * tell the two apart afterwards: both would answer {@code 200 Found}, terminal status, no
+     * payload, indistinguishable from a run that legitimately produced nothing, while the process
+     * that ran it kept answering with the typed rejection until its cache entry aged out. So the
+     * rejection is classified into a durable payload state through
+     * {@link ai.ravenroot.api.persistence.ExecutionResultPayload#refused}, and a cold read of that
+     * record answers {@link ai.ravenroot.api.application.ExecutionLookup.Redacted} naming which
+     * refusal applies.</p>
+     *
+     * <h2>A refusal is logged, never propagated, and the execution is never retroactively failed</h2>
+     * <p>This runs inside {@code startGraphMl}'s {@code execution.whenComplete(...)} action, whose
+     * returned stage nothing in this codebase observes -- a {@link CompletionStage}'s own contract says
+     * an exception thrown from that action completes <em>that returned stage</em> and nothing else, so
+     * letting {@link ExecutionStoreException} propagate out of this method the way it used to would
+     * still never reach a caller, a log, or a retry: it would simply vanish, indistinguishably from a
+     * refusal that never happened. {@link #LOGGER} is what replaces that silence.</p>
+     *
+     * <p>The execution's own already-completed outcome is never rewound by any of this: a run that
+     * genuinely finished does not become a failure because a bookkeeping write after the fact could
+     * not proceed -- that would be a worse lie than the one being fixed. And this is never retried:
+     * the one documented cause of {@link ExecutionStoreException} here that this method distinguishes,
+     * {@link ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable}, is a
+     * {@link ai.ravenroot.api.persistence.Retryability#DETERMINISTIC_REJECT} -- {@code traversalId} was
+     * reused across two submissions, which {@link DurableExecutionResult}'s own Javadoc requires be
+     * unique per tenant, and retrying an identical write repeats an identical, deterministic refusal.
+     *
+     * <h2>The cache is corrected, not merely told</h2>
+     * <p>{@link ExecutionResultRegistry#completed}/{@code failed}/{@code cancelled}/{@code
+     * payloadFailed} already committed <em>this</em> submission's outcome to the in-memory cache before
+     * this method ever ran, and {@link ExecutionResultRegistry.Durable#record} just refused to let it
+     * replace the durable record's own conflicting outcome for the same {@code traversalId} -- the
+     * durable authority keeps whichever submission recorded first. Left there, the cache and the
+     * durable record would disagree for as long as the cache entry survives: a live read of the reused
+     * id would answer with <em>this</em> submission's outcome while it is warm and with the
+     * <em>other</em> submission's once the entry ages out, a restart happens, or a second instance
+     * reads the same store -- the identical id giving two different answers depending on nothing but
+     * timing, which is exactly what "the durable record must be the source" rules out. So the refused
+     * write also erases this submission's cache entry via {@link ExecutionResultRegistry#forgetLocally},
+     * restoring the one property {@link ExecutionResultRegistry}'s own class Javadoc claims -- a cache
+     * in front of the durable record, never a second authority -- immediately rather than only once the
+     * entry would have aged out on its own. The next read of that id, warm or cold, therefore falls
+     * through to the durable record and answers with whichever submission recorded first, consistently,
+     * from the moment the refusal is discovered.</p>
+     *
+     * <p>Whether a reused id should instead be refused at submission -- before a second execution ever
+     * runs and produces output that cannot be kept, and before even this brief window in which a
+     * concurrent reader could observe the now-corrected cache entry -- is a real question this method
+     * does not answer: it needs a synchronous existence check against the durable store on every
+     * submission's hot path, changes what a caller observes at submission time, and only closes the gap
+     * where a result-capable store is composed at all, so it is left to a change that can weigh that
+     * trade-off on its own rather than inherit it as a side effect of this one.</p>
+     */
+    private void recordDurableResult(SecurityContext security, UUID processInstanceId, UUID traversalId,
+                                     String graphVersion, Instant startedAt,
+                                     ProcessInstanceStatus status,
+                                     ai.ravenroot.api.application.ExecutionTerminationReason reason,
+                                     Object payload, GraphExecutionResult result, Throwable failure) {
+        if (durableResults == null) {
+            return;
+        }
+        var nodes = result == null
+                ? ai.ravenroot.api.persistence.ExecutionResultNodes.empty()
+                : ai.ravenroot.api.persistence.ExecutionResultNodes.of(result.visitedNodes(),
+                        result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
+                        result.untakenEdges());
+        var key = new ExecutionKey(security.tenantId(), processInstanceId);
+        var pin = new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion);
+        var endedAt = Instant.now();
+        // A traversal that terminated on a payload rejection has no output object left to project,
+        // and projecting the null it is called with would record NONE -- the positive claim that the
+        // run produced nothing, which is the one thing that state must never say about a payload that
+        // existed and was refused. The refusal itself is what is known, so it is what is recorded.
+        var refused = failure instanceof ai.ravenroot.api.payload.PayloadException rejected
+                ? ai.ravenroot.api.persistence.ExecutionResultPayload.refused(rejected.reason())
+                : null;
+        try {
+            executionResults.recordDurably(refused == null
+                    ? ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId, pin,
+                            status, reason, startedAt, endedAt, payload, nodes, failure,
+                            durableResults.maxPayloadBytes())
+                    : ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId, pin,
+                            status, reason, startedAt, endedAt, refused, nodes, failure));
+        } catch (ExecutionStoreException notRecorded) {
+            boolean conflict = notRecorded.failure()
+                    instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable;
+            // WARNING for the one classified, deterministic cause (a reused traversalId); anything
+            // else this adapter could still throw here is unclassified for this call site and gets the
+            // louder level, because it is not one this method's own reasoning has already accounted
+            // for.
+            var level = conflict ? System.Logger.Level.WARNING : System.Logger.Level.ERROR;
+            LOGGER.log(level, "Durable execution result not recorded for tenantId={0} "
+                            + "processInstanceId={1} traversalId={2}: {3}.{4}",
+                    security.tenantId(), processInstanceId, traversalId, notRecorded.getMessage(),
+                    conflict
+                            ? " This submission's cache entry was corrected to fall through to the "
+                                    + "durable record, which was written by whichever submission "
+                                    + "recorded first."
+                            : " The execution's own outcome is unaffected and still answers a live "
+                                    + "read from this process; it was not durably recorded.");
+            if (conflict) {
+                // See this method's own Javadoc, "The cache is corrected, not merely told": leaving
+                // the cache entry in place here is exactly the disagreement this method exists to
+                // close, not a milder version of it.
+                executionResults.forgetLocally(new ExecutionResultRegistry.Key(security.tenantId(), traversalId));
+            }
+        }
     }
 
     private static void closeApprovalBinding(AutoCloseable binding) {
@@ -1779,7 +1959,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     /**
-     * Issue 154: the durable inventory is available exactly when a store is composed and declares
+     * The durable inventory is available exactly when a store is composed and declares
      * {@link StoreCapability#PROCESS_INVENTORY} — the same "declared capability, not implicit
      * feature-sniffing" rule {@link #durableEventJournalAvailable()} already follows for the journal.
      */
@@ -2617,12 +2797,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var accepted = new ProcessInstance(processInstanceId, ProcessInstanceStatus.ACCEPTED,
                 Map.of(traversalId, traversal));
 
-        // Issue 154: a transient submission opens no deployment domain and models no workload, so
-        // only the caller's own correlation identity is knowable here -- deploymentId and workloadId
-        // stay absent rather than being invented, which is exactly what keeps a transient execution's
-        // inventory row from being conflated with a deployment or a graph version (acceptance
-        // criterion 2). requestId is SecurityContext's own "ingress request correlation identifier",
-        // the same value every interior boundary already carries for this submission.
+        // A transient submission opens no deployment domain and models no workload, so only the
+        // caller's own correlation identity is knowable here -- deploymentId and workloadId stay
+        // absent rather than being invented, which is exactly what keeps a transient execution's
+        // inventory row from being conflated with a deployment or a graph version. requestId is
+        // SecurityContext's own "ingress request correlation identifier", the same value every
+        // interior boundary already carries for this submission.
         StoredProcessInstance created = await(executionStore.apply(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(accepted, new GraphVersionPin(graphVersion)))

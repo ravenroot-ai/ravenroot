@@ -226,7 +226,12 @@ class SqliteTerminationReasonTest {
     private static SchemaMigration terminationReasonMigration() {
         return SqliteSchema.migrations().stream()
                 .filter(candidate -> candidate.statements().stream()
-                        .anyMatch(statement -> statement.contains("termination_reason")))
+                        // "ADD COLUMN termination_reason" and not the bare column name: a later
+                        // migration may legitimately CREATE a table with a column of that name, and
+                        // matching the name alone would make this helper ambiguous the first time one
+                        // did. What it is looking for is the step that added the reason to the two
+                        // pre-existing lifecycle tables, and only an ALTER can be that step.
+                        .anyMatch(statement -> statement.contains("ADD COLUMN termination_reason")))
                 .reduce((first, second) -> {
                     throw new AssertionError("more than one migration adds a termination reason");
                 })

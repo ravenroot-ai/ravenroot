@@ -1120,10 +1120,22 @@ class RavenrootServerTest {
             producedInput.set(new UnsupportedInput());
             String unsupportedId = submitRunAndAwait(client, server, monitor, TERMINAL_FAILURE_GRAPH);
             var unsupported = readSettledResponse(client, server, unsupportedId);
-            assertEquals(400, unsupported.statusCode(), unsupported.body());
+            // 410 EXECUTION_RESULT_REDACTED, and deliberately not the rejection's own 400. A read of
+            // this execution used to answer PAYLOAD_UNSUPPORTED_TYPE while the process that ran it
+            // still held the rejection in memory, and EXECUTION_RESULT_REDACTED from every other
+            // instance and from this one once the entry aged out -- one id, two wire codes, decided
+            // by nothing a caller can see. The durable record has only the coarser distinction to
+            // offer, so the warm answer is the one that gives ground: payloadState still separates a
+            // budget an operator configures from a value no configuration would admit.
+            assertEquals(410, unsupported.statusCode(), unsupported.body());
             assertTrue(unsupported.headers().firstValue("Content-Type").orElse("")
                     .startsWith("application/json"), unsupported.headers().toString());
-            assertTrue(unsupported.body().contains("\"code\":\"PAYLOAD_UNSUPPORTED_TYPE\""), unsupported.body());
+            assertTrue(unsupported.body().contains("\"code\":\"EXECUTION_RESULT_REDACTED\""),
+                    unsupported.body());
+            assertTrue(unsupported.body().contains("\"payloadState\":\"UNCONVERTIBLE\""),
+                    () -> "a value outside the closed payload model is not a limit anybody can raise, "
+                            + "and the body has to keep saying so: " + unsupported.body());
+            assertEquals("FAILED", jsonString(unsupported.body(), "status"), unsupported.body());
             assertFalse(unsupported.body().contains("secret-input-must-not-leak"), unsupported.body());
             ai.ravenroot.api.payload.PayloadJson.read(unsupported.body().getBytes(StandardCharsets.UTF_8),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
@@ -1136,11 +1148,20 @@ class RavenrootServerTest {
                     "the in-memory PayloadValue must exceed the default collection bound by exactly one");
             String overLimitId = submitRunAndAwait(client, server, monitor, TERMINAL_FAILURE_GRAPH);
             var overLimit = readSettledResponse(client, server, overLimitId);
-            assertEquals(413, overLimit.statusCode(), overLimit.body());
+            // The other half of the same rule, and the half that shows what payloadState is for: this
+            // rejection came from a budget the deployment configures, so it is WITHHELD where the
+            // unsupported type above is UNCONVERTIBLE. The finer PAYLOAD_COLLECTION_LIMIT_EXCEEDED is
+            // still what a caller gets when a *request* payload is refused; it cannot survive to a
+            // read of a result, because the durable record does not store it and a warm answer that
+            // published it would be an answer only this instance could give.
+            assertEquals(410, overLimit.statusCode(), overLimit.body());
             assertTrue(overLimit.headers().firstValue("Content-Type").orElse("")
                     .startsWith("application/json"), overLimit.headers().toString());
-            assertTrue(overLimit.body().contains("\"code\":\"PAYLOAD_COLLECTION_LIMIT_EXCEEDED\""),
+            assertTrue(overLimit.body().contains("\"code\":\"EXECUTION_RESULT_REDACTED\""),
                     overLimit.body());
+            assertTrue(overLimit.body().contains("\"payloadState\":\"WITHHELD\""),
+                    () -> "a configured budget refused this payload, which is the distinction "
+                            + "WITHHELD carries and UNCONVERTIBLE does not: " + overLimit.body());
             ai.ravenroot.api.payload.PayloadJson.read(overLimit.body().getBytes(StandardCharsets.UTF_8),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
 

@@ -5520,16 +5520,23 @@ public abstract class ExecutionStoreContract {
         assertTrue(await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).isEmpty());
     }
 
-    // ---- payload-refusal ordering (when WITHHELD is reachable at all) ----
+    // ---- payload-refusal ordering on the projection path ----
 
     /**
      * {@code RuntimeActivityData}'s own projection bounds an output to 16 KiB and reports it
      * truncated, before {@link DurableExecutionResult#project} ever compares the encoding against the
      * adapter's published cap. At either adapter's default cap -- far above 16 KiB -- a huge payload is
-     * therefore truncated-and-retained rather than withheld: {@link ResultPayloadState#WITHHELD} only
-     * becomes reachable when an adapter publishes a cap below the projection's own bound. This pins
-     * that ordering at the store contract, so a future change to either bound cannot silently invert it
-     * without failing here first.
+     * therefore truncated-and-retained rather than withheld: on <em>this</em> path
+     * {@link ResultPayloadState#WITHHELD} only becomes reachable when an adapter publishes a cap below
+     * the projection's own bound. This pins that ordering at the store contract, so a future change to
+     * either bound cannot silently invert it without failing here first.
+     *
+     * <p>It says nothing about the other producer of that state, and must not be read as though it
+     * did: a value the runtime's own payload boundary rejects never reaches this projection at all.
+     * The traversal terminates on the rejection, the caller holding it builds the payload state with
+     * {@link ai.ravenroot.api.persistence.ExecutionResultPayload#refused}, and the result is recorded as {@code WITHHELD} for any
+     * budget an operator configures -- which is reachable at default settings and carries no size,
+     * because no encoding of the refused value was ever produced.</p>
      */
     @Test
     final void aHugePayloadIsTruncatedAndRetainedRatherThanWithheldAtTheAdaptersDefaultCap() {

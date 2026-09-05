@@ -44,11 +44,15 @@ both `InMemoryExecutionStore` and `SqliteExecutionStore` (schema 18).
 **A payload has four possible fates, and each is its own `ResultPayloadState`, never a nullable
 field.** `NONE` — the execution produced nothing; a positive statement, never used to report something
 that was kept and then dropped. `RETAINED` — the projection is present, with independent `redacted`
-and `truncated` flags that qualify it. `WITHHELD` — the projection was produced but exceeded the
-adapter's published byte cap and none of it is stored; `bytes()` still reports the size that was
-refused, so an operator can see by how much to raise the cap. `UNCONVERTIBLE` — the value does not
-project onto the closed payload model at all, which calls for fixing the node rather than raising a
-limit. `EXPIRED` is a fifth, read-only member: it is derived from the record's age against the store's
+and `truncated` flags that qualify it. `WITHHELD` — a payload existed and none of it is stored,
+because a configured budget refused it. Two producers reach that state: an encoded projection larger
+than the adapter's published byte cap, and a value the runtime's own payload boundary rejected for a
+size, depth, element-count, value-count or length budget before any encoding of it existed, which
+terminates the traversal on the rejection. `bytes()` reports the size that was refused in the first
+case, so an operator can see by how much to raise the cap; it is zero in the second, where there was
+never an encoding to measure and the store's cap is not the budget to look at. `UNCONVERTIBLE` — the
+value does not project onto the closed payload model at all, which calls for fixing the node rather
+than raising a limit. `EXPIRED` is a fifth, read-only member: it is derived from the record's age against the store's
 clock at read time and is never written, because a writer cannot know a fact that becomes true later.
 The rejected alternative — a nullable payload field with size and validity reported separately — was
 rejected because it recreates exactly the ambiguity this decision exists to remove: three of these
@@ -71,6 +75,33 @@ the closed-vocabulary code rather than by the transport status. The redacted bod
 may raise from a node returning a value no remote adapter could ever persist. Both CLI transports,
 `EmbeddedBackend` and `RemoteBackend`, are driven through the identical `ExecutionLookup` values and
 proven to fail with the same message for the same execution.
+
+**The process-local cache decides no terminal question by itself.** `ExecutionResultRegistry` answers
+without consulting the store in exactly one case — a `Found` whose status is not terminal — and that
+line is drawn where a store read is provably a miss rather than merely expensive:
+`DurableExecutionResult` refuses a non-terminal status, so a traversal still running cannot have a
+record. Every other local answer defers, a warm full result included. Two narrower rules were tried
+and both failed the same criterion. Returning a tombstone's `Expired` outright reported a cache
+eviction as a retention expiry, and the cache's bounds are counts, so the eviction says nothing about
+the store's clock. Short-circuiting a warm `Found` was that defect read from the other end: expiry is
+applied on the durable read path and nowhere else, so an instance quiet enough not to evict a result
+went on serving its payload past the deadline the store had assigned it, while a sibling — and the
+same instance after a restart — answered `EXECUTION_RESULT_EXPIRED` for the identical id. The cost is
+stated rather than hidden: a terminal read costs one store read even when this process holds the
+answer. It buys the property the whole record exists to establish, and it leaves untouched the only
+traffic the in-memory-first ordering was ever defended on, which is a caller polling an execution that
+has not finished.
+
+**A traversal that terminated on a rejected payload is an answer, not an exception.** The registry
+retains the typed rejection and used to re-raise it from the read, which the server renders as the
+rejection's own recommended status. The record for the same execution says `Redacted`, so one
+identifier carried two different wire codes depending on which instance was asked — and, because the
+re-raise was rendered through the payload-rejection path, produced one audit record per read on that
+instance and none on any other. The retained rejection is now rendered as `Redacted` through the same
+`ExecutionResultPayload#refused` classification the durable write applies to it, so the warm answer
+and the record cannot disagree about which refusal it was. Nothing about the terminal outcome changed:
+the traversal still fails, the rejection is still what failed it, and its reason is still published —
+as `payloadState`, on a body that also carries the terminal status and its termination reason.
 
 **Recording is idempotent by refusal, and never by overwrite.** Identity for this comparison is
 `DurableExecutionResult#fingerprint()`, a digest over every component the producer decided except the
@@ -135,14 +166,20 @@ operation such a trigger composes against, so the audit obligation is met the mo
   ambiguous prior write gets back the first result whether or not it matches what the second run
   actually produced; the codebase does not merge, does not overwrite, and — after the cache-consistency
   fix — does not disagree with itself between a warm and a cold read.
-- **`WITHHELD` is unreachable at either bundled adapter's default configuration.**
+- **`WITHHELD` has two producers, and they differ sharply in how reachable they are.** The
+  store-cap producer is unreachable at either bundled adapter's default configuration:
   `RuntimeActivityData`'s own projection bounds an output to 16 KiB before `DurableExecutionResult`
   ever compares the encoding against the adapter's published cap (1 MiB by default for both adapters),
   so a huge payload is truncated-and-retained rather than withheld. This is a deliberate ordering — a
   declared partial answer beats a refusal — pinned by a contract test
   (`aHugePayloadIsTruncatedAndRetainedRatherThanWithheldAtTheAdaptersDefaultCap`) so a future change to
-  either bound cannot silently invert it. `WITHHELD` becomes reachable only when an adapter is
-  configured with a cap below the projection's own bound.
+  either bound cannot silently invert it, and it becomes reachable only when an adapter is configured
+  with a cap below the projection's own bound. The payload-boundary producer is ordinary at default
+  settings: a node whose value the runtime's payload limits refuse terminates the traversal on that
+  rejection, which the built-in JSON parse and path behaviours raise unwrapped, and the result is
+  recorded as `WITHHELD` carrying no size, because no encoding of the refused value ever existed. The
+  operator response differs with the producer — the first is the store's byte cap, the second the
+  payload limits — and `bytes()` is what tells them apart, being non-zero only for the first.
 - **The SQLite adapter's schema-18 migration is a one-way binary gate, like every migration in this
   store, and this record does not claim otherwise.** `SqliteSchema.migrate` refuses to open any
   database whose recorded schema version exceeds what the running binary understands, before it reads

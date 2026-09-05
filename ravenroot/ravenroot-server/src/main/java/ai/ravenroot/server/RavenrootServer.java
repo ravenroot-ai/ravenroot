@@ -3657,7 +3657,9 @@ public final class RavenrootServer implements AutoCloseable {
      * together, never {@code status} alone, or a cancelled execution reads as an incident.</p>
      *
      * <p>{@code payloadState} is the member this body adds and {@code expiredExecutionJson} does not:
-     * one of {@code WITHHELD} (the encoded projection exceeded the store's byte cap) or
+     * one of {@code WITHHELD} (a configured budget refused the payload: either an encoded projection
+     * larger than the store's byte cap, or a value the runtime's payload limits rejected before any
+     * encoding of it existed, which terminates the traversal on that rejection) or
      * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all) --
      * {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}'s canonical constructor refuses
      * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only two

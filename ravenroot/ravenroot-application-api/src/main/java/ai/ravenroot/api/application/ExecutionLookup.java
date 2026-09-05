@@ -25,11 +25,14 @@ import java.util.UUID;
  * execution as one that never happened.</p>
  *
  * <h2>Where a result lives, and what a caller observes past that horizon</h2>
- * <p>Results are retained in two places at once, and the order matters. A bounded, count-limited
- * cache in the process that ran the execution answers first, and a durable record in the execution
- * store answers when the cache misses. The cache is the same one that has always been here; what
- * changed is that it is no longer the authority, so a result readable before a restart is still
- * readable after one, and readable from a second instance that never ran it.</p>
+ * <p>Results are retained in two places at once, and which one answers is decided by whether the
+ * execution has finished. A bounded, count-limited cache in the process that ran it answers for an
+ * execution still in flight, and the durable record in the execution store answers every terminal
+ * question — including one the cache could have answered from a result it is still holding. The
+ * cache is the same one that has always been here; what changed is that it is no longer the
+ * authority for anything terminal, so a result readable before a restart is still readable after
+ * one, readable from a second instance that never ran it, and no longer readable from the instance
+ * that ran it at the same moment it stops being readable anywhere else.</p>
  *
  * <p>The durable record carries a payload-retention state of its own, and the four answers below are
  * exactly its projection. Concretely, a caller observes:</p>
@@ -37,18 +40,23 @@ import java.util.UUID;
  *   <li>{@link Found} with {@code status == RUNNING} while the traversal is in flight;</li>
  *   <li>{@link Found} with a terminal status once it completes — with a payload when one was
  *       produced and retained, and without one when the execution produced none;</li>
- *   <li>{@link Redacted} when the execution produced a payload that was not retained: it exceeded
- *       the store's cap, or it did not project onto the closed payload model at all. The terminal
- *       status and its termination reason are reported in full;</li>
+ *   <li>{@link Redacted} when the execution produced a payload that was not retained: the payload
+ *       boundary refused it before any encoding of it existed and the traversal terminated on that
+ *       refusal, or its encoding exceeded the store's cap, or it did not project onto the closed
+ *       payload model at all. The terminal status and its termination reason are reported in full;</li>
  *   <li>{@link Expired} once the retention window has elapsed, reported from the durable record,
  *       which owns that judgement because only the store's clock can make it. The terminal status
  *       and its termination reason are still reported, the payload is not. <b>Evicting a result from
  *       the process-local cache is not an expiry and never produces this answer while a durable
  *       record exists</b>: the cache is bounded by a count of executions, not by time, so an
  *       instance that has since run a few hundred more traversals still reads a durably held result
- *       as {@link Found}, exactly as an instance that never ran it does. The process-local record of
- *       a terminal execution answers {@code Expired} on its own only where no durable record backs
- *       it — where none was ever written, or where a purge has since removed it;</li>
+ *       as {@link Found}, exactly as an instance that never ran it does — and an instance quiet
+ *       enough to be holding that result still reads it as {@code Expired} once the record's own
+ *       deadline passes, again exactly as one that never ran it does. Every terminal answer is
+ *       checked against the record; the cache decides no terminal question by itself. The
+ *       process-local record of a terminal execution answers {@code Expired} on its own only where
+ *       no durable record backs it — where none was ever written, or where a purge has since removed
+ *       it;</li>
  *   <li>{@link Unknown} once the durable record has been purged and even the tombstone is gone, when
  *       no durable store is composed and the process has restarted, or when the execution belongs to
  *       another tenant.</li>
@@ -152,6 +160,16 @@ public sealed interface ExecutionLookup {
      * same shape as a run that legitimately produced nothing. Those are different facts and they call
      * for different actions: one is a limit an operator can raise or a defect in a node, and the other
      * is a normal completion.</p>
+     *
+     * <p>It covers a third producer, and that one is not exotic: a traversal that terminated
+     * <em>on</em> its payload, because the runtime's own payload boundary rejected the value before
+     * any encoding of it could exist. There is no size to report for those and
+     * {@link #payloadState()} is derived from the rejection's reason — a budget an operator
+     * configures is {@link ai.ravenroot.api.persistence.ResultPayloadState#WITHHELD}, and anything no
+     * configuration change would have admitted is
+     * {@link ai.ravenroot.api.persistence.ResultPayloadState#UNCONVERTIBLE}. The instance that ran
+     * such a traversal used to rethrow the typed rejection instead, so the same execution answered a
+     * payload-rejection status while that instance held it and this answer everywhere else.</p>
      *
      * <p>Deliberately carries the terminal status and the termination reason, exactly as
      * {@link Expired} does and for exactly the same reason: the status alone reports a cancelled

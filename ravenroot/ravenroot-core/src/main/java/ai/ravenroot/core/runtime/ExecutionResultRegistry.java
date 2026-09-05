@@ -44,18 +44,22 @@ import java.util.UUID;
  * {@link ExecutionLookup.Unknown}, indistinguishable from a nonexistent id.</p>
  *
  * <h2>A cache in front of the durable record, not the authority</h2>
- * <p>When a {@link Durable} record is composed, this registry answers first and the store answers
- * when it misses. That ordering is the whole point: the in-memory entry is the freshest and cheapest
- * answer for a traversal this process ran, and the durable record is the only answer for one it did
- * not — a traversal that ran before a restart, or on another instance sharing the store. Reversing
- * the order would put a disk read in front of every poll of a running execution for no gain, since a
- * running execution has no durable result yet.</p>
+ * <p>When a {@link Durable} record is composed, exactly one class of local answer is returned without
+ * consulting the store: an {@link ExecutionLookup.Found} whose status is <em>not</em> terminal. That
+ * is the whole of the short-circuit, and the line is drawn there because a store read for such an
+ * entry is provably a miss rather than merely an expensive hit —
+ * {@link DurableExecutionResult}'s own constructor refuses a non-terminal status, so a traversal
+ * still running has no durable record by construction and cannot acquire one before it ends. Polling
+ * a running execution therefore still costs nothing, which is the only traffic the in-memory-first
+ * ordering was ever defended on.</p>
  *
- * <p><strong>A tombstone is a miss, not an answer.</strong> Only a retained full result short-circuits
- * the store; the two bounds below evict results from this process long before any retention horizon
- * elapses, so a tombstone means "this process no longer holds it" and never "nobody holds it any
- * more". {@link #lookup} states what that costs when the tombstone is wrongly treated as the latter,
- * and what is answered when the store has nothing either.</p>
+ * <p><strong>Every terminal answer defers, a retained full result included.</strong> Both bounds
+ * below are counts, so nothing here ages out as time passes: an instance that completes fewer than
+ * {@code maxResults} further executions inside the store's retention window would otherwise go on
+ * serving a payload past its declared horizon, while a sibling instance — and the same instance after
+ * a restart — answered {@link ExecutionLookup.Expired} for that identical id. A tombstone is a miss
+ * for the same reason and always was. {@link #lookup} states what the deferral costs, and what is
+ * answered when the store has nothing to say either.</p>
  *
  * <p>With no durable record composed, every path below behaves exactly as it did before one existed:
  * the fallback is reached only after an in-memory miss, and it is skipped entirely. That degradation
@@ -258,7 +262,26 @@ public final class ExecutionResultRegistry {
                 null, Set.of(), Set.of(), Set.of(), Set.of(), Set.of(), false, reason));
     }
 
-    /** Retains only the typed bounded payload refusal, never the rejected object or its text. */
+    /**
+     * Retains only the typed bounded payload refusal, never the rejected object or its text.
+     *
+     * <p>What is retained is the {@link ai.ravenroot.api.payload.PayloadException.Reason}, and
+     * {@link #lookup} renders it as {@link ExecutionLookup.Redacted} through
+     * {@link ai.ravenroot.api.persistence.ExecutionResultPayload#refused} — the same classification
+     * the durable write applies to the same rejection, so the warm answer and the record cannot
+     * disagree about which refusal it was.</p>
+     *
+     * <p>It used to be rethrown from {@link #lookup} instead. That made a read of this execution
+     * answer the rejection's own recommended status while the entry was warm and
+     * {@code 410 EXECUTION_RESULT_REDACTED} once it was not, so the same identifier carried two
+     * different wire codes depending on nothing but which instance was asked — and, because the
+     * throw was rendered by the server's payload-rejection path, produced one audit record per read
+     * from one instance and none from another.</p>
+     *
+     * @param key               the tenant-scoped execution being recorded.
+     * @param processInstanceId the durable process that contained the refused traversal.
+     * @param failure           the typed rejection the traversal terminated on.
+     */
     public synchronized void payloadFailed(Key key, UUID processInstanceId,
                                            ai.ravenroot.api.payload.PayloadException failure) {
         failed(key, processInstanceId);
@@ -269,13 +292,24 @@ public final class ExecutionResultRegistry {
      * The four-way answer defined by {@link ExecutionLookup}; never null, never an empty body.
      *
      * <p>In-memory first, durable second, and the durable read happens outside this object's monitor
-     * so a slow store cannot stall every other execution in the process. Only a process-local
-     * {@link ExecutionLookup.Found} is returned without consulting the store: it is the freshest
-     * answer that exists for a traversal this process ran, and nothing on disk can improve on it.
-     * Both absences — {@link ExecutionLookup.Unknown} and {@link ExecutionLookup.Expired} — fall
-     * through.</p>
+     * so a slow store cannot stall every other execution in the process. <b>The only local answer
+     * returned without consulting the store is an {@link ExecutionLookup.Found} whose status is not
+     * terminal</b>, because that is the only one the store is guaranteed to have nothing to say
+     * about: {@link DurableExecutionResult} refuses a non-terminal status outright, so no record for
+     * a still-running traversal can exist. Every other answer this process can give — a terminal
+     * {@code Found}, a {@link ExecutionLookup.Redacted}, a tombstone's
+     * {@link ExecutionLookup.Expired}, and {@link ExecutionLookup.Unknown} — falls through, and the
+     * record wins wherever one is found.</p>
      *
-     * <h2>An eviction is not an expiry, and a tombstone must not claim it is</h2>
+     * <h2>The cost of that, stated rather than hidden</h2>
+     * <p>A terminal read costs one store read even when this process holds the result. It is bought
+     * deliberately, because the alternative is not "a cheaper read" but "an answer that depends on
+     * which instance was asked", which is the one property the durable record exists to establish.
+     * The traffic that made the in-memory-first ordering worth having is untouched: a caller polling
+     * a running execution is answered from memory on every poll, and reaches the store exactly once
+     * the traversal ends.</p>
+     *
+     * <h2>Neither an eviction nor a warm hit may outrank the record</h2>
      * <p>{@code Expired} used to be returned outright, on the reasoning that a tombstone this process
      * wrote already answers for a result this process evicted. That reasoning conflated two facts
      * that were the same one before a durable record existed and are not the same one now: a
@@ -289,12 +323,20 @@ public final class ExecutionResultRegistry {
      * depending on nothing but which instance was asked, which is the disagreement this whole
      * composition exists to remove.</p>
      *
+     * <p>A retained full result was the same defect read from the other end. It short-circuited the
+     * store, and because both bounds here are counts, an instance quiet enough not to evict it kept
+     * answering {@code Found} <em>with the payload</em> past the record's own {@code retainedUntil},
+     * while a sibling reading the same id got {@code Expired}. Expiry is applied on the durable read
+     * path and nowhere else, so a warm entry cannot observe it without asking; asking is therefore
+     * what it now does.</p>
+     *
      * <p>So where a durable record exists it is the only thing that may pronounce a result expired,
-     * and the tombstone yields to it: {@link #project} derives {@code Expired} from the record's own
-     * retention state, and derives {@code Found} or {@code Redacted} when the record is still
-     * offered. <b>When the store has no record either, the tombstone is kept and returned
-     * unchanged</b> — it still carries a true and useful fact, that this execution ran and reached
-     * this terminal status for this reason, and discarding it in favour of the store's silence would
+     * and both the tombstone and the warm result yield to it: {@link #project} derives
+     * {@code Expired} from the record's own retention state, and derives {@code Found} or
+     * {@code Redacted} when the record is still offered. <b>When the store has no record either, the
+     * local answer is kept and returned unchanged</b> — it still carries a true and useful fact, that
+     * this execution ran and reached this terminal status for this reason, and discarding it in
+     * favour of the store's silence would
      * downgrade a known terminal execution to {@link ExecutionLookup.Unknown}: an execution that
      * never happened. That is the case a result purged from the store, or an execution recorded
      * before a result-capable store was composed, lands in.</p>
@@ -304,9 +346,7 @@ public final class ExecutionResultRegistry {
      */
     public ExecutionLookup lookup(Key key) {
         ExecutionLookup local = lookupLocal(key);
-        boolean deferrable = local instanceof ExecutionLookup.Unknown
-                || local instanceof ExecutionLookup.Expired;
-        if (durable == null || !deferrable) {
+        if (durable == null || answerableHereAlone(local)) {
             return local;
         }
         return durable.load(key.tenantId(), key.executionId())
@@ -314,11 +354,34 @@ public final class ExecutionResultRegistry {
                 .orElse(local);
     }
 
+    /**
+     * Whether {@code local} is an answer the durable record is guaranteed to have nothing to say
+     * about, which is the exact and only condition under which the store is not consulted.
+     *
+     * <p>Expressed as "not terminal" rather than as "RUNNING" because it is the terminality that
+     * carries the argument, not the particular status: {@link DurableExecutionResult} refuses to
+     * exist for a non-terminal status, so no amount of retention policy, purging or clock movement
+     * can produce a record this branch would have skipped. Every other local answer is one the
+     * record may legitimately contradict.</p>
+     */
+    private static boolean answerableHereAlone(ExecutionLookup local) {
+        return local instanceof ExecutionLookup.Found found && !found.outcome().status().terminal();
+    }
+
     private synchronized ExecutionLookup lookupLocal(Key key) {
         Objects.requireNonNull(key, "key");
-        ai.ravenroot.api.payload.PayloadException payloadFailure = payloadFailures.get(key);
-        if (payloadFailure != null) throw payloadFailure;
         ExecutionOutcome outcome = results.get(key);
+        ai.ravenroot.api.payload.PayloadException payloadFailure = payloadFailures.get(key);
+        if (payloadFailure != null) {
+            // Checked before the outcome because payloadFailed writes both: the outcome carries the
+            // terminal status and its reason, and the rejection carries the one thing the outcome
+            // cannot express -- that a payload existed and none of it is being returned.
+            return new ExecutionLookup.Redacted(key.executionId(),
+                    outcome == null ? ProcessInstanceStatus.FAILED : outcome.status(),
+                    outcome == null ? null : outcome.terminationReason(),
+                    ai.ravenroot.api.persistence.ExecutionResultPayload.refused(
+                            payloadFailure.reason()).state());
+        }
         if (outcome != null) {
             return new ExecutionLookup.Found(outcome);
         }

@@ -129,11 +129,16 @@ For the bundled SQLite store this is a schema addition and nothing else. A datab
 
 A terminal execution's canonical result is now kept in the configured store, keyed by tenant and
 traversal, rather than only in one process's bounded in-memory cache. `GET /v1/executions/{id}` and
-`ravenroot result` read the process-local cache first and fall through to the durable record on a
-miss, so a result readable before a restart is readable after one, and readable from a second instance
-that never ran the traversal — as long as a durable, result-capable store is composed. Without one,
-the gap this closes reopens: a result readable before a restart still reads as unknown afterward,
-indistinguishable from an id that never existed.
+`ravenroot result` answer an execution still in flight from the process-local cache, and read every
+terminal answer from the durable record — including one the cache is still holding. So a result
+readable before a restart is readable after one, readable from a second instance that never ran the
+traversal, and no longer served by the instance that ran it once the record says its retention
+deadline has passed. That last part is why the cache is not consulted for a terminal answer: it is
+bounded by a count of executions and not by time, so an instance quiet enough to still be holding a
+result cannot notice the deadline going by. The cost is one store read per terminal read; polling an
+execution that has not finished still costs none. All of this holds as long as a durable,
+result-capable store is composed. Without one, the gap this closes reopens: a result readable before
+a restart still reads as unknown afterward, indistinguishable from an id that never existed.
 
 **Why does this result have no payload?** Four distinct facts can produce that question, and the
 answer tells you which one applies. A `200` body with no payload and `payloadState` absent means the
@@ -141,14 +146,23 @@ execution genuinely produced nothing — the ordinary shape for a failure, a can
 completion whose terminal node returned no value. A `410 EXECUTION_RESULT_EXPIRED` means the execution
 completed and its result was retained, but the retention deadline has since passed; the terminal
 status and termination reason are still reported. A `410 EXECUTION_RESULT_REDACTED` means the payload
-was never retained in the first place, and its `payloadState` field says why: `WITHHELD` means the
-encoded payload exceeded the store's byte cap — raise the cap if that is the right fix — and
-`UNCONVERTIBLE` means the value does not project onto the closed payload model at all, which is a node
-returning a type no remote adapter could ever persist, not a limit to raise. `WITHHELD` is not
-something you should expect to see at default settings: the payload projection bounds an output to
-16 KiB before it is ever compared against the store's cap (1 MiB by default), so a huge payload is
-truncated and retained rather than withheld unless the cap has been configured well below the
-projection's own bound.
+was never retained in the first place, and its `payloadState` field says why. `UNCONVERTIBLE` means
+the value does not project onto the closed payload model at all — a node returning a type no remote
+adapter could ever persist, or a document the payload boundary rejected as malformed — which is not a
+limit to raise. `WITHHELD` means a configured budget refused the payload, and **there are two such
+budgets; read the `bytes` on the record before touching either.** A non-zero size means the encoded
+projection was measured against the store's byte cap and exceeded it, and the size says by how much to
+raise the cap. A zero size means the runtime's own payload limits rejected the value before anything
+was ever encoded, and the traversal terminated on that rejection: the store's cap is not involved and
+raising it changes nothing, so the budget to look at is the payload limits — the encoded-size, depth,
+element-count, value-count and length bounds the deployment configures.
+
+Of those two, the zero-size one is the one to expect. A node whose payload the limits refuse fails its
+traversal, and the built-in JSON parse and path behaviours raise exactly that refusal at default
+settings. The store-cap one is very nearly unreachable by comparison: the payload projection bounds an
+output to 16 KiB before it is ever compared against the store's cap (1 MiB by default), so a huge
+payload is truncated and retained rather than withheld unless the cap has been configured well below
+the projection's own bound.
 
 **Why does this execution id return a result I do not recognise?** The store records a terminal result
 exactly once per `(tenantId, traversalId)` and refuses, rather than overwrites, a conflicting

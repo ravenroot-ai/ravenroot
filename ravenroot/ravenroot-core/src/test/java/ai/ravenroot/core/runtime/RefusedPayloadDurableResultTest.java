@@ -20,15 +20,13 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * What the durable record says about a traversal that terminated <em>on</em> its payload.
  *
  * <p>A node whose payload boundary rejects a value fails the whole traversal with a
- * {@link PayloadException}, and the process that ran it keeps the typed rejection and re-throws it
- * to a caller reading the result. Nothing durable used to carry that fact: the write recorded
+ * {@link PayloadException}. Nothing durable used to carry that fact: the write recorded
  * {@link ResultPayloadState#NONE}, whose own documentation reserves it for "there was nothing to
  * keep" and forbids reporting that something was kept and then dropped. The consequence was a
  * disagreement between the cache and the authority — the same identifier answering with a typed
@@ -36,9 +34,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * no payload, after a restart, from a second instance, or once the entry aged out, indistinguishable
  * from a run that legitimately produced nothing.</p>
  *
- * <p>Each case here is proved from both ends: the state actually written to the store, and what a
- * cold reader — an application instance that never ran the traversal, which is what a restart and a
- * sibling instance both look like — observes.</p>
+ * <p>Recording the refusal fixed the second half and left the first: the process that ran the
+ * traversal rethrew the retained {@link PayloadException} from the read, which the server renders as
+ * that rejection's own recommended status — {@code 413} or {@code 400} — while every other instance
+ * answered {@code 410 EXECUTION_RESULT_REDACTED} for the identical id. <b>That divergence is what
+ * this class now pins closed</b>, by asserting the warm answer and the cold answer are the same
+ * value rather than asserting each of two different ones separately.</p>
+ *
+ * <p>Each case here is therefore proved from three sides: what the warm reader observes, the state
+ * actually written to the store, and what a cold reader — an application instance that never ran the
+ * traversal, which is what a restart and a sibling instance both look like — observes.</p>
  */
 class RefusedPayloadDurableResultTest {
 
@@ -78,6 +83,7 @@ class RefusedPayloadDurableResultTest {
 
     private static void assertRefusalIsDurablyLegible(PayloadException rejection,
                                                       ResultPayloadState expected) throws Exception {
+        ExecutionLookup fromRecorder;
         UUID traversalId = UUID.randomUUID();
         var monitor = new ExecutionMonitor();
         var registry = new BehaviorRegistry().register("refuse-payload",
@@ -100,12 +106,16 @@ class RefusedPayloadDurableResultTest {
                         new ByteArrayInputStream(ONE_EFFECT.getBytes(StandardCharsets.UTF_8)), "payload");
                 assertTrue(terminal.await(10, TimeUnit.SECONDS), "the traversal must reach a terminal state");
 
-                // Unchanged, and deliberately asserted beside the durable state: the process that ran
-                // the traversal still hands the caller the typed rejection. The defect was never that
-                // this answer is wrong; it was that nothing durable agreed with it.
-                var thrown = assertThrows(PayloadException.class,
-                        () -> application.executionResult(TestIdentities.TENANT_A.tenantId(), traversalId));
-                assertEquals(rejection.reason(), thrown.reason());
+                // The instance that ran the traversal, reading while its own entry is warm. It used
+                // to rethrow the retained rejection here, so this identifier carried the rejection's
+                // own wire status from this instance and 410 EXECUTION_RESULT_REDACTED from every
+                // other one -- and, because the throw was rendered by the payload-rejection path,
+                // wrote one audit record per read here and none anywhere else.
+                fromRecorder = assertInstanceOf(ExecutionLookup.Redacted.class,
+                        application.executionResult(TestIdentities.TENANT_A.tenantId(), traversalId),
+                        "a traversal that terminated on a payload rejection must read the same way "
+                                + "from the instance that ran it as from one that never did");
+                assertEquals(expected, ((ExecutionLookup.Redacted) fromRecorder).payloadState());
             }
 
             var recorded = awaitDurableResult(store, traversalId);
@@ -126,6 +136,11 @@ class RefusedPayloadDurableResultTest {
                                 + "report a run that produced nothing as a plain Found");
                 assertEquals(expected, redacted.payloadState());
                 assertEquals(ProcessInstanceStatus.FAILED, redacted.status());
+                // The whole point, and the reason the warm answer above is captured rather than
+                // asserted in isolation: one execution, one answer, whichever instance is asked.
+                assertEquals(fromRecorder, lookup,
+                        "which instance is asked must not be observable, and a wire code that "
+                                + "depends on it is the most observable form that can take");
             }
         }
     }

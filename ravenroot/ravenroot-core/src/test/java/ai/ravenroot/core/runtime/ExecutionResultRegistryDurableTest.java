@@ -241,6 +241,56 @@ class ExecutionResultRegistryDurableTest {
     }
 
     /**
+     * The instance that ran an execution must not be the last one still serving it.
+     *
+     * <p>The eviction case above proves the tombstone no longer outranks the record. This is the
+     * same defect read from the other end, and the count-based bounds are what make it ordinary
+     * rather than exotic: nothing here ages out as time passes, so an instance that has completed
+     * fewer than {@code maxResults} further executions is still holding the full result — payload
+     * included — when the store's retention deadline goes by. Expiry is applied on the durable read
+     * path and nowhere else, so a warm entry cannot notice it without asking.</p>
+     *
+     * <p>The clock is moved a full day past the deadline the store itself assigned, rather than onto
+     * it, so this pins "past the retention horizon" and not a boundary condition. Asserted as an
+     * equality between the two reads for the same reason the eviction case is: the property is not
+     * that the recording instance says something defensible, it is that <b>which instance is asked
+     * must not be observable</b>.</p>
+     */
+    @Test
+    void aResultStillHeldByTheInstanceThatRanItIsNotServedPastTheRecordsRetentionDeadline() {
+        var clock = new MutableClock(START);
+        try (var store = store(clock)) {
+            UUID traversalId = UUID.randomUUID();
+            ExecutionKey key = createInstance(store, traversalId);
+            var registryKey = new ExecutionResultRegistry.Key(TENANT, traversalId);
+
+            var recorded = new ExecutionResultRegistry(256, 8192, DurableExecutionResults.of(store));
+            recorded.started(registryKey, key.processInstanceId());
+            recorded.completed(registryKey, new GraphExecutionResult(key.processInstanceId(), traversalId,
+                    Map.of("answer", 42L), java.util.Set.of("start", "finish"), java.util.Set.of()));
+            DurableExecutionResult stored = store.recordExecutionResult(
+                    completed(key, traversalId, Map.of("answer", 42L),
+                            store.maxExecutionResultPayloadBytes())).toCompletableFuture().join();
+
+            assertEquals(1, recorded.retainedResults(),
+                    "the full result must still be warm here, or this proves nothing about a warm "
+                            + "result outliving its retention horizon");
+            clock.set(stored.retainedUntil().plus(Duration.ofDays(1)));
+
+            var sibling = new ExecutionResultRegistry(256, 8192, DurableExecutionResults.of(store));
+            ExecutionLookup fromSibling = sibling.lookup(registryKey);
+            ExecutionLookup fromRecorder = recorded.lookup(registryKey);
+
+            assertInstanceOf(ExecutionLookup.Expired.class, fromRecorder,
+                    "a result past the deadline the store assigned it must not still be served, with "
+                            + "its payload, by the one instance that happens to be holding it");
+            assertEquals(fromSibling, fromRecorder,
+                    "the same id must read identically from the instance that ran it and from one "
+                            + "that never did; which instance is asked must not be observable");
+        }
+    }
+
+    /**
      * And when nothing durable backs the tombstone, the tombstone is still the truth.
      *
      * <p>The complement of the test above, and the reason the fall-through returns the local answer

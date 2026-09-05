@@ -175,7 +175,14 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * and discarded all three. This registry is what makes {@code POST /v1/executions}'s 202 useful
      * rather than terminal.</p>
      */
-    private final ExecutionResultRegistry executionResults = new ExecutionResultRegistry();
+    private final ExecutionResultRegistry executionResults;
+
+    /**
+     * The durable half of the result answer, or {@code null} when the composed store cannot record
+     * one. Resolved once at composition rather than probed per read, so a deployment with no durable
+     * store takes no exception on its common path.
+     */
+    private final DurableExecutionResults durableResults;
 
     private final AtomicBoolean closed = new AtomicBoolean();
 
@@ -510,6 +517,13 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                             + executionStore.capabilities());
         }
         this.executionStore = executionStore;
+        // The registry becomes a cache in front of the durable record when the store can keep one,
+        // and stays exactly what it was when it cannot. Composed here rather than in a field
+        // initializer because it is the store that decides which of the two this is.
+        this.durableResults = DurableExecutionResults.of(executionStore);
+        this.executionResults = new ExecutionResultRegistry(
+                ExecutionResultRegistry.DEFAULT_MAX_RESULTS,
+                ExecutionResultRegistry.DEFAULT_MAX_TOMBSTONES, this.durableResults);
         if (maxActiveDeployments < 0) {
             throw new IllegalArgumentException(
                     "maxActiveDeployments cannot be negative, got " + maxActiveDeployments);
@@ -1303,6 +1317,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // in-memory work; the handler-trigger path creates the fresh traversal.
                     } else if (terminalFailure instanceof ai.ravenroot.api.payload.PayloadException rejected) {
                         executionResults.payloadFailed(resultKey, processInstanceId, rejected);
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED, null, null, null,
+                                rejected);
                     } else if (ExecutionTermination.isCancellation(terminalFailure)) {
                         // The distinction the durable aggregate already committed, carried into the
                         // read-by-id path so the two cannot disagree. Both sides classify the same
@@ -1311,10 +1328,24 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                         // and as an ordinary failure here reads as correct from either side alone.
                         // The status stored is still FAILED; only the reason separates them.
                         executionResults.cancelled(resultKey, processInstanceId);
+                        // No failure classifier. A deliberate stop is not a fault, and the exception
+                        // type that carried it is a control-flow detail; the termination reason beside
+                        // an unchanged FAILED status is what separates the two, and recording a class
+                        // name as well would invite a reader to treat the stop as an incident.
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED,
+                                ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED, null,
+                                null, null);
                     } else if (error != null || result == null) {
                         executionResults.failed(resultKey, processInstanceId);
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED, null, null, null,
+                                terminalFailure);
                     } else {
                         executionResults.completed(resultKey, result);
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.COMPLETED, null,
+                                result.payload(), result, null);
                     }
                 } catch (RuntimeException resultFailure) {
                     cleanupFailure = resultFailure;
@@ -1369,6 +1400,41 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             throw startupFailure;
         }
         return new ExecutionSubmission(processInstanceId, traversalId, graphVersion);
+    }
+
+    /**
+     * Writes one terminal execution's canonical result through to the durable record, and does
+     * nothing when no store can keep one.
+     *
+     * <p>Called from the completion seam beside the in-memory registry update, and inside the same
+     * guard, so a store that refuses the write surfaces the way every other completion-time store
+     * failure here does rather than being swallowed. It is deliberately not called from the
+     * startup-failure path: a submission that never started has no process instance row, and a result
+     * naming an instance that does not exist is the dangling row the store refuses by design.</p>
+     *
+     * <p>The payload boundary is crossed here and only here on this path.
+     * {@link DurableExecutionResult#of} projects the engine's {@code Object} onto the closed payload
+     * model, bounded by the cap the composed adapter publishes, and reports what became of it rather
+     * than handing back an absence that could mean four different things.</p>
+     */
+    private void recordDurableResult(SecurityContext security, UUID processInstanceId, UUID traversalId,
+                                     String graphVersion, Instant startedAt,
+                                     ProcessInstanceStatus status,
+                                     ai.ravenroot.api.application.ExecutionTerminationReason reason,
+                                     Object payload, GraphExecutionResult result, Throwable failure) {
+        if (durableResults == null) {
+            return;
+        }
+        var nodes = result == null
+                ? ai.ravenroot.api.persistence.ExecutionResultNodes.empty()
+                : ai.ravenroot.api.persistence.ExecutionResultNodes.of(result.visitedNodes(),
+                        result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
+                        result.untakenEdges());
+        executionResults.recordDurably(ai.ravenroot.api.persistence.DurableExecutionResult.of(
+                new ExecutionKey(security.tenantId(), processInstanceId), traversalId,
+                new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion), status, reason,
+                startedAt, Instant.now(), payload, nodes, failure,
+                durableResults.maxPayloadBytes()));
     }
 
     private static void closeApprovalBinding(AutoCloseable binding) {

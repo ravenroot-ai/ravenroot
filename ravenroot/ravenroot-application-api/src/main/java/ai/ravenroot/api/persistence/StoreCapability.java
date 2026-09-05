@@ -132,5 +132,38 @@ public enum StoreCapability {
      * actions. Splitting the capabilities keeps the second obligation from riding in unannounced on
      * the first.</p>
      */
-    INVENTORY_RETENTION
+    INVENTORY_RETENTION,
+
+    /**
+     * A bounded canonical result is recorded for every terminal execution, read back by traversal
+     * across a restart and from any instance sharing the store, refused rather than overwritten when
+     * a second, different outcome arrives for the same traversal, and retained for a declared window
+     * with a per-tenant floor.
+     *
+     * <p>Declaring this asserts four things together, and a caller given three of them is worse off
+     * than one given none. First, the record survives process death and is addressable by
+     * {@code (tenantId, traversalId)}, so a client that reconnects to a different instance reads the
+     * outcome rather than an absence. Second, recording is idempotent by <em>refusal</em>: an
+     * identical re-delivery changes nothing, and a conflicting one fails with
+     * {@link ExecutionStoreFailure.ExecutionResultNotRecordable} rather than replacing a terminal
+     * outcome that other records already name. Third, the read distinguishes unknown, expired,
+     * withheld and available, because {@link ResultPayloadState} is stored beside the result rather
+     * than reconstructed from whether bytes came back. Fourth, retention is explicit — nothing is
+     * deleted on a read — and its floor says how far back the answer is still complete.</p>
+     *
+     * <p>Retention is <strong>not</strong> split off into a second capability the way
+     * {@link #INVENTORY_RETENTION} is split from {@link #PROCESS_INVENTORY}, and the asymmetry is
+     * deliberate. An inventory that is never pruned is honest and its rows read the same either way.
+     * A result is different: its payload-retention state is a component of every read, so an adapter
+     * that kept results without a retention window could not answer the expired case at all — it
+     * would have to report an aged-out payload as an available one, or as none. There is no honest
+     * half of this capability to declare.</p>
+     *
+     * <p>Separate from {@link #DURABLE} for the reason {@link #DURABLE_HANDLERS} is: an in-memory
+     * adapter can honour idempotent refusal, tenant scoping, the four read states and retention
+     * exactly, and it should, so those assertions run against something rather than being skipped
+     * into invisibility. It still must not claim {@code DURABLE}, and a caller that needs the result
+     * to survive process death must check for both.</p>
+     */
+    EXECUTION_RESULTS
 }

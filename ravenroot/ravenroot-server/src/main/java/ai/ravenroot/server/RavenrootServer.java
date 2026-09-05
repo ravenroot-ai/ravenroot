@@ -3079,6 +3079,21 @@ public final class RavenrootServer implements AutoCloseable {
                         json(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED.status(),
                                 expiredExecutionJson(expired,
                                         AuthenticatedPrincipalAttribute.requestId(exchange)));
+                // A result whose payload was never retainable -- refused for size, or unprojectable
+                // -- is collapsed onto the arm above, deliberately and for now. Both answers say the
+                // same two things a caller acts on: the execution is known, its terminal status and
+                // termination reason are these, and its payload is not available. A distinct code and
+                // body field is the right end state and belongs to the projection work, not here: a
+                // wire code published early is a wire code that has to be kept, and publishing one
+                // from the change that adds the store would fix the vocabulary before the surface
+                // that renders it exists.
+                case ai.ravenroot.api.application.ExecutionLookup.Redacted redacted ->
+                        json(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED.status(),
+                                expiredExecutionJson(
+                                        new ai.ravenroot.api.application.ExecutionLookup.Expired(
+                                                redacted.executionId(), redacted.status(),
+                                                redacted.terminationReason()),
+                                        AuthenticatedPrincipalAttribute.requestId(exchange)));
                 case ai.ravenroot.api.application.ExecutionLookup.Unknown unknown ->
                         fail(exchange, ErrorCode.UNKNOWN_EXECUTION);
             }

@@ -1,5 +1,9 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.ExecutionResultNodes;
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.application.ExecutionLookup;
 import ai.ravenroot.api.application.ExecutionOutcome;
 import ai.ravenroot.api.application.ExecutionTerminationReason;
@@ -8,6 +12,7 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
@@ -38,8 +43,25 @@ import java.util.UUID;
  * cannot express. A tenant asking for another tenant's id misses, and a miss is
  * {@link ExecutionLookup.Unknown}, indistinguishable from a nonexistent id.</p>
  *
- * <p>All state is guarded by {@code this}. Contention is bounded by the admission ceiling on
- * concurrent executions, and every operation is a constant-time map mutation.</p>
+ * <h2>A cache in front of the durable record, not the authority</h2>
+ * <p>When a {@link Durable} record is composed, this registry answers first and the store answers
+ * when it misses. That ordering is the whole point: the in-memory entry is the freshest and cheapest
+ * answer for a traversal this process ran, and the durable record is the only answer for one it did
+ * not — a traversal that ran before a restart, or on another instance sharing the store. Reversing
+ * the order would put a disk read in front of every poll of a running execution for no gain, since a
+ * running execution has no durable result yet.</p>
+ *
+ * <p>With no durable record composed, every path below behaves exactly as it did before one existed:
+ * the fallback is reached only after an in-memory miss, and it is skipped entirely. That degradation
+ * is a deployment choice — a result readable before a restart reads as
+ * {@link ExecutionLookup.Unknown} after one — and it is stated on {@link ExecutionLookup} rather than
+ * softened here.</p>
+ *
+ * <p>All in-memory state is guarded by {@code this}. Contention is bounded by the admission ceiling
+ * on concurrent executions, and every operation is a constant-time map mutation. <strong>The durable
+ * fallback is deliberately performed outside that monitor</strong>: it is the only operation here
+ * that can block on a disk or a network, and holding the registry lock across it would let one slow
+ * store stall every read and write of every other execution in the process.</p>
  */
 public final class ExecutionResultRegistry {
 
@@ -65,6 +87,35 @@ public final class ExecutionResultRegistry {
         }
     }
 
+    /**
+     * The durable half of the answer, as this registry needs it.
+     *
+     * <p>Narrower than {@code ExecutionStore} on purpose. This registry needs to record one result
+     * and read one back; expressing that as two methods rather than as a dependency on the whole
+     * persistence port keeps the runtime testable without a store and keeps the composition honest
+     * about what it actually uses. It is also synchronous, because the registry's own contract is,
+     * and the adapter that bridges to the asynchronous port is where the waiting belongs.</p>
+     */
+    public interface Durable {
+
+        /**
+         * Reads one traversal's recorded result.
+         *
+         * @param tenantId    the tenant that owns the execution.
+         * @param traversalId the caller-facing execution id.
+         * @return the recorded result, or empty when there is none this tenant may see.
+         */
+        Optional<DurableExecutionResult> load(String tenantId, UUID traversalId);
+
+        /**
+         * Records one terminal result, or accepts that an identical one is already recorded.
+         *
+         * @param result the record to store.
+         */
+        void record(DurableExecutionResult result);
+    }
+
+    private final Durable durable;
     private final int maxResults;
     private final int maxTombstones;
     private final Map<Key, ExecutionOutcome> results = new LinkedHashMap<>();
@@ -93,6 +144,22 @@ public final class ExecutionResultRegistry {
     }
 
     public ExecutionResultRegistry(int maxResults, int maxTombstones) {
+        this(maxResults, maxTombstones, null);
+    }
+
+    /**
+     * Composes the registry in front of a durable record.
+     *
+     * <p>{@code null} keeps the process-local behaviour this class has always had, unchanged and
+     * untouched by anything below — the fallback is the last branch of a lookup that already missed,
+     * and the recording path is a no-op.</p>
+     *
+     * @param maxResults    full results retained in memory.
+     * @param maxTombstones tombstones retained in memory.
+     * @param durable       the durable record, or {@code null} for none.
+     */
+    public ExecutionResultRegistry(int maxResults, int maxTombstones, Durable durable) {
+        this.durable = durable;
         if (maxResults < 1) {
             throw new IllegalArgumentException("maxResults must be at least 1");
         }
@@ -192,8 +259,29 @@ public final class ExecutionResultRegistry {
         payloadFailures.put(key, Objects.requireNonNull(failure, "failure"));
     }
 
-    /** The three-way answer defined by {@link ExecutionLookup}; never null, never an empty body. */
-    public synchronized ExecutionLookup lookup(Key key) {
+    /**
+     * The four-way answer defined by {@link ExecutionLookup}; never null, never an empty body.
+     *
+     * <p>In-memory first, durable second, and the durable read happens outside this object's monitor
+     * so a slow store cannot stall every other execution in the process. Only an
+     * {@link ExecutionLookup.Unknown} falls through: a process-local {@code Found} is fresher than
+     * anything on disk, and a process-local {@code Expired} tombstone already answers for a result
+     * this process itself evicted.</p>
+     *
+     * @param key the tenant-scoped execution to read.
+     * @return what is known about that execution, which is never an unqualified absence.
+     */
+    public ExecutionLookup lookup(Key key) {
+        ExecutionLookup local = lookupLocal(key);
+        if (durable == null || !(local instanceof ExecutionLookup.Unknown)) {
+            return local;
+        }
+        return durable.load(key.tenantId(), key.executionId())
+                .<ExecutionLookup>map(ExecutionResultRegistry::project)
+                .orElse(local);
+    }
+
+    private synchronized ExecutionLookup lookupLocal(Key key) {
         Objects.requireNonNull(key, "key");
         ai.ravenroot.api.payload.PayloadException payloadFailure = payloadFailures.get(key);
         if (payloadFailure != null) throw payloadFailure;
@@ -207,6 +295,70 @@ public final class ExecutionResultRegistry {
                     tombstone.terminationReason());
         }
         return new ExecutionLookup.Unknown(key.executionId());
+    }
+
+    /**
+     * Writes one terminal result through to the durable record, and does nothing when none is
+     * composed.
+     *
+     * <p>Separate from {@link #completed}, {@link #failed} and {@link #cancelled} rather than folded
+     * into them, because the durable record needs facts none of those three carry — the graph version
+     * the execution was pinned to, and when it started and ended — and inventing them here would mean
+     * inventing them wrongly. The caller that has those facts builds the record.</p>
+     *
+     * @param result the record to store.
+     */
+    public void recordDurably(DurableExecutionResult result) {
+        Objects.requireNonNull(result, "result");
+        if (durable != null) {
+            durable.record(result);
+        }
+    }
+
+    /**
+     * Projects a durable record onto the answer a caller reads, which is the one place the four read
+     * states are derived from the one stored payload state.
+     *
+     * <p>The mapping is total and deliberately not defaultable: a payload that is present or was
+     * never produced is {@link ExecutionLookup.Found}, one that was refused is
+     * {@link ExecutionLookup.Redacted}, and one that aged out is {@link ExecutionLookup.Expired}.
+     * Nothing maps to {@link ExecutionLookup.Unknown} — a record that exists is never reported as an
+     * execution that never happened.</p>
+     *
+     * @param result the recorded result.
+     * @return what a caller reading that execution observes.
+     */
+    public static ExecutionLookup project(DurableExecutionResult result) {
+        Objects.requireNonNull(result, "result");
+        return switch (result.payload().state()) {
+            case NONE, RETAINED -> found(result);
+            case WITHHELD, UNCONVERTIBLE -> new ExecutionLookup.Redacted(result.traversalId(),
+                    result.status(), result.terminationReason(), result.payload().state());
+            case EXPIRED -> new ExecutionLookup.Expired(result.traversalId(), result.status(),
+                    result.terminationReason());
+        };
+    }
+
+    private static ExecutionLookup found(DurableExecutionResult result) {
+        Object payload;
+        try {
+            payload = result.payload().retained() == null ? null
+                    : PayloadJson.read(result.payload().retained().bytes(), PayloadLimits.DEFAULTS)
+                            .toJava();
+        } catch (RuntimeException undecodable) {
+            // Reported as a refusal rather than as an absent payload. A caller told the run produced
+            // nothing would act on that; one told the output is not returnable knows to look
+            // elsewhere, which is the difference this hierarchy's fourth member exists to keep.
+            return new ExecutionLookup.Redacted(result.traversalId(), result.status(),
+                    result.terminationReason(),
+                    ai.ravenroot.api.persistence.ResultPayloadState.UNCONVERTIBLE);
+        }
+        ExecutionResultNodes nodes = result.nodes();
+        return new ExecutionLookup.Found(new ExecutionOutcome(result.key().processInstanceId(),
+                result.traversalId(), result.status(), payload, Set.copyOf(nodes.visitedNodes()),
+                Set.copyOf(nodes.defaultedNodes()), Set.copyOf(nodes.bypassedNodes()),
+                Set.copyOf(nodes.handledFailureNodes()), Set.copyOf(nodes.untakenEdges()), false,
+                result.terminationReason()));
     }
 
     /** Retained full results. Exists so a test can assert the bound rather than infer it. */

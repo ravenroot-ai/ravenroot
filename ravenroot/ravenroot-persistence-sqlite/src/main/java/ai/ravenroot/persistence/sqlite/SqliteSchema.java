@@ -748,7 +748,123 @@ final class SqliteSchema {
                 // Corrupted, never as an absent reason on a run that was in fact cancelled.
                 new SchemaMigration(17, "terminated executions record why, beside an unchanged status",
                         List.of("ALTER TABLE process_instance ADD COLUMN termination_reason TEXT",
-                                "ALTER TABLE traversal ADD COLUMN termination_reason TEXT")));
+                                "ALTER TABLE traversal ADD COLUMN termination_reason TEXT")),
+                // The canonical result of a terminal execution, so a client can read what a run
+                // produced after the process that ran it is gone. Everything before this step keeps
+                // lifecycle state; none of it keeps the answer, which lived in one JVM's memory and
+                // died with it.
+                //
+                //   Normalized, not serialized, like every other table here. The five node and edge
+                //   sets go in execution_result_node rather than into an encoded column, because a
+                //   blob would make the on-disk format an encoding of a Java type and nothing in it
+                //   would be queryable -- the workload aggregation this unblocks has to reach these
+                //   rows without deserializing every result of the tenant. `position` is stored for
+                //   the reason traversal.position is: the order is part of the validated value, since
+                //   the result's fingerprint is computed over it, and a schema that let SQLite choose
+                //   a row order would read back a record whose digest no longer matches what was
+                //   written.
+                //
+                //   The sets are capped rather than unbounded, and the cap is visible in the data.
+                //   A traversal may enter as many nodes as the graph has, so a faithful copy lets one
+                //   pathological run write an unbounded number of rows; ExecutionResultNodes bounds
+                //   each set and appends RuntimeActivityData.TRUNCATION_MARKER when it does, which is
+                //   the marker convention this codebase already uses for a bounded projection. The
+                //   overflow is therefore recorded rather than dropped, and a reader that already
+                //   knows what a truncated Runtime projection looks like recognises this one.
+                //
+                //   ADDITIVE on the data. Two new tables, one new watermark table and two indexes;
+                //   no existing row is read, rewritten or reinterpreted, and no existing column
+                //   changes meaning. A database upgraded by this step describes exactly the same
+                //   executions it described before, plus results for the ones that terminate after
+                //   it.
+                //
+                //   NOT additive on the ROLLBACK, and this is stated plainly rather than softened.
+                //   Like every step in this file it raises PRAGMA user_version, and migrate() refuses
+                //   a database whose version exceeds what the binary understands BEFORE it reads a
+                //   single row. From the moment this step runs, a binary that predates it cannot open
+                //   the file at all. There is no sense in which an older binary "simply does not
+                //   SELECT the new tables": it never gets that far. The gate is total, immediate, and
+                //   independent of whether any result was ever recorded.
+                //
+                // The foreign key to process_instance is ON DELETE CASCADE and is load-bearing in
+                // both directions. A result names the instance and the traversal it belongs to, so a
+                // result outliving its instance would name a row the inventory can no longer
+                // describe -- the dangling-reference failure terminalRetention already refuses to
+                // create against journalRetention. The cascade makes that unreachable, and
+                // SqliteStoreConfig refuses a result window longer than terminalRetention so the
+                // cascade can never cut a result's declared window short either.
+                new SchemaMigration(18, "canonical results for terminal executions", List.of(
+                        """
+                        CREATE TABLE execution_result (
+                            tenant_id             TEXT    NOT NULL,
+                            process_instance_id   TEXT    NOT NULL,
+                            traversal_id          TEXT    NOT NULL,
+                            graph_version_pin     TEXT    NOT NULL,
+                            status                TEXT    NOT NULL,
+                            termination_reason    TEXT,
+                            started_at_epoch_second   INTEGER NOT NULL,
+                            started_at_nano           INTEGER NOT NULL,
+                            ended_at_epoch_second     INTEGER NOT NULL,
+                            ended_at_nano             INTEGER NOT NULL,
+                            recorded_at_epoch_second  INTEGER NOT NULL,
+                            recorded_at_nano          INTEGER NOT NULL,
+                            retained_until_epoch_second INTEGER NOT NULL,
+                            retained_until_nano         INTEGER NOT NULL,
+                            payload_state         TEXT    NOT NULL,
+                            payload_redacted      INTEGER NOT NULL CHECK(payload_redacted IN (0, 1)),
+                            payload_truncated     INTEGER NOT NULL CHECK(payload_truncated IN (0, 1)),
+                            payload_bytes         INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                            payload_content_type  TEXT,
+                            payload               BLOB,
+                            failure_classifier    TEXT,
+                            fingerprint           TEXT    NOT NULL CHECK(length(fingerprint) = 64),
+                            PRIMARY KEY (tenant_id, traversal_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES process_instance (tenant_id, process_instance_id)
+                                ON DELETE CASCADE
+                        )
+                        """,
+                        """
+                        CREATE TABLE execution_result_node (
+                            tenant_id     TEXT    NOT NULL,
+                            traversal_id  TEXT    NOT NULL,
+                            node_set      TEXT    NOT NULL,
+                            position      INTEGER NOT NULL,
+                            value         TEXT    NOT NULL,
+                            PRIMARY KEY (tenant_id, traversal_id, node_set, position),
+                            FOREIGN KEY (tenant_id, traversal_id)
+                                REFERENCES execution_result (tenant_id, traversal_id) ON DELETE CASCADE
+                        )
+                        """,
+                        // Modelled on inventory_watermark, and a table rather than a column for the
+                        // same reason: the floor must outlive every row it describes. Derived from
+                        // the surviving rows it would reset to "nothing was ever forgotten" the
+                        // moment the last purged tenant's rows were gone, and a caller reading it
+                        // would treat an expired result as one that never existed.
+                        """
+                        CREATE TABLE execution_result_watermark (
+                            tenant_id                   TEXT    NOT NULL PRIMARY KEY,
+                            retained_from_epoch_second  INTEGER NOT NULL,
+                            retained_from_nano          INTEGER NOT NULL
+                        )
+                        """,
+                        // The purge walks exactly this axis: one tenant's rows in deadline order.
+                        // tenant_id leads because it leads every key in this schema; an index that
+                        // did not would let a scan touch another tenant's pages before the filter
+                        // discarded them.
+                        "CREATE INDEX execution_result_retention ON execution_result "
+                                + "(tenant_id, retained_until_epoch_second, retained_until_nano)",
+                        // The primary key leads with traversal_id, so resolving an instance to its
+                        // results is the opposite direction and would otherwise scan.
+                        "CREATE INDEX execution_result_instance ON execution_result "
+                                + "(tenant_id, process_instance_id)",
+                        // workload_id has been on process_instance since version 7 with no index of
+                        // its own, which was affordable while nothing aggregated by workload.
+                        // Aggregating results at workload level resolves a workload to its instances
+                        // and then to their results, so without this the first hop is a full scan of
+                        // the tenant's instances on every query.
+                        "CREATE INDEX idx_process_instance_workload ON process_instance "
+                                + "(tenant_id, workload_id)")));
     }
 
     static int currentVersion() {

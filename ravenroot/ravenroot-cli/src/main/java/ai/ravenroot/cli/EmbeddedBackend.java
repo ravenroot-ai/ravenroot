@@ -126,6 +126,12 @@ final class EmbeddedBackend implements CliBackend {
             // and ErrorCode.UNKNOWN_EXECUTION -- so both transports fail the same way for the same caller.
             case ExecutionLookup.Expired expired ->
                     throw new IOException("410 EXECUTION_RESULT_EXPIRED: the execution result is no longer retained");
+            // Collapsed onto the arm above for the reason RavenrootServer's own Redacted arm records:
+            // both answers say the execution is known and its payload is not available, and the two
+            // transports must fail identically for the same caller, so this message stays verbatim
+            // equal to the one above until the projection work gives the case its own code.
+            case ExecutionLookup.Redacted redacted ->
+                    throw new IOException("410 EXECUTION_RESULT_EXPIRED: the execution result is no longer retained");
             case ExecutionLookup.Unknown unknown -> throw new IOException("404 UNKNOWN_EXECUTION: unknown execution");
         };
     }

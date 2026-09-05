@@ -10,10 +10,12 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.ExecutionResultNodes;
 import ai.ravenroot.api.persistence.AgentAuthorityBinding;
 import ai.ravenroot.api.persistence.AgentAuthorityControlState;
 import ai.ravenroot.api.persistence.AgentAuthorityControl;
@@ -63,6 +65,7 @@ import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.ProcessInventoryEntry;
 import ai.ravenroot.api.persistence.ProcessInventoryPage;
 import ai.ravenroot.api.persistence.ProcessInventoryQuery;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.Retryability;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
@@ -5219,6 +5222,335 @@ public abstract class ExecutionStoreContract {
         // (known from another source, such as a journal entry) against the floor to tell "purged"
         // from "never happened".
         assertEquals(deadline, await(store().inventoryRetainedFrom(DEFAULT_TENANT)));
+    }
+
+    // ============================================== PERS-0X: durable execution results (issue #104)
+    //
+    // The six-scenario matrix issue #104 names: restart recovery and multi-instance reads (proved
+    // together below, and the class javadoc for #reopen() says why that is not a shortcut), duplicate
+    // terminal events (a no-op re-delivery and a conflicting one are different failure modes and get
+    // different tests), cancellation persistence (compared against an ordinary failure, never against
+    // a completion -- see the previous section's own rule), tenant isolation (a cross-tenant read and
+    // a purge that must not cross tenants), and retention expiry (the read boundary asserted from both
+    // sides, exactly as the inventory retention tests above assert it for that boundary).
+
+    /**
+     * A payload-carrying {@code COMPLETED} result at a caller-supplied {@code endedAt} rather than at
+     * "now" -- so a test that re-records the identical terminal event under a later clock reading
+     * builds a record that is genuinely identical rather than one that merely looks it because the
+     * deadline math was not exercised.
+     */
+    private DurableExecutionResult completedResult(ExecutionKey key, UUID traversalId, Object payload,
+                                                    Instant endedAt) {
+        return DurableExecutionResult.of(key, traversalId, new GraphVersionPin("graph-v1"),
+                ProcessInstanceStatus.COMPLETED, null, endedAt.minusSeconds(1), endedAt, payload,
+                ExecutionResultNodes.empty(), null, store().maxExecutionResultPayloadBytes());
+    }
+
+    // ---- restart recovery & multi-instance reads ----
+
+    /**
+     * For an adapter with no in-process state beyond the connection itself, "restarted" and "read by a
+     * second instance" are the identical situation: both are a fresh handle with no memory of the
+     * first, reconnected to the same durable backing storage. {@link #reopen()} closes this process's
+     * handle and opens exactly that fresh one, so proving survival across it proves both acceptance
+     * criteria at once rather than by coincidence -- precisely the reasoning the class javadoc states
+     * for {@link StoreCapability#DURABLE} generally, applied here to results specifically.
+     */
+    @Test
+    final void aRecordedResultSurvivesAReopenWhichIsIndistinguishableFromASecondInstanceReadingIt() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        assumeCapability(StoreCapability.DURABLE);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        DurableExecutionResult recorded = await(store().recordExecutionResult(
+                completedResult(key, traversalId, Map.of("answer", 42L), endedAt)));
+
+        ExecutionStore reopened = reopen();
+        DurableExecutionResult read = await(reopened.loadExecutionResult(DEFAULT_TENANT, traversalId))
+                .orElseThrow(() -> new AssertionError(
+                        "a durable result must survive a reopen, the same way a durable inventory row does"));
+        assertEquals(recorded.fingerprint(), read.fingerprint(),
+                "the record read back after a reopen must be byte-for-byte the record written");
+        assertEquals(ResultPayloadState.RETAINED, read.payload().state());
+        assertEquals(recorded.retainedUntil(), read.retainedUntil());
+    }
+
+    // ---- duplicate terminal events ----
+
+    @Test
+    final void anIdenticalReRecordIsANoOpAndDoesNotMoveTheRetentionDeadline() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        DurableExecutionResult first = await(store().recordExecutionResult(
+                completedResult(key, traversalId, Map.of("answer", 42L), endedAt)));
+
+        // The re-delivery arrives later on the store's clock. If the deadline were derived from "now"
+        // rather than from the record's own endedAt, this alone would already make the re-delivery
+        // carry a later deadline and be refused as a conflicting outcome -- turning the idempotency
+        // guarantee into its opposite for the one case it exists to serve.
+        clock().advance(Duration.ofMinutes(5));
+        DurableExecutionResult second = await(store().recordExecutionResult(
+                completedResult(key, traversalId, Map.of("answer", 42L), endedAt)));
+
+        assertEquals(first.fingerprint(), second.fingerprint(),
+                "a re-delivery of the same terminal event must compare equal to what is committed");
+        assertEquals(first.retainedUntil(), second.retainedUntil(),
+                "a no-op re-record must not move the retention deadline the store already assigned");
+        assertEquals(first, await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).orElseThrow());
+    }
+
+    @Test
+    final void aConflictingReRecordForTheSameTraversalIsRefusedAndLeavesTheCommittedRowUntouched() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        DurableExecutionResult committed = await(store().recordExecutionResult(
+                completedResult(key, traversalId, Map.of("answer", 42L), endedAt)));
+
+        DurableExecutionResult conflicting = completedResult(key, traversalId, Map.of("answer", 43L), endedAt);
+        var failure = failureOf(() -> await(store().recordExecutionResult(conflicting)));
+        var refusal = assertInstanceOf(ExecutionStoreFailure.ExecutionResultNotRecordable.class, failure);
+        assertEquals(traversalId, refusal.traversalId());
+        assertEquals(committed.fingerprint(), refusal.currentFingerprint());
+        assertNotEquals(committed.fingerprint(), refusal.requestedFingerprint());
+        assertEquals(Retryability.DETERMINISTIC_REJECT, failure.retryability());
+
+        // A refusal is not a partial write: the row committed before the conflicting attempt must be
+        // completely unchanged, not merely "still present".
+        assertEquals(committed, await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).orElseThrow());
+    }
+
+    /**
+     * {@code recordExecutionResult}'s identity is {@code (tenantId, traversalId)} alone: neither
+     * adapter's schema keys the result on {@code processInstanceId}, and {@link DurableExecutionResult}
+     * folds the instance in only as one more field the fingerprint happens to cover. A caller-supplied
+     * execution id is therefore not scoped to the process instance that used it -- a second, wholly
+     * unrelated instance that happens to reuse the identical id collides with the first at the result
+     * layer, even though nothing at the process/traversal layer below it would ever confuse the two.
+     * This is a real, observable consequence of that design (flagged rather than assumed after wave
+     * 1), and it is pinned here directly rather than left implicit.
+     */
+    @Test
+    final void aTraversalIdReusedByAnUnrelatedProcessInstanceConflictsRatherThanOverwritingTheFirst() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        UUID sharedTraversalId = UUID.randomUUID();
+
+        ExecutionKey first = newKey();
+        completeInstanceAndItsTraversal(first, sharedTraversalId);
+        Instant firstEndedAt = clock().instant();
+        DurableExecutionResult committed = await(store().recordExecutionResult(
+                completedResult(first, sharedTraversalId, Map.of("answer", 1L), firstEndedAt)));
+
+        clock().advance(Duration.ofMinutes(1));
+        ExecutionKey second = newKey();
+        completeInstanceAndItsTraversal(second, sharedTraversalId);
+        Instant secondEndedAt = clock().instant();
+        DurableExecutionResult fromAnUnrelatedInstance =
+                completedResult(second, sharedTraversalId, Map.of("answer", 2L), secondEndedAt);
+
+        var failure = failureOf(() -> await(store().recordExecutionResult(fromAnUnrelatedInstance)));
+        var refusal = assertInstanceOf(ExecutionStoreFailure.ExecutionResultNotRecordable.class, failure);
+        assertEquals(sharedTraversalId, refusal.traversalId());
+        assertEquals(committed.fingerprint(), refusal.currentFingerprint());
+
+        DurableExecutionResult stillCommitted =
+                await(store().loadExecutionResult(DEFAULT_TENANT, sharedTraversalId)).orElseThrow();
+        assertEquals(committed, stillCommitted);
+        assertEquals(first.processInstanceId(), stillCommitted.key().processInstanceId(),
+                "a reused execution id must not let an unrelated later instance take over the first's "
+                        + "recorded result");
+    }
+
+    // ---- cancellation persistence ----
+
+    /**
+     * A cancelled result and an ordinary failure both store {@code FAILED}; the assertion that matters
+     * is that the two are told apart only by the termination reason, and this deliberately never
+     * compares either against a completed result -- an assertion that only distinguishes cancellation
+     * from success would prove nothing about the property this test exists to check.
+     */
+    @Test
+    final void aCancelledResultAndAnOrdinaryFailureBothReportFailedAndAreDistinguishedOnlyByTheReason() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+
+        ExecutionKey cancelledKey = newKey();
+        UUID cancelledTraversal = UUID.randomUUID();
+        cancelInstance(cancelledKey, cancelledTraversal);
+        Instant cancelledEndedAt = clock().instant();
+        DurableExecutionResult cancelled = await(store().recordExecutionResult(
+                DurableExecutionResult.of(cancelledKey, cancelledTraversal, new GraphVersionPin("graph-v1"),
+                        ProcessInstanceStatus.FAILED, ExecutionTerminationReason.CANCELLED,
+                        cancelledEndedAt.minusSeconds(1), cancelledEndedAt, null,
+                        ExecutionResultNodes.empty(), null, store().maxExecutionResultPayloadBytes())));
+
+        ExecutionKey failedKey = newKey();
+        UUID failedTraversal = UUID.randomUUID();
+        failInstanceAndItsTraversal(failedKey, failedTraversal);
+        Instant failedEndedAt = clock().instant();
+        DurableExecutionResult ordinaryFailure = await(store().recordExecutionResult(
+                DurableExecutionResult.of(failedKey, failedTraversal, new GraphVersionPin("graph-v1"),
+                        ProcessInstanceStatus.FAILED, null, failedEndedAt.minusSeconds(1), failedEndedAt,
+                        null, ExecutionResultNodes.empty(), new IllegalStateException("node broke"),
+                        store().maxExecutionResultPayloadBytes())));
+
+        // Both reach the identical terminal status. An assertion that stopped here would prove
+        // nothing -- it is the reason, and only the reason, that must tell them apart.
+        assertEquals(ProcessInstanceStatus.FAILED, cancelled.status());
+        assertEquals(ProcessInstanceStatus.FAILED, ordinaryFailure.status());
+        assertTrue(cancelled.cancelled());
+        assertFalse(ordinaryFailure.cancelled());
+        assertEquals(ExecutionTerminationReason.CANCELLED, cancelled.terminationReason());
+        assertNull(ordinaryFailure.terminationReason());
+        assertNotEquals(cancelled.fingerprint(), ordinaryFailure.fingerprint());
+
+        // The distinction must survive the read path, not merely the write.
+        DurableExecutionResult readCancelled =
+                await(store().loadExecutionResult(DEFAULT_TENANT, cancelledTraversal)).orElseThrow();
+        DurableExecutionResult readFailure =
+                await(store().loadExecutionResult(DEFAULT_TENANT, failedTraversal)).orElseThrow();
+        assertTrue(readCancelled.cancelled());
+        assertFalse(readFailure.cancelled());
+    }
+
+    // ---- tenant isolation ----
+
+    @Test
+    final void aCrossTenantResultReadIsIndistinguishableFromAMissingOne() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        String owner = "result-tenant-owner";
+        String impostor = "result-tenant-impostor";
+        ExecutionKey key = keyFor(owner);
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        await(store().recordExecutionResult(completedResult(key, traversalId, Map.of("answer", 42L), endedAt)));
+
+        Optional<DurableExecutionResult> foreign = await(store().loadExecutionResult(impostor, traversalId));
+        Optional<DurableExecutionResult> neverExisted =
+                await(store().loadExecutionResult(impostor, UUID.randomUUID()));
+        assertEquals(neverExisted, foreign,
+                "a cross-tenant read and a nonexistent id must be the identical answer, or the store "
+                        + "is a cross-tenant existence oracle");
+        assertTrue(foreign.isEmpty());
+        assertTrue(await(store().loadExecutionResult(owner, traversalId)).isPresent());
+    }
+
+    @Test
+    final void purgingOneTenantsResultsLeavesAnotherTenantsFloorAtInstantMinAndItsRowsWhole() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        String tenantA = "result-retention-tenant-a";
+        String tenantB = "result-retention-tenant-b";
+
+        ExecutionKey keyA = keyFor(tenantA);
+        UUID traversalA = UUID.randomUUID();
+        completeInstanceAndItsTraversal(keyA, traversalA);
+        Instant endedAtA = clock().instant();
+        DurableExecutionResult recordedA = await(store().recordExecutionResult(
+                completedResult(keyA, traversalA, Map.of("answer", 1L), endedAtA)));
+
+        clock().advance(Duration.ofSeconds(30));
+        ExecutionKey keyB = keyFor(tenantB);
+        UUID traversalB = UUID.randomUUID();
+        completeInstanceAndItsTraversal(keyB, traversalB);
+        Instant endedAtB = clock().instant();
+        DurableExecutionResult recordedB = await(store().recordExecutionResult(
+                completedResult(keyB, traversalB, Map.of("answer", 2L), endedAtB)));
+        assertTrue(recordedB.retainedUntil().isAfter(recordedA.retainedUntil()),
+                "the fixture requires tenant B's deadline strictly after tenant A's, or the purge "
+                        + "below could not tell isolation from coincidence");
+
+        clock().set(recordedA.retainedUntil());
+        assertEquals(1L, await(store().purgeExpiredExecutionResults(tenantA)));
+        assertEquals(recordedA.retainedUntil(), await(store().executionResultsRetainedFrom(tenantA)));
+        assertEquals(Instant.MIN, await(store().executionResultsRetainedFrom(tenantB)),
+                "purging one tenant's results must never advance another tenant's floor");
+
+        DurableExecutionResult stillWhole =
+                await(store().loadExecutionResult(tenantB, traversalB)).orElseThrow();
+        assertEquals(ResultPayloadState.RETAINED, stillWhole.payload().state(),
+                "tenant isolation means tenant B's own retention window decides this, not tenant A's purge");
+    }
+
+    // ---- retention expiry ----
+
+    /**
+     * The boundary asserted from both sides, exactly as
+     * {@link #findProcessInstanceRetainedUntilIsPresentForEveryTerminalRowAndPurgeRemovesItExactlyAtThatInstant}
+     * asserts it for the inventory: one tick before the published deadline the payload must still be
+     * offered in full, and landed exactly on it the payload must already be gone, because collection
+     * (and therefore the purge below) is inclusive at that same instant.
+     */
+    @Test
+    final void aRecordedResultIsAvailableOneTickBeforeItsDeadlineAndExpiredExactlyAtIt() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+        DurableExecutionResult recorded = await(store().recordExecutionResult(
+                completedResult(key, traversalId, Map.of("answer", 42L), endedAt)));
+        Instant deadline = recorded.retainedUntil();
+
+        clock().set(deadline.minusMillis(1));
+        DurableExecutionResult oneTickEarly =
+                await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).orElseThrow();
+        assertEquals(ResultPayloadState.RETAINED, oneTickEarly.payload().state(),
+                "one tick before the published deadline the payload must still be offered in full");
+        assertTrue(oneTickEarly.payload().available());
+
+        clock().set(deadline);
+        DurableExecutionResult onTheBoundary =
+                await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).orElseThrow();
+        assertEquals(ResultPayloadState.EXPIRED, onTheBoundary.payload().state(),
+                "landed exactly on the published deadline the payload must no longer be offered -- "
+                        + "collection is inclusive, so the read boundary must match it exactly");
+        assertNull(onTheBoundary.payload().retained());
+        assertEquals(ProcessInstanceStatus.COMPLETED, onTheBoundary.status(),
+                "the record itself survives until an explicit purge; only its payload ages out");
+
+        assertEquals(1L, await(store().purgeExpiredExecutionResults(DEFAULT_TENANT)));
+        assertTrue(await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).isEmpty());
+    }
+
+    // ---- payload-refusal ordering (wave 1's flagged WITHHELD reachability) ----
+
+    /**
+     * {@code RuntimeActivityData}'s own projection bounds an output to 16 KiB and reports it
+     * truncated, before {@link DurableExecutionResult#project} ever compares the encoding against the
+     * adapter's published cap. At either adapter's default cap -- far above 16 KiB -- a huge payload is
+     * therefore truncated-and-retained rather than withheld: {@link ResultPayloadState#WITHHELD} only
+     * becomes reachable when an adapter publishes a cap below the projection's own bound. This pins
+     * that ordering at the store contract, so a future change to either bound cannot silently invert it
+     * without failing here first.
+     */
+    @Test
+    final void aHugePayloadIsTruncatedAndRetainedRatherThanWithheldAtTheAdaptersDefaultCap() {
+        assumeCapability(StoreCapability.EXECUTION_RESULTS);
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        completeInstanceAndItsTraversal(key, traversalId);
+        Instant endedAt = clock().instant();
+
+        var huge = new java.util.LinkedHashMap<String, String>();
+        for (int i = 0; i < 4_000; i++) {
+            huge.put("field-" + i, "value-" + i);
+        }
+        DurableExecutionResult recorded = await(store().recordExecutionResult(
+                completedResult(key, traversalId, huge, endedAt)));
+
+        assertEquals(ResultPayloadState.RETAINED, recorded.payload().state(),
+                "at the adapter's default cap a huge payload must be truncated by the projection's own "
+                        + "16 KiB bound, and retained -- never withheld");
+        assertTrue(recorded.payload().truncated(),
+                "the fixture must actually exceed the projection's bound, or this proves nothing");
     }
 
     /** An envelope for {@code key}, carrying causality so the assertions above have something to check. */

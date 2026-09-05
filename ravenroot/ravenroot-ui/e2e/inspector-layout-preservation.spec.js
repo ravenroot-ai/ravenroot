@@ -240,13 +240,19 @@ test('Keep positions retains its input canvas through node autosave', async ({ p
   expect(await routeGeometry(page)).toEqual(routesBefore);
 });
 
-test('document activation retains each explicit arrangement after independent Inspector autosaves', async ({ page }) => {
+test('document activation retains hierarchical and layered routes after independent Inspector autosaves', async ({ page }) => {
   const first = await page.evaluate(() => window.ravenroot.workspace.activeId);
   await arrange(page, 'Arrange — Hierarchical');
+  await startEditing(page);
+  await selectOnly(page, 'n3');
+  await page.locator('#node-editor textarea[name="description"]').fill('First document autosave');
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.activeDocument().graph.nodeMap.n3.description)).toBe('First document autosave');
+  const firstRoutes = await routeGeometry(page);
 
   const second = await page.evaluate(() => window.ravenroot.openDocument({ name: 'second.graphml' }));
   await replaceGraph(page, 'second.graphml');
-  await arrange(page, 'Arrange — Organic');
+  await arrange(page, 'Arrange — Flow (new)');
   const secondPositions = await positions(page);
 
   // Establish both view snapshots after the split exists. Adding a pane legitimately resizes and
@@ -256,6 +262,7 @@ test('document activation retains each explicit arrangement after independent In
   await page.evaluate(() => { window.cy.zoom(0.71); window.cy.pan({ x: 131, y: 79 }); });
   const firstPresentation = await presentation(page);
   expect(firstPresentation.selection).toEqual(['n3']);
+  expect(await routeGeometry(page)).toEqual(firstRoutes);
   await page.evaluate(id => window.ravenroot.activateDocument(id), second);
   await startEditing(page);
   await selectOnly(page, 'n4');
@@ -264,6 +271,7 @@ test('document activation retains each explicit arrangement after independent In
     window.ravenroot.activeDocument().graph.nodeMap.n4.description)).toBe('Second document autosave');
   await page.evaluate(() => { window.cy.zoom(0.82); window.cy.pan({ x: 97, y: 61 }); });
   const secondPresentation = await presentation(page);
+  const secondRoutes = await routeGeometry(page);
   expect(secondPresentation.selection).toEqual(['n4']);
 
   await page.evaluate(id => window.ravenroot.activateDocument(id), first);
@@ -276,14 +284,16 @@ test('document activation retains each explicit arrangement after independent In
   const { selection: firstSelection, cursor: _restoredFirstCursor, ...firstRestoredDurable } = firstRestored;
   expect(firstRestoredDurable).toEqual(firstDurable);
   expect(firstSelection).toEqual([]);
+  expect(await routeGeometry(page)).toEqual(firstRoutes);
 
   await page.evaluate(id => window.ravenroot.activateDocument(id), second);
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutMode)).toBe('cose');
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutMode)).toBe('flow-new');
   const { selection: _secondSelection, cursor: _secondCursor, ...secondDurable } = secondPresentation;
   const secondRestored = await presentation(page);
   const { selection: secondSelection, cursor: _restoredSecondCursor, ...secondRestoredDurable } = secondRestored;
   expect(secondRestoredDurable).toEqual({ ...secondDurable, positions: secondPositions });
   expect(secondSelection).toEqual([]);
+  expect(await routeGeometry(page)).toEqual(secondRoutes);
   expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n4.description))
     .toBe('Second document autosave');
 });

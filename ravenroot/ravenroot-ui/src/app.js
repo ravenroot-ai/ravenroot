@@ -1623,6 +1623,10 @@ function applyActiveDocument() {
   graphName = document_?.name ?? 'untitled.graphml';
   graphDisplayName = document_?.displayName ?? graphName;
   const presentation = documentPresentationState(document_);
+  const retainRouteGeometry = Boolean(document_
+    && document_.renderMode === presentation.renderMode
+    && document_.layoutMode === presentation.layoutMode
+    && document_.visualStyle === presentation.visualStyle);
   renderMode = presentation.renderMode;
   layoutMode = presentation.layoutMode;
   visualStyle = presentation.visualStyle;
@@ -1641,7 +1645,12 @@ function applyActiveDocument() {
   activeExecutionReconciliation = document_?.execution.reconciliationState ?? 'known';
   // The inline-handler contract predates the workspace and still points at the visible graph.
   window.cy = cy;
-  if (cy && document_) cy.batch(() => applyVisualStyle(visualStyle, cy, document_));
+  // Activation repaints document-owned node/runtime state but leaves the live renderer's edge
+  // geometry untouched. Recomputing even the same route family here can choose different control
+  // points after a pane resize; the existing inline edge route is the exact arrangement result.
+  // A legacy or invalid record still takes the canonical normalized style as a complete repaint.
+  if (cy && document_) cy.batch(() =>
+    applyVisualStyle(visualStyle, cy, document_, { preserveEdgeGeometry: retainRouteGeometry }));
 }
 
 function syncSourceSessionChrome(owner = workspace.active) {
@@ -3943,29 +3952,29 @@ function scheduleN8n2EdgeCurves(owner, target, token, complete = null) {
   });
 }
 
-function restoreDefaultStyle(target = cy, owner = workspace.active) {
+function restoreDefaultStyle(target = cy, owner = workspace.active, { preserveEdgeGeometry = false } = {}) {
   if (!target) return;
   if (owner) owner.n8nActive = false;
   if (owner === workspace.active) n8nActive = false;
   target.nodes().removeStyle();
-  target.edges().removeStyle();
+  if (!preserveEdgeGeometry) target.edges().removeStyle();
 }
 
-function applyVisualStyle(name, target = cy, owner = workspace.active) {
+function applyVisualStyle(name, target = cy, owner = workspace.active, { preserveEdgeGeometry = false } = {}) {
   if (!target || !owner) return;
   name = normalizeVisualStyle(name);
   if (owner === workspace.active) visualStyle = name;
   owner.visualStyle = name;
-  restoreDefaultStyle(target, owner);
+  restoreDefaultStyle(target, owner, { preserveEdgeGeometry });
   if (isN8nFamilyLayout(name)) {
     owner.n8nActive = true;
     if (owner === workspace.active) n8nActive = true;
     applyN8nNodeStyle(target, owner);
-    if (name === 'n8n4') applyN8n4EdgeCurves(target);
-    else if (name === 'cyto') applyCytoEdgeCurves(target, owner);
-    else if (name === 'n8n2') applyN8n2EdgeCurves(target);
-    else if (name === 'n8n3') applyN8n3EdgeCurves(target);
-    else target.edges().style({
+    if (!preserveEdgeGeometry && name === 'n8n4') applyN8n4EdgeCurves(target);
+    else if (!preserveEdgeGeometry && name === 'cyto') applyCytoEdgeCurves(target, owner);
+    else if (!preserveEdgeGeometry && name === 'n8n2') applyN8n2EdgeCurves(target);
+    else if (!preserveEdgeGeometry && name === 'n8n3') applyN8n3EdgeCurves(target);
+    else if (!preserveEdgeGeometry) target.edges().style({
       'curve-style': name === 'n8n' ? 'taxi' : 'round-taxi',
       'taxi-direction': 'auto',
       'taxi-turn': '50%',

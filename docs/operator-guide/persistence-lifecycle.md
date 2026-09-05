@@ -125,6 +125,57 @@ Durable holds are a declared store capability, not an assumption. A store that d
 
 For the bundled SQLite store this is a schema addition and nothing else. A database file written by an earlier release upgrades in place by adding one table for holds; no existing table is altered, no row is rewritten, and no data is migrated. Existing traversals are unaffected — a traversal in flight across the upgrade has no hold, and holds are only ever created by a pause issued after it. The usual downgrade rule applies unchanged: a file upgraded by this release is refused by a build that predates it, so take a backup before upgrading if you may need to roll the binary back.
 
+## Durable execution results
+
+A terminal execution's canonical result is now kept in the configured store, keyed by tenant and
+traversal, rather than only in one process's bounded in-memory cache. `GET /v1/executions/{id}` and
+`ravenroot result` read the process-local cache first and fall through to the durable record on a
+miss, so a result readable before a restart is readable after one, and readable from a second instance
+that never ran the traversal — as long as a durable, result-capable store is composed. Without one,
+the gap this closes reopens: a result readable before a restart still reads as unknown afterward,
+indistinguishable from an id that never existed.
+
+**Why does this result have no payload?** Four distinct facts can produce that question, and the
+answer tells you which one applies. A `200` body with no payload and `payloadState` absent means the
+execution genuinely produced nothing — the ordinary shape for a failure, a cancellation, or a
+completion whose terminal node returned no value. A `410 EXECUTION_RESULT_EXPIRED` means the execution
+completed and its result was retained, but the retention deadline has since passed; the terminal
+status and termination reason are still reported. A `410 EXECUTION_RESULT_REDACTED` means the payload
+was never retained in the first place, and its `payloadState` field says why: `WITHHELD` means the
+encoded payload exceeded the store's byte cap — raise the cap if that is the right fix — and
+`UNCONVERTIBLE` means the value does not project onto the closed payload model at all, which is a node
+returning a type no remote adapter could ever persist, not a limit to raise. `WITHHELD` is not
+something you should expect to see at default settings: the payload projection bounds an output to
+16 KiB before it is ever compared against the store's cap (1 MiB by default), so a huge payload is
+truncated and retained rather than withheld unless the cap has been configured well below the
+projection's own bound.
+
+**Why does this execution id return a result I do not recognise?** The store records a terminal result
+exactly once per `(tenantId, traversalId)` and refuses, rather than overwrites, a conflicting
+re-recording. If you submitted two executions under the same id — most commonly by generating the id
+client-side and reusing it after a retry whose outcome was unclear — the second execution still ran to
+completion, but its result was refused when the runtime tried to record it, because a different result
+was already committed under that id. Every subsequent read, cache-warm or cold, restart or not, returns
+the **first** submission's result. There is nothing to reconcile after the fact: the fix is to mint a
+distinct id per submission, never to reuse one you are not certain settled.
+
+**Multi-instance sharing is host-local, not a cluster feature.** The SQLite adapter's cross-process
+exclusion depends on POSIX advisory locks, which are unreliable over NFS, SMB, and most network or
+distributed filesystems — a lock can be silently ignored, cached, or lost on a client reconnect. Do not
+place the database file on shared network storage expecting several hosts to coordinate through it;
+that does not degrade the guarantee, it removes it. Within one host, a second process's read is still
+not a live subscription: a traversal still running elsewhere, or one whose result has not yet
+committed, reads as unknown from that instance until the write lands.
+
+**Retention here follows the same ordering rule as the rest of this store.** A recorded result names
+the process instance and traversal it belongs to, so its retention window can never be configured
+longer than that instance's own terminal-retention window; both bundled adapters refuse to start
+otherwise. As with the durable inventory and the idempotency ledger, **no shipped surface purges
+expired results in this release** — no CLI verb, no HTTP route, no scheduler calls
+`purgeExpiredExecutionResults`. Where an embedder calls it directly, the purge appends its own audit
+record naming the tenant, the count removed, and the operator, whether it succeeded or was refused, so
+a gap in the result table is distinguishable from unaccounted-for loss.
+
 ## Verification
 
 After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, and execute a bounded Test graph before reopening Run traffic. Also confirm that a process instance discoverable through the durable inventory before the restart is still discoverable afterward, and read each instance's reported disposition rather than only its lifecycle status: `PARKED` means an attempt's real-world effect outcome is still unresolved and awaits a human decision (see [Durable process inventory](../architecture/process-inventory.md)), and it can appear on an otherwise-finished instance, so do not treat a terminal status alone as "nothing left to do."
@@ -135,8 +186,10 @@ A held traversal reads as `WAITING`, like any other durable wait, and is therefo
 
 - [Contract](../architecture/durability-events.md)
 - [Durable process inventory](../architecture/process-inventory.md)
+- [Durable execution results](../architecture/execution-results.md)
 - [Decision record](../../adr/0031-durable-canonical-graph-definitions.md)
 - [Cancellation decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)
+- [Execution results decision record](../../adr/0036-durable-execution-results.md)
 - [Runbook](../troubleshooting/embed-backup.md)
 - [Bundle format and commands](../reference/backup-recovery.md)
 - [HTTP API and CLI](../reference/api-cli.md)

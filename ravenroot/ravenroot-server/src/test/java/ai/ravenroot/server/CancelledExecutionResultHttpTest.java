@@ -44,13 +44,18 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Regression coverage for the REST gap wave 1 of the cancellation-visibility work left open: a
- * cancelled execution's durable half already carried {@code ExecutionTerminationReason.CANCELLED}
- * beside its unchanged {@code FAILED} status, but neither {@code GET /v1/executions/{id}}'s 200 body
- * nor its 410 body ever put the reason on the wire. Read alone, a bare {@code status=FAILED} is
- * exactly the misreading {@code ExecutionTerminationReason} exists to remove -- see that type's own
- * Javadoc -- so both response shapes are proved here, not only the in-memory registry wave 1 already
- * covers in {@code ExecutionResultRegistryTest}.
+ * {@code GET /v1/executions/{id}} reports a cancellation as a cancellation, in both of its response
+ * shapes.
+ *
+ * <p>A cancelled execution is stored as {@code FAILED} and qualified by
+ * {@code ExecutionTerminationReason.CANCELLED}; read alone, that status describes an incident that
+ * did not happen -- see that type's own Javadoc. The durable and in-memory halves of this are
+ * asserted elsewhere; what is proved here is the wire, because a reason that never leaves the
+ * process distinguishes nothing for the caller who actually has to act on it.</p>
+ *
+ * <p>Both shapes are covered on purpose. The 200 body carries the reason beside the status, and the
+ * 410 body -- returned once the full result is past its retention horizon -- carries it beside the
+ * terminal status it still reports, since that is the read with nothing left to check it against.</p>
  */
 @Timeout(value = 30, unit = TimeUnit.SECONDS)
 class CancelledExecutionResultHttpTest {

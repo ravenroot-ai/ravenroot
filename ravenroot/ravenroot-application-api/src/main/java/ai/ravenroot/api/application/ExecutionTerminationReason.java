@@ -11,15 +11,31 @@ package ai.ravenroot.api.application;
  * terminal status and can carry this one repeats that sentence, because a reader who consults one
  * field and not the other is not partially informed, they are actively misinformed.</p>
  *
+ * <h2>What this shape does and does not buy</h2>
  * <p>The alternative was a new {@code CANCELLED} member of the two status enums, and it was rejected
- * on compatibility rather than on taste. A status is persisted <em>by name</em>, so the first row
- * carrying a new name is unreadable by any binary that predates it: the enlargement is forward-only,
- * and a rollback past that first row fails loudly. That price has been paid deliberately once, for
- * {@link NodeAttemptStatus#PARKED}, where the alternative was silently forging an outcome nobody
- * observed. It is not worth paying again here, because a nullable reason beside an unchanged status
- * is backward <em>and</em> forward compatible: an older reader sees the {@code FAILED} it has always
- * seen and simply does not see the qualification, which is a reader that is behind rather than a
- * reader that is broken.</p>
+ * on compatibility — but <b>not</b> on rollback compatibility, which is where an earlier version of
+ * this note was wrong, and wrong in the direction that flattered the choice. Carrying the reason in
+ * storage requires a schema migration; the SQLite store refuses to open any database whose recorded
+ * schema version exceeds what the running binary understands, and it refuses before it reads a row.
+ * So this shape forecloses a downgrade to an older binary outright, from the moment the migration
+ * runs, whether or not anything was ever cancelled. A new status name would have needed no migration
+ * — statuses are persisted by name — and would have left a rollback possible until the first
+ * cancelled row was written. <b>On the rollback axis the choice made here is the stricter one, and
+ * that is a cost of it rather than a benefit.</b></p>
+ *
+ * <p>What the choice does buy is the <em>type and wire</em> contract, and that is what decided it.
+ * {@link ProcessInstanceStatus} and {@link TraversalStatus} are not merely persisted tokens: they
+ * are a lifecycle state machine, with {@code canTransitionTo} and {@code terminal()} rules built on
+ * their membership, and every consumer that switches over them exhaustively — here and downstream —
+ * would have had to grow an arm for a value it has never seen. Instead every pre-existing
+ * constructor still compiles and still means what it meant, and every projection still reports the
+ * {@code FAILED} it always reported, now with an optional qualifier beside it.
+ * {@code RequestReplyOutcome} makes the point concretely: it asserts that a failed waiter state
+ * carries a failed process status, so a {@code CANCELLED} status would have turned every
+ * cancellation observed by a request/reply waiter into a construction failure at that boundary. And
+ * the non-durable store, which has no schema version and so no gate of any kind, takes this shape
+ * with no compatibility question at all — as does anything reading the database file without going
+ * through the store's own migration runner, which sees one additional nullable column.</p>
  *
  * <h2>Why cancellation earns its own value</h2>
  * <p>The same argument {@link NodeAttemptCompletion#OPERATOR_VERIFIED} makes one level down: a

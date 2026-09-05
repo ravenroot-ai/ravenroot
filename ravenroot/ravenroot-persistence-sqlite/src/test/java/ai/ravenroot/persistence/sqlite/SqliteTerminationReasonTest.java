@@ -212,8 +212,11 @@ class SqliteTerminationReasonTest {
                         "ALTER TABLE traversal ADD COLUMN termination_reason TEXT"),
                 migration.statements(),
                 "purely additive and nullable: no row is rewritten, no status is touched, and no "
-                        + "column is made NOT NULL -- which is what keeps a downgrade safe forever "
-                        + "rather than only until the first cancelled row is written");
+                        + "column is made NOT NULL. That is a claim about the DATA -- every "
+                        + "pre-existing row keeps its exact meaning -- and deliberately not a claim "
+                        + "about rollback: this step raises the schema version like every other, so "
+                        + "a binary predating it is refused at open regardless of what the rows say. "
+                        + "See SqliteTerminationReasonCorruptionGateTest for that gate");
         assertEquals(IntStream.rangeClosed(1, SqliteSchema.highestKnownVersion()).boxed().toList(),
                 SqliteSchema.migrations().stream().map(SchemaMigration::version).sorted().toList(),
                 "versions must stay 1..n with no gaps and no duplicates; the downgrade guard "

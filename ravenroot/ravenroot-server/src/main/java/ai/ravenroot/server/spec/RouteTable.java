@@ -69,6 +69,9 @@ public final class RouteTable {
                     NEVER, true),
             new RouteDescriptor(Set.of("GET"), "/ready", "Readiness probe (PLAT-02).", false, false, 200,
                     List.of(), NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/configuration",
+                    "Typed operator-owned limits for the connected authoring client.",
+                    true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/status", "Application status and declared capabilities.",
                     true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/runtime", "Runtime snapshot: active executions and node "

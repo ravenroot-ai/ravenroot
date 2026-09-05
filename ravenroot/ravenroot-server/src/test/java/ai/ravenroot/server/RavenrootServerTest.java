@@ -5,6 +5,7 @@ import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.GraphExecutionLimitException;
+import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.core.ai.AgentRuntimeRegistry;
 import ai.ravenroot.core.ai.ModelProviderRegistry;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -22,6 +23,7 @@ import ai.ravenroot.server.security.BrowserOriginPolicy;
 import ai.ravenroot.server.security.HttpSecurityConfiguration;
 import ai.ravenroot.server.security.SecurityHeadersPolicy;
 import ai.ravenroot.server.security.RequestAuthenticator;
+import ai.ravenroot.server.payload.StructuredSubmission;
 import ai.ravenroot.server.support.ForwardingRavenrootApplication;
 import ai.ravenroot.api.security.Role;
 import org.junit.jupiter.api.Test;
@@ -772,6 +774,62 @@ class RavenrootServerTest {
     }
 
     @Test
+    void servesAndEnforcesAnExplicitGraphDocumentBudgetAtTheExactBoundary() throws Exception {
+        byte[] exact = EXECUTABLE_GRAPH.getBytes(StandardCharsets.UTF_8);
+        var defaults = GraphMlLimits.DEFAULTS;
+        var limit = new GraphMlLimits(exact.length, defaults.maxNodes(), defaults.maxEdges(),
+                defaults.maxProperties(), defaults.maxDepth(), defaults.maxStringLength(), defaults.maxKeys(),
+                defaults.maxElements(), defaults.maxAttributes(), defaults.maxNamespaceDeclarations());
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-explicit-parser-limit-test");
+             var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null, limit)) {
+            server.start();
+            var client = HttpClient.newHttpClient();
+
+            var configuration = client.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port() + "/v1/configuration")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, configuration.statusCode());
+            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length + "}",
+                    configuration.body());
+            assertEquals("private, no-store", configuration.headers().firstValue("Cache-Control").orElseThrow());
+
+            for (String path : new String[]{"/v1/graphs/inspect", "/v1/executions"}) {
+                var accepted = client.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + server.port() + path))
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(exact)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertTrue(accepted.statusCode() == 200 || accepted.statusCode() == 202, accepted.body());
+
+                var rejected = client.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + server.port() + path))
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(
+                                (EXECUTABLE_GRAPH + " ").getBytes(StandardCharsets.UTF_8))).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(413, rejected.statusCode(), rejected.body());
+                assertTrue(rejected.body().contains("\"code\":\"GRAPHML_DOCUMENT_TOO_LARGE\""));
+            }
+
+            String structured = "{\"contract\":\"" + StructuredSubmission.CONTRACT
+                    + "\",\"graphml\":" + jsonQuote(EXECUTABLE_GRAPH) + "}";
+            var structuredAccepted = client.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port() + "/v1/executions"))
+                    .header("Content-Type", StructuredSubmission.MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofString(structured, StandardCharsets.UTF_8)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(202, structuredAccepted.statusCode(), structuredAccepted.body());
+
+            String structuredOversized = "{\"contract\":\"" + StructuredSubmission.CONTRACT
+                    + "\",\"graphml\":" + jsonQuote(EXECUTABLE_GRAPH + " ") + "}";
+            var structuredRejected = client.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port() + "/v1/executions"))
+                    .header("Content-Type", StructuredSubmission.MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofString(structuredOversized, StandardCharsets.UTF_8)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(413, structuredRejected.statusCode(), structuredRejected.body());
+        }
+    }
+
+    @Test
     void exposesTheExplicitDevelopmentArtifactLifecycleWithoutReturningSource() throws Exception {
         var runtime = new ProgramRuntime() {
             @Override
@@ -1276,6 +1334,18 @@ class RavenrootServerTest {
         return new RavenrootServer(application,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), ui,
                 authenticator);
+    }
+
+    private static RavenrootServer testServer(ai.ravenroot.api.application.RavenrootApplication application,
+                                               Path ui, GraphMlLimits graphMlLimits) {
+        return new RavenrootServer(application,
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), ui,
+                new DisabledLoopbackAuthenticator(), graphMlLimits);
+    }
+
+    private static String jsonQuote(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t") + "\"";
     }
 
     private static RequestAuthenticator lifecycleAuthenticator() {

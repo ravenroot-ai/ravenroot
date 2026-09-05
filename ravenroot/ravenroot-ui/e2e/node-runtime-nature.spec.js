@@ -49,6 +49,11 @@ function startService() {
       Vary: 'Origin',
       'Content-Type': 'application/json; charset=utf-8',
     };
+    if (request.url === '/v1/configuration') {
+      response.writeHead(200, headers);
+      response.end(JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 }));
+      return;
+    }
     if (request.url === '/v1/node-types') {
       response.writeHead(200, headers);
       response.end(JSON.stringify(catalog));

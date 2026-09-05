@@ -7,6 +7,7 @@ import { parseGraphML } from '../src/graph-parsers.js';
 import {
   DEFAULT_RENDER_MODE,
   DEFAULT_VISUAL_STYLE,
+  DESIGN_LAYOUT_MODES,
   DESIGN_RENDER_MODE,
   documentPresentationState,
   graphLayoutPlan,
@@ -44,6 +45,19 @@ function createHeadlessView(graph) {
 }
 
 describe('Cytoscape layout lifecycle', () => {
+  it('retains every supported arrangement and visual style on an explicit Design document', () => {
+    expect([...DESIGN_LAYOUT_MODES]).toEqual([
+      'preset', 'dagre', 'cose', 'elk', 'hierarchical',
+      'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto',
+      'hierarchical-new', 'flow-new',
+    ]);
+    for (const layoutMode of DESIGN_LAYOUT_MODES) {
+      expect(documentPresentationState({
+        renderMode: 'design', layoutMode, visualStyle: 'n8n4',
+      })).toEqual({ renderMode: 'design', layoutMode, visualStyle: 'n8n4' });
+    }
+  });
+
   it('normalizes every legacy split or combined preference into two semantic modes', () => {
     for (const legacy of ['dagre', 'cose', 'elk', 'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto', 'preset']) {
       expect(documentPresentationState({ layoutMode: legacy })).toEqual({
@@ -73,6 +87,11 @@ describe('Cytoscape layout lifecycle', () => {
     expect(documentPresentationState({ renderMode: 'invalid', layoutMode: 'elastic' })).toEqual({
       renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto',
     });
+    expect(documentPresentationState({
+      renderMode: 'design', layoutMode: 'not-a-layout', visualStyle: 'not-a-style',
+    })).toEqual({ renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto' });
+    expect(documentPresentationState({ renderMode: 'design', layoutMode: 'n8n4' }))
+      .toEqual({ renderMode: 'design', layoutMode: 'cyto', visualStyle: 'cyto' });
   });
   it('keeps the established position-planning default independent from the visual style', () => {
     expect(initialLayoutForGraph(createWorkflowDocument())).toBe('n8n');

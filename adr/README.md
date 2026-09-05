@@ -44,6 +44,7 @@ their architecture status and wording are ready for publication.
 | 2026-09-04 | 0033 | Accepted | [Durable operator holds on traversals](0033-durable-operator-holds.md) |
 | 2026-09-04 | 0034 | Accepted | [Immutable resolved execution manifests](0034-immutable-resolved-execution-manifests.md) |
 | 2026-09-05 | 0035 | Accepted | [Cancellation as a distinct execution termination reason](0035-cancellation-as-a-distinct-termination-reason.md) |
+| 2026-09-05 | 0036 | Accepted | [Durable canonical execution results](0036-durable-execution-results.md) |
 
 ## Status vocabulary
 

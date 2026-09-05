@@ -1,5 +1,7 @@
 package ai.ravenroot.core.graph;
 
+import ai.ravenroot.api.persistence.GraphDefinitionStore;
+
 /**
  * Resource budgets applied to every GraphML import, including embedded use.
  *
@@ -20,7 +22,7 @@ public record GraphMlLimits(
         int maxNamespaceDeclarations) {
 
     public static final GraphMlLimits DEFAULTS = new GraphMlLimits(
-            10 * 1024 * 1024,
+            GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,
             10_000,
             25_000,
             100_000,
@@ -43,7 +45,8 @@ public record GraphMlLimits(
                 || maxElements < 1 || maxAttributes < 1 || maxNamespaceDeclarations < 1) {
             throw new IllegalArgumentException("GraphML limits must all be positive");
         }
-        if (maxBytes > 256 * 1024 * 1024 || maxNodes > 1_000_000 || maxEdges > 5_000_000
+        if (maxBytes > GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES
+                || maxNodes > 1_000_000 || maxEdges > 5_000_000
                 || maxProperties > 10_000_000 || maxDepth > 1_024
                 || maxStringLength > 64 * 1024 * 1024 || maxKeys > 100_000
                 || maxElements > 10_000_000 || maxAttributes > 20_000_000

@@ -1,5 +1,6 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
@@ -8,6 +9,21 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class GraphExecutionLimitsTest {
+
+    @Test
+    void graphDocumentBytesDefaultAndMayBeNarrowedOrRaisedThroughTheCanonicalVariable() {
+        assertEquals(GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,
+                GraphExecutionLimits.fromEnvironment(Map.of()).graphMl().maxBytes());
+        assertEquals(4_096, GraphExecutionLimits.fromEnvironment(Map.of(
+                GraphExecutionLimits.MAX_GRAPHML_BYTES_VARIABLE, "4096")).graphMl().maxBytes());
+        assertEquals(32 * 1024 * 1024, GraphExecutionLimits.fromEnvironment(Map.of(
+                GraphExecutionLimits.MAX_GRAPHML_BYTES_VARIABLE, "33554432")).graphMl().maxBytes());
+        assertEquals(GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES,
+                GraphExecutionLimits.fromEnvironment(Map.of(
+                        GraphExecutionLimits.MAX_GRAPHML_BYTES_VARIABLE,
+                        Integer.toString(GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES)))
+                        .graphMl().maxBytes());
+    }
 
     @Test
     void environmentCanNarrowOrRaiseLimitsOnlyWithinSupportedCeilings() {
@@ -32,5 +48,12 @@ class GraphExecutionLimitsTest {
                         Long.toString(GraphExecutionLimits.HARD_MAX_TRAVERSAL_STEPS + 1))));
         assertThrows(IllegalArgumentException.class, () -> GraphExecutionLimits.fromEnvironment(
                 Map.of(GraphExecutionLimits.MAX_FAN_OUT_VARIABLE, "not-a-number")));
+        assertThrows(IllegalArgumentException.class, () -> GraphExecutionLimits.fromEnvironment(
+                Map.of(GraphExecutionLimits.MAX_GRAPHML_BYTES_VARIABLE, "0")));
+        assertThrows(IllegalArgumentException.class, () -> GraphExecutionLimits.fromEnvironment(
+                Map.of(GraphExecutionLimits.MAX_GRAPHML_BYTES_VARIABLE, "not-a-number")));
+        assertThrows(IllegalArgumentException.class, () -> GraphExecutionLimits.fromEnvironment(
+                Map.of(GraphExecutionLimits.MAX_GRAPHML_BYTES_VARIABLE,
+                        Integer.toString(GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES + 1))));
     }
 }

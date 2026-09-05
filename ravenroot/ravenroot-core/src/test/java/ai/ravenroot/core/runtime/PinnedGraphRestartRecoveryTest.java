@@ -28,6 +28,7 @@ import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.core.graph.GraphDefinition;
 import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.manifest.ExecutionManifestResolver;
@@ -38,6 +39,7 @@ import ai.ravenroot.core.recovery.ExecutionRecoveryService;
 import ai.ravenroot.core.recovery.PinnedGraphRecoveryAuthority;
 import ai.ravenroot.core.recovery.RecoveryDispatcher;
 import ai.ravenroot.core.recovery.RecoveryOutcome;
+import ai.ravenroot.core.recovery.RecoveryClassification;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
 import org.junit.jupiter.api.DisplayName;
@@ -112,6 +114,29 @@ class PinnedGraphRestartRecoveryTest {
                             + "first delivery rather than becoming a second effect");
             assertEquals(NodeAttemptStatus.RUNNING, attemptIn(reopened, fixture).status(),
                     "a redelivery is visible in the delivery counter, not as a new attempt");
+        }
+    }
+
+    @Test
+    void aLoweredLimitLeavesAnExistingDefinitionReadableButRefusesRecovery(@TempDir Path dir) {
+        var clock = new MovableClock(EPOCH);
+        Fixture fixture = crashMidEffect(dir, RecoveryRepeatabilityProperty.REPEATABLE, clock);
+        CanonicalGraphMl document = canonical(RecoveryRepeatabilityProperty.REPEATABLE);
+        var lowered = withGraphDocumentBytes(document.size() - 1);
+
+        try (ExecutionStore reopened = new SqliteExecutionStore(dir.resolve("restart.db"), clock);
+             GraphDefinitionStore documents = new SqliteGraphDefinitionStore(
+                     dir.resolve("restart.db"), clock,
+                     ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE, lowered.graphMl().maxBytes())) {
+            assertEquals(document.size(), documents.load(new ai.ravenroot.api.persistence.GraphDefinitionKey(
+                            TENANT, document.contentId())).toCompletableFuture().join().canonical().size(),
+                    "lowering admission must not make an already durable row unreadable");
+
+            var authority = new PinnedGraphRecoveryAuthority(reopened, documents, null,
+                    declaringCatalog(), lowered);
+            var refused = assertInstanceOf(RecoveryClassification.Refused.class,
+                    authority.classify(fixture.key()));
+            assertEquals(RecoveryClassification.Reason.DEFINITION_UNRESOLVED, refused.reason());
         }
     }
 
@@ -462,6 +487,19 @@ class PinnedGraphRestartRecoveryTest {
                 defaults.maxQueuedAdmissionsPerNode(), defaults.maxTraversalSteps(),
                 defaults.maxAmplifiedDeliveries(), defaults.maxCumulativePayloadBytes(),
                 defaults.maxRecoveryDeliveriesPerAttempt());
+    }
+
+    private static GraphExecutionLimits withGraphDocumentBytes(int maximum) {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        GraphMlLimits graph = defaults.graphMl();
+        var graphMl = new GraphMlLimits(maximum, graph.maxNodes(), graph.maxEdges(), graph.maxProperties(),
+                graph.maxDepth(), graph.maxStringLength(), graph.maxKeys(), graph.maxElements(),
+                graph.maxAttributes(), graph.maxNamespaceDeclarations());
+        return new GraphExecutionLimits(graphMl, defaults.payload(), defaults.maxFanOut(),
+                defaults.maxResidentActors(), defaults.maxLiveActorsPerTraversal(),
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(),
+                defaults.maxTraversalSteps(), defaults.maxAmplifiedDeliveries(),
+                defaults.maxCumulativePayloadBytes(), defaults.maxRecoveryDeliveriesPerAttempt());
     }
 
     private List<RecoveryOutcome> sweep(ExecutionStore store, GraphDefinitionStore documents,

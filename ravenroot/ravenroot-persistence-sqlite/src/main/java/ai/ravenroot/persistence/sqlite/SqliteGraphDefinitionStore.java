@@ -59,11 +59,9 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
 
-    /**
-     * Matches the ceiling GraphML ingest already enforces on a submitted document. A smaller bound
-     * here would accept a document at the edge and then fail to persist it.
-     */
-    public static final int DEFAULT_MAX_DEFINITION_BYTES = 10 * 1024 * 1024;
+    /** Safe default shared with GraphML ingest; composition may supply another value within the ceiling. */
+    public static final int DEFAULT_MAX_DEFINITION_BYTES =
+            GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES;
 
     private static final int SQLITE_PERM = 3;
     private static final int SQLITE_READONLY = 8;
@@ -90,6 +88,12 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
     public SqliteGraphDefinitionStore(Path databaseFile, Clock clock,
                                       GraphDefinitionReferences references) {
         this(SqliteStoreLocation.ofFile(databaseFile), clock, references, DEFAULT_MAX_DEFINITION_BYTES);
+    }
+
+    /** Opens the file-backed store with an explicit graph-definition byte budget. */
+    public SqliteGraphDefinitionStore(Path databaseFile, Clock clock,
+                                      GraphDefinitionReferences references, int maxDefinitionBytes) {
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, references, maxDefinitionBytes);
     }
 
     /**
@@ -120,6 +124,9 @@ public final class SqliteGraphDefinitionStore implements GraphDefinitionStore {
         this.references = Objects.requireNonNull(references, "references");
         if (maxDefinitionBytes < 1) {
             throw new IllegalArgumentException("maxDefinitionBytes must be positive");
+        }
+        if (maxDefinitionBytes > GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES) {
+            throw new IllegalArgumentException("maxDefinitionBytes exceeds the supported safety ceiling");
         }
         this.maxDefinitionBytes = maxDefinitionBytes;
         this.worker = Executors.newSingleThreadExecutor(runnable -> {

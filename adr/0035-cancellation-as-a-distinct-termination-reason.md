@@ -40,26 +40,43 @@ cause chain once and is shared by the runner's terminal handlers, the durable pa
 result registry, and the request/reply coordinator, so the durable aggregate and every read path
 reach the same conclusion about the same run.
 
-**The rejected alternative was a `CANCELLED` member of the two status enums, and it was rejected on
-compatibility, not on taste.** A status is persisted by name. The first row carrying a new name is
-unreadable to any binary that predates it, which is a forward-only enlargement: a rollback past that
-row fails loudly. [ADR 0022](0022-ambiguous-work-is-parked.md) accepted exactly that one-way gate once,
-for `NodeAttemptStatus#PARKED`, because the alternative there was silently forging an outcome nobody
-observed — a price worth paying once, not a precedent for paying it again on the two busiest tables in
-the schema. A nullable column beside an unchanged status is compatible in both directions: an older
-binary never selects a column it does not know about, sees the `FAILED` it has always seen, and keeps
-working; a downgrade after this change stays safe permanently, which the SQLite migration's own
-schema note calls out as the reason for the shape rather than a side effect. The same argument
-[ADR 0022](0022-ambiguous-work-is-parked.md) makes for `OPERATOR_VERIFIED` justifies giving
-cancellation its own value rather than reusing an existing one: nothing about a cancelled traversal
-failed, and counting it as a fault fabricates an incident that gets paged on and reported as
-availability loss.
+**The rejected alternative was a `CANCELLED` member of the two status enums. The reason to prefer the
+chosen shape does not lie on the rollback axis** — an earlier version of this record claimed
+otherwise, and that claim was false. Carrying the reason in storage still requires a schema
+migration, and the SQLite store refuses to open any database whose recorded schema version exceeds
+what the running binary understands, before it reads a single row. Every migration in this schema
+raises that version, this one included, so a binary that predates this change is refused at open,
+unconditionally and immediately, whether or not anything was ever cancelled. A `CANCELLED` status
+member would have needed no migration at all — statuses are persisted by name — so it would not have
+raised the schema version, and an older binary would have kept opening the file, failing only on the
+first row that actually carried the new name, as `Corrupted`. **On the rollback axis the shape chosen
+here is the stricter of the two designs, not the freer one, and that is recorded as a cost of it
+rather than a benefit.**
+
+The actual reason to prefer it is the type and wire contract. `ProcessInstanceStatus` and
+`TraversalStatus` are a lifecycle state machine, not merely persisted tokens: `canTransitionTo` and
+`terminal()` are built on their membership, and every exhaustive switch over them — here and
+downstream — would need a new arm for a value it has never seen. `RequestReplyOutcome` asserts that a
+failed waiter state carries a failed process status; a `CANCELLED` status would have turned every
+cancellation observed by a request/reply waiter into a construction failure at that boundary, a
+concrete existing invariant with no migration guard able to mediate it. The non-durable in-memory
+store has no schema version and therefore no rollback gate under either shape, so the comparison
+above is specific to the durable SQLite store. The issue this decision answers also required an
+additive schema change and explicitly forbade changing a persisted status value, which independently
+rules out the alternative regardless of the trade-off above. The one-way schema gate the column now
+creates is the same cost this store already charges for every other durable change; what it buys back
+is the type safety and the invariant just described, and that is the whole justification.
+[ADR 0022](0022-ambiguous-work-is-parked.md) remains the precedent for giving cancellation its own
+value rather than reusing an existing one — nothing about a cancelled traversal failed, and counting
+it as a fault fabricates an incident that gets paged on and reported as availability loss — but it is
+not, and was never, a precedent for a compatibility claim about rollback; that argument stands or
+falls on the paragraph above alone.
 
 **Cancellation also publishes its own terminal event type, `EXECUTION_CANCELLED`, in place of
 `EXECUTION_FAILED`.** `ravenroot.execution.events` and every consumer built against it are labelled
 by event type alone, so while cancellation published `EXECUTION_FAILED`, an operator stop was counted
 as a failure by construction; qualifying the durable record without changing what the event stream
-publishes would have left that specific defect in place under a different name. `EXECUTION_EVENT_TYPE
+publishes would have left that specific defect in place under a different name. `ExecutionEventType
 .isTraversalTerminal()` is now the single, exhaustive classification of "does a traversal end here" —
 a switch expression with no default over exactly `EXECUTION_COMPLETED`, `EXECUTION_FAILED`, and
 `EXECUTION_CANCELLED` — and every consumer that previously hardcoded its own two-member terminal list
@@ -69,6 +86,12 @@ place that must know rather than a silent gap in three.
 
 ## Consequences
 
+- **A binary that predates this migration cannot open an upgraded SQLite database at all**, from the
+  moment the migration runs, regardless of whether any execution was ever cancelled. This is a total,
+  immediate, data-independent gate, not a partial one triggered by the first cancelled row — the
+  rejected status-enum alternative would have been strictly cheaper to roll back, staying openable
+  until the first row actually carrying the new name. Take a backup before upgrading if rolling back
+  to a binary predating this change is a live possibility.
 - **An out-of-tree event consumer that recognizes only `EXECUTION_COMPLETED` and `EXECUTION_FAILED`
   stops seeing a terminal event at all for a cancelled traversal**, until it is taught the new type.
   This is the direct, stated cost of giving cancellation its own event type, accepted because the

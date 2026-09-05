@@ -79,7 +79,7 @@ the default below. Values are read at process startup and require a restart to c
 | `ravenroot.human-task.max-expiry-seconds` / `RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS` | 2,592,000 | 1–2,147,483,647; above `max-escalation-seconds` | largest graph expiry delay |
 | `ravenroot.human-task.max-title-bytes` / `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | 256 | 1–67,108,864 | UTF-8 title budget |
 | `ravenroot.human-task.max-description-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | 4,096 | 1–67,108,864 | UTF-8 description budget |
-| `ravenroot.human-task.max-response-schema-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | 16,384 | 1–67,108,864 | UTF-8 response-schema metadata budget |
+| `ravenroot.human-task.max-response-schema-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | 128 | 1–128 | ASCII `PayloadEnvelope` schema-label budget |
 | `ravenroot.human-task.max-authorization-tokens` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | 16 | 1–256 | required responder role/scope tokens |
 | `ravenroot.human-task.max-authorization-token-bytes` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | 256 | 1–4,096 | UTF-8 bytes in one authorization token |
 | `ravenroot.human-task.max-decision-body-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | 262,144 | 1–67,108,864; at least `max-response-bytes` | raw encoded PayloadEnvelope HTTP decision body |
@@ -105,7 +105,15 @@ Ravenroot ships no tracked environment-file template or environment generator.
 The UTF-8 unit applies only to fields named `*-bytes`. Response text and key lengths instead count
 UTF-16 code units, including two units for one supplementary Unicode code point. The resource caps
 on inbox pages, write attempts, and authorization tokens bound SQLite page materialization,
-conflict-path retry work, and persisted authorization material respectively.
+conflict-path retry work, and persisted authorization material respectively. Each responder axis
+(roles and scopes) may carry 256 tokens; at 4,096 bytes per token, the two sets together are bounded
+to 2 MiB of raw token text before delimiter and collection overhead.
+
+The Human Task policy must also compose with graph execution limits at startup. Its
+`max-response-bytes` cannot exceed `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES`, and its value plus a
+256-byte Human Task metadata reserve cannot exceed `RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES`.
+Raise the paired graph limit before raising a valid Human Task response limit; an incompatible
+combination refuses startup before the listener opens.
 
 A graph may narrow a configured response ceiling but cannot widen the server policy. The resolved
 response limit, raw-envelope decision-body cap, parser budgets, and write-retry budget are pinned
@@ -114,8 +122,11 @@ an earlier policy. Human Task retention remains part of durable execution-store 
 policy; there is no separate Human Task retention or outstanding-task quota.
 
 Response media-type identity, schema name/version, payload-envelope identity, deterministic task ID,
-and generation fencing are per-task wire or persistence contracts. They are deliberately not global
-operator settings because changing them would make existing clients or durable records ambiguous.
+and generation fencing are per-task wire or persistence contracts. Schema labels use the existing
+ASCII alphanumeric `PayloadEnvelope` token grammar plus `._-:+/` and its fixed 128-unit cap, so bytes
+and units are identical. The former larger policy maximum was never a usable wire label. These
+contracts are deliberately not global operator settings because changing them would make existing
+clients or durable records ambiguous.
 
 ## Identity and browser controls
 

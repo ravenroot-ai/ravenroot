@@ -34,7 +34,7 @@ humanTask:
   maxExpirySeconds: 2592000
   maxTitleBytes: 256
   maxDescriptionBytes: 4096
-  maxResponseSchemaBytes: 16384
+  maxResponseSchemaBytes: 128
   maxAuthorizationTokens: 16
   maxAuthorizationTokenBytes: 256
   maxDecisionBodyBytes: 262144

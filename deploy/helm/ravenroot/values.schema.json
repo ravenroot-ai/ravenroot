@@ -43,7 +43,7 @@
         "maxExpirySeconds": { "$ref": "#/definitions/positiveInt32" },
         "maxTitleBytes": { "$ref": "#/definitions/positiveInt64MiB" },
         "maxDescriptionBytes": { "$ref": "#/definitions/positiveInt64MiB" },
-        "maxResponseSchemaBytes": { "$ref": "#/definitions/positiveInt64MiB" },
+        "maxResponseSchemaBytes": { "$ref": "#/definitions/positive128" },
         "maxAuthorizationTokens": { "$ref": "#/definitions/positive256" },
         "maxAuthorizationTokenBytes": { "$ref": "#/definitions/positive4096" },
         "maxDecisionBodyBytes": { "$ref": "#/definitions/positiveInt64MiB" },
@@ -112,6 +112,12 @@
     "positive256": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 256 },
+        { "$ref": "#/definitions/blank" }
+      ]
+    },
+    "positive128": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 128 },
         { "$ref": "#/definitions/blank" }
       ]
     },

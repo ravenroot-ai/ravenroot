@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  edgePatchChanged,
   INSPECTOR_AUTOSAVE_STORAGE_KEY,
   nodePatchChanged,
   readInspectorAutosavePreference,
@@ -32,5 +33,22 @@ describe('nodePatchChanged', () => {
     })).toBe(false);
     expect(nodePatchChanged(node, { name: 'After' })).toBe(true);
     expect(nodePatchChanged(node, { properties: {} })).toBe(true);
+  });
+});
+
+describe('edgePatchChanged', () => {
+  const edge = {
+    source: 'start', target: 'end', outcome: 'continue', parallel: false,
+    properties: { retries: '2' }, propertyTypes: { retries: 'long' },
+  };
+
+  it('compares edge fields and whole-replacement typed property maps', () => {
+    expect(edgePatchChanged(edge, {
+      source: 'start', target: 'end', outcome: 'continue', parallel: false,
+      properties: { retries: '2' }, propertyTypes: { retries: 'long' },
+    })).toBe(false);
+    expect(edgePatchChanged(edge, { target: 'fallback' })).toBe(true);
+    expect(edgePatchChanged(edge, { properties: { retries: '3' } })).toBe(true);
+    expect(edgePatchChanged(edge, { propertyTypes: { retries: 'string' } })).toBe(true);
   });
 });

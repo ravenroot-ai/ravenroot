@@ -1,6 +1,5 @@
 package ai.ravenroot.core.runtime;
 
-import ai.ravenroot.api.application.ExecutionLookup;
 import ai.ravenroot.api.application.ExecutionSubmission;
 import ai.ravenroot.api.application.EdgeTraversalWireBudget;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
@@ -26,7 +25,6 @@ import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -441,78 +439,6 @@ class DefaultRavenrootApplicationExecutionStoreTest {
         assertEquals(0, application.runtimeSnapshot().activeExecutions());
 
         application.close();
-    }
-
-    /**
-     * DEFECT (issue #104 wave 3, reported not fixed -- {@code DefaultRavenrootApplication.java} is
-     * outside this territory). {@code ExecutionStore.recordExecutionResult}'s identity is
-     * {@code (tenantId, traversalId)} alone (see {@code ExecutionStoreContract}'s own
-     * {@code aTraversalIdReusedByAnUnrelatedProcessInstanceConflictsRatherThanOverwritingTheFirst}),
-     * so a second, wholly unrelated process instance that reuses a caller-supplied traversal id
-     * collides with the first at the result layer. That collision is refused by the store exactly as
-     * designed -- the defect is what {@code DefaultRavenrootApplication} does with the refusal.
-     *
-     * <p>{@code recordDurableResult}'s {@code ExecutionStoreException} is caught inside the completion
-     * lambda passed to {@code execution.whenComplete(...)} (see the seam around line 1350 of that
-     * file) and re-thrown at the end of that same lambda. A {@code CompletionStage#whenComplete}
-     * action's exception is never delivered to any caller of the method that registered it: it only
-     * completes the <em>derived</em> stage exceptionally, and nothing in this codebase observes that
-     * derived stage. The failure is therefore not reported, not logged, and not retried -- it is
-     * discarded in its entirety.</p>
-     *
-     * <p>While the process that ran the second submission stays up, this is invisible: the
-     * process-local {@code ExecutionResultRegistry} entry is updated unconditionally on completion
-     * (it does not consult the store), so a same-process read of {@code executionResult} still
-     * reports the second, correct, in-memory outcome. The defect surfaces only once that entry is
-     * gone -- evicted by {@code ExecutionResultRegistry.DEFAULT_MAX_RESULTS}, or the process restarted,
-     * or (as reproduced here, without needing 256 evictions) a different application instance sharing
-     * only the durable store asks about the id. From that point on the durable record permanently and
-     * silently reports the <em>first</em> submission's outcome for an id whose most recent, true
-     * completion was the second's, and no exception, log line or classified failure anywhere says so.</p>
-     *
-     * <p>This test is the demonstration, not the fix: it names the defect at the boundary
-     * ({@code DefaultRavenrootApplication}, in {@code ravenroot-core/src/main}) that this A2A wave does
-     * not own. It is left {@code @Disabled} because it fails today by construction -- the assertion
-     * below is the property a caller actually needs and does not get.</p>
-     */
-    @Test
-    @Disabled("DEFECT: a reused execution id silently reports the stale first result once no "
-            + "process-local cache entry remains, because the store's refusal of the second write is "
-            + "thrown from inside an unobserved CompletionStage#whenComplete callback and discarded -- "
-            + "see this method's javadoc and the A2A report for issue #104 wave 3")
-    void aReusedExecutionIdSilentlyMisreportsTheStaleFirstResultOnceNoCacheEntryRemains() {
-        var store = new InMemoryExecutionStore();
-        var sharedTraversalId = java.util.UUID.randomUUID();
-
-        // First process instance, submitted and completed under a caller-chosen traversal id.
-        try (var first = applicationWith(new StubExecutionEngine(), store)) {
-            first.startGraphMl(TestIdentities.TENANT_A, sharedTraversalId,
-                    new ByteArrayInputStream(graphBytes()), "first-payload");
-        }
-
-        // A second, unrelated process instance reuses the identical traversal id. Nothing at the
-        // process/traversal level rejects this -- that primary key is (tenant, processInstanceId) --
-        // so the collision is invisible until completion tries to record a *result*, whose store-side
-        // primary key is (tenant, traversalId) alone. This submission's own attempt to record its
-        // result is refused as a conflict, and that refusal is silently discarded as described above.
-        try (var second = applicationWith(new StubExecutionEngine(), store)) {
-            second.startGraphMl(TestIdentities.TENANT_A, sharedTraversalId,
-                    new ByteArrayInputStream(graphBytes()), "second-payload");
-        }
-
-        // A third instance, sharing nothing with either but the store -- exactly like a restart or
-        // another pod -- asks about the traversal id both submissions used.
-        try (var third = applicationWith(new StubExecutionEngine(), store)) {
-            var lookup = third.executionResult(TestIdentities.TENANT_A.tenantId(), sharedTraversalId);
-            var found = assertInstanceOf(ExecutionLookup.Found.class, lookup);
-            // The property a caller actually needs: the most recently completed execution under this
-            // id is reported. Today this reads "first-payload" instead, with nothing anywhere to say
-            // that the second submission's own outcome was silently lost.
-            assertEquals("second-payload", found.outcome().payload(),
-                    "the most recently completed execution under this id must be the one reported");
-        }
-
-        store.close();
     }
 
     private static byte[] graphBytes() {

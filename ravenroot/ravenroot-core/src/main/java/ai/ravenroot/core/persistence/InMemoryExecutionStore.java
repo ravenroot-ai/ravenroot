@@ -331,6 +331,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public int maxHumanTaskResponsePayloadBytes() {
+        return ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_ENCODED_BYTES;
+    }
+
+    @Override
     public Duration maxClockSkew() {
         return maxClockSkew;
     }
@@ -352,8 +357,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             // Decidable from the request alone, so it happens before the monitor is even entered.
             requireNoFencingTokenUnderNotPresent(batch);
             batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
-            batch.handlerTransitions().forEach(transition ->
-                    requireWithinPayloadLimit(transition.outcomePayload()));
+            batch.handlerTransitions().forEach(transition -> {
+                if (!isHumanTaskResolution(batch, transition)) {
+                    requireWithinPayloadLimit(transition.outcomePayload());
+                }
+            });
             batch.idempotency().ifPresent(write -> {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
@@ -436,6 +444,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                                 ? existing.retainedUntil : plusClamped(now, terminalRetention))
                         : null;
 
+                var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
+                        : new LinkedHashMap<>(existing.humanTasks);
                 var handlers = existing == null ? new LinkedHashMap<UUID, DurableHandler>()
                         : new LinkedHashMap<>(existing.handlers);
                 // Handler writes fold after the aggregate, because a registration may name an
@@ -443,7 +453,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // the same batch added. Both are validated against the POST-fold aggregate; folding
                 // them first would force a caller to split one atomic wait, or one atomic re-entry,
                 // across two batches and reopen exactly the crash window PERS-05 exists to close.
-                applyHandlerWrites(key, batch, folded, handlers, revision);
+                applyHandlerWrites(key, batch, folded, handlers, humanTasks, revision);
 
                 var approvals = existing == null ? new LinkedHashMap<UUID, DurableToolApproval>()
                         : new LinkedHashMap<>(existing.approvals);
@@ -471,8 +481,6 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
                     }
                 }
-                var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
-                        : new LinkedHashMap<>(existing.humanTasks);
                 applyHumanTaskWrites(key, batch, folded, pin, humanTasks, revision, now);
 
                 var executionPauses = existing == null
@@ -1880,9 +1888,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 continue;
             }
-            if (registration.responseSchema().maxBytes() > maxPayloadBytes()) {
+            if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
                 throw failure(new ExecutionStoreFailure.PayloadTooLarge(
-                        registration.responseSchema().maxBytes(), maxPayloadBytes()));
+                        registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
             }
             if (!now.isBefore(registration.expiresAt())) {
                 throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
@@ -2037,12 +2045,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * committed one only after {@link #apply(ExecutionBatch)} finishes validating.</p>
      */
     private void applyHandlerWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
-                                    Map<UUID, DurableHandler> handlers, long revision) {
+                                    Map<UUID, DurableHandler> handlers,
+                                    Map<UUID, DurableHumanTask> humanTasks, long revision) {
         for (HandlerRegistration registration : batch.handlersToRegister()) {
             registerHandler(key, folded, handlers, registration, revision);
         }
         for (HandlerTransition transition : batch.handlerTransitions()) {
-            transitionHandler(batch, folded, handlers, transition, revision);
+            transitionHandler(batch, folded, handlers, humanTasks, transition, revision);
         }
     }
 
@@ -2082,7 +2091,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private void transitionHandler(ExecutionBatch batch, ProcessInstance folded,
-                                   Map<UUID, DurableHandler> handlers, HandlerTransition transition,
+                                   Map<UUID, DurableHandler> handlers,
+                                   Map<UUID, DurableHumanTask> humanTasks, HandlerTransition transition,
                                    long revision) {
         DurableHandler current = handlers.get(transition.handlerId());
         if (current == null) {
@@ -2099,6 +2109,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
                     current.status(), transition.next()));
         }
+        requireHandlerOutcomeWithinLimit(batch, humanTasks, transition);
         if (transition.next().resumesProcess()) {
             requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
                     "handler " + current.handlerId() + " resume");
@@ -2334,6 +2345,30 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         if (payload.size() > maxPayloadBytes) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), maxPayloadBytes));
         }
+    }
+
+    private void requireHandlerOutcomeWithinLimit(ExecutionBatch batch,
+                                                  Map<UUID, DurableHumanTask> humanTasks,
+                                                  HandlerTransition transition) {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= maxPayloadBytes) return;
+        DurableHumanTask task = isHumanTaskResolution(batch, transition)
+                ? humanTasks.get(transition.handlerId()) : null;
+        if (task == null) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) return false;
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
     }
 
     // ---------------------------------------------------------------- event journal and outbox

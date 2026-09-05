@@ -520,6 +520,20 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
+     * Stable adapter capacity for a durable Human Task response.
+     *
+     * <p>This is separate from {@link #maxPayloadBytes()} because a Human Task pins its response
+     * contract when it is registered. An adapter may keep a smaller general execution-payload
+     * budget, but this capacity must cover both newly accepted policy values and every older pinned
+     * task it can reopen.</p>
+     *
+     * @return positive encoded-response byte capacity.
+     */
+    default int maxHumanTaskResponsePayloadBytes() {
+        return maxPayloadBytes();
+    }
+
+    /**
      * Reads a task by opaque identity without exposing another tenant's task.
      *
      * @param tenantId authenticated tenant boundary.

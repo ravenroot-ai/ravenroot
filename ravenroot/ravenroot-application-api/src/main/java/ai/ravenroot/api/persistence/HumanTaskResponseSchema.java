@@ -16,8 +16,11 @@ import java.util.Objects;
  */
 public record HumanTaskResponseSchema(String contentType, String schema, String schemaVersion,
                                       PayloadKind kind, int maxBytes) {
-    /** Technical schema ceiling; the operator policy normally supplies a smaller maximum. */
-    public static final int MAX_SCHEMA_UTF8_BYTES = HumanTaskPolicy.HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES;
+    /**
+     * Historical model ceiling retained so adapters can still deserialize and terminate old tasks
+     * whose schema was admitted before the payload-label invariant became an authoring check.
+     */
+    public static final int MAX_SCHEMA_UTF8_BYTES = ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_TEXT_LENGTH;
 
     /** Validates the bounded response contract. */
     public HumanTaskResponseSchema {

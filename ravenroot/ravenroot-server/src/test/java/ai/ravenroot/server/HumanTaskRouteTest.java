@@ -18,10 +18,13 @@ import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.OpaquePayload;
+import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.security.AuthorizationAction;
 import ai.ravenroot.api.security.PrincipalType;
@@ -63,6 +66,7 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class HumanTaskRouteTest {
@@ -127,33 +131,71 @@ class HumanTaskRouteTest {
     }
 
     @Test
-    void authorizedLookupUsesThePersistedBodyParserAndRetryPolicyAcrossStricterAndLooserReopens() {
+    void aResponseAboveTheGenericStoreLimitSettlesAndReopensUnderPinnedStricterAndLooserPolicies() {
         Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
         Path database = directory.resolve("human-task-pinned-policy.db");
-        HumanTaskPolicy policyA = policy(600_000, 700_000, 77, 5);
+        HumanTaskPolicy policyA = policy(1_500_000, 1_700_000, 77, 5, 1_200_000);
+        HumanTaskPolicy stricter = policy(500_000, 600_000, 10, 1, 100_000);
+        HumanTaskPolicy looser = policy(3_000_000, 3_200_000, 120, 9, 2_000_000);
         UUID taskId;
         try (var store = new SqliteExecutionStore(database, clock, policyA)) {
-            taskId = request(store, clock, policyA, 500_000).taskId();
+            taskId = request(store, clock, policyA, 1_500_000).taskId();
         }
         RequestContext approver = new RequestContext("request", "approver", PrincipalType.USER,
                 "urn:ravenroot:test", "tenant-a", Set.of(Role.APPROVER), Set.of());
         RequestContext unauthorized = new RequestContext("request", "viewer", PrincipalType.USER,
                 "urn:ravenroot:test", "tenant-a", Set.of(), Set.of());
-        for (HumanTaskPolicy restarted : List.of(
-                policy(200_000, 250_000, 10, 1), policy(900_000, 1_000_000, 120, 9))) {
-            try (var reopened = new SqliteExecutionStore(database, clock, restarted)) {
-                var service = new HumanTaskService(reopened, clock, restarted);
-                var task = reopened.loadHumanTask("tenant-a", taskId).toCompletableFuture().join()
-                        .orElseThrow();
-                assertEquals(700_000, service.authorizedResponseBodyLimit(approver, taskId).orElseThrow());
-                assertTrue(service.authorizedResponseBodyLimit(unauthorized, taskId).isEmpty());
-                assertTrue(service.authorizedResponseBodyLimit(new RequestContext("request", "approver",
-                        PrincipalType.USER, "urn:ravenroot:test", "other", Set.of(Role.APPROVER),
-                        Set.of()), taskId).isEmpty());
-                assertEquals(77, task.request().executionLimits().responsePayload().maxDepth());
-                assertEquals(5, task.request().executionLimits().writeAttempts());
-                assertEquals(500_000, task.request().responseSchema().maxBytes());
-            }
+        byte[] largeEnvelope = PayloadEnvelope.of("release.decision", "1",
+                PayloadValue.map(Map.of("decision", PayloadValue.of("x".repeat(1_100_000)))))
+                .toJson().getBytes(StandardCharsets.UTF_8);
+        assertTrue(largeEnvelope.length > 1_048_576, "fixture must cross the generic store ceiling");
+
+        try (var reopened = new SqliteExecutionStore(database, clock, stricter)) {
+            var service = new HumanTaskService(reopened, clock, stricter);
+            var oldTask = reopened.loadHumanTask("tenant-a", taskId).toCompletableFuture().join()
+                    .orElseThrow();
+            assertEquals(1_700_000, service.authorizedResponseBodyLimit(approver, taskId).orElseThrow());
+            assertTrue(service.authorizedResponseBodyLimit(unauthorized, taskId).isEmpty());
+            assertTrue(service.authorizedResponseBodyLimit(new RequestContext("request", "approver",
+                    PrincipalType.USER, "urn:ravenroot:test", "other", Set.of(Role.APPROVER),
+                    Set.of()), taskId).isEmpty());
+            assertEquals(77, oldTask.request().executionLimits().responsePayload().maxDepth());
+            assertEquals(5, oldTask.request().executionLimits().writeAttempts());
+            assertEquals(1_500_000, oldTask.request().responseSchema().maxBytes());
+
+            assertEquals(HumanTaskResult.Code.RESOLVED,
+                    service.resolve(approver, taskId, 1,
+                            OpaquePayload.of(largeEnvelope, CONTENT_TYPE)).code());
+            DurableHandler stored = reopened.loadHandler(oldTask.key(), taskId)
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals(largeEnvelope.length, stored.outcomePayload().size());
+
+            Fixture newTask = request(reopened, clock, stricter, 400_000);
+            assertEquals(400_000, reopened.loadHumanTask("tenant-a", newTask.taskId())
+                    .toCompletableFuture().join().orElseThrow().request()
+                    .executionLimits().responsePayload().maxEncodedBytes());
+        }
+
+        try (var reopened = new SqliteExecutionStore(database, clock, looser)) {
+            var task = reopened.loadHumanTask("tenant-a", taskId).toCompletableFuture().join()
+                    .orElseThrow();
+            assertEquals(1_500_000,
+                    task.request().executionLimits().responsePayload().maxEncodedBytes(),
+                    "a looser restart must not widen the old task");
+            DurableHandler stored = reopened.loadHandler(task.key(), taskId)
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals(largeEnvelope.length, stored.outcomePayload().size(),
+                    "the complete response must survive durable handler reads");
+            PendingWork.HandlerTrigger trigger = assertInstanceOf(PendingWork.HandlerTrigger.class,
+                    reopened.claimPendingWork("tenant-a", "recovery", 20, Duration.ofSeconds(30))
+                            .toCompletableFuture().join().stream()
+                            .filter(item -> item.workItemId().equals(taskId)).findFirst().orElseThrow());
+            assertEquals(largeEnvelope.length, trigger.payload().size());
+            assertEquals("x".repeat(1_100_000),
+                    ((Map<?, ?>) ai.ravenroot.api.payload.PayloadJson.readEnvelope(
+                            trigger.payload().bytes(), task.request().executionLimits().responsePayload())
+                            .toJava()).get("decision"),
+                    "recovery must decode the response with the task's pinned parser budget");
         }
     }
 
@@ -227,6 +269,12 @@ class HumanTaskRouteTest {
 
     private static HumanTaskPolicy policy(int maxResponse, int decisionBody, int depth,
                                           int writeAttempts) {
+        return policy(maxResponse, decisionBody, depth, writeAttempts,
+                HumanTaskPolicy.DEFAULTS.responseMaxTextLength());
+    }
+
+    private static HumanTaskPolicy policy(int maxResponse, int decisionBody, int depth,
+                                          int writeAttempts, int maxTextLength) {
         HumanTaskPolicy d = HumanTaskPolicy.DEFAULTS;
         return new HumanTaskPolicy(Math.min(d.defaultResponseBytes(), maxResponse), maxResponse,
                 d.defaultEscalationSeconds(), d.maxEscalationSeconds(), d.defaultExpirySeconds(),
@@ -234,7 +282,7 @@ class HumanTaskRouteTest {
                 d.maxResponseSchemaUtf8Bytes(), d.maxAuthorizationTokens(),
                 d.maxAuthorizationTokenUtf8Bytes(), decisionBody, d.inboxDefaultPageSize(),
                 Math.max(250, d.inboxMaxPageSize()), depth, d.responseMaxCollectionSize(),
-                d.responseMaxValueCount(), d.responseMaxTextLength(), d.responseMaxKeyLength(),
+                d.responseMaxValueCount(), maxTextLength, d.responseMaxKeyLength(),
                 writeAttempts);
     }
 

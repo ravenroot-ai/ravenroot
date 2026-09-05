@@ -144,6 +144,9 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
         String responseSchema = bounded(NodeProperties.string(node, "responseSchema",
                 "ravenroot.human-task.response"), "responseSchema",
                 policy.maxResponseSchemaUtf8Bytes(), false, node);
+        if (!ai.ravenroot.api.payload.PayloadEnvelope.isValidLabel(responseSchema)) {
+            throw invalid(node, "responseSchema", "must be a valid payload schema label");
+        }
         return new HumanTaskDefinition(new HumanTaskMetadata(title, description),
                 new HumanTaskResponseSchema(NodeProperties.string(node, "responseContentType",
                         RESPONSE_CONTENT_TYPE), responseSchema, NodeProperties.string(node,

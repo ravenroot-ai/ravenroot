@@ -1178,6 +1178,16 @@ public final class GraphRunner implements AutoCloseable {
                                                        UUID traversalId, String nodeId, String graphVersion,
                                                        ExecutionRecorder recorder, NodeResult result,
                                                        GraphExecutionBudgetSnapshot budgetSnapshot) {
+        return executeAfterHumanTask(security, processInstanceId, traversalId, nodeId, graphVersion,
+                recorder, result, budgetSnapshot, null);
+    }
+
+    /** Restores a Human Task with its pinned response budget and current graph traversal budget. */
+    public CompletionStage<Void> executeAfterHumanTask(SecurityContext security, UUID processInstanceId,
+                                                       UUID traversalId, String nodeId, String graphVersion,
+                                                       ExecutionRecorder recorder, NodeResult result,
+                                                       GraphExecutionBudgetSnapshot budgetSnapshot,
+                                                       ai.ravenroot.api.payload.PayloadLimits responseLimits) {
         java.util.Objects.requireNonNull(result, "result");
         GraphNode node = graph.node(nodeId);
         var identity = new ExecutionMonitor.ExecutionIdentity(security, engine.id(), graphVersion,
@@ -1218,7 +1228,9 @@ public final class GraphRunner implements AutoCloseable {
             next = graph.nextEdges(node.id(), "continue");
         }
         resumedHop.close();
-        return dispatchSuccessors(next, node, result, measure(result), delivered, completedEventId,
+        long deliveredBytes = responseLimits == null ? measure(result)
+                : measureHumanTaskResult(result, responseLimits);
+        return dispatchSuccessors(next, node, result, deliveredBytes, delivered, completedEventId,
                 state, identity, coordinator, IterationContext.EMPTY)
                 .handle((ignored, failure) -> {
                     Throwable outcome = unwrap(failure);
@@ -3284,6 +3296,24 @@ public final class GraphRunner implements AutoCloseable {
     private long measureDelivery(Object payload, Map<String, Object> attributes) {
         try {
             return Math.addExact(measure(payload), measure(attributes));
+        } catch (ArithmeticException overflow) {
+            throw new GraphExecutionLimitException(GraphExecutionLimitException.Reason.PAYLOAD_BYTES,
+                    Long.MAX_VALUE, executionLimits.maxCumulativePayloadBytes());
+        }
+    }
+
+    private long measureHumanTaskResult(NodeResult result,
+                                        ai.ravenroot.api.payload.PayloadLimits responseLimits) {
+        if (!(result.payload() instanceof Map<?, ?> body) || !body.containsKey("response")) {
+            return measure(result);
+        }
+        var metadata = new LinkedHashMap<Object, Object>(body);
+        Object response = metadata.remove("response");
+        try {
+            long responseBytes = responseLimits.enforceAndMeasure(response);
+            long metadataBytes = executionLimits.payload().enforceAndMeasure(metadata);
+            long attributesBytes = executionLimits.payload().enforceAndMeasure(result.attributes());
+            return Math.addExact(responseBytes, Math.addExact(metadataBytes, attributesBytes));
         } catch (ArithmeticException overflow) {
             throw new GraphExecutionLimitException(GraphExecutionLimitException.Reason.PAYLOAD_BYTES,
                     Long.MAX_VALUE, executionLimits.maxCumulativePayloadBytes());

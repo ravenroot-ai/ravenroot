@@ -1,6 +1,7 @@
 package ai.ravenroot.server;
 
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
+import ai.ravenroot.core.runtime.GraphExecutionLimits;
 
 import java.util.Map;
 import java.util.Objects;
@@ -92,6 +93,26 @@ public final class HumanTaskConfiguration {
                         defaults.writeAttempts()));
         } catch (IllegalArgumentException invalid) {
             throw attributed(invalid);
+        }
+    }
+
+    /** Rejects a Human Task response contract that the active graph traversal cannot carry. */
+    static void requireCompatible(HumanTaskPolicy policy, GraphExecutionLimits graph) {
+        Objects.requireNonNull(policy, "policy");
+        Objects.requireNonNull(graph, "graph");
+        if (policy.maxResponseBytes() > graph.payload().maxEncodedBytes()) {
+            throw new IllegalArgumentException("ravenroot.human-task.max-response-bytes / "
+                    + "RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES cannot exceed "
+                    + "RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES");
+        }
+        // The response's complete wire envelope is no larger than maxResponseBytes. Re-entry replaces
+        // fixed envelope members with bounded task metadata, which is charged separately, so reserve
+        // a conservative 256 bytes in the traversal-wide byte budget without widening graph payloads.
+        long requiredCumulative = (long) policy.maxResponseBytes() + 256L;
+        if (requiredCumulative > graph.maxCumulativePayloadBytes()) {
+            throw new IllegalArgumentException("ravenroot.human-task.max-response-bytes / "
+                    + "RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES is incompatible with "
+                    + "RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES");
         }
     }
 

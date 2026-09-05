@@ -19,6 +19,7 @@ import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
@@ -40,6 +41,8 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Proxy;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -217,6 +220,59 @@ class HumanTaskServiceTest {
             IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
                     () -> new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC)));
             assertTrue(failure.getMessage().contains("durable human tasks"));
+        }
+    }
+
+    @Test
+    void compositionRejectsAnIncompatibleHumanTaskResponseCapacityBeforeServing() throws Exception {
+        try (var sqlite = sqlite("incompatible-response-capacity", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            ExecutionStore incompatible = (ExecutionStore) Proxy.newProxyInstance(
+                    ExecutionStore.class.getClassLoader(), new Class<?>[]{ExecutionStore.class},
+                    (proxy, method, arguments) -> {
+                        if (method.getName().equals("maxHumanTaskResponsePayloadBytes")) {
+                            return HumanTaskPolicy.DEFAULTS.maxResponseBytes() - 1;
+                        }
+                        try {
+                            return method.invoke(sqlite, arguments);
+                        } catch (InvocationTargetException wrapped) {
+                            throw wrapped.getCause();
+                        }
+                    });
+
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> new HumanTaskService(incompatible, Clock.fixed(NOW, ZoneOffset.UTC),
+                            HumanTaskPolicy.DEFAULTS));
+            assertEquals("human-task response policy exceeds the durable store capacity",
+                    failure.getMessage());
+            assertFalse(failure.getMessage().contains(directory.toString()));
+        }
+    }
+
+    @Test
+    void legacyOversizedSchemaStillLoadsAndCanBeCancelledAfterReopen() throws Exception {
+        Path database = directory.resolve("legacy-schema.db");
+        UUID taskId;
+        try (var store = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var legacy = new HumanTaskDefinition(
+                    new HumanTaskMetadata("Review release", "Legacy persisted request."),
+                    new HumanTaskResponseSchema(CONTENT_TYPE, "s".repeat(129), "1",
+                            PayloadKind.MAP, 4096),
+                    HandlerAuthorization.ofRoles(Role.APPROVER.name()), Optional.empty(),
+                    Duration.ofHours(1),
+                    new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1); var binding = service.bindLive(fixture.key, recorder)) {
+                taskId = service.suspend(fixture.message(), legacy).task().request().taskId();
+            }
+        }
+        try (var reopened = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(reopened, Clock.fixed(NOW, ZoneOffset.UTC));
+            assertEquals(129, reopened.loadHumanTask(TENANT, taskId).toCompletableFuture().join()
+                    .orElseThrow().request().responseSchema().schema().length());
+            assertEquals(HumanTaskResult.Code.CANCELLED,
+                    service.cancel(requester(), taskId, 1).code());
         }
     }
 

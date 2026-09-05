@@ -63,6 +63,7 @@ import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
+import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -333,6 +334,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public int maxHumanTaskResponsePayloadBytes() {
+        // Rows accepted by older configurations must remain resolvable after restart. The adapter
+        // therefore publishes the stable structured-payload ceiling rather than today's general
+        // execution-payload setting or the current Human Task policy.
+        return PayloadLimits.HARD_MAX_ENCODED_BYTES;
+    }
+
+    @Override
     public Duration maxClockSkew() {
         return config.maxClockSkew();
     }
@@ -360,8 +369,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
             });
-            batch.handlerTransitions().forEach(transition ->
-                    requireWithinPayloadLimit(transition.outcomePayload()));
+            batch.handlerTransitions().forEach(transition -> {
+                if (!isHumanTaskResolution(batch, transition)) {
+                    requireWithinPayloadLimit(transition.outcomePayload());
+                }
+            });
             batch.toolApprovalsToRegister().forEach(registration -> {
                 requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(),
                         "application/json"));
@@ -2795,6 +2807,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
                     current.status(), transition.next()));
         }
+        requireHandlerOutcomeWithinLimit(key, batch, transition);
         if (transition.next().resumesProcess()) {
             requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
                     "handler " + current.handlerId() + " resume");
@@ -3648,9 +3661,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 }
                 continue;
             }
-            if (registration.responseSchema().maxBytes() > maxPayloadBytes()) {
+            if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
                 throw failure(new ExecutionStoreFailure.PayloadTooLarge(
-                        registration.responseSchema().maxBytes(), maxPayloadBytes()));
+                        registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
             }
             if (!now.isBefore(registration.expiresAt())) {
                 throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
@@ -4039,6 +4052,32 @@ public final class SqliteExecutionStore implements ExecutionStore {
         if (payload.size() > config.maxPayloadBytes()) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), config.maxPayloadBytes()));
         }
+    }
+
+    private void requireHandlerOutcomeWithinLimit(ExecutionKey key, ExecutionBatch batch,
+                                                  HandlerTransition transition) throws SQLException {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= config.maxPayloadBytes()) return;
+        if (!isHumanTaskResolution(batch, transition)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        DurableHumanTask task = readHumanTask(key.tenantId(), transition.handlerId());
+        if (task == null || !task.key().equals(key)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) return false;
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
     }
 
     private void requireLeaseTtl(Duration ttl) {

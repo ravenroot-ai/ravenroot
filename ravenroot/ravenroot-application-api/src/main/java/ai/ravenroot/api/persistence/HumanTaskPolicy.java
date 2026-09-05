@@ -35,19 +35,26 @@ public record HumanTaskPolicy(
     public static final long HARD_MAX_DELAY_SECONDS = Integer.MAX_VALUE;
     public static final int HARD_MAX_TITLE_UTF8_BYTES = PayloadLimits.HARD_MAX_TEXT_LENGTH;
     public static final int HARD_MAX_DESCRIPTION_UTF8_BYTES = PayloadLimits.HARD_MAX_TEXT_LENGTH;
-    public static final int HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES = PayloadLimits.HARD_MAX_TEXT_LENGTH;
-    public static final int HARD_MAX_AUTHORIZATION_TOKENS = PayloadLimits.HARD_MAX_COLLECTION_SIZE;
+    /** Existing ASCII schema-label wire invariant; bytes and UTF-16 units are equal for its grammar. */
+    public static final int HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES =
+            ai.ravenroot.api.payload.PayloadEnvelope.MAX_LABEL_LENGTH;
+    /**
+     * Each role and scope axis may contain this many tokens. Together with the 4 KiB per-token
+     * ceiling this bounds the two persisted authorization sets to 2 MiB of raw token text before
+     * collection and encoding overhead, while leaving sixteen times the historical default.
+     */
+    public static final int HARD_MAX_AUTHORIZATION_TOKENS = 256;
     public static final int HARD_MAX_AUTHORIZATION_TOKEN_UTF8_BYTES = PayloadLimits.HARD_MAX_KEY_LENGTH;
-    /** Leaves one integer for the adapter's look-ahead row without overflow. */
-    public static final int HARD_MAX_INBOX_PAGE_SIZE = Integer.MAX_VALUE - 1;
-    /** Leaves one integer for loop increment without wrapping into an unbounded retry. */
-    public static final int HARD_MAX_WRITE_ATTEMPTS = Integer.MAX_VALUE - 1;
+    /** Bounds the rows and full task projections materialized for one inbox request. */
+    public static final int HARD_MAX_INBOX_PAGE_SIZE = 1_000;
+    /** Bounds synchronous load-and-apply work performed by one conflict-path settlement request. */
+    public static final int HARD_MAX_WRITE_ATTEMPTS = 32;
 
     public static final HumanTaskPolicy DEFAULTS = new HumanTaskPolicy(
             64 * 1_024, 256 * 1_024,
             0, Duration.ofDays(30).toSeconds() - 1,
             Duration.ofDays(7).toSeconds(), Duration.ofDays(30).toSeconds(),
-            256, 4 * 1_024, 16 * 1_024,
+            256, 4 * 1_024, HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES,
             16, HandlerRegistration.MAX_KEY_UTF8_BYTES,
             256 * 1_024, 50, 100,
             32, 1_024, 4_096, 16 * 1_024, 256, 3);

@@ -79,6 +79,13 @@ public final class HumanTaskService {
             throw new IllegalArgumentException(
                     "human-task requires durable human tasks, handlers, timers, and journal support");
         }
+        if (store.maxHumanTaskResponsePayloadBytes() < policy.maxResponseBytes()) {
+            // This constructor runs in the composition root before the HTTP listener exists. Keep
+            // the diagnostic independent of adapter details and paths: operators need to know which
+            // contract is incompatible, while raw persistence diagnostics belong below this layer.
+            throw new IllegalArgumentException(
+                    "human-task response policy exceeds the durable store capacity");
+        }
     }
 
     public AutoCloseable bindLive(ExecutionKey key, ExecutionRecorder recorder) {

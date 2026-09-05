@@ -57,7 +57,28 @@ public record PayloadEnvelope(String contract, String schema, String schemaVersi
 
     public static final String DEFAULT_SCHEMA_VERSION = "1";
 
-    private static final int MAX_LABEL_LENGTH = 128;
+    /**
+     * Protocol bound for schema and schema-version labels.
+     *
+     * <p>Labels are deliberately small grammar-restricted identifiers because they reach audit and
+     * rendering contexts. This is a wire invariant rather than an operator allocation policy.</p>
+     */
+    public static final int MAX_LABEL_LENGTH = 128;
+
+    /** Returns whether a value is a non-blank label accepted by this wire contract. */
+    public static boolean isValidLabel(String value) {
+        if (value == null || value.isBlank() || value.length() > MAX_LABEL_LENGTH) return false;
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            boolean allowed = (character >= 'a' && character <= 'z')
+                    || (character >= 'A' && character <= 'Z')
+                    || (character >= '0' && character <= '9')
+                    || character == '.' || character == '_' || character == '-'
+                    || character == ':' || character == '+' || character == '/';
+            if (!allowed) return false;
+        }
+        return true;
+    }
 
 /**
  * Validates representation compatibility, label grammar and the declared structural shape.
@@ -201,17 +222,7 @@ public record PayloadEnvelope(String contract, String schema, String schemaVersi
         if (value.length() > MAX_LABEL_LENGTH) {
             throw PayloadRejection.keyTooLong(MAX_LABEL_LENGTH);
         }
-        for (int index = 0; index < value.length(); index++) {
-            char character = value.charAt(index);
-            boolean allowed = (character >= 'a' && character <= 'z')
-                    || (character >= 'A' && character <= 'Z')
-                    || (character >= '0' && character <= '9')
-                    || character == '.' || character == '_' || character == '-'
-                    || character == ':' || character == '+' || character == '/';
-            if (!allowed) {
-                throw PayloadRejection.unsupportedType();
-            }
-        }
+        if (!isValidLabel(value)) throw PayloadRejection.unsupportedType();
         return value;
     }
 }

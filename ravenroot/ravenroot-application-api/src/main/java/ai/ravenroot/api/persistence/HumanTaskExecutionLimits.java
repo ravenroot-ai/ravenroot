@@ -29,8 +29,9 @@ public record HumanTaskExecutionLimits(PayloadLimits responsePayload, int decisi
                 || decisionBodyMaxBytes > PayloadLimits.HARD_MAX_ENCODED_BYTES) {
             throw new IllegalArgumentException("decisionBodyMaxBytes must cover the response payload");
         }
-        if (writeAttempts < 1) {
-            throw new IllegalArgumentException("writeAttempts must be positive");
+        if (writeAttempts < 1 || writeAttempts > HumanTaskPolicy.HARD_MAX_WRITE_ATTEMPTS) {
+            throw new IllegalArgumentException("writeAttempts must be between 1 and "
+                    + HumanTaskPolicy.HARD_MAX_WRITE_ATTEMPTS);
         }
     }
 

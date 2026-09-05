@@ -85,6 +85,7 @@ public final class RavenrootServerMain {
         var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits
                 .fromEnvironment(System.getenv());
         var humanTaskPolicy = HumanTaskConfiguration.fromSystem(System.getProperties(), System.getenv());
+        HumanTaskConfiguration.requireCompatible(humanTaskPolicy, graphExecutionLimits);
         // This lease is the offline-maintenance authority shared with backup/restore. It is
         // acquired before the audit trail is opened and retained until both stores are closed.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration

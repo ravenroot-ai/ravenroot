@@ -1,5 +1,6 @@
 package ai.ravenroot.server.persistence;
 
+import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.persistence.sqlite.SqliteStoreLocation;
 import ai.ravenroot.persistence.sqlite.SqliteStoreMaintenanceLock;
 import org.junit.jupiter.api.Test;
@@ -30,6 +31,20 @@ class ExecutionStoreBootstrapTest {
                 new ExecutionStoreConfiguration(true, location), Clock.systemUTC())) {
             assertTrue(Files.isRegularFile(location.databaseFile()));
             assertTrue(opened.store().capabilities().contains(ai.ravenroot.api.persistence.StoreCapability.DURABLE));
+        }
+    }
+
+    @Test
+    void graphDefinitionStoreUsesTheExactCompositionRootBudget() {
+        var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("bounded-store"));
+        var defaults = GraphMlLimits.DEFAULTS;
+        var narrow = new GraphMlLimits(4_096, defaults.maxNodes(), defaults.maxEdges(),
+                defaults.maxProperties(), defaults.maxDepth(), defaults.maxStringLength(), defaults.maxKeys(),
+                defaults.maxElements(), defaults.maxAttributes(), defaults.maxNamespaceDeclarations());
+
+        try (var opened = ExecutionStoreBootstrap.openOwned(
+                new ExecutionStoreConfiguration(true, location), Clock.systemUTC(), narrow)) {
+            assertEquals(4_096, opened.graphDefinitionStore().maxDefinitionBytes());
         }
     }
 

@@ -20,7 +20,7 @@ Values outside the supported ceilings refuse startup instead of silently expandi
 
 | Variable | Default | Supported maximum | What it bounds |
 |---|---:|---:|---|
-| `RAVENROOT_GRAPHML_MAX_BYTES` | 10 MiB | 256 MiB | imported GraphML bytes |
+| `RAVENROOT_GRAPHML_MAX_BYTES` | 10 MiB | 256 MiB | one graph-document budget across the served UI, HTTP ingress, core admission and recovery, structured submissions, and durable canonical definitions |
 | `RAVENROOT_GRAPH_MAX_NODES` | 10,000 | 1,000,000 | nodes admitted |
 | `RAVENROOT_GRAPH_MAX_EDGES` | 25,000 | 5,000,000 | edges admitted |
 | `RAVENROOT_GRAPH_MAX_PROPERTIES` | 100,000 | 10,000,000 | graph, node, and edge properties |
@@ -42,6 +42,20 @@ a retry atomically reserves one step, its non-root delivery, and its exact paylo
 before the retry is recorded or sent. Tool-approval, human-task, and durable-pause checkpoints carry
 the exact counters across restart, and malformed, unknown, or legacy checkpoints without a safe budget
 state refuse re-entry instead of resetting it. Recovery redelivery has its own persisted counter.
+
+`RAVENROOT_GRAPHML_MAX_BYTES` is an integer number of bytes: the default 10 MiB is `10485760`, and
+the hard 256 MiB ceiling is `268435456`. A document of exactly the configured size is accepted by the
+byte boundary; one additional byte is refused before the whole request is buffered. The server
+publishes the resolved value to its authenticated, same-service-origin workspace as typed
+`GET /v1/configuration` JSON. The browser applies that value before reading GraphML or a Graphify JSON
+document, while HTTP, core parsing, restart recovery, and new durable definition writes enforce the
+same budget independently. Graphify JSON remains a view-only import and does not become executable or
+durable graph content. Existing durable definitions remain readable after an operator lowers the
+limit, but recovery refuses to execute one that now exceeds the configured budget.
+
+Blank or absent values use the default. Zero, negative, malformed, and over-ceiling values refuse
+startup; they never silently widen or disable the limit. Compose passes the host value through to the
+same composition root.
 
 A refusal exposes a closed code such as `GRAPH_LIMIT_FAN_OUT_EXCEEDED` or
 `GRAPH_LIMIT_TRAVERSAL_STEPS_EXCEEDED`, never graph content or payload values.

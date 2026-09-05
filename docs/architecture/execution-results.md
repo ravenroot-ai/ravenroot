@@ -25,7 +25,7 @@ Because a payload's absence is now four distinguishable facts instead of one nul
 
 ## Related reading
 
-- [Decision record](../../adr/0036-durable-execution-results.md)
+- [Decision record](../../adr/0037-durable-execution-results.md)
 - [Durability, events, and recovery](durability-events.md)
 - [Durable process inventory](process-inventory.md)
 - [Persistence, lifecycle, and recovery](../operator-guide/persistence-lifecycle.md)

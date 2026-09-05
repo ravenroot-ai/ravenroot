@@ -189,7 +189,7 @@ A held traversal reads as `WAITING`, like any other durable wait, and is therefo
 - [Durable execution results](../architecture/execution-results.md)
 - [Decision record](../../adr/0031-durable-canonical-graph-definitions.md)
 - [Cancellation decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)
-- [Execution results decision record](../../adr/0036-durable-execution-results.md)
+- [Execution results decision record](../../adr/0037-durable-execution-results.md)
 - [Runbook](../troubleshooting/embed-backup.md)
 - [Bundle format and commands](../reference/backup-recovery.md)
 - [HTTP API and CLI](../reference/api-cli.md)

@@ -165,6 +165,22 @@
         }
       }
     },
+    "/v1/configuration": {
+      "get": {
+        "summary": "Typed operator-owned limits for the connected authoring client.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "responses": {
+          "200": {"description": "success"},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"}
+        }
+      }
+    },
     "/v1/credentials": {
       "get": {
         "summary": "GET answers {credentials}, each carrying reference, label, scheme, username and createdAt -- ONLY those belonging to the authenticated caller, and never a value in any form, masked or otherwise. POST stores one value and answers the same shape. The reference is minted by the server: a body proposing one is refused rather than ignored. A graph submitted to /v1/executions naming a stored credential the submitter does not own is refused with access denied.",

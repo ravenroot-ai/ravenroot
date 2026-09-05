@@ -2,6 +2,10 @@ import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
+import { isLayeredMode } from './layered-drawing.js';
+import {
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
+} from './layered-layout.js';
 import * as d3 from 'd3';
 import {
   detectAndParse,
@@ -689,6 +693,8 @@ let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
 let runtimeDisconnect = null;
+let runtimeConfigurationRequest = null;
+let runtimeConfiguration = null;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_BATCH_LIMIT = 256;
@@ -1680,6 +1686,7 @@ window.ravenroot = {
   resetWorkspaceLayout,
   workspaceLayout: () => ({ ...workspaceLayout, plan: workspacePlan }),
   minimapSnapshot: () => minimapLastSnapshot ? JSON.parse(JSON.stringify(minimapLastSnapshot)) : null,
+  graphDocumentByteLimit: currentGraphDocumentByteLimit,
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
 };
@@ -2427,8 +2434,10 @@ function requestReplaceActiveDocument(graph, name, origin = document.activeEleme
 
 // The File command reads a file and hands its text here. Parsing is deliberately complete
 // before a dirty prompt or record mutation, so a malformed replacement is a true no-op.
-function replaceActiveDocumentFromText(text, name, origin = document.activeElement) {
-  const graph = parsePreparedGraph(text, name);
+function replaceActiveDocumentFromText(
+  text, name, origin = document.activeElement, maxBytes = currentGraphDocumentByteLimit(),
+) {
+  const graph = parsePreparedGraph(text, name, { maxBytes });
   return requestReplaceActiveDocument(graph, name, origin);
 }
 
@@ -2779,6 +2788,7 @@ function initCy(elements, gd, options = {}) {
   }
   if (typeof cytoscapeElk !== 'undefined') {
     try { cytoscape.use(cytoscapeElk); } catch(e) { /* already registered */ }
+    try { registerLayeredLayout(cytoscape); } catch(e) { /* already registered */ }
   }
   if (typeof cytoscapeEuler !== 'undefined') {
     try { cytoscape.use(cytoscapeEuler); } catch(e) { /* already registered */ }
@@ -3071,6 +3081,18 @@ function initCy(elements, gd, options = {}) {
         owner.cytoEdgeGeometryRaf = null;
         if (owner.cy !== event.cy || owner.layoutMode !== 'hierarchical') return;
         applyHierarchicalEdgeRoutes(owner.cy);
+      });
+      return;
+    }
+    if (isLayeredMode(owner.layoutMode)) {
+      // The animated arrangement itself publishes its routes once, after `layoutstop`; only a
+      // later manual move needs edges repainted, and then only the moved node's edges leave the
+      // drawing while every other route stays exactly as drawn.
+      if (owner.layoutBusy || owner.cytoEdgeGeometryRaf != null) return;
+      owner.cytoEdgeGeometryRaf = requestAnimationFrame(() => {
+        owner.cytoEdgeGeometryRaf = null;
+        if (owner.cy !== event.cy || !isLayeredMode(owner.layoutMode)) return;
+        applyLayeredRoutes(owner.cy, owner);
       });
       return;
     }
@@ -3809,6 +3831,36 @@ function scheduleHierarchicalEdgeRoutes(owner, target, token, complete = null) {
   });
 }
 
+// The layered arrangements draw placement and routing as one result. Edges the drawing still
+// describes are painted from it; a self-loop keeps the Cyto loop; an edge the drawing cannot
+// vouch for — authored since, or with an endpoint moved by hand — takes the dynamic Cyto route.
+function applyLayeredRoutes(target = cy, owner = workspace.documents.find(document_ => document_.cy === target)) {
+  if (!target) return;
+  const drawing = layeredDrawingOf(target);
+  if (!drawing) return applyCytoEdgeCurves(target, owner);
+  const stale = applyLayeredEdgeRoutes(target, drawing, { loop: edge => applyCustomLoop(edge, { cytoMode: true }) });
+  if (!stale.length) return;
+  const routes = rendererRouteSet(target, 'cyto', null, owner);
+  stale.forEach(edge => {
+    const route = routes.get(edge.id());
+    if (route) applyViewerUnbundledRoute(edge, route, { lineCap: 'round' });
+  });
+}
+
+function scheduleLayeredEdgeRoutes(owner, target, token, complete = null) {
+  if (!layoutRequestIsCurrent(token)) return;
+  owner.layoutDeferredRaf = requestAnimationFrame(() => {
+    owner.layoutDeferredRaf = null;
+    if (layoutRequestIsCurrent(token)) {
+      if (!layeredDrawingOf(target) && owner === workspace.active) {
+        announceGraph('The layered arrangement could not be computed. Node positions are unchanged.');
+      }
+      applyLayeredRoutes(target, owner);
+    }
+    complete?.();
+  });
+}
+
 function scheduleN8n3EdgeCurves(owner, target, token, complete = null) {
   if (!layoutRequestIsCurrent(token)) return;
   owner.layoutDeferredRaf = requestAnimationFrame(() => {
@@ -3975,6 +4027,7 @@ function applyActiveEdgeVisualContract(target = cy, mode = visualStyle) {
   });
   if (route.family === 'taxi' && mode === 'n8n') applyN8nBaseEdgeStyle(target, mode);
   else if (routeMode === 'hierarchical') applyHierarchicalEdgeRoutes(target);
+  else if (isLayeredMode(owner?.layoutMode) && mode === 'cyto') applyLayeredRoutes(target, owner);
   else if (route.family === 'round-taxi') applyN8n2EdgeCurves(target);
   else if (mode === 'n8n3') applyN8n3EdgeCurves(target);
   // N8N4 is deliberately hybrid per edge. Never choose a renderer-wide fallback from the last
@@ -4012,7 +4065,7 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // as ELK-backed modes even though only ELK modes need the per-document serialisation slot. Keeping
 // the two concerns separate prevents an ELK -> native queue hand-off from briefly publishing idle
 // while the replacement layout is already registered and about to start.
-const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', ...ELK_LAYOUT_MODES]);
+const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'flow-new', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
 const DESIGN_ARRANGEMENTS = Object.freeze({
@@ -4020,6 +4073,9 @@ const DESIGN_ARRANGEMENTS = Object.freeze({
   flow: Object.freeze({ layout: 'dagre' }),
   organic: Object.freeze({ layout: 'cose' }),
   keep: Object.freeze({ preservePositions: true }),
+  // Additive layered drawings (ADR 0036). The four entries above are untouched by design.
+  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
+  'flow-new': Object.freeze({ layout: 'flow-new' }),
 });
 
 function renderModeLabel(mode) {
@@ -4091,6 +4147,7 @@ function finishOwnedLayout(token) {
       }
     }
     const deferredRouting = token.mode === 'hierarchical' ? scheduleHierarchicalEdgeRoutes
+      : isLayeredMode(token.mode) ? scheduleLayeredEdgeRoutes
       : owner.visualStyle === 'n8n2' ? scheduleN8n2EdgeCurves
       : owner.visualStyle === 'n8n3' ? scheduleN8n3EdgeCurves
         : owner.visualStyle === 'n8n4' ? scheduleN8n4EdgeCurves
@@ -4224,6 +4281,13 @@ function runOwnedLayout(token) {
     fit: !fitAfterLayout,
     animate,
   }));
+  else if (isLayeredMode(token.mode)) nativeLayout = target.layout({
+    name: LAYERED_LAYOUT_NAME, mode: token.mode,
+    animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
+    fit: !fitAfterLayout, padding: 70,
+    isCurrent: () => layoutRequestIsCurrent(token),
+    onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
+  });
   else if (token.mode === 'preset') {
     target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
     target.fit(60);
@@ -4293,6 +4357,9 @@ function setLayout(name, options = {}) {
   // Retire only stale dynamic route publications from the previous mode. The layout completion RAF
   // remains independently owned so rapid requests can still cancel/settle their session correctly.
   clearDynamicEdgeGeometry(owner);
+  // A layered drawing describes one arrangement; leaving the layered modes discards it so no
+  // later repaint can attach an old drawing to positions another layout produced.
+  if (!isLayeredMode(name)) clearLayeredDrawing(target);
   layoutMode = name;
   if (owner) {
     owner.layoutMode = name;
@@ -4311,7 +4378,9 @@ function setLayout(name, options = {}) {
   syncPaneLayout();
 
   let job;
-  const kind = ELK_LAYOUT_MODES.has(name) ? 'elk' : 'native';
+  // Layered drawings share the ELK serialisation contract: one asynchronous engine run per
+  // document at a time, cancelled before it starts and otherwise allowed to settle.
+  const kind = ELK_LAYOUT_MODES.has(name) || isLayeredMode(name) ? 'elk' : 'native';
   const request = layoutSessions.request({
     documentId: owner.id,
     cy: target,
@@ -9323,6 +9392,8 @@ function connectRuntime(atBoot = false) {
         if (runtimeDisconnect) runtimeDisconnect();
         runtimeDisconnect = null;
         runtimeClient = null;
+        runtimeConfigurationRequest = null;
+        runtimeConfiguration = null;
         return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
       }
       confirmedServiceOrigin = target.origin;
@@ -9350,6 +9421,15 @@ function connectRuntime(atBoot = false) {
   // unlike credentials, which has a transport entirely to itself.
   void deploymentsWindow?.setClient(runtimeClient);
   const connectedClient = runtimeClient;
+  runtimeConfiguration = null;
+  runtimeConfigurationRequest = connectedClient.configuration().then(configuration => {
+    const result = { client: connectedClient, configuration, error: null };
+    if (runtimeClient === connectedClient) runtimeConfiguration = result;
+    return result;
+  }).catch(error => {
+    if (runtimeClient === connectedClient) runtimeConfiguration = null;
+    return { client: connectedClient, configuration: null, error };
+  });
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
     atBoot ? 'Connecting to the service — the access token is kept in memory only'
       : 'Connecting with an in-memory bearer token');
@@ -9405,6 +9485,8 @@ function revokeRuntimeAccess() {
   runtimeDisconnect?.();
   runtimeDisconnect = null;
   runtimeClient = null;
+  runtimeConfigurationRequest = null;
+  runtimeConfiguration = null;
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
   // listing AND republishes `{loaded: false}`, so the node inspector's SECRET_REFERENCE control goes
@@ -10961,33 +11043,47 @@ function onFileInput(evt) {
   const f = evt.target.files[0];
   // Clearing the control keeps re-selecting the same file working after a cancelled confirm.
   evt.target.value = '';
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 }
 
 function onReplaceFileInput(event) {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  showLoading();
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      replaceActiveDocumentFromText(String(reader.result), file.name, document.getElementById('menu-file'));
-    } catch (error) {
-      alert('Error: ' + error.message);
-    } finally {
-      hideLoading();
-    }
-  };
-  reader.onerror = () => {
-    hideLoading();
-    alert('Error: ' + (reader.error?.message || 'The file could not be read'));
-  };
-  reader.readAsText(file);
+  void loadReplacementFile(file);
 }
 
-function parsePreparedGraph(text, name, { automatic = false } = {}) {
-  let graph = detectAndParse(text, name);
+function graphConfigurationUnavailable(cause = null) {
+  const detail = cause?.message ? `: ${cause.message}` : '';
+  return new Error(
+    `Graph document loading is unavailable until the connected service returns valid configuration${detail}`,
+  );
+}
+
+async function graphDocumentByteLimitForLoad() {
+  // A service-origin change replaces the request. Follow the newest request until the value and
+  // connected client describe the same runtime, then return one captured number to the load.
+  while (true) {
+    const request = runtimeConfigurationRequest;
+    if (!request) throw graphConfigurationUnavailable();
+    const result = await request;
+    if (request !== runtimeConfigurationRequest || result.client !== runtimeClient) continue;
+    if (result.error || !result.configuration) {
+      throw graphConfigurationUnavailable(result.error);
+    }
+    return result.configuration.graphDocumentMaxBytes;
+  }
+}
+
+function currentGraphDocumentByteLimit() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient) {
+    throw graphConfigurationUnavailable();
+  }
+  return runtimeConfiguration.configuration.graphDocumentMaxBytes;
+}
+
+function parsePreparedGraph(text, name, { automatic = false, maxBytes } = {}) {
+  let graph = detectAndParse(text, name, maxBytes);
   if (graph.format === 'graphify' && graph.nodes.length > GFY_MAX_WARN) {
     if (automatic) return sampleLargeGraph(graph, GFY_SAMPLE);
     const keep = GFY_SAMPLE;
@@ -11001,14 +11097,21 @@ function parsePreparedGraph(text, name, { automatic = false } = {}) {
   return graph;
 }
 
-function loadFileObj(file) {
-  loadLocalGraphInput(file, {
+async function loadFileObj(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
     createReader: () => new FileReader(),
     onStart: showLoading,
     parseAndRender: text => {
       // Parse and make the large-graph decision BEFORE allocating a record: failures leave the
       // workspace, active id and every existing history exactly as they were.
-      const graph = parsePreparedGraph(text, file.name);
+      const graph = parsePreparedGraph(text, file.name, { maxBytes });
       openDocument({ name: file.name, graph });
       clearActivity();
       addActivityMessage('editor', `Loaded ${file.name}`, 'completed');
@@ -11022,13 +11125,39 @@ function loadFileObj(file) {
   });
 }
 
+async function loadReplacementFile(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
+    createReader: () => new FileReader(),
+    onStart: showLoading,
+    parseAndRender: text => replaceActiveDocumentFromText(
+      String(text), file.name, document.getElementById('menu-file'), maxBytes),
+    onRejected: error => alert('Error: ' + error.message),
+    onError: error => alert('Error: ' + error.message),
+    onComplete: hideLoading,
+  });
+}
+
 async function autoLoadUrl(url) {
   const name = url.split('/').pop();
-  await loadUrlGraphInput(url, {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    console.warn('Auto-load failed:', error.message);
+    return false;
+  }
+  return loadUrlGraphInput(url, maxBytes, {
     fetchImpl: fetch,
     onStart: showLoading,
     parseAndRender: text => {
-      const gd = parsePreparedGraph(text, name, { automatic: true });
+      const gd = parsePreparedGraph(text, name, { automatic: true, maxBytes });
       const active = workspace.active;
       active.name = name;
       active.displayName = allocateDocumentDisplayName(name);
@@ -11078,7 +11207,7 @@ wrap.addEventListener('drop', e => {
     return;
   }
   const f = e.dataTransfer.files[0];
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 });
 
 // ═══════════════════════════════════════════════════════════════

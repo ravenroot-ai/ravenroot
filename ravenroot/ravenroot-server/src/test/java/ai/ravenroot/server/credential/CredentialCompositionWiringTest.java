@@ -55,7 +55,8 @@ class CredentialCompositionWiringTest {
         assertTrue(source.contains(
                         "ai.ravenroot.server.credential.SqliteUserCredentialStore.fromEnvironment(System.getenv())"),
                 () -> MAIN + " must open the author-credential store from the operator's environment");
-        assertTrue(source.contains("embedConfiguration, userCredentials)"),
+        assertTrue(source.contains(
+                        "embedConfiguration, userCredentials, graphExecutionLimits.graphMl())"),
                 () -> MAIN + " must hand the store to the server. Without it the constructor receives "
                         + "null, /v1/credentials answers 404, and credentialAdmission falls back to "
                         + "permissive() -- so nothing can be entered and nothing is owned by anyone.");

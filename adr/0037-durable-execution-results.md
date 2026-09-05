@@ -1,4 +1,4 @@
-# ADR 0036: Durable canonical execution results
+# ADR 0037: Durable canonical execution results
 
 - Status: Accepted
 - Date: 2026-09-05

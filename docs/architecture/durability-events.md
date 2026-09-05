@@ -28,4 +28,4 @@ Recovery reconstructs accepted work from durable authority; live delivery accele
 - [Durable process inventory](process-inventory.md)
 - [Durable execution results](execution-results.md)
 - [Decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)
-- [Decision record](../../adr/0036-durable-execution-results.md)
+- [Decision record](../../adr/0037-durable-execution-results.md)

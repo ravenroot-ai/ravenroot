@@ -109,6 +109,11 @@ function startService() {
         response.end();
         return;
       }
+      if (request.url === '/v1/configuration') {
+        response.writeHead(200, headers);
+        response.end(JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 }));
+        return;
+      }
       if (request.url === '/v1/node-types') {
         setTimeout(() => {
           response.writeHead(200, headers);

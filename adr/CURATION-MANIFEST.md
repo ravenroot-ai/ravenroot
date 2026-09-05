@@ -41,7 +41,8 @@ without presenting the same choice as two independent contracts.
 | 2026-09-04 | [0033](0033-durable-operator-holds.md) | Accepted | Defines an operator hold on a traversal as a durable record committed at a writable traversal boundary, with the traversal stored as `WAITING`, no claimable work, and continuation only by an authorized resume. |
 | 2026-09-04 | [0034](0034-immutable-resolved-execution-manifests.md) | Accepted | Extends ADR 0031: the pinned document is joined by the resolved dependency set an execution was accepted against, and recovery verifies both. |
 | 2026-09-05 | [0035](0035-cancellation-as-a-distinct-termination-reason.md) | Accepted | Defines a nullable termination reason beside an unchanged terminal status, and a dedicated terminal event type, so a cancelled execution is distinguishable from an ordinary failure everywhere it is reported. |
-| 2026-09-05 | [0036](0036-durable-execution-results.md) | Accepted | Defines the durable canonical execution result: a four-state payload vocabulary, a fourth `ExecutionLookup` read answer, exactly-once-by-refusal recording, and a retention window that must not outlive the process instance it names. |
+| 2026-09-04 | [0036](0036-layered-graph-drawing-in-the-design-editor.md) | Accepted | Defines the additive layered arrangements of the design editor: ELK layered placement and routing consumed together, label-aware spacing, back edges routed outside the band, and the existing arrangements left unchanged. |
+| 2026-09-05 | [0037](0037-durable-execution-results.md) | Accepted | Defines the durable canonical execution result: a four-state payload vocabulary, a fourth `ExecutionLookup` read answer, exactly-once-by-refusal recording, and a retention window that must not outlive the process instance it names. |
 
 ## Publication rules
 

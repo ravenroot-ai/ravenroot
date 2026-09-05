@@ -52,6 +52,24 @@ public enum ErrorCode {
      * body or a bare 404 would have hidden.
      */
     EXECUTION_RESULT_EXPIRED(410, "the execution result is no longer retained"),
+    /**
+     * The counterpart that keeps {@link #EXECUTION_RESULT_EXPIRED} honest in the other direction: the
+     * execution provably ran and its terminal status is still known, but its payload was never
+     * retained in the first place -- refused because its encoding exceeded the store's byte cap, or
+     * because the value does not project onto the closed payload model at all. Distinct from
+     * {@link #EXECUTION_RESULT_EXPIRED} on purpose: one names a record that aged out under a
+     * retention policy working as configured, the other names a record whose payload was refused at
+     * write time and that no amount of reading it sooner would have recovered. A caller told "expired"
+     * learns nothing actionable; a caller told "redacted" can distinguish a size limit an operator may
+     * raise from a node returning a value no remote adapter could ever persist -- the two published
+     * {@code payloadState} values ({@code WITHHELD}, {@code UNCONVERTIBLE}) this response body carries
+     * beside {@code status} and {@code terminationReason}, for the identical reason those two travel
+     * beside {@link #EXECUTION_RESULT_EXPIRED}'s own body. 410, the same status
+     * {@link #EXECUTION_RESULT_EXPIRED} uses, because both describe the identical shape of absence to
+     * an HTTP caller -- the resource is known and its content is not being returned -- and the two are
+     * told apart by the closed-vocabulary {@code code}, not by the transport status.
+     */
+    EXECUTION_RESULT_REDACTED(410, "the execution result was never retained"),
     /** The request violates an input contract without disclosing rejected content. */
     INVALID_REQUEST(400, "the request was rejected as invalid"),
     /**

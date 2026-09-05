@@ -355,11 +355,20 @@ public final class RouteTable {
                             + "cancelled execution reports status=FAILED and terminationReason=CANCELLED "
                             + "-- read status alone here and a deliberate stop looks exactly like an "
                             + "incident. cancelled is the same fact as a convenience boolean. "
-                            + "410: it ran, but its result is past the retention horizon; the body still "
-                            + "carries status, terminationReason and cancelled for the same reason they "
-                            + "are on the 200 body -- a tombstone reporting a bare FAILED would tell a "
-                            + "caller its cancellation was an incident, from the one answer it has no "
-                            + "live record left to check it against. visitedNodes, "
+                            + "410 EXECUTION_RESULT_EXPIRED: it ran, but its result is past the retention "
+                            + "horizon; the body still carries status, terminationReason and cancelled "
+                            + "for the same reason they are on the 200 body -- a tombstone reporting a "
+                            + "bare FAILED would tell a caller its cancellation was an incident, from "
+                            + "the one answer it has no live record left to check it against. A distinct "
+                            + "410 EXECUTION_RESULT_REDACTED: it ran, but its payload was never retained "
+                            + "in the first place -- refused for exceeding the store's byte cap, or for "
+                            + "not projecting onto the closed payload model at all -- rather than having "
+                            + "aged out after being retained. The body carries the same status, "
+                            + "terminationReason and cancelled as the 200 and the EXPIRED bodies, plus a "
+                            + "payloadState field naming which of the two refusals applies (WITHHELD or "
+                            + "UNCONVERTIBLE), so a caller can tell a size limit an operator may raise "
+                            + "from a node returning a value no remote adapter could ever persist. "
+                            + "visitedNodes, "
                             + "defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array "
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
                             + "so a node reached, defaulted, bypassed or failed-and-handled more than once "
@@ -406,7 +415,8 @@ public final class RouteTable {
                             + "window that resets on every restart and can be shorter than this "
                             + "result's own retention.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_EXECUTION.code(),
-                            ErrorCode.EXECUTION_RESULT_EXPIRED.code(), ErrorCode.INVALID_REQUEST.code()), READ, true),
+                            ErrorCode.EXECUTION_RESULT_EXPIRED.code(), ErrorCode.EXECUTION_RESULT_REDACTED.code(),
+                            ErrorCode.INVALID_REQUEST.code()), READ, true),
             // This tenant's live executions, with their identifiers, read straight from
             // runtime bookkeeping rather than from the event stream -- a stalled traversal that has
             // stopped emitting still appears, because it is listed from the same map

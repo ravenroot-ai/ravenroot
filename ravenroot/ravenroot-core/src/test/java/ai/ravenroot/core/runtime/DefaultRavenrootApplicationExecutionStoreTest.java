@@ -108,6 +108,132 @@ class DefaultRavenrootApplicationExecutionStoreTest {
     }
 
     /**
+     * The priority-two API-projection proof: an execution's result must be sourced from the durable
+     * record after a restart, exercised through the real {@link RavenrootApplication#executionResult}
+     * production path rather than assumed from {@code ExecutionResultRegistryDurableTest}'s
+     * registry-level coverage alone.
+     *
+     * <p>{@code application} answers the first read from its own in-memory
+     * {@code ExecutionResultRegistry}, exactly as it always has. {@code restarted} is a brand new
+     * {@link DefaultRavenrootApplication} -- a fresh engine, a fresh registry, nothing carried over --
+     * composed against the identical {@code store}. {@link DefaultRavenrootApplication#close()} never
+     * touches the {@link ExecutionStore} it was given (see its own Javadoc: the store is a resource the
+     * caller owns), so {@code store} survives {@code application}'s shutdown exactly as it would survive
+     * a process restart, and {@code restarted} answering correctly here is the same fact a second
+     * instance sharing the store, or the same instance after a crash and recovery, would observe.</p>
+     */
+    @Test
+    void executionResultSurvivesARestartByReadingTheDurableRecord() {
+        var store = new InMemoryExecutionStore();
+        var application = applicationWith(new StubExecutionEngine(), store);
+
+        ExecutionSubmission submission = application.startGraphMl(TestIdentities.TENANT_A,
+                java.util.UUID.randomUUID(), new ByteArrayInputStream(graphBytes()), "restart-payload");
+
+        // Sanity: the first read, against the process that just ran it, answers from the in-memory
+        // cache -- the behaviour this whole feature must not regress.
+        var beforeRestart = assertInstanceOf(ai.ravenroot.api.application.ExecutionLookup.Found.class,
+                application.executionResult(TestIdentities.TENANT_A.tenantId(), submission.executionId()));
+        assertEquals(ProcessInstanceStatus.COMPLETED, beforeRestart.outcome().status());
+
+        application.close();
+
+        var restarted = applicationWith(new StubExecutionEngine(), store);
+        var afterRestart = restarted.executionResult(TestIdentities.TENANT_A.tenantId(), submission.executionId());
+        assertInstanceOf(ai.ravenroot.api.application.ExecutionLookup.Found.class, afterRestart,
+                () -> "a restarted process with no memory of this execution must still answer from the "
+                        + "durable record rather than as Unknown: " + afterRestart);
+        var found = (ai.ravenroot.api.application.ExecutionLookup.Found) afterRestart;
+        assertEquals(ProcessInstanceStatus.COMPLETED, found.outcome().status());
+        assertEquals(beforeRestart.outcome().payload(), found.outcome().payload(),
+                "the restarted read must agree with the pre-restart one on what the execution produced");
+        assertEquals(beforeRestart.outcome().visitedNodes(), found.outcome().visitedNodes());
+
+        restarted.close();
+        store.close();
+    }
+
+    /**
+     * The defect an independent verification pass found in the seam the restart test above exercises:
+     * {@code startGraphMl}'s {@code execution.whenComplete(...)} return value is never observed, so an
+     * exception thrown from inside that action -- including {@code recordDurableResult}'s durable-write
+     * refusal -- used to vanish rather than reach a caller, a log, or a retry. A caller reusing a
+     * traversal id across two submissions is a real, deterministic conflict ({@code traversalId} must
+     * be unique per tenant, per {@code DurableExecutionResult}'s own Javadoc), and the store correctly
+     * refuses to let the second submission's outcome replace the first's -- but nothing said so.
+     *
+     * <p>This proves two things about the fix rather than one. First, the refusal is now observable: a
+     * {@link java.util.logging.Handler} attached to the same logger name
+     * {@code recordDurableResult} logs through captures a record naming the reused id. Second, and
+     * deliberately unchanged: once neither submission's entry survives in the process-local registry --
+     * simulated here the same way {@link #executionResultSurvivesARestartByReadingTheDurableRecord}
+     * simulates a restart, with a fresh application over the same store -- a read of the reused id
+     * still answers with the <em>first</em> submission's payload. That is {@code recordExecutionResult}'s
+     * own idempotent-by-refusal design, stated on its own Javadoc, and this fix does not and must not
+     * change it: rewriting the durable record to prefer whichever submission happened to finish last
+     * would silently replace one caller's already-durable answer with another's, for two submissions
+     * that were never the same execution to begin with.</p>
+     */
+    @Test
+    void aReusedExecutionIdSilentlyMisreportsTheStaleFirstResultOnceNoCacheEntryRemains() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var application = applicationWith(new StubExecutionEngine(), store);
+        java.util.UUID reusedId = java.util.UUID.randomUUID();
+
+        application.startGraphMl(TestIdentities.TENANT_A, reusedId,
+                new ByteArrayInputStream(graphBytes()), "first-payload");
+
+        var captured = new java.util.concurrent.LinkedBlockingQueue<java.util.logging.LogRecord>();
+        var handler = new java.util.logging.Handler() {
+            @Override public void publish(java.util.logging.LogRecord record) {
+                captured.add(record);
+            }
+            @Override public void flush() { }
+            @Override public void close() { }
+        };
+        var logger = java.util.logging.Logger.getLogger(
+                "ai.ravenroot.core.runtime.DefaultRavenrootApplication");
+        logger.addHandler(handler);
+        logger.setLevel(java.util.logging.Level.ALL);
+        try {
+            // Same traversal id, a second submission, a different payload: activeExecutions no
+            // longer holds the first (StubExecutionEngine completes synchronously, like every other
+            // assertion in this class that reads store state immediately after startGraphMl returns),
+            // so this is accepted and runs to completion -- and its durable write collides.
+            application.startGraphMl(TestIdentities.TENANT_A, reusedId,
+                    new ByteArrayInputStream(graphBytes()), "second-payload");
+        } finally {
+            logger.removeHandler(handler);
+        }
+
+        var refusal = captured.poll(5, java.util.concurrent.TimeUnit.SECONDS);
+        assertTrue(refusal != null, "a reused traversal id's durable-write refusal must be logged, "
+                + "not silently discarded by whenComplete's unobserved return value");
+        assertEquals(java.util.logging.Level.WARNING, refusal.getLevel(),
+                "ExecutionResultNotRecordable is a DETERMINISTIC_REJECT, not an unclassified failure");
+        assertTrue(List.of(refusal.getParameters()).contains(reusedId),
+                () -> "expected the reused traversal id among the log parameters: "
+                        + List.of(refusal.getParameters()));
+
+        application.close();
+
+        // The restart case, exactly as the neighbouring test performs it: a fresh application, a
+        // fresh in-memory registry, the same store. Neither submission's entry survives in memory.
+        var restarted = applicationWith(new StubExecutionEngine(), store);
+        var afterRestart = restarted.executionResult(TestIdentities.TENANT_A.tenantId(), reusedId);
+        var found = assertInstanceOf(ai.ravenroot.api.application.ExecutionLookup.Found.class, afterRestart,
+                () -> "the durable record for the reused id must still answer as a completed execution, "
+                        + "not as Unknown: " + afterRestart);
+        assertEquals("first-payload", found.outcome().payload(),
+                "the durable store keeps whichever submission recorded first and never overwrites it "
+                        + "with a later, colliding one -- this is the documented, unchanged behaviour, "
+                        + "not the defect this test guards");
+
+        restarted.close();
+        store.close();
+    }
+
+    /**
      * Issue 154's write path, at the transient-submission admission point: {@code startGraphMl}
      * never opens a deployment domain and models no workload, so the durable inventory row it
      * writes must carry an absent {@code deploymentId} and {@code workloadId} while still recording

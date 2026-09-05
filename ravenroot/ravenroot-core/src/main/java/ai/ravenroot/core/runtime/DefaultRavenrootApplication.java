@@ -71,6 +71,25 @@ import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public final class DefaultRavenrootApplication implements RavenrootApplication {
+    /**
+     * The channel {@link #recordDurableResult} reports a refused durable write through.
+     *
+     * <p>Not a design choice made lightly: {@link #startGraphMl}'s {@code execution.whenComplete(...)}
+     * return value is never assigned, chained or awaited by anything, and a {@link CompletionStage}
+     * contract is exact about what that means -- an exception thrown from a {@code whenComplete} action
+     * completes <em>the stage that call returns</em> exceptionally, and nothing else. A caller that
+     * never looks at that returned stage never learns the action threw, no matter how loudly it throws.
+     * The old code inside that lambda that eventually re-threw a durable-write refusal was therefore
+     * equivalent, in every deployment this codebase ships, to discarding it silently -- and worse than a
+     * plain discard, because a reader of that code could believe otherwise. A {@link System.Logger} is
+     * the channel every completion-time failure in this class that cannot be handed back to a caller
+     * already uses ({@link ai.ravenroot.core.runtime.builtin.LogNodeBehaviorFactory} for a node's own
+     * diagnostic output is the same JDK facade, one package over), and it is observable the moment the
+     * refusal happens rather than never.</p>
+     */
+    private static final System.Logger LOGGER =
+            System.getLogger("ai.ravenroot.core.runtime.DefaultRavenrootApplication");
+
     private volatile ai.ravenroot.api.ingress.ManagedIngress managedIngress;
     /** Composition-root hook installed before deployment activation. */
     public void installManagedIngress(ai.ravenroot.api.ingress.ManagedIngress managedIngress) {
@@ -1406,16 +1425,46 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * Writes one terminal execution's canonical result through to the durable record, and does
      * nothing when no store can keep one.
      *
-     * <p>Called from the completion seam beside the in-memory registry update, and inside the same
-     * guard, so a store that refuses the write surfaces the way every other completion-time store
-     * failure here does rather than being swallowed. It is deliberately not called from the
-     * startup-failure path: a submission that never started has no process instance row, and a result
-     * naming an instance that does not exist is the dangling row the store refuses by design.</p>
+     * <p>Called from the completion seam beside the in-memory registry update, which already happened
+     * by the time this runs and is never undone here -- see below for why. It is deliberately not
+     * called from the startup-failure path: a submission that never started has no process instance
+     * row, and a result naming an instance that does not exist is the dangling row the store refuses
+     * by design.</p>
      *
      * <p>The payload boundary is crossed here and only here on this path.
      * {@link DurableExecutionResult#of} projects the engine's {@code Object} onto the closed payload
      * model, bounded by the cap the composed adapter publishes, and reports what became of it rather
      * than handing back an absence that could mean four different things.</p>
+     *
+     * <h2>A refusal is logged, never propagated, and the execution is never retroactively failed</h2>
+     * <p>This runs inside {@code startGraphMl}'s {@code execution.whenComplete(...)} action, whose
+     * returned stage nothing in this codebase observes -- a {@link CompletionStage}'s own contract says
+     * an exception thrown from that action completes <em>that returned stage</em> and nothing else, so
+     * letting {@link ExecutionStoreException} propagate out of this method the way it used to would
+     * still never reach a caller, a log, or a retry: it would simply vanish, indistinguishably from a
+     * refusal that never happened. {@link #LOGGER} is what replaces that silence.</p>
+     *
+     * <p>Two decisions, deliberately not softened. First, the execution's already-completed outcome is
+     * never rewound: {@link ExecutionResultRegistry#completed}/{@code failed}/{@code cancelled} already
+     * committed the in-memory answer this method's caller reads immediately, and a run that genuinely
+     * finished does not become a failure because a bookkeeping write after the fact could not proceed --
+     * that would be a worse lie than the one being fixed. Second, this is never retried: the one
+     * documented cause of {@link ExecutionStoreException} here,
+     * {@link ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable}, is a
+     * {@link ai.ravenroot.api.persistence.Retryability#DETERMINISTIC_REJECT} -- {@code traversalId} was
+     * reused across two submissions, which {@link DurableExecutionResult}'s own Javadoc requires be
+     * unique per tenant, and retrying an identical write repeats an identical, deterministic refusal.
+     * The durable record therefore keeps whichever of the two submissions recorded first, permanently,
+     * by the store's own idempotent-by-refusal design (see {@code ExecutionStore#recordExecutionResult});
+     * a caller reading the reused id once the in-memory entry for the second submission is gone observes
+     * the first submission's result, which is a property of that design and not something this method
+     * changes. What changes is that the refusal now leaves a trace instead of none. Whether a reused id
+     * should instead be refused at submission -- before a second execution ever runs and produces output
+     * that cannot be kept -- is a real question this method does not answer: it needs a synchronous
+     * existence check against the durable store on every submission's hot path, changes what a caller
+     * observes at submission time, and only closes the gap where a result-capable store is composed at
+     * all, so it is left to a change that can weigh that trade-off on its own rather than inherit it as
+     * a side effect of this one.</p>
      */
     private void recordDurableResult(SecurityContext security, UUID processInstanceId, UUID traversalId,
                                      String graphVersion, Instant startedAt,
@@ -1430,11 +1479,25 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 : ai.ravenroot.api.persistence.ExecutionResultNodes.of(result.visitedNodes(),
                         result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
                         result.untakenEdges());
-        executionResults.recordDurably(ai.ravenroot.api.persistence.DurableExecutionResult.of(
-                new ExecutionKey(security.tenantId(), processInstanceId), traversalId,
-                new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion), status, reason,
-                startedAt, Instant.now(), payload, nodes, failure,
-                durableResults.maxPayloadBytes()));
+        try {
+            executionResults.recordDurably(ai.ravenroot.api.persistence.DurableExecutionResult.of(
+                    new ExecutionKey(security.tenantId(), processInstanceId), traversalId,
+                    new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion), status, reason,
+                    startedAt, Instant.now(), payload, nodes, failure,
+                    durableResults.maxPayloadBytes()));
+        } catch (ExecutionStoreException notRecorded) {
+            // WARNING for the one classified, deterministic cause (a reused traversalId); anything
+            // else this adapter could still throw here is unclassified for this call site and gets the
+            // louder level, because it is not one this method's own reasoning has already accounted
+            // for.
+            var level = notRecorded.retryability() == ai.ravenroot.api.persistence.Retryability.DETERMINISTIC_REJECT
+                    ? System.Logger.Level.WARNING : System.Logger.Level.ERROR;
+            LOGGER.log(level, "Durable execution result not recorded for tenantId={0} "
+                            + "processInstanceId={1} traversalId={2}: {3}. The execution''s own outcome is "
+                            + "unaffected and already answers a live read; this traversal id''s durable "
+                            + "record, if any, was written by whichever submission recorded first.",
+                    security.tenantId(), processInstanceId, traversalId, notRecorded.getMessage());
+        }
     }
 
     private static void closeApprovalBinding(AutoCloseable binding) {
@@ -1845,7 +1908,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     }
 
     /**
-     * Issue 154: the durable inventory is available exactly when a store is composed and declares
+     * The durable inventory is available exactly when a store is composed and declares
      * {@link StoreCapability#PROCESS_INVENTORY} — the same "declared capability, not implicit
      * feature-sniffing" rule {@link #durableEventJournalAvailable()} already follows for the journal.
      */
@@ -2685,12 +2748,12 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         var accepted = new ProcessInstance(processInstanceId, ProcessInstanceStatus.ACCEPTED,
                 Map.of(traversalId, traversal));
 
-        // Issue 154: a transient submission opens no deployment domain and models no workload, so
-        // only the caller's own correlation identity is knowable here -- deploymentId and workloadId
-        // stay absent rather than being invented, which is exactly what keeps a transient execution's
-        // inventory row from being conflated with a deployment or a graph version (acceptance
-        // criterion 2). requestId is SecurityContext's own "ingress request correlation identifier",
-        // the same value every interior boundary already carries for this submission.
+        // A transient submission opens no deployment domain and models no workload, so only the
+        // caller's own correlation identity is knowable here -- deploymentId and workloadId stay
+        // absent rather than being invented, which is exactly what keeps a transient execution's
+        // inventory row from being conflated with a deployment or a graph version. requestId is
+        // SecurityContext's own "ingress request correlation identifier", the same value every
+        // interior boundary already carries for this submission.
         StoredProcessInstance created = await(executionStore.apply(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.notPresent())
                 .apply(new ExecutionTransition.ProcessCreated(accepted, new GraphVersionPin(graphVersion)))

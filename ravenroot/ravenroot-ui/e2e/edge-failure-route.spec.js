@@ -241,8 +241,9 @@ test('overriding an Error target with an outcome drops the declaration instead o
     await openEdgeInspector(page, 'error');
     await page.locator('#edge-editor input[name="outcome"]').fill('reviewed');
     await expect(page.locator('#edge-kind-state')).toHaveAttribute('data-edge-kind', 'outcome');
-    await page.locator('#edge-editor button[type="submit"]').click();
 
+    // Wait for autosave itself. Clicking Save here would rebuild the form and erase the stale hidden
+    // checkbox this sequence is meant to expose.
     await expect.poll(() => edgeState(page, 'error'))
       .toMatchObject({ outcome: 'reviewed', declared: undefined, failureRouteKind: '' });
 

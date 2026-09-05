@@ -1,6 +1,7 @@
 package ai.ravenroot.server.ratelimit;
 
 import ai.ravenroot.api.application.ExecutionEvent;
+import ai.ravenroot.api.application.ExecutionEventType;
 
 import java.time.Clock;
 import java.util.ArrayList;
@@ -88,20 +89,32 @@ public final class ActiveExecutionRegistry implements AutoCloseable {
      *
      * <p>This is the whole coupling to the engine: the events already carry a tenant and already have
      * terminal types, so no new contract is needed and nothing has to be threaded through the
-     * submission path. Unknown event types are ignored rather than defaulted, so adding an event type
-     * cannot accidentally change admission.</p>
+     * submission path.</p>
+     *
+     * <p><b>Node- and join-level event types are ignored here, deliberately and by name -- this is
+     * not the same rule as "ignores unknown terminal types".</b> A traversal-terminal event releases
+     * this method's one resource (the admission slot); every other event type carries no fact this
+     * method needs, known or not. That distinction used to be blurred: a hardcoded {@code case
+     * EXECUTION_COMPLETED, EXECUTION_FAILED ->} list was the only definition of "terminal" this
+     * method had, so {@link ExecutionEventType#EXECUTION_CANCELLED} silently fell into the same
+     * {@code default} arm as {@code NODE_STARTED} when it was added -- a cancelled execution's
+     * admission slot was never released, and nothing here failed to compile to say so. Terminal-ness
+     * is now delegated entirely to {@link ExecutionEventType#isTraversalTerminal()}, an exhaustive
+     * switch expression with no default: a future terminal type cannot silently rejoin the "ignored"
+     * cohort here the way {@code EXECUTION_CANCELLED} once did, because failing to classify it in
+     * that one method is a compile error, not a silent admission-accounting gap in this one.</p>
      */
     public void observe(ExecutionEvent event) {
         if (event == null) {
             return;
         }
-        switch (event.type()) {
-            case EXECUTION_STARTED -> emit(started(event));
-            case EXECUTION_COMPLETED, EXECUTION_FAILED -> finished(event.executionId());
-            default -> {
-                // Node-level transitions say nothing about how many executions are running.
-            }
+        if (event.type() == ExecutionEventType.EXECUTION_STARTED) {
+            emit(started(event));
+        } else if (event.type().isTraversalTerminal()) {
+            finished(event.executionId());
         }
+        // Every other event type is node- or join-level and says nothing about how many executions
+        // are running -- ignored here because it is irrelevant, not because it is unrecognised.
     }
 
     /**

@@ -167,5 +167,38 @@ public enum ExecutionEventType {
      * {@link #EXECUTION_FAILED} obey: exactly one of the three per traversal, never followed by
      * {@link #EXECUTION_PAUSED}, and published after the traversal has stopped dispatching.</p>
      */
-    EXECUTION_CANCELLED
+    EXECUTION_CANCELLED;
+
+    /**
+     * Whether this type ends a traversal -- exactly {@link #EXECUTION_COMPLETED},
+     * {@link #EXECUTION_FAILED} and {@link #EXECUTION_CANCELLED}, the three types a traversal can
+     * end with, never more than one per traversal and never followed by another event.
+     *
+     * <h2>Why this exists as a method on the enum rather than a set each caller keeps</h2>
+     * <p>Before this method existed, {@code ActiveExecutionRegistry.observe} and
+     * {@code TelemetryBridge.accept} each hardcoded their own list of "the terminal types I release
+     * a resource on" ({@code case EXECUTION_COMPLETED, EXECUTION_FAILED -> ...}), and when
+     * {@link #EXECUTION_CANCELLED} was added, both were forgotten independently: a cancelled
+     * execution's admission slot was never released, and its traversal span was never ended. A
+     * {@code switch} <em>statement</em> with a silent {@code default} does not fail to compile when a
+     * new enum constant falls through it -- it just no-ops, silently, exactly as both of those did.
+     * A {@code switch} <em>expression</em> with no {@code default} does not have that failure mode:
+     * it must cover every constant, so a constant added to this enum without also being classified
+     * here is a compile error in this one method, not a silent behavioral gap in every caller that
+     * copied the list.</p>
+     *
+     * <p>This is deliberately narrower than "every terminal-shaped concept in this enum": it answers
+     * only "does a traversal end here", which is the one fact both callers above actually need.
+     * {@link #JOIN_FAILED} ends a join, not a traversal (a later terminal event follows it); it is
+     * {@code false} here for that reason, not omitted by oversight.</p>
+     */
+    public boolean isTraversalTerminal() {
+        return switch (this) {
+            case EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED -> true;
+            case EXECUTION_STARTED, NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED, NODE_COMPLETED,
+                    EDGE_TRAVERSED, NODE_FAILED, NODE_RETRY_SCHEDULED, JOIN_SATISFIED,
+                    JOIN_ITERATION_BACKLOG, JOIN_ARRIVAL_DISCARDED, JOIN_FAILED, EXECUTION_PAUSED,
+                    EXECUTION_RESUMED -> false;
+        };
+    }
 }

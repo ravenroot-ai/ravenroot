@@ -869,7 +869,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
      * inventory exists to surface.</p>
      */
     private static final String INVENTORY_COLUMNS =
-            "SELECT p.process_instance_id, p.status, p.graph_version_pin, p.revision, p.fencing_token, "
+            "SELECT p.process_instance_id, p.status, p.termination_reason, p.graph_version_pin, "
+                    + "p.revision, p.fencing_token, "
                     + "p.lifecycle_generation, p.deployment_id, p.workload_id, p.correlation_id, "
                     + "p.created_at_epoch_second, p.created_at_nano, p.updated_at_epoch_second, "
                     + "p.updated_at_nano, p.retained_until_epoch_second, p.retained_until_nano, "
@@ -1015,6 +1016,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 }
                 boolean leaseLive = leaseLive(key, clock.instant());
                 String sql = "SELECT t.traversal_id, t.position, t.ingress_node_id, t.status, "
+                        + "t.termination_reason, "
                         + "(SELECT COUNT(*) FROM invocation i WHERE i.tenant_id = t.tenant_id "
                         + "AND i.process_instance_id = t.process_instance_id "
                         + "AND i.traversal_id = t.traversal_id) AS invocation_count, "
@@ -1039,7 +1041,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                                     StoredUuid.required(rows, "traversal", "traversal_id", key),
                                     rows.getInt("position"), rows.getString("ingress_node_id"), status,
                                     InventoryDisposition.ofTraversal(status, leaseLive, parked > 0),
-                                    rows.getInt("invocation_count"), parked));
+                                    rows.getInt("invocation_count"), parked,
+                                    terminationReasonOf(key, rows.getString("termination_reason"))));
                         }
                     }
                 }
@@ -1261,7 +1264,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 rows.getInt("traversal_count"), StoredInstant.read(rows, "created_at"),
                 StoredInstant.read(rows, "updated_at"),
                 retainedUntilOf(status, nullableInstant(rows, "retained_until"),
-                        StoredInstant.read(rows, "updated_at")));
+                        StoredInstant.read(rows, "updated_at")),
+                terminationReasonOf(key, rows.getString("termination_reason")));
     }
 
     /**

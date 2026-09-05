@@ -901,11 +901,31 @@ public final class ExecutionMonitor {
         if (limited != null) {
             return limited.reason().publicCode();
         }
+        return deepestCause(error).getClass().getSimpleName();
+    }
+
+    /**
+     * Bounded the same way {@link ExecutionTermination#reasonOf} bounds its own walk of the identical
+     * chain, and for the identical reason: this runs on a traversal's completion path, which has no
+     * timeout above it, and an unbounded {@code while (current.getCause() != null)} trusted a cause
+     * chain to terminate on its own. {@link Throwable#initCause} refuses only a direct self-reference
+     * ({@code cause == this}), not a longer cycle -- two throwables can be constructed to name each
+     * other as cause, at which point the previous unbounded walk here never returned. A depth this
+     * large is already far past anything a real wrapping produces, so the bound is a safety stop
+     * rather than a policy, exactly as {@link ExecutionTermination}'s own Javadoc states for its walk.
+     */
+    private static final int MAX_CAUSE_DEPTH = 64;
+
+    private static Throwable deepestCause(Throwable error) {
         Throwable current = error;
-        while (current.getCause() != null) {
-            current = current.getCause();
+        for (int depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
+            Throwable cause = current.getCause();
+            if (cause == null || cause == current) {
+                return current;
+            }
+            current = cause;
         }
-        return current.getClass().getSimpleName();
+        return current;
     }
 
     private static GraphExecutionLimitException executionLimitIn(Throwable error, java.util.Set<Throwable> seen) {
@@ -924,10 +944,7 @@ public final class ExecutionMonitor {
         if (error == null) {
             return "unknown failure";
         }
-        Throwable current = error;
-        while (current.getCause() != null) {
-            current = current.getCause();
-        }
+        Throwable current = deepestCause(error);
         return current.getMessage() == null ? current.getClass().getSimpleName() : current.getMessage();
     }
 

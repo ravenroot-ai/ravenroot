@@ -926,7 +926,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     rows.add(new TraversalInventoryEntry(key, traversal.traversalId(), position++,
                             traversal.ingressNodeId(), traversal.status(),
                             InventoryDisposition.ofTraversal(traversal.status(), leaseLive, parked > 0),
-                            invocations, parked));
+                            invocations, parked, traversal.terminationReason()));
                 }
                 return List.copyOf(rows);
             }
@@ -1091,7 +1091,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 entry.fencingToken,
                 leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
                 entry.state.traversals().size(), entry.createdAt, entry.updatedAt,
-                retainedUntilOf(entry));
+                retainedUntilOf(entry), entry.state.terminationReason());
     }
 
     private void requireInventoryQuery(ProcessInventoryQuery query) {

@@ -3076,7 +3076,9 @@ public final class RavenrootServer implements AutoCloseable {
                 case ai.ravenroot.api.application.ExecutionLookup.Found found ->
                         json(exchange, 200, executionOutcomeJson(found.outcome()));
                 case ai.ravenroot.api.application.ExecutionLookup.Expired expired ->
-                        fail(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED);
+                        json(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED.status(),
+                                expiredExecutionJson(expired,
+                                        AuthenticatedPrincipalAttribute.requestId(exchange)));
                 case ai.ravenroot.api.application.ExecutionLookup.Unknown unknown ->
                         fail(exchange, ErrorCode.UNKNOWN_EXECUTION);
             }
@@ -3267,8 +3269,15 @@ public final class RavenrootServer implements AutoCloseable {
     private static String processInventoryEntryJson(ai.ravenroot.api.persistence.ProcessInventoryEntry entry) {
         return "{\"tenantId\":\"" + escape(entry.key().tenantId())
                 + "\",\"processInstanceId\":\"" + entry.key().processInstanceId()
-                + "\",\"status\":\"" + entry.status()
-                + "\",\"disposition\":\"" + entry.disposition()
+                + "\",\"status\":\"" + entry.status() + "\""
+                // Beside status, following the same rule as executionOutcomeJson's own
+                // terminationReason: always present, including as JSON null, so the durable inventory
+                // does not misreport a cancellation as an ordinary failure after a restart, once live
+                // in-memory state is gone and this row is the only place left to ask.
+                + ",\"terminationReason\":" + (entry.terminationReason() == null ? "null"
+                        : "\"" + entry.terminationReason() + "\"")
+                + ",\"cancelled\":" + entry.cancelled()
+                + ",\"disposition\":\"" + entry.disposition()
                 + "\",\"revision\":" + entry.revision()
                 + ",\"lifecycleGeneration\":" + entry.lifecycleGeneration()
                 + ",\"graphVersion\":\"" + escape(entry.graphVersionPin().reference())
@@ -3459,8 +3468,11 @@ public final class RavenrootServer implements AutoCloseable {
         return "{\"traversalId\":\"" + entry.traversalId()
                 + "\",\"position\":" + entry.position()
                 + ",\"ingressNodeId\":\"" + escape(entry.ingressNodeId())
-                + "\",\"status\":\"" + entry.status()
-                + "\",\"disposition\":\"" + entry.disposition()
+                + "\",\"status\":\"" + entry.status() + "\""
+                + ",\"terminationReason\":" + (entry.terminationReason() == null ? "null"
+                        : "\"" + entry.terminationReason() + "\"")
+                + ",\"cancelled\":" + entry.cancelled()
+                + ",\"disposition\":\"" + entry.disposition()
                 + "\",\"invocationCount\":" + entry.invocationCount()
                 + ",\"parkedAttemptCount\":" + entry.parkedAttemptCount()
                 + "}";
@@ -3504,11 +3516,19 @@ public final class RavenrootServer implements AutoCloseable {
         var body = new StringBuilder("{\"processInstanceId\":\"").append(outcome.processInstanceId())
                 .append("\",\"traversalId\":\"").append(outcome.traversalId())
                 .append("\",\"executionId\":\"").append(outcome.executionId())
-                .append("\",\"status\":\"").append(outcome.status())
+                .append("\",\"status\":\"").append(outcome.status()).append('"')
                 // Beside status rather than inside it: status stays the durable lifecycle value a
-                // consumer already switches over, and this qualifies it. Always present, for the
-                // reason degraded and handledFailure are always present.
-                .append("\",\"paused\":").append(outcome.paused())
+                // consumer already switches over, and this qualifies it. Always present -- including
+                // as JSON null when absent -- for the same reason degraded and handledFailure are
+                // always present: a field a client can see is always missing must never be
+                // indistinguishable from a field this server does not report at all. A cancelled
+                // execution reports status FAILED here; read terminationReason beside it, never
+                // status alone -- see ExecutionOutcome's own Javadoc.
+                .append(",\"terminationReason\":")
+                .append(outcome.terminationReason() == null ? "null"
+                        : "\"" + outcome.terminationReason() + "\"")
+                .append(",\"cancelled\":").append(outcome.cancelled())
+                .append(",\"paused\":").append(outcome.paused())
                 .append(",\"degraded\":").append(outcome.degraded())
                 .append(",\"handledFailure\":").append(outcome.handledFailure())
                 .append(",\"visitedNodes\":").append(stringArrayJson(outcome.visitedNodes()))
@@ -3521,6 +3541,40 @@ public final class RavenrootServer implements AutoCloseable {
             body.append(",\"payload\":").append(PayloadJson.write(value))
                     .append(",\"payloadEnvelope\":").append(PayloadEnvelope.of(value).toJson());
         }
+        return body.append('}').toString();
+    }
+
+    /**
+     * The 410 body for {@link ai.ravenroot.api.application.ExecutionLookup.Expired}.
+     *
+     * <p>{@link ErrorEnvelope} is deliberately closed -- five fixed fields, no public constructor that
+     * accepts arbitrary structure -- because widening it would let some future caller smuggle
+     * unbounded text through every error response this server sends. This response is not that: it is
+     * one specific, additive endpoint answer, built directly rather than by asking the closed envelope
+     * to carry fields it was never meant to. Its first five members reproduce {@link ErrorEnvelope}'s
+     * own {@code toJson()} shape byte for byte, so an existing client reading only those fields sees no
+     * difference; {@code status} and {@code terminationReason} are new members appended after them.</p>
+     *
+     * <p>{@code status} and {@code terminationReason} must be read together, exactly as
+     * {@link ai.ravenroot.api.application.ExecutionLookup.Expired}'s own Javadoc says: a tombstone
+     * reporting {@code FAILED} with no reason is an ordinary failure, and the same {@code FAILED} with
+     * {@code terminationReason == "CANCELLED"} is a deliberate stop. Dropping the reason here --
+     * exactly what the pre-existing code did by discarding {@code Expired} entirely in favour of a bare
+     * {@link ErrorCode#EXECUTION_RESULT_EXPIRED} -- would make "visible after eviction" false at this
+     * boundary even though the tombstone carries the answer.</p>
+     */
+    private static String expiredExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Expired expired,
+                                               String correlationId) {
+        ErrorEnvelope envelope = ErrorEnvelope.of(ErrorCode.EXECUTION_RESULT_EXPIRED, correlationId);
+        var body = new StringBuilder("{\"contract\":\"").append(escape(envelope.contract())).append('"')
+                .append(",\"code\":\"").append(escape(envelope.code())).append('"')
+                .append(",\"message\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"error\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"correlationId\":\"").append(escape(envelope.correlationId())).append('"')
+                .append(",\"status\":\"").append(expired.status()).append('"')
+                .append(",\"terminationReason\":")
+                .append(expired.terminationReason() == null ? "null" : "\"" + expired.terminationReason() + "\"")
+                .append(",\"cancelled\":").append(expired.cancelled());
         return body.append('}').toString();
     }
 

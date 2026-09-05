@@ -238,6 +238,16 @@ if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example
   exit 1
 fi
 
+for invalid in humanTask.maxAuthorizationTokens=257 humanTask.maxPageSize=1001 humanTask.writeAttempts=33; do
+  if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
+    --set-string auth.audience=ravenroot-human-task-test \
+    --set-string auth.jwksUri=https://idp.example.test/jwks \
+    --set "$invalid" >"$TEMP_DIR/helm-invalid-resource-cap.out" 2>&1; then
+    echo "Helm accepted an out-of-range Human Task resource cap: $invalid" >&2
+    exit 1
+  fi
+done
+
 if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
   --set-string auth.audience=ravenroot-human-task-test \
   --set-string auth.jwksUri=https://idp.example.test/jwks \

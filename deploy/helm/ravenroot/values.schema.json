@@ -44,17 +44,17 @@
         "maxTitleBytes": { "$ref": "#/definitions/positiveInt64MiB" },
         "maxDescriptionBytes": { "$ref": "#/definitions/positiveInt64MiB" },
         "maxResponseSchemaBytes": { "$ref": "#/definitions/positiveInt64MiB" },
-        "maxAuthorizationTokens": { "$ref": "#/definitions/positiveMillion" },
+        "maxAuthorizationTokens": { "$ref": "#/definitions/positive256" },
         "maxAuthorizationTokenBytes": { "$ref": "#/definitions/positive4096" },
         "maxDecisionBodyBytes": { "$ref": "#/definitions/positiveInt64MiB" },
-        "defaultPageSize": { "$ref": "#/definitions/positiveInt32MinusOne" },
-        "maxPageSize": { "$ref": "#/definitions/positiveInt32MinusOne" },
+        "defaultPageSize": { "$ref": "#/definitions/positive1000" },
+        "maxPageSize": { "$ref": "#/definitions/positive1000" },
         "responseMaxDepth": { "$ref": "#/definitions/positive256" },
         "responseMaxCollectionSize": { "$ref": "#/definitions/positiveMillion" },
         "responseMaxValueCount": { "$ref": "#/definitions/positiveFiveMillion" },
         "responseMaxTextLength": { "$ref": "#/definitions/positiveInt64MiB" },
         "responseMaxKeyLength": { "$ref": "#/definitions/positive4096" },
-        "writeAttempts": { "$ref": "#/definitions/positiveInt32MinusOne" }
+        "writeAttempts": { "$ref": "#/definitions/positive32" }
       }
     },
     "persistence": {
@@ -85,12 +85,6 @@
         { "$ref": "#/definitions/blank" }
       ]
     },
-    "positiveInt32MinusOne": {
-      "oneOf": [
-        { "type": "integer", "minimum": 1, "maximum": 2147483646 },
-        { "$ref": "#/definitions/blank" }
-      ]
-    },
     "nonNegativeEscalationSeconds": {
       "oneOf": [
         { "type": "integer", "minimum": 0, "maximum": 2147483646 },
@@ -118,6 +112,18 @@
     "positive256": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 256 },
+        { "$ref": "#/definitions/blank" }
+      ]
+    },
+    "positive1000": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 1000 },
+        { "$ref": "#/definitions/blank" }
+      ]
+    },
+    "positive32": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1, "maximum": 32 },
         { "$ref": "#/definitions/blank" }
       ]
     }

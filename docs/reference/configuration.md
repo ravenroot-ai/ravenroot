@@ -80,17 +80,17 @@ the default below. Values are read at process startup and require a restart to c
 | `ravenroot.human-task.max-title-bytes` / `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | 256 | 1–67,108,864 | UTF-8 title budget |
 | `ravenroot.human-task.max-description-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | 4,096 | 1–67,108,864 | UTF-8 description budget |
 | `ravenroot.human-task.max-response-schema-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | 16,384 | 1–67,108,864 | UTF-8 response-schema metadata budget |
-| `ravenroot.human-task.max-authorization-tokens` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | 16 | 1–1,000,000 | required responder role/scope tokens |
+| `ravenroot.human-task.max-authorization-tokens` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | 16 | 1–256 | required responder role/scope tokens |
 | `ravenroot.human-task.max-authorization-token-bytes` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | 256 | 1–4,096 | UTF-8 bytes in one authorization token |
 | `ravenroot.human-task.max-decision-body-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | 262,144 | 1–67,108,864; at least `max-response-bytes` | raw encoded PayloadEnvelope HTTP decision body |
-| `ravenroot.human-task.default-page-size` / `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | 50 | 1–2,147,483,646; no greater than `max-page-size` | inbox page size when `limit` is omitted |
-| `ravenroot.human-task.max-page-size` / `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | 100 | 1–2,147,483,646 | largest requested inbox page |
+| `ravenroot.human-task.default-page-size` / `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | 50 | 1–1,000; no greater than `max-page-size` | inbox page size when `limit` is omitted |
+| `ravenroot.human-task.max-page-size` / `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | 100 | 1–1,000 | largest requested inbox page |
 | `ravenroot.human-task.response-max-depth` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | 32 | 1–256 | structured response nesting depth |
 | `ravenroot.human-task.response-max-collection-size` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | 1,024 | 1–1,000,000 | entries in one response collection |
 | `ravenroot.human-task.response-max-value-count` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT` | 4,096 | 1–5,000,000 | values across one response |
-| `ravenroot.human-task.response-max-text-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | 16,384 | 1–67,108,864 | UTF-8 text value budget |
-| `ravenroot.human-task.response-max-key-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | 256 | 1–4,096 | UTF-8 object-key budget |
-| `ravenroot.human-task.write-attempts` / `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | 3 | 1–2,147,483,646 | durable Human Task write retries |
+| `ravenroot.human-task.response-max-text-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | 16,384 | 1–67,108,864 | UTF-16 code units in one text value |
+| `ravenroot.human-task.response-max-key-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | 256 | 1–4,096 | UTF-16 code units in one object key |
+| `ravenroot.human-task.write-attempts` / `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | 3 | 1–32 | durable Human Task write retries |
 
 For example, use
 `-Dravenroot.human-task.max-response-bytes=524288` or
@@ -101,6 +101,11 @@ individual technical ranges, while the server validates the relational constrain
 listener. A malformed, overflowed, or inconsistent non-blank value refuses startup without echoing
 the supplied value. The direct `ravenroot/scripts/server.sh` launcher inherits the same environment;
 Ravenroot ships no tracked environment-file template or environment generator.
+
+The UTF-8 unit applies only to fields named `*-bytes`. Response text and key lengths instead count
+UTF-16 code units, including two units for one supplementary Unicode code point. The resource caps
+on inbox pages, write attempts, and authorization tokens bound SQLite page materialization,
+conflict-path retry work, and persisted authorization material respectively.
 
 A graph may narrow a configured response ceiling but cannot widen the server policy. The resolved
 response limit, raw-envelope decision-body cap, parser budgets, and write-retry budget are pinned

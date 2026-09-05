@@ -35,7 +35,8 @@ narrow the configured response ceiling. The server pins resolved limits on regis
 policy change does not change an existing durable task after recovery: this includes its separately
 pinned raw-envelope decision-body cap, parser budgets, and write-retry budget. See [Configuration
 and deployment defaults](configuration.md#human-task-operational-policy) for every setting, default,
-range, precedence rule, and deployment mapping.
+range, precedence rule, and deployment mapping. Text and object-key parser budgets count UTF-16 code
+units; all `*-bytes` settings remain UTF-8 byte budgets.
 
 Correlation and deduplication are deliberately fixed. The task and handler share a deterministic
 task ID derived from the original tenant, process, traversal, invocation, and attempt. The attempt

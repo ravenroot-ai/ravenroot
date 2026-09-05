@@ -3,7 +3,10 @@ package ai.ravenroot.server.persistence;
 import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.ExecutionManifestStore;
 import ai.ravenroot.api.persistence.GraphDefinitionStore;
+import ai.ravenroot.core.graph.GraphMlLimits;
+import ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
 import ai.ravenroot.persistence.sqlite.SqliteStoreMaintenanceLock;
@@ -32,8 +35,15 @@ public final class ExecutionStoreBootstrap {
      * every audit/store consumer.  The returned owner is the only lifecycle authority.
      */
     public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock) {
+        return openOwned(configuration, clock, GraphMlLimits.DEFAULTS);
+    }
+
+    /** Opens all durable stores with the graph-definition budget chosen by the composition root. */
+    public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
+                                   GraphMlLimits graphMlLimits) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(clock, "clock");
+        Objects.requireNonNull(graphMlLimits, "graphMlLimits");
         try {
             // Preserve the adapter's useful location classification before the maintenance API
             // deliberately reduces its own diagnostics to path-free lock failures.
@@ -42,7 +52,7 @@ public final class ExecutionStoreBootstrap {
             try {
                 SqliteStoreMaintenanceLock.requireNoPendingRecovery(configuration.location());
                 if (!configuration.enabled()) {
-                    return new Opened(null, null, () -> { }, maintenanceLock::close);
+                    return new Opened(null, null, null, () -> { }, maintenanceLock::close);
                 }
                 var store = new SqliteExecutionStore(configuration.location(), clock);
                 // Same database file as the executions that pin these definitions, which is what puts
@@ -54,16 +64,38 @@ public final class ExecutionStoreBootstrap {
                 GraphDefinitionStore definitions;
                 try {
                     definitions = new SqliteGraphDefinitionStore(configuration.location(), clock,
-                            ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE);
+                            ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE,
+                            graphMlLimits.maxBytes());
                 } catch (RuntimeException failed) {
                     store.close();
                     throw failed;
                 }
-                return new Opened(store, definitions, () -> {
+                // Same file again, and for the third time the same three reasons: one backup captures
+                // an execution together with the manifest it needs, retention can ask whether the
+                // instance still exists inside the transaction that removes its manifest, and one
+                // schema version describes all three. The adapter's own reachability query is the
+                // authority, so no additional reference source is composed.
+                ExecutionManifestStore manifests;
+                try {
+                    manifests = new SqliteExecutionManifestStore(configuration.location(), clock,
+                            ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE);
+                } catch (RuntimeException failed) {
                     try {
                         definitions.close();
                     } finally {
                         store.close();
+                    }
+                    throw failed;
+                }
+                return new Opened(store, definitions, manifests, () -> {
+                    try {
+                        manifests.close();
+                    } finally {
+                        try {
+                            definitions.close();
+                        } finally {
+                            store.close();
+                        }
                     }
                 }, maintenanceLock::close);
             } catch (RuntimeException failed) {
@@ -108,21 +140,24 @@ public final class ExecutionStoreBootstrap {
     public static final class Opened implements AutoCloseable {
         private final ExecutionStore store;
         private final GraphDefinitionStore graphDefinitionStore;
+        private final ExecutionManifestStore executionManifestStore;
         private final Runnable closeStore;
         private final Runnable releaseMaintenanceLock;
         private final AtomicBoolean closed = new AtomicBoolean();
 
         private Opened(ExecutionStore store, GraphDefinitionStore graphDefinitionStore,
+                       ExecutionManifestStore executionManifestStore,
                        Runnable closeStore, Runnable releaseMaintenanceLock) {
             this.store = store;
             this.graphDefinitionStore = graphDefinitionStore;
+            this.executionManifestStore = executionManifestStore;
             this.closeStore = Objects.requireNonNull(closeStore, "closeStore");
             this.releaseMaintenanceLock = Objects.requireNonNull(
                     releaseMaintenanceLock, "releaseMaintenanceLock");
         }
 
         static Opened forTest(Runnable closeStore, Runnable releaseMaintenanceLock) {
-            return new Opened(null, null, closeStore, releaseMaintenanceLock);
+            return new Opened(null, null, null, closeStore, releaseMaintenanceLock);
         }
 
         public ExecutionStore store() {
@@ -138,6 +173,17 @@ public final class ExecutionStoreBootstrap {
          */
         public GraphDefinitionStore graphDefinitionStore() {
             return graphDefinitionStore;
+        }
+
+        /**
+         * The durable execution manifests held in the same database, or {@code null} when the store
+         * is configured off. Closed first, before the definitions and the execution store, so nothing
+         * can observe a manifest store whose database file has already been released.
+         *
+         * @return the composed execution manifest store, or {@code null}.
+         */
+        public ExecutionManifestStore executionManifestStore() {
+            return executionManifestStore;
         }
 
         /**

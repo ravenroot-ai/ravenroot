@@ -279,6 +279,29 @@ describe('command history', () => {
     expect(history.isDirty()).toBe(false);
   });
 
+  it('coalesces updateEdgeFields within a focus session and stops at the save point', () => {
+    const graph = createWorkflowDocument();
+    const history = createCommandHistory();
+    const edge = graph.edges.find(candidate => candidate.id === 'edge-dosomething-end');
+    const before = edge.description;
+
+    updateEdgeFields(graph, edge.id, { description: 'A' }, history, { coalesceKey: 'edge-description' });
+    updateEdgeFields(graph, edge.id, { description: 'AB' }, history, { coalesceKey: 'edge-description' });
+    expect(history.depth()).toBe(1);
+    expect(edge.description).toBe('AB');
+    history.undo(graph);
+    expect(edge.description).toBe(before);
+    history.redo(graph);
+    expect(edge.description).toBe('AB');
+
+    history.markSaved();
+    updateEdgeFields(graph, edge.id, { description: 'ABC' }, history, { coalesceKey: 'edge-description' });
+    expect(history.depth()).toBe(2);
+    history.undo(graph);
+    expect(edge.description).toBe('AB');
+    expect(history.isDirty()).toBe(false);
+  });
+
   it('restores the previous edit when a coalesced replacement fails', () => {
     const graph = createWorkflowDocument();
     const history = createCommandHistory();

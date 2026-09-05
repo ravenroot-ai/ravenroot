@@ -7,6 +7,7 @@ import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.persistence.JournalCursor;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 
 import java.nio.charset.StandardCharsets;
@@ -42,6 +43,7 @@ final class ImapConsumerSource implements InboundSource {
     @SuppressWarnings("unused") private final Clock clock;
     private final IntConsumer reconnectBackoffObserver;
     private final DoubleSupplier reconnectJitter;
+    private final ReservedNetworkPolicy destinationPolicy;
     private final Object lifecycle = new Object();
 
     private volatile State state = State.STOPPED;
@@ -63,6 +65,16 @@ final class ImapConsumerSource implements InboundSource {
                        ImapProfileResolver profiles, ImapConsumerPolicyResolver policies,
                        ImapConsumerProtocol protocol, Executor executor, Clock clock,
                        IntConsumer reconnectBackoffObserver, DoubleSupplier reconnectJitter) {
+        this(configuration, credentials, profiles, policies, protocol, executor, clock,
+                reconnectBackoffObserver, reconnectJitter,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+
+    ImapConsumerSource(NodeConfiguration configuration, CredentialResolver credentials,
+                       ImapProfileResolver profiles, ImapConsumerPolicyResolver policies,
+                       ImapConsumerProtocol protocol, Executor executor, Clock clock,
+                       IntConsumer reconnectBackoffObserver, DoubleSupplier reconnectJitter,
+                       ReservedNetworkPolicy destinationPolicy) {
         this.configuration = Objects.requireNonNull(configuration);
         this.credentials = Objects.requireNonNull(credentials);
         this.profiles = Objects.requireNonNull(profiles);
@@ -72,6 +84,7 @@ final class ImapConsumerSource implements InboundSource {
         this.clock = Objects.requireNonNull(clock);
         this.reconnectBackoffObserver = Objects.requireNonNull(reconnectBackoffObserver);
         this.reconnectJitter = Objects.requireNonNull(reconnectJitter);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public CompletionStage<Void> start(InboundSourceContext context) {
@@ -439,6 +452,7 @@ final class ImapConsumerSource implements InboundSource {
                     .orElseThrow(() -> new SourceFailure("imap-profile-unavailable"));
             if (!tenant.equals(profile.tenant()) || !name.equals(profile.id()))
                 throw new SourceFailure("imap-profile-unavailable");
+            destinationPolicy.requireAllowedLiteral(profile.host());
             return profile;
         } catch (SourceFailure failure) { throw failure; }
         catch (RuntimeException failure) { throw new SourceFailure("imap-profile-unavailable"); }

@@ -60,11 +60,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <em>both</em> stores, through the public constructor that accepts both, and that is the only
  * composition in which a deployment-hosted acceptance is durably bound.</p>
  *
- * <p><strong>The shipped server does not compose deployments this way.</strong> Deployment
- * registration builds deployments with no execution store, so their traversals are not durably
- * recorded and not durably bound; giving deployments durable execution state is separate work. These
- * assertions are about the capability being real and correct where it is composed, not about the
- * default server composition, and must not be read as covering it.</p>
+ * <p><strong>What the shipped server composes, stated as of this change.</strong>
+ * {@code DefaultRavenrootApplication.registerDeployment} passes its own execution store, definition
+ * store and manifest service to every deployment it builds, so a server started with a durable store
+ * does durably record and bind deployment-hosted traversals. That was not true when this class was
+ * written and the paragraph here said so; it is stated again rather than deleted because a reader
+ * checking whether these assertions cover the default composition needs the answer, and the answer
+ * has changed. What still bounds them is the store: a deployment composed without an execution store
+ * enters no durable-recording path at all, which is what the last test below pins.</p>
  */
 class DeploymentHostedGraphDefinitionBindingTest {
 
@@ -121,6 +124,61 @@ class DeploymentHostedGraphDefinitionBindingTest {
                     executions.load(executionKey).toCompletableFuture().join().graphVersionPin().reference(),
                     "and the accepted traversal must be pinned to the address that document is filed "
                             + "under, or recovery would have an identifier resolving to nothing");
+
+            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
+        }
+    }
+
+    /**
+     * A deployment-hosted traversal is an accepted execution like any other, so it must carry the
+     * same record of what it was resolved against.
+     *
+     * <p>The assertion is not decorative. Every recovery path that verifies refuses an execution with
+     * no such record, so a deployment that accepted traversals without one would have produced work
+     * that could never be resumed — visible only later, on the first restart, as a recovery that
+     * declines forever.</p>
+     */
+    @Test
+    void aDeploymentHostedTraversalRecordsTheDependencySetItWasAcceptedAgainst() throws Exception {
+        Path database = databaseDirectory.resolve("manifest.db");
+        UUID processInstanceId = UUID.randomUUID();
+
+        try (var engine = new JoinTestEngine();
+             var executions = new SqliteExecutionStore(database, clock());
+             var definitions = new SqliteGraphDefinitionStore(database, clock(),
+                     GraphDefinitionReferences.NONE);
+             var manifestStore = new ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore(
+                     database, clock(), ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE)) {
+
+            BehaviorRegistry behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults());
+            var manifests = new ai.ravenroot.core.manifest.ExecutionManifestService(manifestStore,
+                    ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
+                            executions.capabilities(), behaviors,
+                            UnknownBehaviorPolicy.passThrough(), GraphExecutionLimits.DEFAULTS, null),
+                    clock());
+            var deployment = new DefaultGraphDeployment(DeploymentId.of("manifest-" + UUID.randomUUID()),
+                    engine, behaviors, new ExecutionMonitor(), fixedIdentities(processInstanceId),
+                    graphBytes(), DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executions,
+                    DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, "worker-" + UUID.randomUUID(),
+                    Duration.ofSeconds(30),
+                    RequestReplyLimits.defaults(DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
+                    definitions, GraphExecutionLimits.DEFAULTS, null, manifests);
+            deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
+
+            var receipt = deployment.ingress().offerDurably(IDENTITY, IngressTarget.start(), "payload",
+                    "poller-1", "key-A");
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class, receipt);
+
+            var executionKey = new ExecutionKey(IDENTITY.tenantId(), processInstanceId);
+            var recorded = manifestStore.load(executionKey).toCompletableFuture().join();
+            assertEquals(GraphContentId.of(graphBytes()), recorded.manifest().graphContentId(),
+                    "the record pins the same document address the traversal is pinned to");
+            assertEquals("STANDARD", recorded.manifest().runtime().executionPolicy(),
+                    "and the policy a deployment-hosted traversal actually runs under");
+
+            // The verification a later recovery performs, run against this same runtime: it must pass,
+            // or the deployment would be accepting work its own process could not resume.
+            manifests.verify(executionKey, ai.ravenroot.api.application.ExecutionPolicy.STANDARD);
 
             deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }

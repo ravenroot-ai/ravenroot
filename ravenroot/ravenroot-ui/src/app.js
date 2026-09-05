@@ -2,6 +2,10 @@ import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
+import { isLayeredMode, layeredLabelSide } from './layered-drawing.js';
+import {
+  LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
+} from './layered-layout.js';
 import * as d3 from 'd3';
 import {
   detectAndParse,
@@ -189,6 +193,11 @@ import {
   hasUnsavedWork,
 } from './workspace.js';
 import {
+  captureDocumentCloseSnapshot,
+  classifyDocumentCloseTargets,
+  resolveDocumentCloseSnapshot,
+} from './document-close-plan.js';
+import {
   PANE_MIN_WIDTH,
   PANE_HEADER_HEIGHT,
   SPLITTER_KEY_STEP,
@@ -285,6 +294,7 @@ import { requestGraphLifecycle } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { uiText } from './ui-text.js';
 import {
+  edgePatchChanged,
   nodePatchChanged,
   readInspectorAutosavePreference,
   writeInspectorAutosavePreference,
@@ -684,6 +694,8 @@ let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
 let runtimeDisconnect = null;
+let runtimeConfigurationRequest = null;
+let runtimeConfiguration = null;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_BATCH_LIMIT = 256;
@@ -1662,6 +1674,7 @@ window.ravenroot = {
   activateDocument,
   closeDocument,
   requestCloseDocument,
+  requestCloseAllDocuments,
   documents: () => {
     captureActiveDocument();
     return workspace.documents;
@@ -1674,6 +1687,7 @@ window.ravenroot = {
   resetWorkspaceLayout,
   workspaceLayout: () => ({ ...workspaceLayout, plan: workspacePlan }),
   minimapSnapshot: () => minimapLastSnapshot ? JSON.parse(JSON.stringify(minimapLastSnapshot)) : null,
+  graphDocumentByteLimit: currentGraphDocumentByteLimit,
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
 };
@@ -2421,13 +2435,18 @@ function requestReplaceActiveDocument(graph, name, origin = document.activeEleme
 
 // The File command reads a file and hands its text here. Parsing is deliberately complete
 // before a dirty prompt or record mutation, so a malformed replacement is a true no-op.
-function replaceActiveDocumentFromText(text, name, origin = document.activeElement) {
-  const graph = parsePreparedGraph(text, name);
+function replaceActiveDocumentFromText(
+  text, name, origin = document.activeElement, maxBytes = currentGraphDocumentByteLimit(),
+) {
+  const graph = parsePreparedGraph(text, name, { maxBytes });
   return requestReplaceActiveDocument(graph, name, origin);
 }
 
 function activateDocument(id) {
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
+  if (inspectorDraft?.form.isConnected) {
+    return runAfterInspectorDraft(() => activateDocument(id));
+  }
   retireElementSelectionGesture(cy);
   invalidateStableSelection();
   cancelNodeMoveGesture();
@@ -2441,9 +2460,7 @@ function activateDocument(id) {
   return workspace.activeId;
 }
 
-function closeDocument(id) {
-  const target = workspace.find(id);
-  if (!target) return false;
+function teardownDocument(target) {
   if (dragSnapshot?.owner === target) cancelNodeMoveGesture();
   if (edgeGestureSession?.owner === target) cancelEdgeGesture({ clearMessage: true });
   retireProgramReadiness(target);
@@ -2452,7 +2469,6 @@ function closeDocument(id) {
   // request/controller without pretending that closing the tab is an undeploy command.
   target.sourceSession.pollController?.abort();
   target.sourceSession.pollController = null;
-  captureActiveDocument();
   // Renderer ownership is per document: close retires this target's callbacks and host without
   // touching any visible sibling, whether or not the target owns the shared chrome.
   destroyDocumentRenderer(target, 'closed');
@@ -2462,26 +2478,51 @@ function closeDocument(id) {
   detachExecution(target);
   if (target.cy) releaseCanvasZoomBridge(target.cy);
   target.cy?.destroy();
-  const targetIndex = workspace.documents.indexOf(target);
-  if (workspaceLayout.mode !== 'grid') {
-    const axis = workspaceLayout.mode === 'horizontal' ? 'columnShares' : 'rowShares';
-    const remaining = workspaceLayout[axis].filter((_, index) => index !== targetIndex);
-    const total = remaining.reduce((sum, value) => sum + value, 0);
-    workspaceLayout[axis] = total > 0 ? remaining.map(value => value / total) : [1];
-  }
-  // The pane goes with the document, and takes its canvas with it. Removing a pane does not move
-  // any other pane, so no surviving canvas is re-parented by a close.
   if (target.container) paneSeedObserver.unobserve(target.container);
   target.programReadiness?.overlay?.remove();
   target.pane?.remove();
   target.container = null;
   target.pane = null;
   paneRenderedSize.delete(target.id);
-  workspace.close(id);
+}
+
+function removeClosedDocumentShares(targets) {
+  if (workspaceLayout.mode !== 'grid') {
+    const axis = workspaceLayout.mode === 'horizontal' ? 'columnShares' : 'rowShares';
+    const closing = new Set(targets);
+    const remaining = workspaceLayout[axis].filter((_, index) =>
+      !closing.has(workspace.documents[index]));
+    const total = remaining.reduce((sum, value) => sum + value, 0);
+    workspaceLayout[axis] = total > 0 ? remaining.map(value => value / total) : [1];
+  }
+}
+
+function projectWorkspaceAfterDocumentClose() {
   applyActiveDocument();
   syncPaneLayout();
   reconcileActiveRenderModeRenderer();
   syncActiveDocumentChrome();
+}
+
+function closeDocument(id) {
+  const target = workspace.find(id);
+  if (!target) return false;
+  captureActiveDocument();
+  removeClosedDocumentShares([target]);
+  teardownDocument(target);
+  workspace.close(id);
+  projectWorkspaceAfterDocumentClose();
+  return true;
+}
+
+function closeDocumentSnapshot(snapshot) {
+  captureActiveDocument();
+  const targets = resolveDocumentCloseSnapshot(workspace, snapshot);
+  if (!targets.length) return false;
+  removeClosedDocumentShares(targets);
+  targets.forEach(teardownDocument);
+  workspace.closeMany(targets.map(target => target.id));
+  projectWorkspaceAfterDocumentClose();
   return true;
 }
 
@@ -2751,6 +2792,7 @@ function initCy(elements, gd, options = {}) {
   }
   if (typeof cytoscapeElk !== 'undefined') {
     try { cytoscape.use(cytoscapeElk); } catch(e) { /* already registered */ }
+    try { registerLayeredLayout(cytoscape); } catch(e) { /* already registered */ }
   }
   if (typeof cytoscapeEuler !== 'undefined') {
     try { cytoscape.use(cytoscapeEuler); } catch(e) { /* already registered */ }
@@ -3043,6 +3085,18 @@ function initCy(elements, gd, options = {}) {
         owner.cytoEdgeGeometryRaf = null;
         if (owner.cy !== event.cy || owner.layoutMode !== 'hierarchical') return;
         applyHierarchicalEdgeRoutes(owner.cy);
+      });
+      return;
+    }
+    if (isLayeredMode(owner.layoutMode)) {
+      // The animated arrangement itself publishes its routes once, after `layoutstop`; only a
+      // later manual move needs edges repainted, and then only the moved node's edges leave the
+      // drawing while every other route stays exactly as drawn.
+      if (owner.layoutBusy || owner.cytoEdgeGeometryRaf != null) return;
+      owner.cytoEdgeGeometryRaf = requestAnimationFrame(() => {
+        owner.cytoEdgeGeometryRaf = null;
+        if (owner.cy !== event.cy || !isLayeredMode(owner.layoutMode)) return;
+        applyLayeredRoutes(owner.cy, owner);
       });
       return;
     }
@@ -3580,6 +3634,9 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
     });
     applyRuntimeVisual(n);
   });
+  // Restated after the per-node style above, which writes this family's placement inline: a
+  // restyle must not drag the names back under the cards of a top-down drawing.
+  applyLayeredLabelSide(target, layeredLabelSide(owner?.layoutMode), owner);
 }
 
 // ── Snap all nodes to a regular grid ─────────────────────────────────────
@@ -3781,6 +3838,61 @@ function scheduleHierarchicalEdgeRoutes(owner, target, token, complete = null) {
   });
 }
 
+// Where the node name is painted while a layered arrangement is displayed. A top-down drawing
+// routes through the channel under each card — exactly where the n8n family paints the name — so
+// that arrangement carries the name beside the card instead. The drawing measures the labels only
+// after this has run, so the two never disagree.
+const SIDE_LABEL_STYLE = Object.freeze({
+  'text-valign': 'center', 'text-halign': 'right', 'text-margin-x': 10, 'text-margin-y': 0,
+});
+const N8N_LABEL_STYLE = Object.freeze({
+  'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-x': 0, 'text-margin-y': 10,
+});
+const LABEL_PLACEMENT_PROPERTIES = 'text-valign text-halign text-margin-x text-margin-y';
+
+// Any side but `right` hands the name back to whoever paints this render mode: under the card in
+// the n8n family, and centred inside the node by the base stylesheet everywhere else. Restoring by
+// removal rather than by writing one placement is what keeps the non-n8n modes untouched.
+function applyLayeredLabelSide(target = cy, side = 'bottom', owner = workspace.active) {
+  if (!target) return;
+  if (side === 'right') {
+    target.nodes().style(SIDE_LABEL_STYLE);
+    return;
+  }
+  target.nodes().removeStyle(LABEL_PLACEMENT_PROPERTIES);
+  if (isN8nFamilyLayout(owner?.visualStyle ?? visualStyle)) target.nodes().style(N8N_LABEL_STYLE);
+}
+
+// The layered arrangements draw placement and routing as one result. Edges the drawing still
+// describes are painted from it; a self-loop keeps the Cyto loop; an edge the drawing cannot
+// vouch for — authored since, or with an endpoint moved by hand — takes the dynamic Cyto route.
+function applyLayeredRoutes(target = cy, owner = workspace.documents.find(document_ => document_.cy === target)) {
+  if (!target) return;
+  const drawing = layeredDrawingOf(target);
+  if (!drawing) return applyCytoEdgeCurves(target, owner);
+  const stale = applyLayeredEdgeRoutes(target, drawing, { loop: edge => applyCustomLoop(edge, { cytoMode: true }) });
+  if (!stale.length) return;
+  const routes = rendererRouteSet(target, 'cyto', null, owner);
+  stale.forEach(edge => {
+    const route = routes.get(edge.id());
+    if (route) applyViewerUnbundledRoute(edge, route, { lineCap: 'round' });
+  });
+}
+
+function scheduleLayeredEdgeRoutes(owner, target, token, complete = null) {
+  if (!layoutRequestIsCurrent(token)) return;
+  owner.layoutDeferredRaf = requestAnimationFrame(() => {
+    owner.layoutDeferredRaf = null;
+    if (layoutRequestIsCurrent(token)) {
+      if (!layeredDrawingOf(target) && owner === workspace.active) {
+        announceGraph('The layered arrangement could not be computed. Node positions are unchanged.');
+      }
+      applyLayeredRoutes(target, owner);
+    }
+    complete?.();
+  });
+}
+
 function scheduleN8n3EdgeCurves(owner, target, token, complete = null) {
   if (!layoutRequestIsCurrent(token)) return;
   owner.layoutDeferredRaf = requestAnimationFrame(() => {
@@ -3947,6 +4059,7 @@ function applyActiveEdgeVisualContract(target = cy, mode = visualStyle) {
   });
   if (route.family === 'taxi' && mode === 'n8n') applyN8nBaseEdgeStyle(target, mode);
   else if (routeMode === 'hierarchical') applyHierarchicalEdgeRoutes(target);
+  else if (isLayeredMode(owner?.layoutMode) && mode === 'cyto') applyLayeredRoutes(target, owner);
   else if (route.family === 'round-taxi') applyN8n2EdgeCurves(target);
   else if (mode === 'n8n3') applyN8n3EdgeCurves(target);
   // N8N4 is deliberately hybrid per edge. Never choose a renderer-wide fallback from the last
@@ -3984,7 +4097,7 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // as ELK-backed modes even though only ELK modes need the per-document serialisation slot. Keeping
 // the two concerns separate prevents an ELK -> native queue hand-off from briefly publishing idle
 // while the replacement layout is already registered and about to start.
-const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', ...ELK_LAYOUT_MODES]);
+const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
 const DESIGN_ARRANGEMENTS = Object.freeze({
@@ -3992,6 +4105,9 @@ const DESIGN_ARRANGEMENTS = Object.freeze({
   flow: Object.freeze({ layout: 'dagre' }),
   organic: Object.freeze({ layout: 'cose' }),
   keep: Object.freeze({ preservePositions: true }),
+  // Additive layered drawings (ADR 0036). The four entries above are untouched by design.
+  'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
+  'layered-down': Object.freeze({ layout: 'layered-down' }),
 });
 
 function renderModeLabel(mode) {
@@ -4063,6 +4179,7 @@ function finishOwnedLayout(token) {
       }
     }
     const deferredRouting = token.mode === 'hierarchical' ? scheduleHierarchicalEdgeRoutes
+      : isLayeredMode(token.mode) ? scheduleLayeredEdgeRoutes
       : owner.visualStyle === 'n8n2' ? scheduleN8n2EdgeCurves
       : owner.visualStyle === 'n8n3' ? scheduleN8n3EdgeCurves
         : owner.visualStyle === 'n8n4' ? scheduleN8n4EdgeCurves
@@ -4196,6 +4313,14 @@ function runOwnedLayout(token) {
     fit: !fitAfterLayout,
     animate,
   }));
+  else if (isLayeredMode(token.mode)) nativeLayout = target.layout({
+    name: LAYERED_LAYOUT_NAME, mode: token.mode,
+    animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
+    fit: !fitAfterLayout, padding: 70,
+    prepareLabels: side => applyLayeredLabelSide(target, side, owner),
+    isCurrent: () => layoutRequestIsCurrent(token),
+    onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
+  });
   else if (token.mode === 'preset') {
     target.nodes().forEach(node => node.position({ x: node.data('px'), y: node.data('py') }));
     target.fit(60);
@@ -4265,6 +4390,12 @@ function setLayout(name, options = {}) {
   // Retire only stale dynamic route publications from the previous mode. The layout completion RAF
   // remains independently owned so rapid requests can still cancel/settle their session correctly.
   clearDynamicEdgeGeometry(owner);
+  // A layered drawing describes one arrangement; leaving the layered modes discards it so no
+  // later repaint can attach an old drawing to positions another layout produced.
+  if (!isLayeredMode(name)) clearLayeredDrawing(target);
+  // Node names follow the incoming arrangement: beside the card for the top-down drawing, back to
+  // this render mode's own placement for everything else, including a plain render-mode change.
+  applyLayeredLabelSide(target, layeredLabelSide(name), owner);
   layoutMode = name;
   if (owner) {
     owner.layoutMode = name;
@@ -4283,7 +4414,9 @@ function setLayout(name, options = {}) {
   syncPaneLayout();
 
   let job;
-  const kind = ELK_LAYOUT_MODES.has(name) ? 'elk' : 'native';
+  // Layered drawings share the ELK serialisation contract: one asynchronous engine run per
+  // document at a time, cancelled before it starts and otherwise allowed to settle.
+  const kind = ELK_LAYOUT_MODES.has(name) || isLayeredMode(name) ? 'elk' : 'native';
   const request = layoutSessions.request({
     documentId: owner.id,
     cy: target,
@@ -4558,7 +4691,7 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
   const edges = cy.edges(':selected');
   const desiredIds = [...nodes.map(node => node.id()), ...edges.map(edge => edge.id())];
   if (!skipDraftGuard && modifyEnabled && inspectorDraft?.form.isConnected
-      && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.nodeId) return;
+      && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.elementId) return;
   if (!skipDraftGuard && guardInspectorSelectionChange(desiredIds)) return;
   if (nodes.length > 1 && edges.empty()) {
     showMultiNodeInfo(nodes.map(node => node.id()));
@@ -4877,7 +5010,7 @@ function readNodeEditorPatch(form, model) {
 }
 
 function inspectNodeDraft(draft = inspectorDraft) {
-  const model = draft && graphData?.nodeMap?.[draft.nodeId];
+  const model = draft && graphData?.nodeMap?.[draft.elementId];
   if (!draft || !model || draft.documentId !== workspace.activeId || !draft.form.isConnected) {
     return { valid: false, changed: false, patch: null, model: null };
   }
@@ -4893,6 +5026,36 @@ function inspectNodeDraft(draft = inspectorDraft) {
   } catch {
     return { valid: false, changed: draft.dirty, patch: null, model };
   }
+}
+
+function inspectEdgeDraft(draft = inspectorDraft) {
+  const model = draft && graphData?.edges?.find(edge => edge.id === draft.elementId);
+  if (!draft || !model || draft.documentId !== workspace.activeId || !draft.form.isConnected) {
+    return { valid: false, changed: false, patch: null, model: null };
+  }
+  if (!draft.form.checkValidity()) return { valid: false, changed: draft.dirty, patch: null, model };
+  const id = String(draft.form.elements.id.value ?? '');
+  const source = String(draft.form.elements.source.value || '');
+  const target = String(draft.form.elements.target.value || '');
+  if (!validateEdgeId(graphData, id, { existingId: model.id }).ok
+      || !validateEdgeConnection(graphData, { source, target, edgeId: model.id }).ok) {
+    return { valid: false, changed: draft.dirty, patch: null, model };
+  }
+  try {
+    const patch = readEdgeEditorPatch(draft.form, model);
+    return {
+      valid: true,
+      changed: draft.baseline ? edgePatchChanged(draft.baseline, patch) : draft.dirty,
+      patch,
+      model,
+    };
+  } catch {
+    return { valid: false, changed: draft.dirty, patch: null, model };
+  }
+}
+
+function inspectInspectorDraft(draft = inspectorDraft) {
+  return draft?.elementType === 'edge' ? inspectEdgeDraft(draft) : inspectNodeDraft(draft);
 }
 
 /**
@@ -4930,6 +5093,16 @@ function syncAutosavedNodeRenderer(nodeId) {
   }
 }
 
+function syncAutosavedEdgeRenderer(edgeId) {
+  const element = cy?.getElementById(edgeId);
+  if (!element?.nonempty()) return;
+  const rendered = buildElements(graphData).find(candidate =>
+    candidate.data?.id === edgeId && Object.hasOwn(candidate.data, 'source'));
+  if (!rendered) return;
+  element.move({ source: rendered.data.source, target: rendered.data.target });
+  element.data(rendered.data);
+}
+
 function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
   if (!draft) return false;
   clearTimeout(draft.timer);
@@ -4938,30 +5111,54 @@ function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
   draft.dirty = assessment.changed;
   if (!assessment.valid) return false;
   if (!assessment.changed) return true;
-  const command = updateNodeFields(graphData, draft.nodeId, assessment.patch, editHistory, { coalesceKey });
+  const command = updateNodeFields(graphData, draft.elementId, assessment.patch, editHistory, { coalesceKey });
   if (!command) return false;
   draft.baseline = structuredClone(assessment.patch);
   draft.dirty = false;
-  syncAutosavedNodeRenderer(draft.nodeId);
+  syncAutosavedNodeRenderer(draft.elementId);
   updateHistoryUi();
   scheduleProgramGraphReadiness(workspace.active);
   return true;
 }
 
-function scheduleNodeDraftCommit(draft, immediate = false) {
+function commitEdgeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
+  if (!draft) return false;
+  clearTimeout(draft.timer);
+  draft.timer = null;
+  const assessment = inspectEdgeDraft(draft);
+  draft.dirty = assessment.changed;
+  if (!assessment.valid) return false;
+  if (!assessment.changed) return true;
+  const command = updateEdgeFields(graphData, draft.elementId, assessment.patch, editHistory,
+    { coalesceKey });
+  if (!command) return false;
+  draft.baseline = structuredClone(assessment.patch);
+  draft.dirty = false;
+  syncAutosavedEdgeRenderer(draft.elementId);
+  updateHistoryUi();
+  return true;
+}
+
+function commitInspectorDraft(draft = inspectorDraft, options = {}) {
+  return draft?.elementType === 'edge'
+    ? commitEdgeDraft(draft, options) : commitNodeDraft(draft, options);
+}
+
+function scheduleInspectorDraftCommit(draft, immediate = false) {
   if (!draft || draft !== inspectorDraft || !inspectorAutosave) return;
   clearTimeout(draft.timer);
-  const commit = () => commitNodeDraft(draft, { coalesceKey: draft.focusKey });
+  const commit = () => commitInspectorDraft(draft, { coalesceKey: draft.focusKey });
   if (immediate) commit();
   else draft.timer = setTimeout(commit, 180);
 }
 
-function bindNodeInspectorDraft(form, model, creating) {
+function bindInspectorDraft(form, model, elementType, creating) {
   if (creating) return;
   clearTimeout(inspectorDraft?.timer);
   const draft = {
     form,
-    nodeId: model.id,
+    elementType,
+    elementId: model.id,
     documentId: workspace.activeId,
     dirty: false,
     baseline: null,
@@ -4971,32 +5168,36 @@ function bindNodeInspectorDraft(form, model, creating) {
     lastFocusControl: null,
   };
   if (form.checkValidity()) {
-    try { draft.baseline = readNodeEditorPatch(form, model); } catch { /* invalid stays untouched */ }
+    try {
+      draft.baseline = elementType === 'edge'
+        ? readEdgeEditorPatch(form, model) : readNodeEditorPatch(form, model);
+    } catch { /* invalid stays untouched */ }
   }
   inspectorDraft = draft;
   form.addEventListener('focusin', event => {
-    if (!event.target.matches('input:not([readonly]), textarea')) return;
+    if (!event.target.matches('input:not([readonly]), textarea, select')) return;
+    draft.lastFocusControl = event.target;
+    if (!event.target.matches('input:not([readonly]):not([type="checkbox"]):not([type="radio"]), textarea')) return;
     if (draft.focusControl !== event.target) {
       draft.focusControl = event.target;
-      draft.lastFocusControl = event.target;
-      draft.focusKey = `node:${model.id}:edit:${++inspectorEditSequence}`;
+      draft.focusKey = `${elementType}:${model.id}:edit:${++inspectorEditSequence}`;
     }
   });
   form.addEventListener('focusout', event => {
     if (event.target !== draft.focusControl) return;
-    if (inspectorAutosave) commitNodeDraft(draft, { coalesceKey: draft.focusKey });
+    if (inspectorAutosave) commitInspectorDraft(draft, { coalesceKey: draft.focusKey });
     draft.focusControl = null;
     draft.focusKey = null;
   });
   form.addEventListener('input', () => {
     draft.dirty = true;
-    draft.dirty = inspectNodeDraft(draft).changed;
-    scheduleNodeDraftCommit(draft, false);
+    draft.dirty = inspectInspectorDraft(draft).changed;
+    scheduleInspectorDraftCommit(draft, false);
   });
   form.addEventListener('change', () => {
     draft.dirty = true;
-    draft.dirty = inspectNodeDraft(draft).changed;
-    scheduleNodeDraftCommit(draft, true);
+    draft.dirty = inspectInspectorDraft(draft).changed;
+    scheduleInspectorDraftCommit(draft, true);
   });
 }
 
@@ -5007,9 +5208,9 @@ function retireInspectorDraft(form = null) {
 }
 
 function restoreDraftSelection(draft) {
-  const node = cy?.getElementById(draft.nodeId);
-  if (!node?.nonempty()) return;
-  applyStableSelection(cy, [draft.nodeId]);
+  const element = cy?.getElementById(draft.elementId);
+  if (!element?.nonempty()) return;
+  applyStableSelection(cy, [draft.elementId]);
 }
 
 function guardInspectorSelectionChange(desiredIds) {
@@ -5018,12 +5219,12 @@ function guardInspectorSelectionChange(desiredIds) {
     if (pendingInspectorTransition) restoreDraftSelection(pendingInspectorTransition.draft);
     return Boolean(pendingInspectorTransition);
   }
-  if (desiredIds.length === 1 && desiredIds[0] === draft.nodeId) return false;
+  if (desiredIds.length === 1 && desiredIds[0] === draft.elementId) return false;
   clearTimeout(draft.timer);
   draft.timer = null;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
-    if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+    if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
       openInspectorUnsavedDialog(draft, desiredIds, false);
       return true;
     }
@@ -5062,7 +5263,7 @@ function completeInspectorTransition(action) {
   const pending = pendingInspectorTransition;
   if (!pending) return false;
   const dialog = document.getElementById('inspector-unsaved-dialog');
-  if (action === 'save' && !commitNodeDraft(pending.draft, { coalesceKey: pending.draft.focusKey })) {
+  if (action === 'save' && !commitInspectorDraft(pending.draft, { coalesceKey: pending.draft.focusKey })) {
     document.getElementById('inspector-unsaved-description').textContent =
       uiText('inspector.unsaved.invalidDescription');
     return false;
@@ -5093,10 +5294,10 @@ function runAfterInspectorDraft(action, { deferredAction = action, deferredResul
   if (!draft?.form.isConnected) return Boolean(action());
   clearTimeout(draft.timer);
   draft.timer = null;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
-    if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
-      openInspectorUnsavedDialog(draft, [draft.nodeId], false);
+    if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
+      openInspectorUnsavedDialog(draft, [draft.elementId], false);
       pendingInspectorTransition.complete = deferredAction;
       return deferredResult;
     }
@@ -5107,7 +5308,7 @@ function runAfterInspectorDraft(action, { deferredAction = action, deferredResul
     retireInspectorDraft(draft.form);
     return Boolean(action());
   }
-  openInspectorUnsavedDialog(draft, [draft.nodeId], assessment.valid);
+  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid);
   pendingInspectorTransition.complete = deferredAction;
   return deferredResult;
 }
@@ -5116,6 +5317,7 @@ function renderNodeForm(model, creating) {
   contextualHelp.dismiss();
   const descriptor = catalogDescriptor(model.behavior);
   const catalogEditorDescriptor = programCatalogEditorDescriptor(descriptor);
+  const catalogFieldOwner = { documentId: workspace.activeId, nodeId: model.id };
   const catalogNames = new Set((descriptor?.properties || []).map(property => property.name));
   // `runtime.nature` (or whatever `descriptor.natureProperty` names) is platform-owned, never a
   // behavior property (see NodeRuntimeNatureProperty's javadoc) — it has its own dedicated control
@@ -5165,7 +5367,8 @@ function renderNodeForm(model, creating) {
       <div id="node-nature-section">${natureFieldHtml(descriptor, model)}</div>
       <div id="node-max-concurrency-section">${maxConcurrencyFieldHtml(descriptor, model)}</div>
       <div id="node-join-section">${joinFieldHtml(graphData, model)}</div>
-      <div id="catalog-properties">${catalogPropertyFieldsHtml(catalogEditorDescriptor, model.properties || {})}</div>
+      <div id="catalog-properties">${catalogPropertyFieldsHtml(
+        catalogEditorDescriptor, model.properties || {}, catalogFieldOwner)}</div>
       <div id="program-workspace">${programWorkspaceContentHtml(descriptor, model)}</div>
       ${propertyEditorHtml('node-properties', extras)}
       <div class="editor-actions">
@@ -5197,7 +5400,7 @@ function renderNodeForm(model, creating) {
     // the nature control is, and against the CURRENT form state rather than the loaded model.
     renderBypassSection(form, model);
     document.getElementById('catalog-properties').innerHTML = catalogPropertyFieldsHtml(
-      programCatalogEditorDescriptor(selected), {});
+      programCatalogEditorDescriptor(selected), {}, catalogFieldOwner);
     document.getElementById('program-workspace').innerHTML = programWorkspaceContentHtml(selected, model);
     bindProgramWorkspace(form, model);
   });
@@ -5216,7 +5419,7 @@ function renderNodeForm(model, creating) {
   // handler, which would otherwise have to re-bind itself on every change.
   document.getElementById('catalog-properties')?.addEventListener('change', event => {
     if (!catalogEditorDescriptor || !event.target.closest('[data-catalog-property]')) return;
-    refreshConditionalCatalogProperties(catalogEditorDescriptor);
+    refreshConditionalCatalogProperties(catalogEditorDescriptor, catalogFieldOwner);
   });
   form.addEventListener('submit', event => {
     event.preventDefault();
@@ -5235,9 +5438,9 @@ function renderNodeForm(model, creating) {
     } else {
       const draft = inspectorDraft?.form === form ? inspectorDraft : null;
       if (draft) {
-        const assessment = inspectNodeDraft(draft);
+        const assessment = inspectInspectorDraft(draft);
         if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
-        if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+        if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
           return showFormError(form, 'This node is no longer part of the document');
         }
       } else if (nodePatchChanged(model, patch)
@@ -5262,7 +5465,7 @@ function renderNodeForm(model, creating) {
     });
   });
   bindProgramWorkspace(form, model);
-  bindNodeInspectorDraft(form, model, creating);
+  bindInspectorDraft(form, model, 'node', creating);
 }
 
 function catalogDescriptor(behavior) {
@@ -5328,8 +5531,23 @@ function refreshSecretReferenceChoices() {
   });
 }
 
-function catalogPropertyFieldsHtml(descriptor, values) {
+function catalogPropertyFieldsHtml(descriptor, values, owner) {
   if (!descriptor?.properties?.length) return '';
+  // Code-point tokens and a separator that cannot occur inside one encoded component keep the
+  // document/node/property tuple reversible and collision-free without exposing a document name.
+  const idPart = raw => {
+    const points = Array.from(String(raw ?? ''), character => character.codePointAt(0).toString(16));
+    return points.length ? points.join('-') : 'empty';
+  };
+  const fieldIdsFor = propertyName => {
+    const identity = [owner?.documentId, owner?.nodeId, propertyName].map(idPart).join('--');
+    const base = `catalog-property-${identity}`;
+    return { control: `${base}-control`, hint: `${base}-hint`, state: `${base}-state` };
+  };
+  const describedByAttribute = (...ids) => {
+    const describedBy = [...new Set(ids.flat().filter(Boolean))].join(' ');
+    return describedBy ? ` aria-describedby="${escapeAttribute(describedBy)}"` : '';
+  };
   // Every sibling's CURRENTLY DISPLAYED value, resolved with the exact same fallback each
   // field's own control uses below — so a condition reads the same value the user actually sees in
   // the referenced sibling, never a stale or differently-defaulted one. Computed once, up front,
@@ -5338,6 +5556,8 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     descriptor.properties.map(property => [property.name, values[property.name] ?? property.defaultValue ?? '']));
   const fields = descriptor.properties.map(property => {
     const value = resolvedValues[property.name];
+    const title = property.displayName || property.name;
+    const fieldIds = fieldIdsFor(property.name);
     // `adapterBinding` (always paired with `required` — see
     // NodePropertyDescriptor#adapterBinding) names a property whose EMPTY value does not make the
     // graph invalid, it makes the node UNCONFIGURED: the server admits it and the node refuses only
@@ -5370,8 +5590,6 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     const requiredNow = isPropertyRequiredNow(property, resolvedValues);
     const nativeRequired = requiredNow && visible && !adapterBound;
     const unconfigured = adapterBound && adapterIdOf(value) === '';
-    const stateId = `catalog-state-${escapeAttribute(property.name)}`;
-    const describedBy = unconfigured ? ` aria-describedby="${stateId}"` : '';
     // A closed-choice property whose descriptor declares NO default has three states, not two
     // — each allowed value, plus "the author has not declared this" — and a `<select>` built only
     // from `allowedValues` can represent two of them. HTML then picks the first option as the
@@ -5443,6 +5661,59 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // telling a document that declares nothing at all apart from a document that declares a non-empty
     // value the allowed values do not recognise -- `mismatchedOption` needs exactly that second case.
     const present = values[property.name] != null;
+    // The sentence follows the control. It used to end "never paste a secret" because the
+    // control was a text box that would have taken one; the control now cannot, so the hint says
+    // where the choices come from and what the document actually stores instead.
+    const secretHint = property.type === 'SECRET_REFERENCE'
+      ? ' The list holds the credentials you have stored. The value itself is entered in the'
+        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
+      : '';
+    // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
+    // still be prompted to fill the property in. What changes is only whether the browser blocks
+    // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
+    // state so "not configured yet" cannot be mistaken for "required and missing".
+    const fieldClass = unconfigured ? 'editor-field full catalog-property catalog-property--unconfigured' : 'editor-field full catalog-property';
+    // Scoped to the properties each sentence is about: every other property keeps its exact
+    // pre-existing description text (no inserted punctuation), so properties outside this state are
+    // unchanged. `appendSentence` is the same joining rule used inline.
+    const baseText = (property.description || '') + secretHint;
+    const appendSentence = (text, sentence) =>
+      text.trim().replace(/[.!?]?$/, text.trim() ? '. ' : '') + sentence;
+    let helpText = baseText;
+    let stateText = '';
+    if (unconfigured) {
+      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
+      // For a node that invokes a MODEL provider, the UI also states where the thing it is
+      // waiting for is declared. Without this the sentence above tells an author their node will
+      // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
+      // failed run. This editor has no Model providers panel, so the sentence names
+      // the plugin bundle that supplies the node type; see `PROVIDER_CONFIG_POINTER` for why it is
+      // rewritten rather than dropped.
+      //
+      // Gated on the catalog's declared capabilities, never on the behavior name and never on
+      // `adapterBinding` alone: that flag is a plain boolean meaning "names a deployment-configured
+      // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
+      // and configure a model provider would be a confident instruction to the wrong place. See
+      // `invokesModelProvider`, which reads the same capability set the runtime reads.
+      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
+    }
+    // Stated unconditionally for the shape, not only while the value happens to be undeclared.
+    // The hint is rendered once and is not re-rendered on a plain value change (only
+    // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
+    // sentence phrased as "this is currently undeclared" would go stale in the DOM the moment the
+    // author picked a value. Phrased as what the option MEANS, it stays true in every state. It says
+    // nothing about what any particular behavior does with the absence — that belongs to the
+    // property's own `description`, which the catalog owns.
+    if (undeclarable) {
+      helpText = appendSentence(helpText,
+        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+    }
+    const hintText = helpText.trim();
+    const describedBy = describedByAttribute(
+      stateText ? fieldIds.state : null,
+      hintText ? fieldIds.hint : null,
+    );
+    const accessibility = ` id="${fieldIds.control}"${describedBy}`;
     let control;
     if (property.allowedValues?.length) {
       const declared = property.allowedValues.some(option => String(option) === String(value));
@@ -5494,7 +5765,7 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // a GENUINELY absent value (nothing declared, or a declared empty string -- see `present`'s own
       // comment) still renders "Not declared" FIRST with `value=""` and selected, so it is still the
       // HTML placeholder label option and `required` still stops the save until the author decides.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${undeclaredOption}${mismatchedOption}${property.allowedValues.map(option =>
         `<option value="${escapeAttribute(option)}" ${String(option) === String(value) ? 'selected' : ''}>${escapeHtml(option)}</option>`).join('')}</select>`;
     } else if (property.type === 'SECRET_REFERENCE') {
       // CHOOSE, NEVER TYPE.
@@ -5515,9 +5786,9 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       // omission: a control that degrades to an input when the list is empty degrades exactly when
       // an author is most likely to reach for the secret instead. What the two degraded states do
       // instead is PRESERVE, never invent — see the two options below.
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
     } else if (property.type === 'TEXT' || property.type === 'CEL_EXPRESSION') {
-      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${describedBy} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
+      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
     } else if (property.type === 'BOOLEAN') {
       // Same defect as the closed-choice branch above, muter -- `String(value) !== 'true'` is
       // true for ANY value that is not the exact string "true", so a stored value that merely FAILED
@@ -5539,58 +5810,11 @@ function catalogPropertyFieldsHtml(descriptor, values) {
       const recognized = !present || stringValue === '' || stringValue === 'true' || stringValue === 'false';
       const unrecognizedOption = recognized ? ''
         : `<option value="${escapeAttribute(value)}" selected>Current value not recognized: ${escapeHtml(value)}</option>`;
-      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${describedBy}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
+      control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="BOOLEAN"${accessibility}>${unrecognizedOption}<option value="false" ${recognized && stringValue !== 'true' ? 'selected' : ''}>false</option><option value="true" ${stringValue === 'true' ? 'selected' : ''}>true</option></select>`;
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
-      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${describedBy} ${nativeRequired ? 'required' : ''}>`;
-    }
-    // The sentence follows the control. It used to end "never paste a secret" because the
-    // control was a text box that would have taken one; the control now cannot, so the hint says
-    // where the choices come from and what the document actually stores instead.
-    const secretHint = property.type === 'SECRET_REFERENCE'
-      ? ' The list holds the credentials you have stored. The value itself is entered in the'
-        + ' Credentials window, on the Run menu; only the reference is written to the graph.'
-      : '';
-    // The `*` marker survives regardless: `adapterBinding` implies `required`, so the author should
-    // still be prompted to fill the property in. What changes is only whether the browser blocks
-    // saving over it, and — while it is blank — a distinct hint that replaces the native :invalid
-    // state so "not configured yet" cannot be mistaken for "required and missing".
-    const fieldClass = unconfigured ? 'editor-field full catalog-property catalog-property--unconfigured' : 'editor-field full catalog-property';
-    // Scoped to the properties each sentence is about: every other property keeps its exact
-    // pre-existing description text (no inserted punctuation), so properties outside this state are
-    // unchanged. `appendSentence` is the same joining rule used inline.
-    const baseText = (property.description || '') + secretHint;
-    const appendSentence = (text, sentence) =>
-      text.trim().replace(/[.!?]?$/, text.trim() ? '. ' : '') + sentence;
-    let helpText = baseText;
-    let stateText = '';
-    if (unconfigured) {
-      stateText = 'Not configured yet — this node will refuse when execution reaches it, not when the graph is saved.';
-      // For a node that invokes a MODEL provider, the UI also states where the thing it is
-      // waiting for is declared. Without this the sentence above tells an author their node will
-      // refuse and leaves them with an unexplained blank — which they resolve, if at all, after a
-      // failed run. This editor has no Model providers panel, so the sentence names
-      // the plugin bundle that supplies the node type; see `PROVIDER_CONFIG_POINTER` for why it is
-      // rewritten rather than dropped.
-      //
-      // Gated on the catalog's declared capabilities, never on the behavior name and never on
-      // `adapterBinding` alone: that flag is a plain boolean meaning "names a deployment-configured
-      // adapter", so an AMQP or Telegram node package carries it too, and telling its author to go
-      // and configure a model provider would be a confident instruction to the wrong place. See
-      // `invokesModelProvider`, which reads the same capability set the runtime reads.
-      if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
-    }
-    // Stated unconditionally for the shape, not only while the value happens to be undeclared.
-    // The hint is rendered once and is not re-rendered on a plain value change (only
-    // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
-    // sentence phrased as "this is currently undeclared" would go stale in the DOM the moment the
-    // author picked a value. Phrased as what the option MEANS, it stays true in every state. It says
-    // nothing about what any particular behavior does with the absence — that belongs to the
-    // property's own `description`, which the catalog owns.
-    if (undeclarable) {
-      helpText = appendSentence(helpText,
-        'Not declared is a state of its own: it saves no value for this property, which is not the same as choosing one.');
+      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${accessibility} ${nativeRequired ? 'required' : ''}>`;
     }
     // `hidden`, never omitted from the render. `readCatalogPropertyEditor` collects every
     // `[data-catalog-property]` control that EXISTS in the form regardless of `hidden` — submit
@@ -5600,11 +5824,14 @@ function catalogPropertyFieldsHtml(descriptor, values) {
     // accessibility tree and Tab order, and out of native constraint validation — see
     // `.catalog-property[hidden]` in styles.css for why the CSS side of this needs its own rule
     // rather than relying on the attribute alone.
-    const title = property.displayName || property.name;
-    const state = stateText ? `<small id="${stateId}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
+    const hint = hintText
+      ? `<small id="${fieldIds.hint}" class="catalog-property-hint visually-hidden">${escapeHtml(hintText)}</small>` : '';
+    const state = stateText
+      ? `<small id="${fieldIds.state}" class="catalog-property-state">${escapeHtml(stateText)}</small>` : '';
     return `<div class="${fieldClass}" ${visible ? '' : 'hidden'}>
-      <div class="editor-label-row"><label>${escapeHtml(title)}${requiredNow ? ' *' : ''}</label>
-        ${contextualHelpButtonHtml(title, helpText)}</div>${control}${state}</div>`;
+      <div class="editor-label-row"><label for="${fieldIds.control}">${escapeHtml(title)}${requiredNow
+        ? ' <span aria-hidden="true">*</span>' : ''}</label>
+        ${contextualHelpButtonHtml(title, helpText)}</div>${control}${hint}${state}</div>`;
   }).join('');
   return `<div class="editor-section-title"><span>${escapeHtml(descriptor.displayName)} properties</span></div><div class="editor-grid">${fields}</div>`;
 }
@@ -5677,7 +5904,7 @@ function describeConditionalChanges(before, after) {
  * a mode is a status change, not an error, so it must not interrupt (`aria-live="assertive"` would);
  * and a second live region would just be two channels racing to describe one piece of UI.
  */
-function refreshConditionalCatalogProperties(descriptor) {
+function refreshConditionalCatalogProperties(descriptor, owner = {}) {
   const container = document.getElementById('catalog-properties');
   if (!container) return;
   const activeProperty = document.activeElement?.dataset?.catalogProperty;
@@ -5702,7 +5929,7 @@ function refreshConditionalCatalogProperties(descriptor) {
     state.visible !== after[index].visible || state.requiredNow !== after[index].requiredNow);
   if (!changed) return;
   contextualHelp.dismiss();
-  container.innerHTML = catalogPropertyFieldsHtml(descriptor, currentValues);
+  container.innerHTML = catalogPropertyFieldsHtml(descriptor, currentValues, owner);
   if (activeProperty) {
     container.querySelector(`[data-catalog-property="${escapeAttribute(activeProperty)}"]`)?.focus();
   }
@@ -6897,6 +7124,37 @@ function applyProgramBuildResult(form, panel, result) {
   if (build && result.artifactId) build.textContent = 'Rebuild';
 }
 
+function readEdgeEditorPatch(form, model) {
+  const values = new FormData(form);
+  const custom = readPropertyEditor(form);
+  const failureRouteControl = form.querySelector('[data-failure-route-control]');
+  const boxGoverns = !failureRouteControl.hidden;
+  const boxTicked = boxGoverns && values.get('failureRoute') === 'on';
+  const outcome = boxTicked
+    ? DEFAULT_EDGE_OUTCOME
+    : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
+  const declaresFailureRoute = boxGoverns
+    ? boxTicked
+    : form.dataset.preserveImplicitFailureDeclaration === 'true'
+      && outcome === DEFAULT_EDGE_OUTCOME;
+  setEdgeFailureRoute(custom, declaresFailureRoute);
+  return {
+    source: String(values.get('source')),
+    target: String(values.get('target')),
+    outcome,
+    command: String(values.get('command') || '').trim().toLowerCase(),
+    label: outcome,
+    edgeType: outcomeToEdgeType(outcome),
+    edgeName: String(values.get('edgeName') || '').trim(),
+    status: Number(values.get('status')) || 0,
+    trafficWeight: values.get('trafficWeight') === '' ? null : Number(values.get('trafficWeight')),
+    parallel: values.get('parallel') === 'on',
+    description: String(values.get('description') || '').trim(),
+    properties: custom.properties,
+    propertyTypes: custom.propertyTypes,
+  };
+}
+
 function renderEdgeForm(model, creating) {
   contextualHelp.dismiss();
   const extras = additionalProperties(model, 'edge');
@@ -6938,6 +7196,23 @@ function renderEdgeForm(model, creating) {
   const form = document.getElementById('edge-editor');
   form.elements.source.value = model.source || graphData.nodes[0]?.id || '';
   form.elements.target.value = model.target || graphData.nodes[1]?.id || graphData.nodes[0]?.id || '';
+  form.dataset.preserveImplicitFailureDeclaration = String(
+    declared && graphData.nodeMap?.[model.target]?.kind === 'ERROR',
+  );
+  const forgetOriginalFailureDeclaration = event => {
+    if (event.target.matches('[name="target"], [name="outcome"], [name="failureRoute"]')) {
+      form.dataset.preserveImplicitFailureDeclaration = 'false';
+    }
+    if (event.target.matches('[name="outcome"]')
+        && graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR') {
+      // The checkbox is hidden for an Error target, but an imported explicit declaration can leave
+      // it checked. Naming an outcome removes that declaration; clear its hidden control state too,
+      // so moving the edge to an ordinary target cannot revive the route the author just replaced.
+      form.elements.failureRoute.checked = false;
+    }
+  };
+  form.addEventListener('input', forgetOriginalFailureDeclaration);
+  form.addEventListener('change', forgetOriginalFailureDeclaration);
 
   // There are three states an edge can be in. The Inspector STATES which one rather than leaving it
   // to be inferred from a name, so the panel always carries a sentence naming it.
@@ -6966,24 +7241,30 @@ function renderEdgeForm(model, creating) {
   let restorableOutcome = failureRoute
     ? DEFAULT_EDGE_OUTCOME
     : String(model.outcome || DEFAULT_EDGE_OUTCOME);
+  let coupledTarget = String(form.elements.target.value || '');
   function targetIsErrorNode() {
     return graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR';
   }
   function applyFailureRouteCoupling() {
     const errorTarget = targetIsErrorNode();
-    // The checkbox is meaningless against an ERROR target, and a stale tick left over from before
-    // the target changed would silently re-enter the model on submit.
+    const target = String(form.elements.target.value || '');
+    const targetChanged = target !== coupledTarget;
+    coupledTarget = target;
+    // The checkbox is meaningless against an ERROR target. Clear it when an author moves a declared
+    // route there, which normalizes the route to the target's implicit form. Keep an imported
+    // declaration in the hidden control until the author changes routing intent: if they first move
+    // it to an ordinary target, the visible checkbox must faithfully show the document's declaration.
     controlRow.hidden = errorTarget;
-    const clearedByTarget = errorTarget && failureRouteBox.checked;
-    if (errorTarget) failureRouteBox.checked = false;
+    const clearedByTarget = errorTarget && targetChanged && failureRouteBox.checked;
+    if (clearedByTarget) failureRouteBox.checked = false;
     const explicitOutcome = errorTarget
       && String(outcomeField.value || DEFAULT_EDGE_OUTCOME).trim() !== DEFAULT_EDGE_OUTCOME;
     const isFailureRoute = errorTarget ? !explicitOutcome : failureRouteBox.checked;
 
-    if (failureRouteBox.checked && !outcomeField.readOnly) {
+    if (!errorTarget && failureRouteBox.checked && !outcomeField.readOnly) {
       restorableOutcome = String(outcomeField.value || DEFAULT_EDGE_OUTCOME);
     }
-    if (failureRouteBox.checked) {
+    if (!errorTarget && failureRouteBox.checked) {
       outcomeField.value = DEFAULT_EDGE_OUTCOME;
       outcomeField.readOnly = true;
       outcomeField.setAttribute('aria-describedby', 'edge-kind-state');
@@ -7192,69 +7473,40 @@ function renderEdgeForm(model, creating) {
     // leading/trailing whitespace is significant and validated without normalization.
     const id = String(values.get('id') || '');
     if (creating && graphData.edges.some(edge => edge.id === id)) return showFormError(form, `Edge ID ${id} already exists`);
-    const custom = readPropertyEditor(form);
-    // When the checkbox governs, it is the authority on BOTH halves of the pair, so the
-    // outcome is forced back to the default here as well as held there in the field: a form can be
-    // submitted by Enter from another field, and the two states must not be able to disagree on the
-    // way to the model.
-    //
-    // When it does NOT govern -- an `ERROR` target, where the implicit failure-route default decides -- an explicit
-    // declaration already on the edge has to be re-applied by hand or it is lost:
-    // `readPropertyEditor` rebuilds the bag from the visible rows, and `failure.route` deliberately
-    // has no row. It is re-applied only while the edge is still a failure route, though. Naming an
-    // outcome against an `ERROR` target IS how an author overrides the default, and carrying the
-    // declaration past that override would hand the engine `failure.route` together with an
-    // explicit outcome -- the one combination it refuses AT LOAD. That would move the error from
-    // the drawing to the run, introduced by the code intended to preserve the author's declaration.
-    const boxGoverns = !controlRow.hidden;
-    const boxTicked = boxGoverns && values.get('failureRoute') === 'on';
-    const outcome = boxTicked
-      ? DEFAULT_EDGE_OUTCOME
-      : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
-    const declaresFailureRoute = boxGoverns
-      ? boxTicked
-      : edgeDeclaresFailureRoute(model) && outcome === DEFAULT_EDGE_OUTCOME;
-    setEdgeFailureRoute(custom, declaresFailureRoute);
-    const patch = {
-      source: String(values.get('source')),
-      target: String(values.get('target')),
-      outcome,
-      command: String(values.get('command') || '').trim().toLowerCase(),
-      label: outcome,
-      // Was an inline 'continue'/'default' split that didn't recognize 'failed' or
-      // 'completed', so an edge authored or edited through this form here didn't pick up the
-      // renderer's red-dashed/green style until a save-and-reload round trip re-parsed it.
-      // The failure classification is deliberately NOT repeated here: `classifyFailureRoutes` runs
-      // over the whole document inside `buildElements` on the rebuild below, and it is the only
-      // place that can see the target node's kind. Computing it twice is how the two answers
-      // eventually disagree.
-      edgeType: outcomeToEdgeType(outcome),
-      edgeName: String(values.get('edgeName') || '').trim(),
-      status: Number(values.get('status')) || 0,
-      trafficWeight: values.get('trafficWeight') === '' ? null : Number(values.get('trafficWeight')),
-      parallel: values.get('parallel') === 'on',
-      description: String(values.get('description') || '').trim(),
-      properties: custom.properties,
-      propertyTypes: custom.propertyTypes,
-    };
+    const patch = readEdgeEditorPatch(form, model);
     if (creating) {
-      const created = createEdge(id, patch.source, patch.target, outcome);
+      const created = createEdge(id, patch.source, patch.target, patch.outcome);
       Object.assign(created, patch);
       insertEdgeElement(graphData, created, editHistory);
-    } else if (!updateEdgeFields(graphData, model.id, patch, editHistory)) {
-      return showFormError(form, 'This edge is no longer part of the document');
+    } else {
+      const draft = inspectorDraft?.form === form ? inspectorDraft : null;
+      if (draft) {
+        const assessment = inspectInspectorDraft(draft);
+        if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
+        if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
+          return showFormError(form, 'This edge is no longer part of the document');
+        }
+      } else if (edgePatchChanged(model, patch)
+          && !updateEdgeFields(graphData, model.id, patch, editHistory)) {
+        return showFormError(form, 'This edge is no longer part of the document');
+      }
     }
+    retireInspectorDraft(form);
     rebuildGraph();
     updateHistoryUi();
     showEdgeInfo(cy.getElementById(id));
   });
   document.getElementById('delete-edge')?.addEventListener('click', () => {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return;
-    deleteElements(graphData, [], [model.id], editHistory);
-    rebuildGraph();
-    updateHistoryUi();
-    closeInfo();
+    runAfterInspectorDraft(() => {
+      deleteElements(graphData, [], [model.id], editHistory);
+      rebuildGraph();
+      updateHistoryUi();
+      closeInfo();
+      return true;
+    });
   });
+  bindInspectorDraft(form, model, 'edge', creating);
 }
 
 function propertyEditorHtml(id, properties) {
@@ -7816,7 +8068,7 @@ function showAddEdgeForm({ skipDraftGuard = false } = {}) {
   renderEdgeForm(createEdge(id, graphData.nodes[0].id, graphData.nodes[1].id), true);
 }
 
-function downloadDocument(id) {
+function prepareDocumentDownload(id) {
   const target = workspace.find(id);
   // A freshly opened active document lives in the working view until the first capture. Saving is
   // itself a capture boundary, so write that view back before asking the record what it contains.
@@ -7824,7 +8076,7 @@ function downloadDocument(id) {
   if (!target?.graph || target.graph.format === 'graphify') {
     if (id === workspace.activeId) showInspectorMessage(
       'Only Ravenroot workflow documents can be exported as executable GraphML.');
-    return false;
+    return null;
   }
   if (id === workspace.activeId) {
     syncGraphPositions();
@@ -7833,24 +8085,46 @@ function downloadDocument(id) {
     syncGraphPositionsFromCy(target.graph, target.cy);
   }
   const xml = serializeGraphML(target.graph);
-  const blob = new Blob([xml], { type: 'application/graphml+xml;charset=utf-8' });
+  return {
+    target,
+    xml,
+    filename: target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`,
+  };
+}
+
+function dispatchDocumentDownload(prepared) {
+  const blob = new Blob([prepared.xml], { type: 'application/graphml+xml;charset=utf-8' });
   const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = target.name.endsWith('.graphml') ? target.name : `${target.name}.graphml`;
-  anchor.click();
-  URL.revokeObjectURL(url);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = prepared.filename;
+    anchor.click();
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function markDocumentDownloaded(prepared, { announce = true } = {}) {
+  const { target } = prepared;
   // Exporting GraphML is the only persistence this editor has, so it is the save point: the undo
   // stack keeps its depth and the document becomes clean at its current position.
   target.history.markSaved();
-  if (id === workspace.activeId) {
+  if (target.id === workspace.activeId) {
     editHistory.markSaved();
     updateHistoryUi();
-    addActivityMessage('editor', `Saved ${anchor.download}`, 'completed');
+    if (announce) addActivityMessage('editor', `Saved ${prepared.filename}`, 'completed');
   } else {
     syncPaneHeaders();
     syncDocumentSwitcher();
   }
+}
+
+function downloadDocument(id) {
+  const prepared = prepareDocumentDownload(id);
+  if (!prepared) return false;
+  dispatchDocumentDownload(prepared);
+  markDocumentDownloaded(prepared);
   return true;
 }
 
@@ -7890,13 +8164,13 @@ function redoEdit() {
 function finalizeInspectorBeforeHistory() {
   const draft = inspectorDraft;
   if (!draft?.form.isConnected) return true;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (!assessment.changed) {
     retireInspectorDraft(draft.form);
     return true;
   }
   if (inspectorAutosave && assessment.valid
-      && commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+      && commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
     retireInspectorDraft(draft.form);
     return true;
   }
@@ -8168,7 +8442,7 @@ function toggleModify({ skipDraftGuard = false } = {}) {
 function toggleInspectorAutosave() {
   inspectorAutosave = !inspectorAutosave;
   writeInspectorAutosavePreference(inspectorAutosave);
-  if (inspectorAutosave && inspectorDraft) scheduleNodeDraftCommit(inspectorDraft, true);
+  if (inspectorAutosave && inspectorDraft) scheduleInspectorDraftCommit(inspectorDraft, true);
   refreshCommands();
 }
 
@@ -9247,6 +9521,8 @@ function connectRuntime(atBoot = false) {
         if (runtimeDisconnect) runtimeDisconnect();
         runtimeDisconnect = null;
         runtimeClient = null;
+        runtimeConfigurationRequest = null;
+        runtimeConfiguration = null;
         return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
       }
       confirmedServiceOrigin = target.origin;
@@ -9274,6 +9550,15 @@ function connectRuntime(atBoot = false) {
   // unlike credentials, which has a transport entirely to itself.
   void deploymentsWindow?.setClient(runtimeClient);
   const connectedClient = runtimeClient;
+  runtimeConfiguration = null;
+  runtimeConfigurationRequest = connectedClient.configuration().then(configuration => {
+    const result = { client: connectedClient, configuration, error: null };
+    if (runtimeClient === connectedClient) runtimeConfiguration = result;
+    return result;
+  }).catch(error => {
+    if (runtimeClient === connectedClient) runtimeConfiguration = null;
+    return { client: connectedClient, configuration: null, error };
+  });
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
     atBoot ? 'Connecting to the service — the access token is kept in memory only'
       : 'Connecting with an in-memory bearer token');
@@ -9329,6 +9614,8 @@ function revokeRuntimeAccess() {
   runtimeDisconnect?.();
   runtimeDisconnect = null;
   runtimeClient = null;
+  runtimeConfigurationRequest = null;
+  runtimeConfiguration = null;
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
   // listing AND republishes `{loaded: false}`, so the node inspector's SECRET_REFERENCE control goes
@@ -9834,7 +10121,8 @@ async function playGraph(mode = 'test') {
 function handleRuntimeEvent(event) {
   const target = documentForRuntimeEvent(workspace, event);
   if (!target) return;
-  const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED';
+  const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
+    || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
   // The activity log is one panel and follows the active document, so only its events are logged.
   if (isActive) appendActivityEvent(event);
@@ -9862,7 +10150,14 @@ function handleRuntimeEvent(event) {
     const recoveredFromUnknown = target.execution.reconciliationState === 'unknown';
     settleReconciledExecution(target, event.executionId, target.execution.reconciliationClient,
       target.execution.generation, {
+      // The durable contract, unchanged by this event type existing: a cancelled execution is still
+      // reported as FAILED (see ExecutionTerminationReason's own documented rationale), so this is
+      // not a guess -- it is the same status the server itself will report once `fetchOutcome: true`
+      // below fetches the real outcome. `terminationReason` rides along so the one caller that reads
+      // this synthetic object directly (the "recovered from unknown" activity message) does not call
+      // a cancellation an ordinary failure while the real outcome is still in flight.
       status: event.type === 'EXECUTION_COMPLETED' ? 'COMPLETED' : 'FAILED',
+      terminationReason: event.type === 'EXECUTION_CANCELLED' ? 'CANCELLED' : null,
     }, recoveredFromUnknown, { fetchOutcome: true });
     const binding = target.execution.executionId;
     if (isActive && (binding === event.executionId || binding === PENDING_EXECUTION)) {
@@ -9891,6 +10186,10 @@ function handleRuntimeEvent(event) {
   if (event.type === 'NODE_BYPASSED') state = 'bypassed';
   if (event.type === 'NODE_COMPLETED' && state !== 'fallback' && state !== 'bypassed') state = 'completed';
   if (event.type === 'NODE_FAILED') state = 'failed';
+  // A retried attempt leaves the node ACTIVE, not failed: the visit has not settled, and the next
+  // attempt's own NODE_STARTED is already on its way. Rendering it as failed and then back to active
+  // would flash a terminal state the traversal never reached.
+  if (event.type === 'NODE_RETRY_SCHEDULED') state = 'active';
   // `activeInstances` is the count of LIVE INSTANCES of this node's actor -- 1 for a resident
   // nature however much traffic crosses it, one per concurrent invocation for the default one. It is
   // what the node is rendered by. `inFlightArrivals` is the queue depth and is deliberately kept in a
@@ -10873,33 +11172,47 @@ function onFileInput(evt) {
   const f = evt.target.files[0];
   // Clearing the control keeps re-selecting the same file working after a cancelled confirm.
   evt.target.value = '';
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 }
 
 function onReplaceFileInput(event) {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  showLoading();
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      replaceActiveDocumentFromText(String(reader.result), file.name, document.getElementById('menu-file'));
-    } catch (error) {
-      alert('Error: ' + error.message);
-    } finally {
-      hideLoading();
-    }
-  };
-  reader.onerror = () => {
-    hideLoading();
-    alert('Error: ' + (reader.error?.message || 'The file could not be read'));
-  };
-  reader.readAsText(file);
+  void loadReplacementFile(file);
 }
 
-function parsePreparedGraph(text, name, { automatic = false } = {}) {
-  let graph = detectAndParse(text, name);
+function graphConfigurationUnavailable(cause = null) {
+  const detail = cause?.message ? `: ${cause.message}` : '';
+  return new Error(
+    `Graph document loading is unavailable until the connected service returns valid configuration${detail}`,
+  );
+}
+
+async function graphDocumentByteLimitForLoad() {
+  // A service-origin change replaces the request. Follow the newest request until the value and
+  // connected client describe the same runtime, then return one captured number to the load.
+  while (true) {
+    const request = runtimeConfigurationRequest;
+    if (!request) throw graphConfigurationUnavailable();
+    const result = await request;
+    if (request !== runtimeConfigurationRequest || result.client !== runtimeClient) continue;
+    if (result.error || !result.configuration) {
+      throw graphConfigurationUnavailable(result.error);
+    }
+    return result.configuration.graphDocumentMaxBytes;
+  }
+}
+
+function currentGraphDocumentByteLimit() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient) {
+    throw graphConfigurationUnavailable();
+  }
+  return runtimeConfiguration.configuration.graphDocumentMaxBytes;
+}
+
+function parsePreparedGraph(text, name, { automatic = false, maxBytes } = {}) {
+  let graph = detectAndParse(text, name, maxBytes);
   if (graph.format === 'graphify' && graph.nodes.length > GFY_MAX_WARN) {
     if (automatic) return sampleLargeGraph(graph, GFY_SAMPLE);
     const keep = GFY_SAMPLE;
@@ -10913,14 +11226,21 @@ function parsePreparedGraph(text, name, { automatic = false } = {}) {
   return graph;
 }
 
-function loadFileObj(file) {
-  loadLocalGraphInput(file, {
+async function loadFileObj(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
     createReader: () => new FileReader(),
     onStart: showLoading,
     parseAndRender: text => {
       // Parse and make the large-graph decision BEFORE allocating a record: failures leave the
       // workspace, active id and every existing history exactly as they were.
-      const graph = parsePreparedGraph(text, file.name);
+      const graph = parsePreparedGraph(text, file.name, { maxBytes });
       openDocument({ name: file.name, graph });
       clearActivity();
       addActivityMessage('editor', `Loaded ${file.name}`, 'completed');
@@ -10934,13 +11254,39 @@ function loadFileObj(file) {
   });
 }
 
+async function loadReplacementFile(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
+    createReader: () => new FileReader(),
+    onStart: showLoading,
+    parseAndRender: text => replaceActiveDocumentFromText(
+      String(text), file.name, document.getElementById('menu-file'), maxBytes),
+    onRejected: error => alert('Error: ' + error.message),
+    onError: error => alert('Error: ' + error.message),
+    onComplete: hideLoading,
+  });
+}
+
 async function autoLoadUrl(url) {
   const name = url.split('/').pop();
-  await loadUrlGraphInput(url, {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    console.warn('Auto-load failed:', error.message);
+    return false;
+  }
+  return loadUrlGraphInput(url, maxBytes, {
     fetchImpl: fetch,
     onStart: showLoading,
     parseAndRender: text => {
-      const gd = parsePreparedGraph(text, name, { automatic: true });
+      const gd = parsePreparedGraph(text, name, { automatic: true, maxBytes });
       const active = workspace.active;
       active.name = name;
       active.displayName = allocateDocumentDisplayName(name);
@@ -10990,7 +11336,7 @@ wrap.addEventListener('drop', e => {
     return;
   }
   const f = e.dataTransfer.files[0];
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 });
 
 // ═══════════════════════════════════════════════════════════════
@@ -11882,7 +12228,12 @@ function completeCloseDocument(id) {
   return true;
 }
 
-function requestCloseDocument(id, origin = document.activeElement) {
+function requestCloseDocument(id, origin = document.activeElement, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard && workspace.activeId === id && inspectorDraft?.form.isConnected) {
+    return runAfterInspectorDraft(
+      () => requestCloseDocument(id, origin, { skipDraftGuard: true }),
+    );
+  }
   captureActiveDocument();
   const target = workspace.find(id);
   if (!target) return false;
@@ -11892,6 +12243,233 @@ function requestCloseDocument(id, origin = document.activeElement) {
     origin,
     complete: () => proceedToCloseDocument(id, origin),
   });
+}
+
+let pendingCloseAllDocuments = null;
+
+function closeAllDocumentsDialog() {
+  return document.getElementById('close-all-documents-dialog');
+}
+
+function closeAllDescription(oneKey, manyKey, count) {
+  return uiText(count === 1 ? oneKey : manyKey, { count });
+}
+
+function renderCloseAllList(documents, kind) {
+  const list = document.getElementById('close-all-documents-list');
+  list.replaceChildren(...documents.map(document_ => {
+    const item = document.createElement('li');
+    if (kind === 'sessions') {
+      const count = document_.sourceSession.sourceCount;
+      item.textContent = uiText(count === 1 ? 'closeAll.sessions.item.one' : 'closeAll.sessions.item.many', {
+        name: document_.displayName,
+        count,
+      });
+    } else {
+      item.textContent = document_.displayName;
+    }
+    return item;
+  }));
+}
+
+function renderCloseAllActions(actions) {
+  const host = document.getElementById('close-all-documents-actions');
+  host.replaceChildren(...actions.map(({ action, label, kind = '' }) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = `btn${kind ? ` ${kind}` : ''}`;
+    button.dataset.closeAllAction = action;
+    button.textContent = label;
+    return button;
+  }));
+}
+
+function showCloseAllStep(step, targets) {
+  const dialog = closeAllDocumentsDialog();
+  const title = document.getElementById('close-all-documents-title');
+  const description = document.getElementById('close-all-documents-description');
+  const status = document.getElementById('close-all-documents-status');
+  dialog.removeAttribute('aria-busy');
+  status.textContent = '';
+  delete status.dataset.state;
+  if (step === 'dirty') {
+    title.textContent = uiText('closeAll.dirty.title');
+    description.textContent = closeAllDescription(
+      'closeAll.dirty.description.one', 'closeAll.dirty.description.many', targets.length);
+    renderCloseAllList(targets, 'dirty');
+    renderCloseAllActions([
+      { action: 'save', label: uiText('closeAll.dirty.save'), kind: 'primary' },
+      { action: 'discard', label: uiText('closeAll.dirty.discard'), kind: 'danger' },
+      { action: 'cancel', label: uiText('closeAll.cancel') },
+    ]);
+  } else {
+    title.textContent = uiText('closeAll.sessions.title');
+    description.textContent = closeAllDescription(
+      'closeAll.sessions.description.one', 'closeAll.sessions.description.many', targets.length);
+    renderCloseAllList(targets, 'sessions');
+    renderCloseAllActions([
+      { action: 'stop', label: uiText('closeAll.sessions.stop'), kind: 'danger' },
+      { action: 'keep', label: uiText('closeAll.sessions.keep') },
+      { action: 'cancel', label: uiText('closeAll.cancel') },
+    ]);
+  }
+  if (!dialog.open) dialog.showModal();
+  dialog.querySelector('[data-close-all-action="cancel"]')?.focus();
+}
+
+function showCloseAllWorking() {
+  const dialog = closeAllDocumentsDialog();
+  dialog.setAttribute('aria-busy', 'true');
+  document.getElementById('close-all-documents-title').textContent = uiText('closeAll.working.title');
+  document.getElementById('close-all-documents-description').textContent =
+    uiText('closeAll.working.description');
+  document.getElementById('close-all-documents-list').replaceChildren();
+  document.getElementById('close-all-documents-status').textContent = '';
+  renderCloseAllActions([]);
+}
+
+function showCloseAllFailure(stage) {
+  const dialog = closeAllDocumentsDialog();
+  dialog.removeAttribute('aria-busy');
+  document.getElementById('close-all-documents-title').textContent = uiText('closeAll.failure.title');
+  document.getElementById('close-all-documents-description').textContent =
+    uiText('closeAll.failure.description');
+  document.getElementById('close-all-documents-list').replaceChildren();
+  const status = document.getElementById('close-all-documents-status');
+  status.dataset.state = 'error';
+  status.textContent = uiText(stage === 'stop' ? 'closeAll.failure.stop' : 'closeAll.failure.save');
+  renderCloseAllActions([
+    { action: 'retry', label: uiText('closeAll.retry'), kind: 'primary' },
+    { action: 'cancel', label: uiText('closeAll.cancel') },
+  ]);
+  dialog.querySelector('[data-close-all-action="retry"]')?.focus();
+}
+
+function focusAfterCloseAll() {
+  const newDocument = document.getElementById('btn-new');
+  const target = workspace.size
+    ? document.getElementById('document-switcher')
+    : (newDocument?.getClientRects().length ? newDocument : menuTrigger('file'));
+  target?.focus();
+}
+
+function cancelCloseAllDocuments() {
+  const pending = pendingCloseAllDocuments;
+  if (!pending) return false;
+  pending.cancelled = true;
+  pendingCloseAllDocuments = null;
+  const dialog = closeAllDocumentsDialog();
+  if (dialog.open) dialog.close('cancel');
+  const focusTarget = pending.origin?.isConnected ? pending.origin : menuTrigger('view');
+  focusTarget?.focus();
+  return true;
+}
+
+function finishCloseAllDocuments(snapshot) {
+  const dialog = closeAllDocumentsDialog();
+  pendingCloseAllDocuments = null;
+  if (dialog.open) dialog.close('closed');
+  closeDocumentSwitcher();
+  closeDocumentSnapshot(snapshot);
+  focusAfterCloseAll();
+}
+
+async function commitCloseAllDocuments() {
+  const pending = pendingCloseAllDocuments;
+  if (!pending || pending.committing) return false;
+  const targets = resolveDocumentCloseSnapshot(workspace, pending.snapshot);
+  if (!targets.length) {
+    finishCloseAllDocuments(pending.snapshot);
+    return true;
+  }
+  const classified = classifyDocumentCloseTargets(targets);
+  if (classified.dirty.length && !pending.dirtyChoice) {
+    showCloseAllStep('dirty', classified.dirty);
+    return true;
+  }
+  if (classified.activeSessions.length && !pending.sessionChoice) {
+    showCloseAllStep('sessions', classified.activeSessions);
+    return true;
+  }
+
+  pending.committing = true;
+  showCloseAllWorking();
+  let stage = 'save';
+  try {
+    const prepared = pending.dirtyChoice === 'save'
+      ? classified.dirty.map(document_ => {
+        const download = prepareDocumentDownload(document_.id);
+        if (!download) throw new Error('Document download preparation failed.');
+        return download;
+      })
+      : [];
+
+    if (pending.sessionChoice === 'stop') {
+      stage = 'stop';
+      for (const owner of classified.activeSessions) {
+        if (!resolveDocumentCloseSnapshot(workspace, pending.snapshot).includes(owner)) continue;
+        const stopped = sourceSessionIsActive(owner.sourceSession)
+          ? await stopActiveSourceSession(owner) : true;
+        if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
+        if (!stopped) {
+          throw new Error('Source session did not stop.');
+        }
+      }
+    }
+
+    stage = 'save';
+    if (pendingCloseAllDocuments !== pending || pending.cancelled) return false;
+    const liveTargets = new Set(resolveDocumentCloseSnapshot(workspace, pending.snapshot));
+    const liveDownloads = prepared.filter(item => liveTargets.has(item.target));
+    liveDownloads.forEach(dispatchDocumentDownload);
+    liveDownloads.forEach(item => markDocumentDownloaded(item, { announce: false }));
+    finishCloseAllDocuments(pending.snapshot);
+    return true;
+  } catch {
+    pending.committing = false;
+    showCloseAllFailure(stage);
+    return false;
+  }
+}
+
+function beginCloseAllDocuments(snapshot, origin) {
+  const targets = resolveDocumentCloseSnapshot(workspace, snapshot);
+  if (!targets.length) return false;
+  pendingCloseAllDocuments = {
+    snapshot,
+    origin,
+    dirtyChoice: null,
+    sessionChoice: null,
+    committing: false,
+  };
+  const { dirty, activeSessions } = classifyDocumentCloseTargets(targets);
+  if (dirty.length) return showCloseAllStep('dirty', dirty) || true;
+  if (activeSessions.length) return showCloseAllStep('sessions', activeSessions) || true;
+  finishCloseAllDocuments(snapshot);
+  return true;
+}
+
+function requestCloseAllDocuments(origin = document.activeElement) {
+  captureActiveDocument();
+  const snapshot = captureDocumentCloseSnapshot(workspace.documents);
+  if (!snapshot.length || pendingCloseAllDocuments) return false;
+  const begin = () => beginCloseAllDocuments(snapshot, origin);
+  return runAfterInspectorDraft(begin, { deferredAction: begin, deferredResult: true });
+}
+
+function handleCloseAllDocumentsAction(action) {
+  const pending = pendingCloseAllDocuments;
+  if (!pending || pending.committing) return false;
+  if (action === 'cancel') return cancelCloseAllDocuments();
+  if (action === 'retry') {
+    void commitCloseAllDocuments();
+    return true;
+  }
+  if (action === 'save' || action === 'discard') pending.dirtyChoice = action;
+  else if (action === 'stop' || action === 'keep') pending.sessionChoice = action;
+  else return false;
+  void commitCloseAllDocuments();
+  return true;
 }
 
 /**
@@ -11951,7 +12529,10 @@ function closeActiveDeploymentDialog(outcome) {
     // matching `stopActiveSourceSession`'s own token discipline: closing first would abort the poll
     // controller closeDocument itself owns, but the stop request it kicks off here is unaffected by
     // that abort (see `sourceSessionCleanupIsCurrent`, which does not depend on the pollController).
-    void stopActiveSourceSession(target).finally(() => completeCloseDocument(pending.documentId));
+    void stopActiveSourceSession(target).then(stopped => {
+      if (stopped) completeCloseDocument(pending.documentId);
+      else if (pending.origin?.isConnected) pending.origin.focus();
+    });
     return;
   }
   // outcome === 'close': detach observation only, the exact contract closeDocument's own comment
@@ -11960,10 +12541,10 @@ function closeActiveDeploymentDialog(outcome) {
 }
 
 const commandRegistry = createCommandRegistry(createAppCommands({
-  newDocument: () => openDocument(),
-  openFile: () => document.getElementById('file-inp').click(),
-  replaceActive: () => document.getElementById('replace-file-inp').click(),
-  save: () => exportGraphML(),
+  newDocument: () => runAfterInspectorDraft(() => openDocument()),
+  openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
+  replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
+  save: () => runAfterInspectorDraft(() => exportGraphML()),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),
@@ -11981,6 +12562,8 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   zoomIn: () => zoomBy(1.2),
   zoomOut: () => zoomBy(0.8),
   openDocumentSwitcher: () => openDocumentSwitcher(),
+  closeAllDocuments: (_context, invocation) => requestCloseAllDocuments(
+    invocation.control?.closest('#application-menu') ? menuTrigger('view') : invocation.control),
   openPanels: () => openPanelsIndex(document.querySelector('.rail-index')),
   toggleLeftPanels: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'left', !panelLayout.zones.left.collapsed)),
   toggleRightInspector: () => updatePanelLayout(setZoneCollapsed(panelLayout, 'right', !panelLayout.zones.right.collapsed)),
@@ -12012,6 +12595,7 @@ function commandContext() {
   const selectedNodes = cy?.nodes(':selected');
   return {
     hasDocument: Boolean(workspace.active && graphData),
+    hasOpenDocuments: workspace.size > 0,
     editable: Boolean(graphData && graphData.format !== 'graphify'),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
@@ -12119,7 +12703,8 @@ function renderApplicationMenu(name) {
 function openApplicationMenu(name, { focus = true } = {}) {
   const dialog = document.getElementById('unsaved-document-dialog');
   const activeDeploymentDialog = document.getElementById('active-deployment-dialog');
-  if (dialog.open || activeDeploymentDialog.open) return false;
+  const closeAllDialog = closeAllDocumentsDialog();
+  if (dialog.open || activeDeploymentDialog.open || closeAllDialog.open) return false;
   closePopovers({ applicationMenu: false });
   const trigger = menuTrigger(name);
   const popup = document.getElementById('application-menu');
@@ -12323,6 +12908,11 @@ document.addEventListener('click', event => {
     completeInspectorTransition(inspectorUnsavedAction.dataset.inspectorUnsavedAction);
     return;
   }
+  const closeAllAction = event.target.closest('[data-close-all-action]');
+  if (closeAllAction) {
+    handleCloseAllDocumentsAction(closeAllAction.dataset.closeAllAction);
+    return;
+  }
   const unsavedAction = event.target.closest('[data-unsaved-action]');
   if (unsavedAction) {
     closeUnsavedDocumentDialog(unsavedAction.dataset.unsavedAction);
@@ -12411,8 +13001,8 @@ document.addEventListener('click', event => {
     const form = removeProperty.closest('form');
     removeProperty.closest('.property-row')?.remove();
     if (form === inspectorDraft?.form) {
-      inspectorDraft.dirty = inspectNodeDraft(inspectorDraft).changed;
-      scheduleNodeDraftCommit(inspectorDraft, true);
+      inspectorDraft.dirty = inspectInspectorDraft(inspectorDraft).changed;
+      scheduleInspectorDraftCommit(inspectorDraft, true);
     }
     return;
   }
@@ -12431,7 +13021,7 @@ document.addEventListener('click', event => {
   const action = control.dataset.action;
   if (action === 'fit') fitGraph();
   else if (action === 'help') toggleHelp();
-  else if (action === 'new-document') openDocument();
+  else if (action === 'new-document') runAfterInspectorDraft(() => openDocument());
   else if (action === 'modify') toggleModify();
   else if (action === 'connect') toggleConnect();
   else if (action === 'add-node') showAddNodeForm();
@@ -12667,6 +13257,13 @@ document.getElementById('unsaved-document-dialog').addEventListener('keydown', e
 document.getElementById('unsaved-document-dialog').addEventListener('cancel', event => {
   event.preventDefault();
   closeUnsavedDocumentDialog('cancel');
+});
+document.getElementById('close-all-documents-dialog').addEventListener('keydown', event => {
+  event.stopPropagation();
+});
+document.getElementById('close-all-documents-dialog').addEventListener('cancel', event => {
+  event.preventDefault();
+  cancelCloseAllDocuments();
 });
 // Same containment as the unsaved-changes dialog above, for the same reason -- Escape must
 // resolve this modal's own cancel action, not fall through to canvas or global shortcuts behind it.

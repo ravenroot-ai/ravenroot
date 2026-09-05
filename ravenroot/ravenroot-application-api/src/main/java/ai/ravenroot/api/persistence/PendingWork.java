@@ -60,7 +60,7 @@ public sealed interface PendingWork {
  * @param attemptOrdinal the attempt ordinal constraint applied while processing the request.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
  * @param command command awaiting delivery.
  */
     record AttemptDispatch(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
@@ -82,7 +82,7 @@ public sealed interface PendingWork {
  * @param attemptOrdinal the attempt ordinal constraint applied while processing the request.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
  */
         public AttemptDispatch(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
                                UUID attemptId, int attemptOrdinal, long fencingToken,
@@ -104,7 +104,7 @@ public sealed interface PendingWork {
  * @param payload bounded payload carried by the pending work.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
      */
     record TimerDue(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
                     Instant dueAt, OpaquePayload payload, long fencingToken,
@@ -148,7 +148,7 @@ public sealed interface PendingWork {
  * @param payload bounded payload carried by the pending work.
  * @param fencingToken the stable fencing token used to identify the requested resource.
  * @param leaseExpiresAt instant at which the pending-work lease expires.
- * @param deliveryAttempt number of earlier delivery attempts.
+ * @param deliveryAttempt one-based count of deliveries of this item, including this one.
      */
     record HandlerTrigger(ExecutionKey key, UUID workItemId, UUID traversalId, UUID invocationId,
                           String handlerName, OpaquePayload payload, long fencingToken,

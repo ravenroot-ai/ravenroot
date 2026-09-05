@@ -80,12 +80,16 @@ public final class RavenrootServerMain {
         var authentication = AuthenticationConfiguration.fromEnvironment(System.getenv(), port);
         var httpSecurity = HttpSecurityConfiguration.fromEnvironment(System.getenv(), port);
         var artifactLifecycle = ArtifactLifecycleConfiguration.fromEnvironment(System.getenv());
+        // Resolve the operator's graph-document budget once, before any durable store opens.
+        // Every downstream admission and recovery boundary receives this same typed value.
+        var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits
+                .fromEnvironment(System.getenv());
         // This lease is the offline-maintenance authority shared with backup/restore. It is
         // acquired before the audit trail is opened and retained until both stores are closed.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
                 .fromEnvironment(System.getenv());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
-                executionStoreConfiguration, java.time.Clock.systemUTC());
+                executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl());
         try (var startupGuard = executionStoreOwner.startupGuard()) {
         var engine = ExecutionEngines.create(engineId, "ravenroot-server");
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
@@ -158,9 +162,34 @@ public final class RavenrootServerMain {
         // never be allowed to replace the real diagnosis with an unrelated audit failure. See
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
+        var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
+        ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
+                ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
+                        approvalStore, java.time.Clock.systemUTC(),
+                        ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration
+                                .fromEnvironment(System.getenv()),
+                        agentBudgetTelemetry)
+                : null;
+        ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
+                ? new ai.ravenroot.core.approval.ToolApprovalService(
+                        approvalStore, java.time.Clock.systemUTC(), agentBudgets == null
+                                ? ai.ravenroot.core.approval.ToolApprovalBudgetHooks.none()
+                                : agentBudgets) : null;
+        ai.ravenroot.core.humantask.HumanTaskService humanTasks = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.HUMAN_TASKS)
+                ? new ai.ravenroot.core.humantask.HumanTaskService(
+                        approvalStore, java.time.Clock.systemUTC()) : null;
+        ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings = toolApprovals == null
+                ? null : ai.ravenroot.server.approval.ToolApprovalConfiguration
+                        .fromEnvironment(System.getenv());
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
-                new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail));
+                new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
+                toolApprovals, toolApprovalSettings, agentBudgets, humanTasks);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -208,11 +237,85 @@ public final class RavenrootServerMain {
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
+        var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
-                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), executionStore,
+                executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
-                executionStoreOwner.graphDefinitionStore());
+                executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore());
+        // Every recovery path verifies against the application's own resolver rather than one built
+        // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
+        // two composition sites was updated and the other was not, and the refusals that followed
+        // would look like corrupt manifests rather than like a composition mistake.
+        var executionManifests = application.executionManifests();
+        // Recovery is composed whenever there is durable state to recover, not only when a durable
+        // decision service happens to be enabled. The two are unrelated: work interrupted mid-flight
+        // is outstanding whether or not this deployment also approves tool calls, and gating the
+        // whole loop on the decision services left an ordinary deployment discovering nothing and
+        // classifying nothing after a restart.
+        //
+        // The condition is the execution store alone, and the pinned document store is not tested
+        // beside it even though a rebuild reads it. The bootstrap opens all three stores together or
+        // opens none, so a null document store beside a live execution store is a composition error
+        // rather than a supported shape. Tolerating it here would answer that error by silently
+        // running with no recovery at all — the failure mode hardest to notice and most expensive to
+        // have. The authority's own null check refuses it at startup instead, loudly, before a
+        // listener exists.
+        final ai.ravenroot.server.recovery.ExecutionRecoveryDriver approvalRecovery;
+        final ai.ravenroot.server.recovery.RecoveryStartupDiscovery recoveryDiscovery;
+        if (executionStore == null) {
+            approvalRecovery = null;
+            recoveryDiscovery = null;
+        } else {
+            var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
+                    .fromEnvironment(System.getenv());
+            String recoveryWorker = "ravenroot-durable-decision-" + java.util.UUID.randomUUID();
+            var dispatchers = new java.util.ArrayList<ai.ravenroot.core.recovery.RecoveryDispatcher>();
+            if (toolApprovals != null) {
+                toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
+                var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
+                        executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
+                        engine, behaviors, monitor, executionIdentities, recoveryWorker,
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
+                        executionManifests);
+                dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
+                        executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor));
+            }
+            if (humanTasks != null) {
+                humanTasks.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
+                var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
+                        executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
+                        engine, behaviors, monitor, executionIdentities, recoveryWorker,
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
+                        executionManifests);
+                dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
+                        executionStore, humanTasks, continuationExecutor));
+            }
+            // One authority over the pinned document and the manifest, shared by the coordinator's
+            // fail-closed gate and by the declaration source below, so the answer a sweep acts on
+            // and the answer it reports cannot come from two objects that could drift apart.
+            var recoveryAuthority = new ai.ravenroot.core.recovery.PinnedGraphRecoveryAuthority(
+                    executionStore, executionStoreOwner.graphDefinitionStore(), executionManifests,
+                    behaviors::descriptor, graphExecutionLimits);
+            var recoveryCoordinator = new ai.ravenroot.core.recovery.ExecutionRecoveryCoordinator(
+                    recoveryAuthority, dispatchers);
+            var recoveryService = new ai.ravenroot.core.recovery.ExecutionRecoveryService(
+                    executionStore, recoveryConfiguration.tenantIds(), recoveryWorker,
+                    recoveryConfiguration.batchLimit(), recoveryConfiguration.leaseTtl(),
+                    // The declarations come from the coordinator's own authority rather than from
+                    // NONE_DECLARED. Before documents were retained there was no graph to read after
+                    // a restart, so every ambiguous attempt parked for want of a snapshot; the pinned
+                    // document is now readable, and an author's declaration survives the process that
+                    // accepted it.
+                    recoveryCoordinator.declarations(), recoveryCoordinator,
+                    graphExecutionLimits.maxRecoveryDeliveriesPerAttempt());
+            approvalRecovery = new ai.ravenroot.server.recovery.ExecutionRecoveryDriver(
+                    recoveryService, recoveryConfiguration.interval());
+            recoveryDiscovery = new ai.ravenroot.server.recovery.RecoveryStartupDiscovery(
+                    recoveryService, recoveryCoordinator, executionStore::supports,
+                    recoveryConfiguration.interval());
+        }
         application.configureArtifactDualControl(artifactLifecycle.dualControl());
         serverStartup.installInto(application::installManagedIngress);
         // Stated at startup rather than left to be discovered from a run's outcome: an operator who
@@ -239,14 +342,22 @@ public final class RavenrootServerMain {
                         ? java.util.List.of(new ai.ravenroot.server.readiness.DependencyStatus("managed-ingress", true,
                                 serverStartup.readinessDetail()))
                         : java.util.List.of(),
+                // A deployment that composes no recovery loop has nothing to classify and is ready as
+                // soon as its dependencies are; one that does stays closed until it knows what it
+                // inherited. Refusals found by that pass do not hold the gate: they are inherited
+                // facts for an operator, not a reason to refuse traffic for unrelated tenants.
+                recoveryDiscovery == null ? () -> true : recoveryDiscovery::complete,
                 readinessConfiguration);
         // The two rejection-detail sinks route into the same durable audit trail as
         // everything else here rather than defaulting to RavenrootServer's stdout loggers -- see
         // AuditTrailGraphMlRejectionSink's Javadoc for why this satisfies rather than reopens FIX-03
         // and API-01's "server-side sink only" constraint on GraphMlRejectionDetail/PayloadException.
         // AuditTrailExecutionSink is a fifth subscriber alongside the stdout logger
-        // and whatever TelemetrySupport installs below -- see its own Javadoc for exactly which four
-        // ExecutionEventTypes it admits and why the other six stay off the chain.
+        // and whatever TelemetrySupport installs below -- see its own Javadoc, and the exhaustive
+        // switch in its `decisional` method, for which ExecutionEventTypes it admits and why the
+        // rest stay off the chain. Deliberately no count here: the previous wording named one, the
+        // set has grown twice since, and a number in a cross-reference goes stale silently while the
+        // switch it describes cannot.
         var authorization = new ai.ravenroot.api.security.DefaultAuthorizationService(
                 new AuditTrailAuthorizationSink(auditTrail));
         // The durable operator authority the packaged process was missing under the relevant contract. It is a
@@ -317,7 +428,21 @@ public final class RavenrootServerMain {
                         readinessConfiguration.drainGracePeriod(),
                         new AuditTrailExecutionControlSink(auditTrail),
                         assistantComposition.service(),
-                        embedConfiguration, userCredentials);
+                        embedConfiguration, userCredentials, graphExecutionLimits.graphMl());
+                // No null check on approvalRecovery: both services are composed only when the
+                // execution store is, which is the same condition that composes the loop.
+                if (toolApprovals != null) {
+                    server.installToolApprovals(toolApprovals, approvalRecovery::sweepTenant);
+                }
+                if (humanTasks != null) {
+                    server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant);
+                }
+                if (agentBudgets != null) {
+                    server.installAgentAuthorityControl(agentBudgets);
+                }
+                if (executionManifests != null) {
+                    server.installExecutionManifests(executionManifests);
+                }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(
                             ai.ravenroot.server.ingress.ManagedIngressRegistry ingress) {
@@ -350,7 +475,8 @@ public final class RavenrootServerMain {
         java.util.Optional<AutoCloseable> telemetry;
         try {
             telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
-                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor);
+                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor,
+                    agentBudgetTelemetry);
         } catch (RuntimeException | Error telemetryFailure) {
             startupHandle.close();
             userCredentials.close();
@@ -368,6 +494,8 @@ public final class RavenrootServerMain {
             try {
                 startupHandle.gracefulShutdown();
             } finally {
+                if (approvalRecovery != null) approvalRecovery.close();
+                if (recoveryDiscovery != null) recoveryDiscovery.close();
                 try {
                     registered.activation().close();
                 } finally {
@@ -419,7 +547,13 @@ public final class RavenrootServerMain {
         }));
         try {
             startupHandle.start();
+            // Discovery starts before the sweep loop: the sweep claims and dispatches, and a process
+            // should know what it inherited before it begins acting on it.
+            if (recoveryDiscovery != null) recoveryDiscovery.start();
+            if (approvalRecovery != null) approvalRecovery.start();
         } catch (RuntimeException | Error startFailure) {
+            if (recoveryDiscovery != null) recoveryDiscovery.close();
+            if (approvalRecovery != null) approvalRecovery.close();
             userCredentials.close();
             closeEmbedRegistrations(embedRegistrations);
             assistantComposition.close();
@@ -526,13 +660,20 @@ public final class RavenrootServerMain {
     private static PluginActivationOrchestrator.Registration registerNodePackagesOrRefuse(
             BehaviorEnvironment environment, CredentialResolver credentials,
             AuditTrailPluginActivationSink auditSink,
-            ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink) {
+            ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
+            ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+            ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+            ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
                     new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
-                    toolAuditSink);
+                    toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
-                    BehaviorRegistry.standard(environment), System.getenv(), services);
+                    BehaviorRegistry.standard(environment,
+                            ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
+                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), humanTasks),
+                    System.getenv(), services);
         } catch (RuntimeException activationFailed) {
             var diagnosis = PluginActivationDiagnostics.diagnose(activationFailed);
             System.err.println(diagnosis.consoleMessage());

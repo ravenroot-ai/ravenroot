@@ -31,6 +31,7 @@ describe('application command catalog', () => {
       connectArmed: true, hasSelection: true, layoutMode: 'cyto', renderMode: 'design', running: false,
       canUndo: true, canRedo: false, hasToken: true, leftCollapsed: false, rightCollapsed: true,
       workspaceLayoutMode: 'grid', workspaceLayoutDefault: false,
+      hasOpenDocuments: true,
       applicationTheme: 'dark',
       canDuplicateSelectedNode: true,
     };
@@ -71,6 +72,8 @@ describe('application command catalog', () => {
     expect(byId['view.rightInspector'].isChecked(context)).toBe(false);
     expect(byId['view.themeDark'].isChecked(context)).toBe(true);
     expect(byId['view.themeLight'].isChecked(context)).toBe(false);
+    expect(byId['view.closeAllDocuments'].isEnabled(context)).toBe(true);
+    expect(byId['view.closeAllDocuments'].isEnabled({ ...context, hasOpenDocuments: false })).toBe(false);
     // Offered while the document is editable and has not already declared join semantics;
     // withdrawn once it has, since migrating an already-declared document is a defined no-op.
     expect(byId['edit.migrateJoinSemantics'].placements).toContain('menu.edit');
@@ -138,6 +141,31 @@ describe('application command catalog', () => {
     spied['layout.design'].execute();
     spied['layout.monitoring'].execute();
     expect(setRenderMode.mock.calls).toEqual([['design'], ['monitoring']]);
+  });
+
+  it('adds the layered arrangements as a sibling group after the established four', () => {
+    const commands = createAppCommands({});
+    const established = commands.filter(command => command.group === 'design-arrange');
+    const layered = commands.filter(command => command.group === 'design-arrange-layered');
+    expect(layered.map(command => command.id)).toEqual([
+      'layout.arrange.hierarchical-new',
+      'layout.arrange.layered-down',
+    ]);
+    expect(layered.map(command => command.label)).toEqual([
+      'Arrange — Hierarchical (new)',
+      'Arrange — Layered (top-down)',
+    ]);
+    expect(Math.min(...layered.map(command => command.order)))
+      .toBeGreaterThan(Math.max(...established.map(command => command.order)));
+    expect(layered.every(command => command.kind == null
+      && command.placements.includes('menu.layout') && command.placements.includes('help'))).toBe(true);
+    expect(layered.every(command => command.isEnabled({ hasDocument: true, renderMode: 'design' }))).toBe(true);
+    expect(layered.some(command => command.isEnabled({ hasDocument: true, renderMode: 'monitoring' }))).toBe(false);
+    const arrange = vi.fn();
+    const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));
+    spied['layout.arrange.hierarchical-new'].execute();
+    spied['layout.arrange.layered-down'].execute();
+    expect(arrange.mock.calls).toEqual([['hierarchical-new'], ['layered-down']]);
   });
 
   it('offers semantic Design arrangements as actions after the render modes', () => {
@@ -212,6 +240,21 @@ describe('application command catalog', () => {
       createAppCommands({ openDocumentSwitcher }).map(cmd => [cmd.id, cmd]));
     byIdSpied['view.graphs'].execute({ hasDocument: true });
     expect(openDocumentSwitcher).toHaveBeenCalledOnce();
+  });
+
+  it('exposes Close All Documents from View through the canonical command action', () => {
+    const closeAllDocuments = vi.fn();
+    const byId = Object.fromEntries(
+      createAppCommands({ closeAllDocuments }).map(command => [command.id, command]));
+
+    expect(byId['view.closeAllDocuments']).toMatchObject({
+      label: 'Close All Documents', group: 'panels',
+    });
+    expect(byId['view.closeAllDocuments'].placements).toContain('menu.view');
+    expect(byId['view.closeAllDocuments'].isEnabled({ hasOpenDocuments: true })).toBe(true);
+    expect(byId['view.closeAllDocuments'].isEnabled({ hasOpenDocuments: false })).toBe(false);
+    byId['view.closeAllDocuments'].execute();
+    expect(closeAllDocuments).toHaveBeenCalledOnce();
   });
 });
 

@@ -16,12 +16,16 @@ spec:
       labels:
         {{- include "ravenroot.selectorLabels" . | nindent 8 }}
     spec:
-      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s), for
-      # the same reason and pointing at the same runbook section as the raw Kubernetes manifest
-      # (deploy/kubernetes/ravenroot.yaml): docs/runbooks/plat-02-readiness-drain-and-alerts.md §2,
-      # the pre-deployment form and, once CORE-LIFECYCLE long-lived deployments run
-      # on this pod, the Shape 2 form together with RAVENROOT_MAX_ACTIVE_DEPLOYMENTS. This
-      # chart does not pick a number for you.
+      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s), for the
+      # same reason as the raw Kubernetes manifest (deploy/kubernetes/ravenroot.yaml): that default is
+      # NOT safe once any long-lived deployments run on this pod, because
+      # DefaultRavenrootApplication.close() stops them one at a time, not concurrently, so the pod's
+      # worst-case graceful-shutdown time grows with RAVENROOT_MAX_ACTIVE_DEPLOYMENTS (M). See
+      # ai.ravenroot.server.deployment.DeploymentCapConfiguration's Javadoc for the cited formula --
+      # podShutdownSeconds(M) = 46 + 30*M seconds, 286s at the default cap of 8 -- and
+      # ai.ravenroot.server.GracefulShutdown's Javadoc for what it deliberately does not cover
+      # (in-flight executions at shutdown). This chart does not pick a number for you; set one
+      # explicitly via an overlay before running any long-lived deployments.
       automountServiceAccountToken: false
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}

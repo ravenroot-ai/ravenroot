@@ -6,6 +6,7 @@ import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -13,8 +14,10 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
+import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.time.Duration;
 import java.util.LinkedHashMap;
@@ -60,6 +63,10 @@ import java.util.concurrent.ExecutionException;
  * no code path that could return one -- a stronger statement than "it is careful with it".</p>
  */
 public final class LlmPromptNodeBehavior implements NodeBehavior {
+    private static final CancellationSignal NEVER_CANCELLED = new CancellationSignal() {
+        @Override public boolean cancelled() { return false; }
+        @Override public void onCancel(Runnable listener) { }
+    };
 
     /** The catalog name, unchanged from the one the core used to publish. */
     public static final String BEHAVIOR = "llm-prompt";
@@ -221,12 +228,21 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
 
         @Override
         public CompletionStage<NodeResult> handle(NodeMessage message) {
-            return invoke(message, services, settings);
+            return invoke(message, services, settings, NEVER_CANCELLED);
+        }
+
+        @Override
+        public CompletionStage<NodeResult> handle(NodeMessage message, CancellationSignal cancellation) {
+            return invoke(message, services, settings, Objects.requireNonNull(cancellation, "cancellation"));
         }
     }
 
     private CompletionStage<NodeResult> invoke(NodeMessage message, NodePackageServices services,
-                                               Settings settings) {
+                                               Settings settings, CancellationSignal cancellation) {
+        if (cancellation.cancelled()) {
+            return CompletableFuture.failedFuture(
+                    new LlmPromptException(LlmPromptException.Code.DEADLINE_EXCEEDED));
+        }
         // The key pairs the tenant with the profile, and the separator is a character neither can
         // contain: a profile name is masked to [A-Za-z0-9._-] before it is ever resolved.
         Admission.Lease lease = profileAdmission.tryAcquire(
@@ -251,12 +267,18 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                     settings.profile().endpoint(), "POST",
                     Map.of("content-type", List.of("application/json")), body,
                     Duration.ofMillis(settings.timeoutMs()),
-                    settings.profile().credentialBinding().orElse(null)));
+                    settings.profile().credentialBinding().orElse(null), null,
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                            settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
+                            settings.profile().maxResponseBytes(), 100,
+                            Duration.ofMillis(settings.timeoutMs()), Set.of("application/json")),
+                    ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {
             lease.close();
             return CompletableFuture.failedFuture(sanitize(failure));
         }
         var result = new CompletableFuture<NodeResult>();
+        cancellation.onCancel(call::cancel);
         call.completion().whenComplete((response, failure) -> {
             try {
                 if (failure != null) {
@@ -300,6 +322,14 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
         attributes.put(ModelInputProvenance.PROMPT_ATTRIBUTE, provenance.snapshot());
         completion.promptTokens().ifPresent(count -> attributes.put("llm.promptTokens", count));
         completion.completionTokens().ifPresent(count -> attributes.put("llm.completionTokens", count));
+        try {
+            int outputLimit = Math.toIntExact(Math.min(settings.profile().maxResponseBytes(),
+                    response.effectiveMaximumOutputBytes()));
+            new PayloadLimits(outputLimit, 32, 50_000, 100_000, outputLimit, 4_096)
+                    .enforceAndMeasure(Map.of("payload", completion.text(), "attributes", Map.copyOf(attributes)));
+        } catch (RuntimeException oversized) {
+            throw new LlmPromptException(LlmPromptException.Code.RESPONSE_TOO_LARGE);
+        }
         return new NodeResult("continue", completion.text(), Map.copyOf(attributes));
     }
 
@@ -329,7 +359,8 @@ public final class LlmPromptNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE, RESPONSE_TOO_LARGE -> LlmPromptException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> LlmPromptException.Code.DEADLINE_EXCEEDED;
                 case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> LlmPromptException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> LlmPromptException.Code.TRANSPORT_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE, BUDGET_EXHAUSTED ->
+                        LlmPromptException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new LlmPromptException(LlmPromptException.Code.TRANSPORT_UNAVAILABLE);

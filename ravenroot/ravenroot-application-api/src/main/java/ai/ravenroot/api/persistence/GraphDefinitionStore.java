@@ -62,6 +62,12 @@ import java.util.concurrent.CompletionStage;
  */
 public interface GraphDefinitionStore extends AutoCloseable {
 
+    /** Default graph-definition admission budget: 10 MiB, expressed in bytes. */
+    int DEFAULT_MAX_DEFINITION_BYTES = 10 * 1024 * 1024;
+
+    /** Hard safety ceiling for a graph definition: 256 MiB, expressed in bytes. */
+    int HARD_MAX_DEFINITION_BYTES = 256 * 1024 * 1024;
+
     /**
      * Facilities this adapter honours.
      *

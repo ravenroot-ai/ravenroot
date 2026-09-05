@@ -17,13 +17,17 @@ import ai.ravenroot.api.application.TraversalStatus;
  * break.</p>
  *
  * <h2>There is deliberately no {@code PAUSED}</h2>
- * <p>No durable pause state exists in the product yet: pause and resume act on the runtime's
- * in-memory active-execution map, and {@link ProcessInstanceStatus} has no {@code PAUSED} member, so
- * a paused instance is durably indistinguishable from a running one and a {@code PAUSED} constant
- * here could only ever be returned by guessing. The work that makes pause durable adds the constant
- * then. Because the disposition is derived rather than stored, that addition needs no schema
- * migration, no backfill and no change to any row already written — which is the whole reason this
- * is computed rather than persisted.</p>
+ * <p>An operator hold on a traversal <em>is</em> durable, and this classification still has no
+ * member for it — on purpose, and not for want of the work. A held traversal is stored as
+ * {@link ProcessInstanceStatus#WAITING}, the same value every other durable wait writes, and
+ * {@link #WAITING} already ranks it: above {@link #INTERRUPTED}, which is the correct answer,
+ * because an instance somebody deliberately stopped is not part of the restart-recovery cohort.</p>
+ *
+ * <p>Adding a {@code PAUSED} rank would therefore not add information. It would restate, in a
+ * derived answer, a fact that is already stored authoritatively beside the instance in its hold
+ * record — which is the one thing a derived answer must not do, for the reason this whole enum is
+ * computed rather than persisted. <em>Which</em> wait an instance is in is a question for the hold
+ * record; whether it is waiting at all is this classification's question, and it answers it.</p>
  *
  * <h2>Precedence</h2>
  * <p>More than one constant can describe the same row, so the mapping fixes a total order and applies

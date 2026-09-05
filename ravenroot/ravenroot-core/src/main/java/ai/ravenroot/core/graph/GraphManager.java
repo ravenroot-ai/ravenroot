@@ -144,7 +144,13 @@ public final class GraphManager implements AutoCloseable {
     }
 
     public static ParsedGraphMl readGraphMlDocument(InputStream input) {
-        byte[] bytes = SecureGraphMlParser.readAndValidate(input, GraphMlLimits.DEFAULTS);
+        return readGraphMlDocument(input, GraphMlLimits.DEFAULTS);
+    }
+
+    /** Reads and retains a GraphML document under caller-selected resource budgets. */
+    public static ParsedGraphMl readGraphMlDocument(InputStream input, GraphMlLimits limits) {
+        Objects.requireNonNull(limits, "limits");
+        byte[] bytes = SecureGraphMlParser.readAndValidate(input, limits);
         return new ParsedGraphMl(readValidatedGraphMl(bytes), bytes);
     }
 

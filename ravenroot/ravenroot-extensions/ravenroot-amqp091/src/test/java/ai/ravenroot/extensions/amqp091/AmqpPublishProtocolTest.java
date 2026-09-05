@@ -1,6 +1,7 @@
 package ai.ravenroot.extensions.amqp091;
 
 import ai.ravenroot.api.security.SecretValue;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -134,6 +135,39 @@ class AmqpPublishProtocolTest {
         assertEquals("c-1", output.get("correlationId"));
         assertEquals(1, output.get("attemptCount"));
         assertFalse(output.toString().contains(AmqpTestSupport.SECRET));
+    }
+
+    @Test
+    void reservedLiteralProfileIsRefusedBeforeCredentialOrProtocolAndExactExceptionReachesTransport() {
+        AmqpProfile base = AmqpTestSupport.profile();
+        AmqpProfile literal = new AmqpProfile(base.tenant(), base.name(), "127.0.0.1", base.port(), base.tls(),
+                base.vhost(), base.username(), base.credentialRef(), base.defaultExchange(), base.exchanges(),
+                base.defaultRoutingKey(), base.routingKeys(), base.headers(), base.replyTo(), base.allowPersistent(),
+                base.maxPriority(), base.maxExpirationMs(), base.maxConcurrency(), base.maxPerSecond(),
+                base.timeoutMs(), base.maxBodyBytes(), base.retries());
+        AtomicInteger credentials = new AtomicInteger();
+        var deniedProtocol = new AmqpTestSupport.FakeProtocol(Event.CONFIRM);
+        var denied = new AmqpPublishNodeBehavior(reference -> {
+            credentials.incrementAndGet();
+            return Optional.of(new SecretValue(AmqpTestSupport.SECRET.toCharArray()));
+        }, (tenant, name) -> Optional.of(literal), deniedProtocol,
+                new AmqpRuntimeControls(System::nanoTime, Runnable::run, 8, 8, 32),
+                System::nanoTime, millis -> { }, ReservedNetworkPolicy.denyAllReserved());
+        assertEquals("PERMANENT_FAILURE", AmqpTestSupport.output(
+                denied.create(AmqpTestSupport.configuration()), AmqpTestSupport.payload()).get("status"));
+        assertEquals(0, credentials.get());
+        assertEquals(0, deniedProtocol.connects.get());
+
+        var allowedProtocol = new AmqpTestSupport.FakeProtocol(Event.CONFIRM);
+        var allowed = new AmqpPublishNodeBehavior(
+                reference -> Optional.of(new SecretValue(AmqpTestSupport.SECRET.toCharArray())),
+                (tenant, name) -> Optional.of(literal), allowedProtocol,
+                new AmqpRuntimeControls(System::nanoTime, Runnable::run, 8, 8, 32),
+                System::nanoTime, millis -> { },
+                ReservedNetworkPolicy.fromCommaSeparatedExceptions("127.0.0.1:LOOPBACK"));
+        assertEquals("CONFIRMED", AmqpTestSupport.output(
+                allowed.create(AmqpTestSupport.configuration()), AmqpTestSupport.payload()).get("status"));
+        assertEquals(1, allowedProtocol.connects.get());
     }
 
     private static void assertStatus(Event event, String expected) {

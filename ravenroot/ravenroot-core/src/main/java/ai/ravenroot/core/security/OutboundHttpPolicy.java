@@ -1,11 +1,8 @@
 package ai.ravenroot.core.security;
 
 import ai.ravenroot.core.security.egress.EgressAddressGuard;
-import ai.ravenroot.core.security.egress.ReservedNetwork;
 
-import java.net.InetAddress;
 import java.net.URI;
-import java.net.UnknownHostException;
 import java.time.Duration;
 import java.util.Collection;
 import java.util.LinkedHashSet;
@@ -185,41 +182,7 @@ public final class OutboundHttpPolicy {
      * will actually use is decided.
      */
     private void requireLiteralNotReserved(String host) {
-        String candidate = host.startsWith("[") && host.endsWith("]")
-                ? host.substring(1, host.length() - 1)
-                : host;
-        if (!looksLikeLiteralAddress(candidate)) {
-            return;
-        }
-        InetAddress address;
-        try {
-            // Safe from triggering DNS: reached only for an operator-allowlisted host that already
-            // parses as numeric, and any residual failure is treated as "not a literal".
-            address = InetAddress.getByName(candidate);
-        } catch (UnknownHostException e) {
-            return;
-        }
-        if (EgressAddressGuard.policy().permits(host, address)) {
-            return;
-        }
-        throw new SecurityException("Outbound HTTP destination is a reserved address ("
-                + ReservedNetwork.of(address) + "): " + host);
-    }
-
-    private static boolean looksLikeLiteralAddress(String host) {
-        if (host.isEmpty()) {
-            return false;
-        }
-        if (host.indexOf(':') >= 0) {
-            return true;
-        }
-        for (int i = 0; i < host.length(); i++) {
-            char c = host.charAt(i);
-            if ((c < '0' || c > '9') && c != '.') {
-                return false;
-            }
-        }
-        return true;
+        EgressAddressGuard.requireAllowedLiteral(host);
     }
 
     public Duration timeout(long requestedMillis) {

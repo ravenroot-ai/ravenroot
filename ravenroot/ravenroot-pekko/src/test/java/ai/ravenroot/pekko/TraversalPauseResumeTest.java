@@ -143,7 +143,7 @@ class TraversalPauseResumeTest {
     void cancellingAPausedTraversalReleasesTheHopItWasHolding() throws Exception {
         var monitor = new ExecutionMonitor();
         var gateEntered = new CountDownLatch(1);
-        var executionFailed = new CountDownLatch(1);
+        var executionCancelled = new CountDownLatch(1);
         var tailStarted = new CountDownLatch(1);
         var releaseGate = new CompletableFuture<NodeResult>();
         var behaviors = new BehaviorRegistry()
@@ -161,8 +161,8 @@ class TraversalPauseResumeTest {
                  if (event.type() == ExecutionEventType.NODE_STARTED && "tail".equals(event.nodeId())) {
                      tailStarted.countDown();
                  }
-                 if (event.type() == ExecutionEventType.EXECUTION_FAILED) {
-                     executionFailed.countDown();
+                 if (event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
+                     executionCancelled.countDown();
                  }
              })) {
 
@@ -179,8 +179,11 @@ class TraversalPauseResumeTest {
                     "the traversal must be provably parked before the cancel this test is about");
 
             assertTrue(application.cancelTraversal(traversalId), "a paused traversal must still be cancellable");
-            assertTrue(executionFailed.await(15, TimeUnit.SECONDS),
-                    "cancelling a paused traversal must end it rather than leave it holding");
+            assertTrue(executionCancelled.await(15, TimeUnit.SECONDS),
+                    "cancelling a paused traversal must end it rather than leave it holding, and it "
+                            + "ends as a cancellation rather than as a failure: the event type is the "
+                            + "only dimension this stream is labelled by, so a stop published as "
+                            + "EXECUTION_FAILED would be counted as one");
             assertFalse(tailStarted.await(1, TimeUnit.SECONDS),
                     "the released hop must be refused by the cancellation, not run by the resume path");
             assertTrue(application.liveExecutions("tenant-a").isEmpty(),

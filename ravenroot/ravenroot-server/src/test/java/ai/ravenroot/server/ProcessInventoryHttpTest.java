@@ -112,6 +112,81 @@ class ProcessInventoryHttpTest {
     }
 
     /**
+     * A cancelled instance's durable inventory row -- and its one traversal's row -- must carry
+     * {@code terminationReason=CANCELLED} beside the {@code status=FAILED} both already reported
+     * before this feature. Proves "visible after restart" at the surface the acceptance criterion
+     * actually means it for: this is the durable, restart-surviving read, not the process-local
+     * result registry {@code CancelledExecutionResultHttpTest} already covers.
+     */
+    @Test
+    void aCancelledInstanceIsListedInTheDurableInventoryWithItsReason() throws Exception {
+        var hangReached = new java.util.concurrent.CountDownLatch(1);
+        var hangingBehaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
+                .register("hang", message -> {
+                    hangReached.countDown();
+                    try {
+                        Thread.sleep(3_000);
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                    }
+                    return java.util.concurrent.CompletableFuture.completedFuture(
+                            ai.ravenroot.api.execution.NodeResult.continueWith(message.payload()));
+                });
+        String hangGraph = """
+                <?xml version="1.0" encoding="UTF-8"?>
+                <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+                  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+                  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+                  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+                  <graph id="process-inventory-cancelled-test" edgedefault="directed">
+                    <node id="start"><data key="kind">START</data></node>
+                    <node id="hang"><data key="kind">BEHAVIOR</data><data key="behavior">hang</data></node>
+                    <node id="end"><data key="kind">END</data></node>
+                    <edge id="e1" source="start" target="hang"><data key="outcome">continue</data></edge>
+                    <edge id="e2" source="hang" target="end"><data key="outcome">continue</data></edge>
+                  </graph>
+                </graphml>
+                """;
+
+        try (var engine = new PekkoExecutionEngine("process-inventory-cancelled-test");
+             var store = new InMemoryExecutionStore()) {
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), hangingBehaviors,
+                    new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), store);
+            try (var server = testServer(application, new HeaderTenantAuthenticator())) {
+                server.start();
+
+                var submitResponse = postAs(server, "/v1/executions?mode=run", hangGraph, "tenant-a");
+                assertEquals(202, submitResponse.statusCode(), submitResponse.body());
+                String processInstanceId = extract(submitResponse.body(), "processInstanceId");
+                String executionId = extract(submitResponse.body(), "executionId");
+                assertTrue(hangReached.await(5, TimeUnit.SECONDS), "the hang node never started");
+
+                var cancelled = postAs(server, "/v1/executions/" + executionId + "/cancel", "", "tenant-a");
+                assertEquals(200, cancelled.statusCode(), cancelled.body());
+
+                String inventory = pollUntilStatus(server, "tenant-a", "FAILED");
+                assertTrue(inventory.contains("\"processInstanceId\":\"" + processInstanceId + "\""),
+                        () -> "the cancelled instance did not appear in the durable inventory: " + inventory);
+                assertTrue(inventory.contains("\"status\":\"FAILED\""),
+                        () -> "a cancelled instance is still stored and reported as FAILED: " + inventory);
+                assertTrue(inventory.contains("\"terminationReason\":\"CANCELLED\""),
+                        () -> "the durable inventory did not carry the reason, so after a restart this "
+                                + "row would read as an ordinary incident: " + inventory);
+                assertTrue(inventory.contains("\"cancelled\":true"), inventory);
+
+                String traversals = body(getAs(server,
+                        "/v1/executions/" + processInstanceId + "/traversals", "tenant-a"));
+                assertTrue(traversals.contains("\"status\":\"FAILED\""), traversals);
+                assertTrue(traversals.contains("\"terminationReason\":\"CANCELLED\""),
+                        () -> "the traversal row must carry the reason too, not only the instance row: "
+                                + traversals);
+                assertTrue(traversals.contains("\"cancelled\":true"), traversals);
+            }
+        }
+    }
+
+    /**
      * The tenant boundary, over the durable source rather than runtime bookkeeping. Mutation proof:
      * replace {@code delegate.processInventory(context.tenantId(), query)} in
      * {@code AuthorizedRavenrootApplication#processInventory} with an unscoped read and
@@ -391,6 +466,21 @@ class ProcessInventoryHttpTest {
             // completed instance disappear from an unfiltered poll the instant it finishes.
             listing = body(getAs(server, "/v1/executions/inventory?includeTerminal=true", tenant));
             if (!listing.contains("\"status\":\"COMPLETED\"")) {
+                Thread.sleep(100);
+                continue;
+            }
+            return listing;
+        } while (System.nanoTime() < deadline);
+        return listing;
+    }
+
+    /** Like {@link #pollUntilNonEmpty}, but for a terminal status other than the ordinary COMPLETED. */
+    private static String pollUntilStatus(RavenrootServer server, String tenant, String status) throws Exception {
+        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(10).toNanos();
+        String listing;
+        do {
+            listing = body(getAs(server, "/v1/executions/inventory?includeTerminal=true", tenant));
+            if (!listing.contains("\"status\":\"" + status + "\"")) {
                 Thread.sleep(100);
                 continue;
             }

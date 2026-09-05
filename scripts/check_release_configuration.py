@@ -12,6 +12,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from scripts.central_registry import PUBLISHABLE_ARTIFACTS, publishable_artifacts
+from scripts.check_extension_pack import check_pack
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,7 @@ def required_text(root: ET.Element, path: str, expected: str) -> None:
 
 
 def check_pom() -> None:
+    check_pack()
     project = ET.parse(ROOT / "ravenroot/pom.xml").getroot()
     required_text(project, "m:url", "https://ravenroot.ai")
     required_text(project, "m:licenses/m:license/m:name", "Apache License, Version 2.0")
@@ -129,6 +131,10 @@ def check_workflows() -> None:
     ci = workflows["ci.yml"]
     if "secrets." in ci or "packages: write" in ci or "environment:\n      name: release" in ci:
         raise ValueError("ordinary CI must not possess release credentials or package authority")
+    if ci.count("python3 -m unittest scripts.tests.test_release_registries") != 2:
+        raise ValueError("OCI, Central, and GitHub Release reconciliation tests must run in both CI tiers")
+    if ci.count("python3 -m unittest scripts.tests.test_extension_pack") != 2:
+        raise ValueError("the extension-pack membership contract must run in both CI tiers")
 
     authorize = workflows["authorize-release.yml"]
     if "secrets." in authorize or "environment:" in authorize or "pull_request_target" in authorize:
@@ -137,9 +143,14 @@ def check_workflows() -> None:
         raise ValueError("main-side authorization trigger or fail-closed implementation changed")
 
     publication = workflows["release.yml"]
-    validate, separator, publish = publication.partition("\n  publish:\n")
+    validate, separator, protected_and_public = publication.partition("\n  publish:\n")
     if not separator:
         raise ValueError("release workflow has no separately protected publish job")
+    publish, public_separator, public = protected_and_public.partition(
+        "\n  verify-public-release:\n"
+    )
+    if not public_separator:
+        raise ValueError("release workflow has no fresh anonymous verification job")
     if "secrets." in validate or "packages: write" in validate or "environment:" in validate:
         raise ValueError("non-secret release gates gained publication authority")
     if "environment:\n      name: release" not in publish:
@@ -151,19 +162,58 @@ def check_workflows() -> None:
         "tags:\n      - \"v*\"",
         "workflow_dispatch:",
         "test \"$GITHUB_REF_TYPE\" = tag",
+        "release_contract.py validate-event",
         "validate-tag-authorization",
         "packages: write",
         "id-token: write",
-        "central_registry.py compare-local",
-        "skopeo copy --all",
+        "central_registry.py validate-bundle",
+        "central_registry.py build-bundle",
+        "central_registry.py publish-bundle",
+        "check_extension_pack.py --sbom",
+        "oci_registry.py validate-local",
+        "oci_registry.py reconcile",
+        "oci_registry.py verify-public",
+        "python3 -m unittest scripts.tests.test_release_registries -v",
         "SOURCE_DATE_EPOCH",
-        "local_image_digest",
-        "https://spdx.dev/Document",
-        "https://slsa.dev/provenance/v1",
+        "image_digest",
         "push-to-registry: true",
     ):
         if required not in publication:
             raise ValueError(f"release workflow contract is missing: {required}")
+    if re.search(r"ravenroot:\$?\{?[^\s\"']+@sha256", publication):
+        raise ValueError("OCI references must never combine a tag and digest")
+    if ":latest" in publication:
+        raise ValueError("release workflow must not create or move latest")
+    if any(
+        forbidden in public
+        for forbidden in ("secrets.", "environment:", "packages: write", "id-token: write")
+    ):
+        raise ValueError("anonymous release verification gained credentials or publication authority")
+    for required in (
+        "needs: [validate, publish]",
+        "permissions:\n      contents: read",
+        "persist-credentials: false",
+        "needs.publish.outputs.image_digest",
+    ):
+        if required not in public:
+            raise ValueError(f"anonymous release verification is missing: {required}")
+
+    github_release = (ROOT / "scripts/github_release.py").read_text(encoding="utf-8")
+    for required in ('"--draft"', '"--draft=false"', '"--latest=false"'):
+        if required not in github_release:
+            raise ValueError(f"GitHub Release transaction is missing: {required}")
+    oci_registry = (ROOT / "scripts/oci_registry.py").read_text(encoding="utf-8")
+    for required in (
+        '"copy",',
+        '"--all",',
+        'f"{REPOSITORY}@{digest}"',
+        '"--src-no-creds"',
+        '"--preserve-digests"',
+        '"https://spdx.dev/Document"',
+        '"https://slsa.dev/provenance/v1"',
+    ):
+        if required not in oci_registry:
+            raise ValueError(f"OCI reconciliation contract is missing: {required}")
 
 
 def check_documentation() -> None:

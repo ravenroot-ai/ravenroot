@@ -43,6 +43,19 @@ export function executionOutcomeMessages(outcome = {}) {
     const nodes = defaultedNodes.length ? `: ${defaultedNodes.join(', ')}` : '; node list unavailable';
     messages.push({ title: 'execution outcome', css: 'fallback',
       detail: `${outcome.status || 'COMPLETED'}, degraded: ${defaultedNodes.length} node(s) ran as an unresolved default${nodes}` });
+  } else if (outcome.status === 'FAILED' && (outcome.cancelled === true || outcome.terminationReason === 'CANCELLED')) {
+    // A cancelled execution is stored and reported as FAILED (see `ExecutionTerminationReason`'s own
+    // documented rationale: forward/backward compatibility for a status persisted by name), so a bare
+    // "FAILED" here is not a partial answer, it is the wrong one -- it tells an operator a deliberate
+    // stop was an incident. `cancelled`/`terminationReason` are additive fields on the same outcome
+    // JSON `/v1/executions/{id}` already returns; an older server that predates them never sets
+    // either, so this branch is simply never reached and the FAILED branch below is unchanged.
+    // Styled like the degraded branch above (`fallback`, the amber dot) rather than a new class: a
+    // cancellation is deliberately neither the green of a clean COMPLETED nor the red this panel
+    // reserves for an actual incident -- see TelemetryBridge's identical UNSET-not-ERROR span-status
+    // reasoning for a cancelled traversal, made for the same reason on a different surface.
+    messages.push({ title: 'execution outcome', detail: 'CANCELLED (stopped on request, stored as FAILED)',
+      css: 'fallback' });
   } else if (outcome.status === 'FAILED') {
     messages.push({ title: 'execution outcome', detail: 'FAILED', css: 'failed' });
   } else {

@@ -152,7 +152,8 @@ public final class RavenrootCliMain {
         return new DefaultRavenrootApplication(engine, monitor, behaviors, environment.artifacts(),
                 environment.programRuntime(),
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), null, 0,
-                ai.ravenroot.core.runtime.UnknownBehaviorPolicy.fromEnvironment(environmentVariables));
+                ai.ravenroot.core.runtime.UnknownBehaviorPolicy.fromEnvironment(environmentVariables),
+                ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(environmentVariables));
     }
 
     private static int runRemote(GlobalOptions options, String[] commandArgs) {

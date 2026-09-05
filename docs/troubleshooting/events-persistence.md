@@ -18,6 +18,19 @@ Protect the last safe cursor and durable store before reconciling gaps, expired 
 
 **Verify:** Execute a new bounded Test and verify its result remains retrievable for the configured interval.
 
+## A failed result might actually be a cancellation
+
+**Diagnosis:** `status` reports `FAILED` for both an ordinary failure and a cancellation issued through
+`POST .../cancel` — `status` alone cannot distinguish them, by design.
+
+**Action:** Read `terminationReason` (or `cancelled`) beside `status` on the same response, the durable
+inventory row, or the CLI result; a value of `CANCELLED` means the run was stopped on request, not
+that it broke. On the event stream, a cancelled traversal publishes `EXECUTION_CANCELLED` rather than
+`EXECUTION_FAILED`, and metrics and audit entries key off that same event type.
+
+**Verify:** Confirm the reason is present exactly on the executions you know you cancelled, and absent
+(or `null`) on genuine failures.
+
 ## Restart recovery does not become ready
 
 **Diagnosis:** The store is unavailable, incompatible, locked, or contains state that recovery cannot reconcile.

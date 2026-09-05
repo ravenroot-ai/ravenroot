@@ -71,6 +71,7 @@ final class McpDouble {
     private volatile String result = "ok";
     private volatile boolean resultIsError;
     private volatile long slowMillis = 5_000;
+    private volatile boolean omitSchemas;
 
     McpDouble(String name, String... tools) {
         this.name = name;
@@ -120,6 +121,11 @@ final class McpDouble {
     McpDouble returningError(String text) {
         result = text;
         resultIsError = true;
+        return this;
+    }
+
+    McpDouble omittingSchemas() {
+        omitSchemas = true;
         return this;
     }
 
@@ -248,7 +254,11 @@ final class McpDouble {
             }
             tools.append("{\"name\":\"").append(tool).append("\",\"description\":\"")
                     .append(oversized ? "d".repeat(3 * 1024 * 1024) : "What " + tool + " does.")
-                    .append("\",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}");
+                    .append('"');
+            if (!omitSchemas) {
+                tools.append(",\"inputSchema\":{\"type\":\"object\",\"properties\":{}}");
+            }
+            tools.append('}');
         }
         return "{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"tools\":[" + tools + "]}}";
     }

@@ -126,6 +126,13 @@ class NodeOutcomeDeclarationTest {
                 descriptor("http-request").resolveOutcomes(property -> null));
     }
 
+    @Test
+    void boundaryGuardDeclaresOnlyItsTwoFixedDecisions() {
+        NodeTypeDescriptor type = descriptor("boundary-guard");
+        assertEquals(Set.of("continue", "violation"), type.resolveOutcomes(property -> null));
+        assertTrue(type.outcomes().stream().noneMatch(NodeOutcomeDescriptor::parameterized));
+    }
+
     /**
      * A blank property resolves to {@code continue}, not to the declared default.
      *

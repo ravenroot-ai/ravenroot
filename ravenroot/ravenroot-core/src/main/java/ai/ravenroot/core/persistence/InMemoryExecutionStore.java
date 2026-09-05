@@ -5,7 +5,18 @@ import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocation;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
+import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -18,6 +29,11 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.InventoryCursor;
 import ai.ravenroot.api.persistence.InventoryDisposition;
@@ -34,6 +50,12 @@ import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 
 import java.time.Clock;
 import java.time.Duration;
@@ -131,12 +153,17 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      */
     private final Map<String, Instant> inventoryRetainedFrom = new LinkedHashMap<>();
     private final AtomicLong revisionSequence = new AtomicLong();
+    private AgentAuthorityControl agentAuthorityControl = new AgentAuthorityControl(
+            AgentAuthorityControlState.ACTIVE, 0, Instant.EPOCH, 0);
     private final Clock clock;
     private final Duration maxLeaseTtl;
     private final int maxPayloadBytes;
     private final Duration maxClockSkew;
     private final Duration journalRetention;
     private final Duration terminalRetention;
+    private final Duration executionResultRetention;
+    private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
+    private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
         this(Clock.systemUTC(), DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
@@ -164,6 +191,46 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention,
                                   Duration terminalRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, terminalRetention,
+                terminalRetention);
+    }
+
+    /**
+     * Composes the store with an independent result retention window.
+     *
+     * <p>Every shorter constructor defaults it to {@code terminalRetention}, which is the same
+     * default {@code SqliteStoreConfig} ships and for the same reason: the two windows answer one
+     * operational question — how long after a run ends can somebody still find out what happened —
+     * and defaulting them apart would silently lose a result for an instance that is still
+     * discoverable.</p>
+     *
+     * @param clock                    the store's own clock authority.
+     * @param maxLeaseTtl              longest lease this store issues.
+     * @param maxPayloadBytes          largest payload this store accepts.
+     * @param maxClockSkew             budget within which a caller's issuance instant is accepted.
+     * @param journalRetention         how long journal records are retained.
+     * @param terminalRetention        how long terminal instances are retained.
+     * @param executionResultRetention how long recorded terminal results are retained.
+     */
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention, Duration executionResultRetention) {
+        this.executionResultRetention =
+                Objects.requireNonNull(executionResultRetention, "executionResultRetention");
+        if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
+            throw new IllegalArgumentException("executionResultRetention must be positive");
+        }
+        if (terminalRetention != null && terminalRetention.compareTo(executionResultRetention) < 0) {
+            // The same guard SqliteStoreConfig applies, on both adapters for the reason the journal
+            // guard is on both: it is a property of the contract rather than of the medium. A result
+            // names the instance and traversal it belongs to, so a result outliving its instance names
+            // a row the inventory can no longer describe. Enforcing it in only one adapter would let a
+            // deployment reach a state through the reference store that the durable store refuses, and
+            // discover the difference on the day it swapped them.
+            throw new IllegalArgumentException("terminalRetention " + terminalRetention
+                    + " cannot be shorter than executionResultRetention " + executionResultRetention
+                    + ": results would outlive the instance they name");
+        }
         this.terminalRetention = Objects.requireNonNull(terminalRetention, "terminalRetention");
         if (terminalRetention.isZero() || terminalRetention.isNegative()) {
             throw new IllegalArgumentException("terminalRetention must be positive");
@@ -218,7 +285,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         return Set.of(StoreCapability.TRANSACTIONAL_BATCH, StoreCapability.IDEMPOTENCY_PURGE,
                 StoreCapability.EVENT_JOURNAL, StoreCapability.JOURNAL_COMPACTION,
                 StoreCapability.DURABLE_HANDLERS,
-                StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION);
+                StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
+                StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
+                StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
+                // EXECUTION_RESULTS joins them on the same rule and makes no durability
+                // claim: idempotent refusal, tenant scoping, the four read states and
+                // retention are all properties of the mechanism rather than of the
+                // medium, and this adapter honours every one of them exactly. What it
+                // cannot honour is survival of process death, which is what DURABLE
+                // says and what this adapter still does not say.
+                StoreCapability.EXECUTION_RESULTS);
     }
 
     @Override
@@ -346,11 +422,50 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // across two batches and reopen exactly the crash window PERS-05 exists to close.
                 applyHandlerWrites(key, batch, folded, handlers, revision);
 
+                var approvals = existing == null ? new LinkedHashMap<UUID, DurableToolApproval>()
+                        : new LinkedHashMap<>(existing.approvals);
+                applyToolApprovalWrites(key, batch, folded, pin, approvals, revision, now);
+
+                DurableAgentAuthorityBudget agentBudget = existing == null ? null : existing.agentBudget;
+                for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+                    requireAgentAuthorityControl(operation);
+                    if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                        NodeInvocation invocation = folded.traversals().values().stream()
+                                .flatMap(traversal -> traversal.invocations().values().stream())
+                                .filter(candidate -> candidate.invocationId()
+                                        .equals(register.binding().invocationId()))
+                                .findFirst().orElse(null);
+                        if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                                || !invocation.parentInvocationIds()
+                                        .equals(register.binding().causalParentInvocationIds())) {
+                            throw failure(ExecutionStoreFailure.invalid(
+                                    "agent grant binding does not name the post-fold invocation"));
+                        }
+                    }
+                    try {
+                        agentBudget = AgentAuthorityBudgetFold.apply(key, agentBudget, operation, now);
+                    } catch (IllegalArgumentException | IllegalStateException invalid) {
+                        throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                    }
+                }
+                var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
+                        : new LinkedHashMap<>(existing.humanTasks);
+                applyHumanTaskWrites(key, batch, folded, pin, humanTasks, revision, now);
+
+                var executionPauses = existing == null
+                        ? new LinkedHashMap<UUID, DurableExecutionPause>()
+                        : new LinkedHashMap<>(existing.executionPauses);
+                applyExecutionPauseWrites(key, batch, folded, pin, executionPauses, revision);
+
                 var next = new Entry(folded, revision, pin, key.tenantId(), now,
                         existing == null ? 0L : existing.fencingToken,
                         existing == null ? null : existing.lease,
                         timers,
                         handlers,
+                        approvals,
+                        agentBudget,
+                        humanTasks,
+                        executionPauses,
                         existing == null ? new HashMap<>() : new HashMap<>(existing.workClaims),
                         existing == null ? new HashSet<>() : new HashSet<>(existing.acknowledged),
                         createdAt, generation, origin, retainedUntil);
@@ -383,6 +498,80 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return entry.toStoredRevalidated(key);
             }
         });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.agentBudget);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return complete(() -> {
+            synchronized (monitor) {
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return complete(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            synchronized (monitor) {
+                if (agentAuthorityControl.state() != expectedState
+                        || agentAuthorityControl.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                if (targetState == AgentAuthorityControlState.KILLED) {
+                    long releasedTeamActive = 0;
+                    for (Entry entry : instances.values()) {
+                        if (entry.agentBudget != null
+                                && entry.agentBudget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                                && entry.agentBudget.controlEpoch() == expectedEpoch) {
+                            long before = entry.agentBudget.reserved().teamActive();
+                            entry.agentBudget = AgentAuthorityBudgetFold.apply(entry.agentBudget.key(),
+                                    entry.agentBudget, new AgentBudgetOperation.KillRoot(expectedEpoch),
+                                    clock.instant());
+                            releasedTeamActive = Math.addExact(releasedTeamActive,
+                                    before - entry.agentBudget.reserved().teamActive());
+                        }
+                    }
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(), Math.addExact(
+                            agentAuthorityControl.teamActiveReleased(), releasedTeamActive));
+                } else {
+                    agentAuthorityControl = new AgentAuthorityControl(targetState,
+                            Math.addExact(expectedEpoch, 1), clock.instant(),
+                            agentAuthorityControl.teamActiveReleased());
+                }
+                return agentAuthorityControl;
+            }
+        });
+    }
+
+    private void requireAgentAuthorityControl(AgentBudgetOperation operation) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (agentAuthorityControl.state() != AgentAuthorityControlState.ACTIVE
+                || agentAuthorityControl.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid("agent authority control is not active for this epoch"));
+        }
     }
 
     @Override
@@ -790,7 +979,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     rows.add(new TraversalInventoryEntry(key, traversal.traversalId(), position++,
                             traversal.ingressNodeId(), traversal.status(),
                             InventoryDisposition.ofTraversal(traversal.status(), leaseLive, parked > 0),
-                            invocations, parked));
+                            invocations, parked, traversal.terminationReason()));
                 }
                 return List.copyOf(rows);
             }
@@ -868,6 +1057,137 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return (long) doomed.size();
             }
         });
+    }
+
+    // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public Duration executionResultRetention() {
+        return executionResultRetention;
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return maxPayloadBytes;
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            Objects.requireNonNull(result, "result");
+            requireResultPayloadWithinLimit(result);
+            DurableExecutionResult candidate = result.withRetainedUntil(
+                    plusClamped(result.endedAt(), executionResultRetention));
+            var lookup = new ResultKey(result.key().tenantId(), result.traversalId());
+            synchronized (monitor) {
+                DurableExecutionResult stored = executionResults.get(lookup);
+                if (stored != null) {
+                    // Identity is the fingerprint and not record equality, because two writes of the
+                    // same result differ in nothing a producer decided and the collections inside it
+                    // have no defined iteration order at the source. Comparing the digest is what
+                    // makes a duplicate terminal event free rather than a conflict.
+                    if (stored.fingerprint().equals(candidate.fingerprint())) {
+                        return stored;
+                    }
+                    throw new ExecutionStoreException(
+                            new ExecutionStoreFailure.ExecutionResultNotRecordable(result.traversalId(),
+                                    stored.status(), candidate.status(), stored.fingerprint(),
+                                    candidate.fingerprint()));
+                }
+                if (!instances.containsKey(result.key())) {
+                    // Indistinguishable from another tenant's instance, which is the point: the key
+                    // carries the tenant, so a cross-tenant record is refused by the same miss.
+                    throw new ExecutionStoreException(new ExecutionStoreFailure.NotFound(result.key()));
+                }
+                executionResults.put(lookup, candidate);
+                return candidate;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                UUID traversalId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                DurableExecutionResult stored = executionResults.get(new ResultKey(tenantId, traversalId));
+                if (stored == null) {
+                    return Optional.<DurableExecutionResult>empty();
+                }
+                Instant now = clock.instant();
+                // Retained while now < retainedUntil, strictly, so the boundary matches the purge's
+                // exactly: a row eligible for collection is one whose payload this read no longer
+                // offers. The SQLite adapter pairs them the same way, and a disagreement here would
+                // produce an instant at which the two stores answer differently for the same result.
+                return Optional.of(now.isBefore(stored.retainedUntil()) ? stored : stored.expired());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                return executionResultsRetainedFrom.getOrDefault(tenantId, Instant.MIN);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                var doomed = new ArrayList<ResultKey>();
+                Instant latest = null;
+                for (var recorded : executionResults.entrySet()) {
+                    if (!recorded.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    Instant deadline = recorded.getValue().retainedUntil();
+                    if (deadline.isAfter(now)) {
+                        continue;
+                    }
+                    doomed.add(recorded.getKey());
+                    if (latest == null || deadline.isAfter(latest)) {
+                        latest = deadline;
+                    }
+                }
+                if (doomed.isEmpty()) {
+                    // A purge that removed nothing leaves the floor exactly where it was. Advancing it
+                    // would report a retention gap that does not exist, on every tick of a periodic job.
+                    return 0L;
+                }
+                doomed.forEach(executionResults::remove);
+                // The LATEST deadline crossed, for the reason purgeExpiredProcessInstances records:
+                // the guarantee runs in the direction "everything past this is still here", and the
+                // earliest inverts the ambiguity into the unsafe direction.
+                Instant floor = latest;
+                executionResultsRetainedFrom.merge(tenantId, floor,
+                        (current, candidate) -> candidate.isAfter(current) ? candidate : current);
+                return (long) doomed.size();
+            }
+        });
+    }
+
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+        ExecutionResultPayload payload = result.payload();
+        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maxPayloadBytes) {
+            throw new ExecutionStoreException(
+                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maxPayloadBytes));
+        }
+        if (payload.state() == ResultPayloadState.EXPIRED) {
+            throw new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                    "EXPIRED describes a record's age and is produced by a read; it cannot be stored"));
+        }
     }
 
     // ---------------------------------------------------------------- inventory helpers
@@ -955,7 +1275,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 entry.fencingToken,
                 leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
                 entry.state.traversals().size(), entry.createdAt, entry.updatedAt,
-                retainedUntilOf(entry));
+                retainedUntilOf(entry), entry.state.terminationReason());
     }
 
     private void requireInventoryQuery(ProcessInventoryQuery query) {
@@ -1040,6 +1360,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             idempotency.clear();
             forgottenBefore.clear();
             inventoryRetainedFrom.clear();
+            executionResults.clear();
+            executionResultsRetainedFrom.clear();
         }
     }
 
@@ -1277,6 +1599,368 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         live.addAll(entry.handlers.keySet());
         entry.acknowledged.retainAll(live);
         entry.workClaims.keySet().retainAll(live);
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
+    public CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                           UUID approvalId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(approvalId, "approvalId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty() : Optional.ofNullable(entry.approvals.get(approvalId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.approvals.values());
+            }
+        });
+    }
+
+    private void applyToolApprovalWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                         GraphVersionPin pin,
+                                         Map<UUID, DurableToolApproval> approvals, long revision,
+                                         Instant now) {
+        for (ToolApprovalRegistration registration : batch.toolApprovalsToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "tool approval " + registration.approvalId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval identity or graph pin does not match its execution"));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("tool approval expiry must be after store time"));
+            }
+            DurableToolApproval existing = approvals.get(registration.approvalId());
+            if (existing != null) {
+                if (!existing.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("tool approval " + registration.approvalId()
+                            + " is already registered with a different request"));
+                }
+                continue;
+            }
+            approvals.put(registration.approvalId(), DurableToolApproval.pending(key, registration, revision));
+        }
+        for (ToolApprovalTransition transition : batch.toolApprovalTransitions()) {
+            DurableToolApproval current = approvals.get(transition.approvalId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown tool approval "
+                        + transition.approvalId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), transition.next()));
+            }
+            if (transition.next() == ToolApprovalStatus.EXPIRED
+                    && now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            if ((transition.next() == ToolApprovalStatus.APPROVED
+                    || transition.next() == ToolApprovalStatus.DENIED
+                    || transition.next() == ToolApprovalStatus.CONSUMED) && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            approvals.put(transition.approvalId(), current.apply(transition, revision));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? Optional.empty()
+                        : Optional.ofNullable(entry.executionPauses.get(pauseId));
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return complete(() -> {
+            Objects.requireNonNull(key, "key");
+            synchronized (monitor) {
+                Entry entry = instances.get(key);
+                return entry == null ? List.of() : List.copyOf(entry.executionPauses.values());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    for (DurableExecutionPause pause : entry.executionPauses.values()) {
+                        if (pause.status() == ExecutionPauseStatus.HELD
+                                && traversalId.equals(pause.request().traversalId())) {
+                            return Optional.of(pause);
+                        }
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    /**
+     * Folds this batch's hold writes after the aggregate, for the reason handler writes fold after
+     * it: a hold names the invocation it sits behind, and that invocation may have been completed by
+     * this same batch.
+     */
+    private void applyExecutionPauseWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                           GraphVersionPin pin,
+                                           Map<UUID, DurableExecutionPause> pauses, long revision) {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            DurableExecutionPause existing = pauses.get(registration.pauseId());
+            if (existing != null) {
+                if (!existing.request().equals(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                            + " is already committed with a different hold"));
+                }
+                continue;
+            }
+            // At most one live hold per traversal, which is what makes findHeldExecutionPause a
+            // deterministic single answer for a resume that presents only a traversal id.
+            for (DurableExecutionPause other : pauses.values()) {
+                if (other.status() == ExecutionPauseStatus.HELD
+                        && other.request().traversalId().equals(registration.traversalId())) {
+                    throw failure(ExecutionStoreFailure.invalid("traversal "
+                            + registration.traversalId() + " is already held by " + other.request().pauseId()));
+                }
+            }
+            pauses.put(registration.pauseId(), DurableExecutionPause.held(key, registration, revision));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = pauses.get(transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            pauses.put(transition.pauseId(), current.apply(transition, revision));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable human tasks
+
+    @Override
+    public CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(taskId, "taskId");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (tenantId.equals(entry.tenantId) && entry.humanTasks.containsKey(taskId)) {
+                        return Optional.of(entry.humanTasks.get(taskId));
+                    }
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            if (query.limit() < 1 || query.limit() > maxHumanTaskPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskPageSize()));
+            }
+            synchronized (monitor) {
+                List<DurableHumanTask> tenantTasks = instances.values().stream()
+                        .filter(entry -> tenantId.equals(entry.tenantId))
+                        .flatMap(entry -> entry.humanTasks.values().stream())
+                        .toList();
+                UUID cursor = null;
+                if (query.cursor().isPresent()) {
+                    cursor = query.cursor().orElseThrow();
+                    UUID requiredCursor = cursor;
+                    if (tenantTasks.stream().noneMatch(
+                            task -> task.request().taskId().equals(requiredCursor))) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "human-task cursor does not belong to this tenant"));
+                    }
+                }
+                String cursorText = cursor == null ? null : cursor.toString();
+                List<DurableHumanTask> matching = tenantTasks.stream()
+                        .filter(task -> cursorText == null
+                                || task.request().taskId().toString().compareTo(cursorText) > 0)
+                        .filter(task -> query.admits(task.status()))
+                        .sorted(Comparator.comparing(task -> task.request().taskId().toString()))
+                        .limit(query.limit() + 1L).toList();
+                int end = Math.min(query.limit(), matching.size());
+                List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
+                Optional<UUID> next = matching.size() > end
+                        ? Optional.of(page.getLast().request().taskId()) : Optional.empty();
+                return new HumanTaskPage(page, next);
+            }
+        });
+    }
+
+    private void applyHumanTaskWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
+                                      GraphVersionPin pin,
+                                      Map<UUID, DurableHumanTask> tasks, long revision, Instant now) {
+        for (HumanTaskRegistration registration : batch.humanTasksToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "human task " + registration.taskId());
+            requireAttemptExists(folded, registration.traversalId(), registration.invocationId(),
+                    registration.attemptId(), "human task " + registration.taskId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task identity or graph pin does not match its execution"));
+            }
+            DurableHumanTask byDeduplication = humanTaskByDeduplicationKey(
+                    key.tenantId(), key, tasks, registration.deduplicationKey());
+            if (byDeduplication != null) {
+                if (!byDeduplication.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                            + registration.deduplicationKey()
+                            + " already registers a different human task"));
+                }
+                continue;
+            }
+            if (registration.responseSchema().maxBytes() > maxPayloadBytes()) {
+                throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                        registration.responseSchema().maxBytes(), maxPayloadBytes()));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
+            }
+            if (registration.escalateAt().isPresent()
+                    && !now.isBefore(registration.escalateAt().orElseThrow())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task escalation must be after store time"));
+            }
+            DurableHumanTask byId = humanTaskById(key.tenantId(), key, tasks, registration.taskId());
+            if (byId != null) {
+                throw failure(ExecutionStoreFailure.invalid("human task " + registration.taskId()
+                        + " is already registered under a different deduplication key"));
+            }
+            DurableHumanTask correlation = liveHumanTaskByCorrelationKey(
+                    key.tenantId(), key, tasks, registration.correlationKey());
+            if (correlation != null) {
+                throw failure(ExecutionStoreFailure.invalid("correlation key "
+                        + registration.correlationKey() + " already identifies a live human task"));
+            }
+            tasks.put(registration.taskId(), DurableHumanTask.waiting(key, registration, revision));
+        }
+        for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
+            DurableHumanTask current = tasks.get(transition.taskId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown human task " + transition.taskId()));
+            }
+            if (current.alreadyApplied(transition)) continue;
+            if (transition.expectedGeneration() != current.generation()
+                    || !current.status().canTransitionTo(transition.next())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.EXPIRED && now.isBefore(current.request().expiresAt())) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() == HumanTaskStatus.ESCALATED
+                    && (current.request().escalateAt().isEmpty()
+                    || now.isBefore(current.request().escalateAt().orElseThrow())
+                    || !now.isBefore(current.request().expiresAt()))) {
+                throw humanTaskConflict(current, transition);
+            }
+            if (transition.next() != HumanTaskStatus.EXPIRED
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                        current.request().taskId(), current.status(), HumanTaskStatus.EXPIRED,
+                        transition.expectedGeneration(), current.generation()));
+            }
+            tasks.put(transition.taskId(), current.apply(transition, revision));
+        }
+    }
+
+    private ExecutionStoreException humanTaskConflict(DurableHumanTask current,
+                                                       HumanTaskTransition transition) {
+        return failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                current.request().taskId(), current.status(), transition.next(),
+                transition.expectedGeneration(), current.generation()));
+    }
+
+    private DurableHumanTask humanTaskById(String tenantId, ExecutionKey writtenKey,
+                                           Map<UUID, DurableHumanTask> pending, UUID taskId) {
+        return tenantHumanTasks(tenantId, writtenKey, pending).stream()
+                .filter(task -> task.request().taskId().equals(taskId)).findFirst().orElse(null);
+    }
+
+    private DurableHumanTask humanTaskByDeduplicationKey(String tenantId, ExecutionKey writtenKey,
+                                                         Map<UUID, DurableHumanTask> pending,
+                                                         String deduplicationKey) {
+        return tenantHumanTasks(tenantId, writtenKey, pending).stream()
+                .filter(task -> task.request().deduplicationKey().equals(deduplicationKey))
+                .findFirst().orElse(null);
+    }
+
+    private DurableHumanTask liveHumanTaskByCorrelationKey(String tenantId, ExecutionKey writtenKey,
+                                                           Map<UUID, DurableHumanTask> pending,
+                                                           String correlationKey) {
+        return tenantHumanTasks(tenantId, writtenKey, pending).stream()
+                .filter(task -> !task.status().terminal())
+                .filter(task -> task.request().correlationKey().equals(correlationKey))
+                .findFirst().orElse(null);
+    }
+
+    private List<DurableHumanTask> tenantHumanTasks(String tenantId, ExecutionKey writtenKey,
+                                                   Map<UUID, DurableHumanTask> pending) {
+        var result = new ArrayList<DurableHumanTask>();
+        for (Map.Entry<ExecutionKey, Entry> item : instances.entrySet()) {
+            if (!tenantId.equals(item.getKey().tenantId()) || item.getKey().equals(writtenKey)) continue;
+            result.addAll(item.getValue().humanTasks.values());
+        }
+        result.addAll(pending.values());
+        return result;
+    }
+
+    private void requireAttemptExists(ProcessInstance folded, UUID traversalId, UUID invocationId,
+                                      UUID attemptId, String what) {
+        var traversal = folded == null ? null : folded.traversals().get(traversalId);
+        var invocation = traversal == null ? null : traversal.invocations().get(invocationId);
+        if (invocation == null || invocation.attempts().stream()
+                .noneMatch(attempt -> attempt.attemptId().equals(attemptId))) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names attempt " + attemptId
+                    + ", which this batch neither found nor created"));
+        }
     }
 
     // ---------------------------------------------------------------- durable handlers
@@ -1942,6 +2626,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, TimerSchedule> timers;
         /** Registration order, which is the order {@code handlers(key)} promises to return. */
         private final Map<UUID, DurableHandler> handlers;
+        /** Registration order, retained for deterministic operator inspection. */
+        private final Map<UUID, DurableToolApproval> approvals;
+        private DurableAgentAuthorityBudget agentBudget;
+        /** First-class human tasks retained in registration order within this instance. */
+        private final Map<UUID, DurableHumanTask> humanTasks;
+        /** Operator holds retained in commit order within this instance. */
+        private final Map<UUID, DurableExecutionPause> executionPauses;
         private final Map<UUID, WorkClaim> workClaims;
         private final Set<UUID> acknowledged;
         private final Instant createdAt;
@@ -1953,6 +2644,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private Entry(ProcessInstance state, long revision, GraphVersionPin graphVersionPin, String tenantId,
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
                       Map<UUID, DurableHandler> handlers,
+                      Map<UUID, DurableToolApproval> approvals,
+                      DurableAgentAuthorityBudget agentBudget,
+                      Map<UUID, DurableHumanTask> humanTasks,
+                      Map<UUID, DurableExecutionPause> executionPauses,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,
                       long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
             this.state = state;
@@ -1964,6 +2659,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             this.lease = lease;
             this.timers = timers;
             this.handlers = handlers;
+            this.approvals = approvals;
+            this.agentBudget = agentBudget;
+            this.humanTasks = humanTasks;
+            this.executionPauses = executionPauses;
             this.workClaims = workClaims;
             this.acknowledged = acknowledged;
             this.createdAt = createdAt;
@@ -1985,8 +2684,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
          */
         private StoredProcessInstance toStoredRevalidated(ExecutionKey key) {
             try {
+                // Every component, including the termination reason. Reconstructing through the
+                // pre-reason shape would revalidate the aggregate and silently strip the one field
+                // that distinguishes a cancelled execution from a failed one -- a defence-in-depth
+                // check that quietly damaged what it was checking.
                 var revalidated = new ProcessInstance(state.processInstanceId(), state.status(),
-                        state.traversals());
+                        state.traversals(), state.terminationReason());
                 return new StoredProcessInstance(revalidated, revision, graphVersionPin, tenantId, updatedAt);
             } catch (IllegalArgumentException | IllegalStateException corrupted) {
                 throw new ExecutionStoreException(
@@ -2000,6 +2703,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, NodeAttempt attempt,
                                     ai.ravenroot.api.execution.NodeCommand command) {
+    }
+
+    /** A recorded result, addressable only with the tenant that owns it. */
+    private record ResultKey(String tenantId, UUID traversalId) {
     }
 
     private record IdempotencyKey(String tenantId, String key) {

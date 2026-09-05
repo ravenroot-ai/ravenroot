@@ -82,6 +82,54 @@ class RequestReplyCoordinatorTest {
         assertEquals(0, fixture.control.cancelled.size());
     }
 
+    /**
+     * Regression: a traversal cancelled by some path other than this exchange's own {@code cancel()}
+     * -- an operator's {@code POST /v1/executions/{id}/cancel} against the same underlying traversal,
+     * for instance -- completes {@code control.execute}'s stage exceptionally with a
+     * {@link TraversalCancelledException}. {@code failedOutcome} previously built the failure's
+     * {@code ExecutionOutcome} through the pre-reason constructor unconditionally, so a request/reply
+     * waiter could never learn that the FAILED result it received was in fact a cancellation -- the
+     * same durable/event-stream distinction {@link ExecutionTerminationReason} exists to carry,
+     * missing on this one surface. {@link RequestReplyTerminalState#CANCELLED} is a different case
+     * entirely (this exchange's own waiter detaching) and is not what this test exercises.
+     */
+    @Test
+    void aTraversalCancelledWhileARequestReplyWaiterIsPendingReportsTheReasonOnTheFailedOutcome() throws Exception {
+        var fixture = fixture(1, limits(1, 256, 256));
+        RequestReplyExchange exchange = accepted(fixture.coordinator.request(IngressTarget.start(),
+                PayloadValue.of("one"), NOW.plusSeconds(5)));
+
+        fixture.control.completeExceptionally(
+                new TraversalCancelledException(exchange.traversalId(), "next"));
+
+        RequestReplyOutcome outcome = exchange.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
+        assertEquals(RequestReplyTerminalState.FAILED, outcome.state());
+        var execution = outcome.executionOutcome().orElseThrow();
+        assertEquals(ai.ravenroot.api.application.ProcessInstanceStatus.FAILED, execution.status(),
+                "the durable contract is unchanged by this fix: a cancellation is still stored as FAILED");
+        assertTrue(execution.cancelled(),
+                "a traversal cancelled out from under a waiting request/reply exchange must be reported "
+                        + "as a cancellation, not an ordinary, indistinguishable failure");
+        assertEquals(ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED,
+                execution.terminationReason());
+    }
+
+    /** The negative control: an ordinary failure must not be misreported as a cancellation either. */
+    @Test
+    void anOrdinaryFailureWhileARequestReplyWaiterIsPendingCarriesNoTerminationReason() throws Exception {
+        var fixture = fixture(1, limits(1, 256, 256));
+        RequestReplyExchange exchange = accepted(fixture.coordinator.request(IngressTarget.start(),
+                PayloadValue.of("one"), NOW.plusSeconds(5)));
+
+        fixture.control.completeExceptionally(new RuntimeException("a node genuinely broke"));
+
+        RequestReplyOutcome outcome = exchange.completion().toCompletableFuture().get(1, TimeUnit.SECONDS);
+        assertEquals(RequestReplyTerminalState.FAILED, outcome.state());
+        var execution = outcome.executionOutcome().orElseThrow();
+        assertFalse(execution.cancelled());
+        assertNull(execution.terminationReason());
+    }
+
     @Test
     void timeoutDetachesWaiterButExecutionCapacityRemainsHeldUntilLateTraversalSettles() throws Exception {
         var fixture = fixture(1, limits(1, 256, 256));
@@ -677,6 +725,14 @@ class RequestReplyCoordinatorTest {
 
         synchronized void completeAt(int index, GraphExecutionResult result) {
             executions.get(index).complete(result);
+        }
+
+        synchronized void completeExceptionally(Throwable failure) {
+            completeExceptionallyAt(executions.size() - 1, failure);
+        }
+
+        synchronized void completeExceptionallyAt(int index, Throwable failure) {
+            executions.get(index).completeExceptionally(failure);
         }
     }
 }

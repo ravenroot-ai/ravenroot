@@ -7,13 +7,24 @@ import java.util.UUID;
 
 /**
  * Immutable state of one process ingress or re-entry traversal.
+ *
+ * <p><b>{@link #status()} is not the whole answer for a traversal that ended.</b> A traversal that
+ * was stopped on request is stored as {@link TraversalStatus#FAILED} and carries
+ * {@link ExecutionTerminationReason#CANCELLED}; read without the reason, that status describes an
+ * incident that did not happen. The pair is the answer, never the status alone — see
+ * {@link ExecutionTerminationReason} for why the status was deliberately left unchanged.</p>
+ *
  * @param traversalId the stable traversal id used to identify the requested resource.
  * @param ingressNodeId the stable ingress node id used to identify the requested resource.
  * @param status lifecycle state represented by this value.
  * @param invocations invocation map keyed by each invocation's ID.
+ * @param terminationReason why a terminal {@code status} was reached when the status alone would
+ *                         misdescribe it, or {@code null} when nothing distinguishes this
+ *                         termination. Always {@code null} while the traversal is not terminal.
  */
 public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus status,
-                        Map<UUID, NodeInvocation> invocations) {
+                        Map<UUID, NodeInvocation> invocations,
+                        ExecutionTerminationReason terminationReason) {
 /**
  * Validates traversal state and immutable invocation history together.
  */
@@ -34,6 +45,25 @@ public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus 
         }
         invocations = Collections.unmodifiableMap(ordered);
         validateCompletedState(status, invocations);
+        validateTerminationReason(status, terminationReason);
+    }
+
+/**
+ * Compatibility constructor for the shape that predates a recorded termination reason.
+ *
+ * <p>Reports an absent reason, which is the correct reading of every traversal built without one:
+ * nothing distinguishes its termination. Kept rather than migrated away from because a stored row
+ * written before the reason existed reconstructs through exactly this shape, and it must
+ * reconstruct as "unstated" rather than as a value somebody guessed.</p>
+ *
+ * @param traversalId the stable traversal id used to identify the requested resource.
+ * @param ingressNodeId the stable ingress node id used to identify the requested resource.
+ * @param status lifecycle state represented by this value.
+ * @param invocations invocation map keyed by each invocation's ID.
+ */
+    public Traversal(UUID traversalId, String ingressNodeId, TraversalStatus status,
+                     Map<UUID, NodeInvocation> invocations) {
+        this(traversalId, ingressNodeId, status, invocations, null);
     }
 
 /**
@@ -42,6 +72,22 @@ public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus 
  * @return an immutable traversal snapshot bearing {@code next}; the current snapshot is not modified.
  */
     public Traversal transitionTo(TraversalStatus next) {
+        return transitionTo(next, null);
+    }
+
+/**
+ * Moves this traversal to a permitted successor lifecycle state, recording why.
+ *
+ * <p>The reason and the status are set in one call because they are one fact. A traversal that
+ * reached {@code FAILED} and a traversal that reached {@code FAILED} <em>because it was
+ * cancelled</em> are different terminations, and a second call that annotated the first into the
+ * second would leave a window in which the record says an incident occurred.</p>
+ *
+ * @param next requested lifecycle state after this transition.
+ * @param reason why this termination is not what its status alone suggests, or {@code null}.
+ * @return an immutable traversal snapshot bearing {@code next}; the current snapshot is not modified.
+ */
+    public Traversal transitionTo(TraversalStatus next, ExecutionTerminationReason reason) {
         if (!status.canTransitionTo(next)) {
             throw new IllegalStateException("Illegal traversal transition: " + status + " -> " + next);
         }
@@ -53,7 +99,7 @@ public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus 
             throw new IllegalStateException(
                     "A completed traversal requires at least one completed invocation");
         }
-        return new Traversal(traversalId, ingressNodeId, next, invocations);
+        return new Traversal(traversalId, ingressNodeId, next, invocations, reason);
     }
 
 /**
@@ -71,7 +117,7 @@ public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus 
         }
         var updated = new LinkedHashMap<>(invocations);
         updated.put(invocation.invocationId(), invocation);
-        return new Traversal(traversalId, ingressNodeId, status, updated);
+        return new Traversal(traversalId, ingressNodeId, status, updated, terminationReason);
     }
 
 /**
@@ -89,7 +135,36 @@ public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus 
         }
         var updated = new LinkedHashMap<>(invocations);
         updated.put(invocation.invocationId(), invocation);
-        return new Traversal(traversalId, ingressNodeId, status, updated);
+        return new Traversal(traversalId, ingressNodeId, status, updated, terminationReason);
+    }
+
+    /**
+     * Refuses a termination reason that contradicts the status it is meant to qualify.
+     *
+     * <p>Two contradictions, and both are reconstructions a durable adapter must not fold silently.
+     * A reason on a traversal that has not ended claims a termination that has not happened. A
+     * cancellation on a {@code COMPLETED} traversal claims a run was stopped <em>and</em> produced a
+     * result, which no execution can do — a cancelled traversal reaches no end node, which is why it
+     * is recorded as {@code FAILED} in the first place.</p>
+     *
+     * <p>This runs in the canonical constructor, which is what an adapter rebuilds stored rows
+     * through, so either shape arriving from a database is classified as corrupt rather than loaded
+     * and believed.</p>
+     */
+    private static void validateTerminationReason(TraversalStatus status,
+                                                  ExecutionTerminationReason terminationReason) {
+        if (terminationReason == null) {
+            return;
+        }
+        if (!status.terminal()) {
+            throw new IllegalArgumentException("A traversal that is " + status
+                    + " has not terminated and cannot carry the termination reason " + terminationReason);
+        }
+        if (terminationReason == ExecutionTerminationReason.CANCELLED
+                && status != TraversalStatus.FAILED) {
+            throw new IllegalArgumentException(
+                    "A cancelled traversal reaches no end node and is recorded as FAILED, not " + status);
+        }
     }
 
     private static void validateCompletedState(TraversalStatus status, Map<UUID, NodeInvocation> invocations) {

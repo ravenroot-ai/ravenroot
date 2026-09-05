@@ -42,6 +42,8 @@ services:
       # is overridden, set this explicitly to match or the UI's own API calls will get 403.
       RAVENROOT_BROWSER_ALLOWED_ORIGINS: ${RAVENROOT_BROWSER_ALLOWED_ORIGINS:-}
       RAVENROOT_ENGINE: ${RAVENROOT_ENGINE:-pekko}
+      # One byte budget for browser preflight, HTTP admission, core/recovery, and durable definitions.
+      RAVENROOT_GRAPHML_MAX_BYTES: ${RAVENROOT_GRAPHML_MAX_BYTES:-}
       RAVENROOT_HTTP_ALLOWED_HOSTS: ${RAVENROOT_HTTP_ALLOWED_HOSTS:-}
       # The host allowlist above was never sufficient on its own: it matches on the
       # NAME, so an allowlisted host whose DNS an attacker controls could return a link-local

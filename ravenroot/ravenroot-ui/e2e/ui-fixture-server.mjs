@@ -22,6 +22,17 @@ const CSP = "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ances
 
 createServer(async (request, response) => {
   const pathname = new URL(request.url, 'http://127.0.0.1').pathname;
+  if (pathname === '/v1/configuration') {
+    const body = JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024 });
+    response.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Security-Policy': CSP,
+      'Cache-Control': 'no-store',
+      'Content-Length': Buffer.byteLength(body),
+    });
+    response.end(body);
+    return;
+  }
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
   const file = normalize(join(root, relative));
   if (!file.startsWith(root) || !existsSync(file) || !(await stat(file)).isFile()) {

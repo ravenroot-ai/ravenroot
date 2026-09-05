@@ -69,6 +69,9 @@ public final class RouteTable {
                     NEVER, true),
             new RouteDescriptor(Set.of("GET"), "/ready", "Readiness probe (PLAT-02).", false, false, 200,
                     List.of(), NEVER, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/configuration",
+                    "Typed operator-owned limits for the connected authoring client.",
+                    true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/status", "Application status and declared capabilities.",
                     true, true, 200, STANDARD_ERRORS, READ, true),
             new RouteDescriptor(Set.of("GET"), "/v1/runtime", "Runtime snapshot: active executions and node "
@@ -308,7 +311,8 @@ public final class RouteTable {
             // visitedNodes, defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON
             // array with no repeats. GraphExecutionResult holds every one of them as a Set, so a node
             // reached, defaulted, bypassed or failed-and-handled more than once in one traversal still
-            // appears exactly once in this response. The event projections preserve per-visit counts.
+            // appears exactly once in this response. Their lexical serialisation is deterministic
+            // presentation, not visit order. The event projections preserve ordered evidence.
             //
             // /v1/events/recent's durable projection carries the event type but not the node id:
             // RavenrootServer#recentDurableEvents serialises "type":event.eventType() verbatim, while
@@ -340,12 +344,47 @@ public final class RouteTable {
             // signal, the same failure shape as the durable nodeId caveat.
             new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}",
                     "Reads one execution's status, payload, visited nodes and defaulted nodes. "
-                            + "410: it ran, but its result is past the retention horizon. visitedNodes, "
+                            + "paused is true while a pause is held on the traversal: status stays "
+                            + "RUNNING and paused qualifies it, so a consumer switching over status is "
+                            + "unaffected. Always present, never true for a terminal status, and read "
+                            + "live rather than stored beside the result. A hold taken at a boundary "
+                            + "the runtime can write down survives a restart and stays resumable and "
+                            + "cancellable; one taken anywhere else does not. A terminal execution's "
+                            + "result is recorded durably, so this route answers with it after a "
+                            + "restart and from any instance sharing the store, not only from the "
+                            + "instance that ran it and not only while a bounded in-process cache "
+                            + "still holds it; where the deployment composes no result-capable store, "
+                            + "a result read before a restart reads as 404 after one. A traversal "
+                            + "still held rather than terminal is found through the durable inventory, "
+                            + "where it reads as WAITING. "
+                            + "terminationReason qualifies a terminal status the same way paused "
+                            + "qualifies RUNNING: always present (null when nothing distinguishes the "
+                            + "termination), and it must be read beside status, never instead of it. A "
+                            + "cancelled execution reports status=FAILED and terminationReason=CANCELLED "
+                            + "-- read status alone here and a deliberate stop looks exactly like an "
+                            + "incident. cancelled is the same fact as a convenience boolean. "
+                            + "410 EXECUTION_RESULT_EXPIRED: it ran, but its result is past the retention "
+                            + "horizon; the body still carries status, terminationReason and cancelled "
+                            + "for the same reason they are on the 200 body -- a tombstone reporting a "
+                            + "bare FAILED would tell a caller its cancellation was an incident, from "
+                            + "the one answer it has no live record left to check it against. A distinct "
+                            + "410 EXECUTION_RESULT_REDACTED: it ran, but its payload was never retained "
+                            + "in the first place -- refused for exceeding a configured payload budget, or for "
+                            + "not projecting onto the closed payload model at all -- rather than having "
+                            + "aged out after being retained. The body carries the same status, "
+                            + "terminationReason and cancelled as the 200 and the EXPIRED bodies, plus a "
+                            + "payloadState field naming which of the two refusals applies (WITHHELD or "
+                            + "UNCONVERTIBLE), so a caller can tell a size limit an operator may raise "
+                            + "from a node returning a value no remote adapter could ever persist. "
+                            + "visitedNodes, "
                             + "defaultedNodes, bypassedNodes and handledFailureNodes are each a JSON array "
                             + "of node ids with no repeats: the runtime holds every one of them as a set, "
                             + "so a node reached, defaulted, bypassed or failed-and-handled more than once "
                             + "in this traversal still appears exactly once here, and none of the four "
-                            + "says how many times. A fifth field, untakenEdges (#519), is not one of "
+                            + "says how many times. Their arrays are sorted for deterministic presentation, "
+                            + "but that lexical order is not traversal chronology and must not be read as "
+                            + "one. Use invocation or event history when visit order or repeats matter. "
+                            + "A fifth field, untakenEdges (#519), is not one of "
                             + "these four and is not a node list: each entry is a string naming one "
                             + "outgoing edge of a node this run bypassed -- "
                             + "\"<source>-><target> [outcome=<outcome>]\" -- that the node's own "
@@ -357,7 +396,14 @@ public final class RouteTable {
                             + "a filter as a parameter), carries one NODE_STARTED, NODE_BYPASSED, "
                             + "NODE_DEFAULTED or NODE_FAILED event per visit for visitedNodes, "
                             + "bypassedNodes, defaultedNodes and handledFailureNodes respectively -- "
-                            + "under both of that stream's sources, with two silent-undercount "
+                            + "except on a node with an orchestration retry policy, where a visit is "
+                            + "one NODE_STARTED per attempt, each intermediate attempt settles as "
+                            + "NODE_RETRY_SCHEDULED rather than NODE_FAILED, and only the last "
+                            + "settles as one of the four. So a client counting visits by counting "
+                            + "NODE_STARTED overcounts a retried node, and the attempt ordinal that "
+                            + "would separate them is not on this projection -- the four node lists "
+                            + "in this response are sets and remain exact. "
+                            + "Under both of that stream's sources, with two silent-undercount "
                             + "caveats of the same shape where the source is a durable journal. "
                             + "First, NODE_DEFAULTED rows exist only in a journal written by a build "
                             + "that emits them, and nothing in the data says which: envelopeVersion "
@@ -377,7 +423,8 @@ public final class RouteTable {
                             + "window that resets on every restart and can be shorter than this "
                             + "result's own retention.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_EXECUTION.code(),
-                            ErrorCode.EXECUTION_RESULT_EXPIRED.code(), ErrorCode.INVALID_REQUEST.code()), READ, true),
+                            ErrorCode.EXECUTION_RESULT_EXPIRED.code(), ErrorCode.EXECUTION_RESULT_REDACTED.code(),
+                            ErrorCode.INVALID_REQUEST.code()), READ, true),
             // This tenant's live executions, with their identifiers, read straight from
             // runtime bookkeeping rather than from the event stream -- a stalled traversal that has
             // stopped emitting still appears, because it is listed from the same map
@@ -395,7 +442,15 @@ public final class RouteTable {
                             + "the event stream, so a stalled traversal that has stopped emitting still "
                             + "appears -- that property is why this route exists. Tenant-scoped "
                             + "structurally, the same way GET /v1/executions/{id} is: never reveals "
-                            + "whether another tenant has executions running.", true, false, 200,
+                            + "whether another tenant has executions running. Each row carries paused: "
+                            + "true while a pause is held on that traversal, which is what separates a "
+                            + "deliberate hold from a stalled traversal -- both are listed and both have "
+                            + "stopped emitting. The field is always present. This listing is "
+                            + "process-local, so a traversal held before a restart is not listed here "
+                            + "at all -- not because the hold was lost, but because no traversal of a "
+                            + "process that is gone is live here. A hold taken at a boundary the "
+                            + "runtime can write down survives the restart and stays resumable and "
+                            + "cancellable; the durable inventory is where it is found.", true, false, 200,
                     STANDARD_ERRORS, READ, true),
             // Issue 154 (acceptance criterion 7): the durable, authoritative inventory API, CLI, UI,
             // audit and recovery callers share, distinct from GET /v1/executions/live's process-local
@@ -420,7 +475,12 @@ public final class RouteTable {
                             + "counterpart, limit is bounded by the response's maxPageSize, and "
                             + "cursor takes a previous page's nextCursor. Any other parameter name "
                             + "is refused as 400, and so is a recognised name carrying a blank "
-                            + "value, rather than either being silently ignored. The response "
+                            + "value, rather than either being silently ignored. Each row carries "
+                            + "terminationReason and cancelled beside status, following the same "
+                            + "always-present rule GET /v1/executions/{id} documents for the same "
+                            + "pair: a cancelled instance reports status=FAILED here too, and the "
+                            + "reason is what keeps that readable after a restart, once nothing "
+                            + "richer than this row is left to ask. The response "
                             + "always carries retainedFrom, this tenant's "
                             + "inventory retention floor, so a caller can tell an instance that never "
                             + "existed from one purged by policy without a second request, and "
@@ -445,11 +505,39 @@ public final class RouteTable {
                             + "is a processInstanceId, not the executionId/traversalId GET "
                             + "/v1/executions/{id} and the cancel/pause/resume trio use -- a process "
                             + "instance can contain more than one traversal, so a traversal id could "
-                            + "not address this route's question. 404 when the instance is absent, "
+                            + "not address this route's question. Each traversal row carries "
+                            + "terminationReason and cancelled beside status, for the identical reason "
+                            + "the process inventory's own rows do. 404 when the instance is absent, "
                             + "belongs to another tenant, or was purged past its terminal retention "
                             + "window -- all three indistinguishable by design, exactly like GET "
                             + "/v1/executions/{id}'s own 404. 501 when this deployment has no "
                             + "inventory-capable execution store composed.", true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
+                            ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
+            // A distinct path and entry for the same reason /traversals has one: this table is keyed
+            // per path, and {id} here is a processInstanceId because a manifest is pinned once per
+            // process instance. registersContext is false -- this is a sub-route inside the
+            // /v1/executions context, dispatched by RavenrootServer's own segment matching, exactly
+            // like /traversals and the cancel/pause/resume trio.
+            new RouteDescriptor(Set.of("GET"), "/v1/executions/{id}/manifest",
+                    "Reports the identity of the dependency set one process instance was accepted "
+                            + "against, and whether this deployment still resolves it (#153). {id} is a "
+                            + "processInstanceId, like GET /v1/executions/{id}/traversals and unlike "
+                            + "every other /v1/executions sub-route. The body carries "
+                            + "manifestFormatVersion, manifestDigest, the pinned graphVersion, graphId "
+                            + "and graphVersionId, pinnedAt, a compatible verdict, an "
+                            + "incompatibleDimensions list of dimension names and dimensionsTruncated. "
+                            + "It deliberately carries no value from the pinned dependency set -- no "
+                            + "capability set, no execution limit, no node-package identity and no "
+                            + "package count -- because those describe the deployment rather than the "
+                            + "caller's execution; the comparison's own values stay in the server-side "
+                            + "diagnostic a refused recovery raises. 404 when no manifest is pinned for "
+                            + "the instance, when it belongs to another tenant, and when it was "
+                            + "accepted before this deployment began recording them -- all three "
+                            + "indistinguishable by design. 501 when this deployment composed no "
+                            + "manifest store, and when a stored manifest no longer verifies.",
+                    true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_PROCESS_INSTANCE.code(),
                             ErrorCode.PROCESS_INVENTORY_UNAVAILABLE.code()), READ, true),
@@ -467,17 +555,64 @@ public final class RouteTable {
                             + "dispatched until the traversal is resumed. 200 with a PauseResult body "
                             + "distinguishing PAUSED, ALREADY_PAUSED and NOT_ACTIVE; unknown ownership "
                             + "fails closed as 403, not a distinct outcome. A paused traversal is still "
-                            + "live: it keeps its state, still appears in GET /v1/executions/live and is "
-                            + "still cancellable.", true, false, 200,
+                            + "live: it keeps its state, still appears in GET /v1/executions/live -- with "
+                            + "paused true -- and is still cancellable. A pause that takes effect "
+                            + "publishes EXECUTION_PAUSED once; ALREADY_PAUSED changed nothing and "
+                            + "publishes nothing. A traversal that has begun to end refuses a new hold "
+                            + "and answers NOT_ACTIVE, so no pause is ever reported after the "
+                            + "execution's terminal event.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/executions/{id}/resume",
                     "Resumes a paused traversal (#488), continuing from the node it was holding at. "
                             + "200 with a ResumeResult body distinguishing RESUMED, NOT_PAUSED and "
                             + "NOT_ACTIVE -- resuming a traversal that was never paused is reported, not "
-                            + "silently successful.", true, false, 200,
+                            + "silently successful. A resume that releases a hold publishes "
+                            + "EXECUTION_RESUMED once. Cancelling a paused traversal, its own "
+                            + "completion, and shutdown all release the same hold and publish no "
+                            + "resume: none of them is the traversal running again.", true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(), ErrorCode.UNKNOWN_RESOURCE.code()),
                     NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/executions/{id}/tool-approvals/{approvalId}/{decision}",
+                    "Approves, denies, or cancels one exact durable tool call. The authenticated "
+                            + "tenant and qualified approver identity are authoritative; unknown and "
+                            + "cross-tenant approvals are indistinguishable, and the response never "
+                            + "contains arguments or continuation state.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("GET"), "/v1/human-tasks",
+                    "Lists a bounded page of the authenticated tenant's outstanding durable human "
+                            + "tasks. Terminal tasks are omitted unless includeTerminal=true; responses "
+                            + "contain bounded display and schema metadata, never execution or response payloads.",
+                    true, true, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), READ, true),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-tasks/{taskId}/{decision}",
+                    "Resolves, denies, or cancels one tenant-scoped human task under its required "
+                            + "generation fence. Resolve accepts the task's bounded PayloadEnvelope; "
+                            + "unknown and cross-tenant task IDs are indistinguishable.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/agent-authority",
+                    "Dispatch context for the authenticated durable agent-authority trip/reset controls. "
+                            + "Bare and unknown operations are nondisclosing 404 responses.",
+                    true, true, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/agent-authority/trip",
+                    "Trips the durable store-global first-party agent authority epoch. PLATFORM_ADMIN "
+                            + "only; the response contains only state and epoch.", true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"), "/v1/agent-authority/reset",
+                    "Resets the durable store-global first-party agent authority epoch without reviving "
+                            + "pre-trip grants. PLATFORM_ADMIN only; the response contains only state and epoch.",
+                    true, false, 200, concat(STANDARD_ERRORS, ErrorCode.UNKNOWN_RESOURCE.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/drain",
                     "Drains the server (#37): ADR 0012's engine-wide drain exposed as an operator command. "
                             + "Platform-scoped, not any tenant's own operator. 200 DRAINED; 202 TIMED_OUT if "

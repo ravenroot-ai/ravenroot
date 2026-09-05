@@ -60,6 +60,11 @@ public final class EgressAddressGuard {
         return policy;
     }
 
+    /** Applies the current operator policy to a numeric literal without performing DNS. */
+    public static void requireAllowedLiteral(String host) {
+        policy.delegate().requireAllowedLiteral(host);
+    }
+
     /** Number of resolutions refused since JVM start. Diagnostics only, never a decision input. */
     public static long refusals() {
         return REFUSALS.get();
@@ -95,7 +100,7 @@ public final class EgressAddressGuard {
      * client from silently falling back to the reserved one.
      */
     static List<InetAddress> filter(String name, List<InetAddress> resolved) throws UnknownHostException {
-        ReservedNetworkPolicy current = policy;
+        ReservedNetworkPolicy current = policy();
         List<InetAddress> permitted = resolved.stream()
                 .filter(address -> current.permits(name, address))
                 .toList();

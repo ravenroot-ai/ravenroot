@@ -16,6 +16,7 @@ import java.net.http.HttpHeaders;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
@@ -222,11 +223,9 @@ class AnthropicWireFormatTest {
      * would be asserting its own breakage. The small body below travels the identical path — same
      * client, same handler, same bounded read — and must come back as words.</p>
      *
-     * <p><b>Mutation proof.</b> Change {@code readNBytes(budget + 1)} to {@code readNBytes(budget)} in
-     * {@code readBounded} and the message assertion reds: the body is then exactly at budget, the
-     * over-budget branch never fires, and the refusal arrives from the JSON reader instead — the same
-     * reason for a different cause, which is why this asserts the message and not the reason alone.
-     * Restore {@code BodyHandlers.ofByteArray()} and this test does not compile.</p>
+     * <p><b>Mutation proof.</b> Replacing the bounded handler with an unbounded body handler leaves
+     * the endless fixture running instead of producing the named refusal. Removing cancellation
+     * leaves the fixture open and fails the cleanup assertion.</p>
      */
     @Test
     void aResponseOverTheReadBudgetIsRefusedAsItIsReadAndNamed() throws Exception {
@@ -244,8 +243,8 @@ class AnthropicWireFormatTest {
                         + "them apart: " + failure.getMessage());
 
         long budget = AnthropicAssistantProvider.RESPONSE_LIMITS.maxEncodedBytes();
-        assertTrue(endless.served() <= budget + 1,
-                () -> "the body must be bounded as it is read: at most one byte past the budget was "
+        assertTrue(endless.served() <= budget + 8192,
+                () -> "the body must be bounded as it is read: at most one transport chunk past the budget was "
                         + "ever taken from the socket, and " + endless.served() + " were");
         assertTrue(endless.closed(),
                 "the refusal path must still close the body, or the connection leaks");
@@ -427,17 +426,48 @@ class AnthropicWireFormatTest {
             this.body = body;
         }
 
-        @SuppressWarnings("unchecked")
         @Override
-        public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler) {
+        public <T> HttpResponse<T> send(HttpRequest request, HttpResponse.BodyHandler<T> handler)
+                throws IOException {
             capture.accept(request);
-            return (HttpResponse<T>) new CannedResponse(request, status, body.get());
+            HttpHeaders headers = HttpHeaders.of(Map.of("content-type", List.of("application/json")),
+                    (left, right) -> true);
+            HttpResponse.BodySubscriber<T> subscriber = handler.apply(new HttpResponse.ResponseInfo() {
+                @Override public int statusCode() { return status; }
+                @Override public HttpHeaders headers() { return headers; }
+                @Override public Version version() { return Version.HTTP_1_1; }
+            });
+            var subscription = new TestSubscription();
+            subscriber.onSubscribe(subscription);
+            try (InputStream input = body.get()) {
+                byte[] chunk = new byte[8192];
+                while (!subscription.cancelled) {
+                    int read = input.read(chunk);
+                    if (read < 0) break;
+                    subscriber.onNext(List.of(ByteBuffer.wrap(java.util.Arrays.copyOf(chunk, read))));
+                }
+                if (!subscription.cancelled) subscriber.onComplete();
+            } catch (Throwable failure) {
+                subscriber.onError(failure);
+            }
+            T responseBody;
+            try {
+                responseBody = subscriber.getBody().toCompletableFuture().join();
+            } catch (java.util.concurrent.CompletionException failure) {
+                if (failure.getCause() instanceof IOException ioFailure) throw ioFailure;
+                throw failure;
+            }
+            return new CannedResponse<>(request, status, headers, responseBody);
         }
 
         @Override
         public <T> CompletableFuture<HttpResponse<T>> sendAsync(HttpRequest request,
                                                                 HttpResponse.BodyHandler<T> handler) {
-            return CompletableFuture.completedFuture(send(request, handler));
+            try {
+                return CompletableFuture.completedFuture(send(request, handler));
+            } catch (IOException failure) {
+                return CompletableFuture.failedFuture(failure);
+            }
         }
 
         @Override
@@ -502,6 +532,13 @@ class AnthropicWireFormatTest {
         }
     }
 
+    private static final class TestSubscription implements Flow.Subscription {
+        private volatile boolean cancelled;
+
+        @Override public void request(long count) { }
+        @Override public void cancel() { cancelled = true; }
+    }
+
     /**
      * A client whose {@code send} throws a bare unchecked exception, standing in for the injected
      * client: a client bug, a stub, or a transport failure not covered by any of
@@ -518,25 +555,25 @@ class AnthropicWireFormatTest {
         }
     }
 
-    private record CannedResponse(HttpRequest request, int statusCode, InputStream body)
-            implements HttpResponse<InputStream> {
+    private record CannedResponse<T>(HttpRequest request, int statusCode, HttpHeaders headers, T body)
+            implements HttpResponse<T> {
         @Override
         public HttpRequest request() {
             return request;
         }
 
         @Override
-        public Optional<HttpResponse<InputStream>> previousResponse() {
+        public Optional<HttpResponse<T>> previousResponse() {
             return Optional.empty();
         }
 
         @Override
         public HttpHeaders headers() {
-            return HttpHeaders.of(Map.of(), (a, b) -> true);
+            return headers;
         }
 
         @Override
-        public InputStream body() {
+        public T body() {
             return body;
         }
 

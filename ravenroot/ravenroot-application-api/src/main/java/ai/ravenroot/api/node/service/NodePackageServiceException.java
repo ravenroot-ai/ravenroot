@@ -3,7 +3,8 @@ package ai.ravenroot.api.node.service;
 import java.util.Objects;
 
 /** Stable, sanitized refusal from a package service. */
-public final class NodePackageServiceException extends RuntimeException {
+public final class NodePackageServiceException extends RuntimeException
+        implements ai.ravenroot.api.execution.RetryClassified {
     private static final long serialVersionUID = 1L;
 
     /** Sanitized categories that a package may use for retry, presentation, or telemetry decisions. */
@@ -31,7 +32,11 @@ public final class NodePackageServiceException extends RuntimeException {
         /** The remote peer or protocol exchange was unacceptable. */
         PROTOCOL_REFUSED,
         /** A transport failure occurred without exposing transport-specific details. */
-        TRANSPORT_FAILED
+        TRANSPORT_FAILED,
+        /** An external effect completed but its required accounting or audit did not. */
+        EFFECT_OUTCOME_INDETERMINATE,
+        /** Durable agent authority or economic budget was exhausted or revoked. */
+        BUDGET_EXHAUSTED
     }
 
     /** Sanitized reason retained independently of the exception message. */
@@ -54,5 +59,17 @@ public final class NodePackageServiceException extends RuntimeException {
      */
     public Reason reason() {
         return reason;
+    }
+
+    /**
+     * Prevents automatic repetition when a completed effect could not be durably accounted.
+     *
+     * @return indeterminate only for post-effect accounting/audit failure; otherwise deterministic
+     */
+    @Override
+    public ai.ravenroot.api.persistence.Retryability retryability() {
+        return reason == Reason.EFFECT_OUTCOME_INDETERMINATE
+                ? ai.ravenroot.api.persistence.Retryability.INDETERMINATE
+                : ai.ravenroot.api.persistence.Retryability.DETERMINISTIC_REJECT;
     }
 }

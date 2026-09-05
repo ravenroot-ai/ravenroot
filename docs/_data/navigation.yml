@@ -51,6 +51,8 @@
       url: /integrator-guide/embed-protocol.html
     - title: Nodes, plugins, and adapters
       url: /integrator-guide/extensions-adapters.html
+    - title: First-party extension dependency pack
+      url: /integrator-guide/extension-pack.html
     - title: Model, agent, and program integration
       url: /integrator-guide/ai-programs.html
 
@@ -68,6 +70,8 @@
       url: /architecture/durability-events.html
     - title: Durable process inventory
       url: /architecture/process-inventory.html
+    - title: Durable execution results
+      url: /architecture/execution-results.html
     - title: AI, programs, and extensions
       url: /architecture/ai-extension-boundaries.html
     - title: Embedded projection security model
@@ -78,6 +82,8 @@
       url: /security/trust-identity.html
     - title: Graph input, credentials, and egress
       url: /security/input-secrets-egress.html
+    - title: Publication boundary policies
+      url: /security/publication-boundaries.html
     - title: AI, tools, and programmable code
       url: /security/ai-code.html
     - title: Embed, privacy, and audit
@@ -91,6 +97,8 @@
       url: /reference/graphml.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
+    - title: Durable human tasks
+      url: /reference/human-tasks.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: HTTP API and CLI

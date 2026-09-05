@@ -256,4 +256,77 @@ test.describe('multi-document lifecycle', () => {
       name: 'replacement.graphml', dirty: false, format: 'graphml',
     }));
   });
+
+  test('replace rejects N+1 local bytes before constructing a FileReader', async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = FileReader.prototype.readAsText;
+      window.__ravenrootFileReads = 0;
+      FileReader.prototype.readAsText = function measuredReadAsText(...args) {
+        window.__ravenrootFileReads += 1;
+        return original.apply(this, args);
+      };
+    });
+    await page.route('**/v1/configuration', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 64 }),
+    }));
+    await page.goto('/');
+    await expect.poll(() => page.evaluate(() => {
+      try {
+        return window.ravenroot.graphDocumentByteLimit();
+      } catch {
+        return null;
+      }
+    })).toBe(64);
+
+    let message = '';
+    page.once('dialog', async dialog => {
+      message = dialog.message();
+      await dialog.dismiss();
+    });
+    await page.locator('#replace-file-inp').setInputFiles({
+      name: 'oversized.graphml',
+      mimeType: 'application/graphml+xml',
+      buffer: Buffer.from('x'.repeat(65)),
+    });
+
+    await expect.poll(() => message).toContain('document exceeds the configured byte limit');
+    await expect.poll(() => page.evaluate(() => window.__ravenrootFileReads)).toBe(0);
+  });
+
+  test('malformed runtime configuration fails closed before opening a local file', async ({ page }) => {
+    await page.addInitScript(() => {
+      const original = FileReader.prototype.readAsText;
+      window.__ravenrootFileReads = 0;
+      FileReader.prototype.readAsText = function measuredReadAsText(...args) {
+        window.__ravenrootFileReads += 1;
+        return original.apply(this, args);
+      };
+    });
+    await page.route('**/v1/configuration', route => route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 0 }),
+    }));
+    await page.goto('/');
+    const before = await records(page);
+
+    let message = '';
+    page.once('dialog', async dialog => {
+      message = dialog.message();
+      await dialog.dismiss();
+    });
+    await page.locator('#file-inp').setInputFiles({
+      name: 'valid.graphml',
+      mimeType: 'application/graphml+xml',
+      buffer: graphMl,
+    });
+
+    await expect.poll(() => message).toContain(
+      'Graph document loading is unavailable until the connected service returns valid configuration',
+    );
+    await expect.poll(() => page.evaluate(() => window.__ravenrootFileReads)).toBe(0);
+    expect(await records(page)).toEqual(before);
+  });
 });

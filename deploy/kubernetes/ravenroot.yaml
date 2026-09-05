@@ -21,13 +21,19 @@ spec:
       labels:
         app.kubernetes.io/name: ravenroot
     spec:
-      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s).
-      # Sizing it is an operator decision from the shutdown-sizing formula in
-      # docs/runbooks/plat-02-readiness-drain-and-alerts.md §2 -- the pre-deployment form, sized by
-      # peak concurrent in-flight executions, and, once CORE-LIFECYCLE long-lived
-      # deployments run on this pod, the Shape 2 form in that same section together with
-      # RAVENROOT_MAX_ACTIVE_DEPLOYMENTS. Neither sizing obligation is resolved by setting a value in
-      # this file; the runbook documents the obligation, it does not pick a number for you.
+      # terminationGracePeriodSeconds is deliberately NOT set here (Kubernetes default: 30s), and
+      # sizing it is an operator decision -- but the Kubernetes default is NOT a safe choice once any
+      # long-lived deployments run on this pod: DefaultRavenrootApplication.close() stops them one at
+      # a time, not concurrently, so the pod's own worst-case graceful-shutdown time grows with
+      # RAVENROOT_MAX_ACTIVE_DEPLOYMENTS (M) rather than staying fixed. See
+      # ai.ravenroot.server.deployment.DeploymentCapConfiguration's Javadoc for the exact, cited
+      # formula and its derivation (ravenroot-server/src/main/java/ai/ravenroot/server/deployment/
+      # DeploymentCapConfiguration.java); as of that Javadoc, the worst case is
+      # podShutdownSeconds(M) = 46 + 30*M seconds, which is 286s at this file's implied default cap
+      # of 8 -- nearly ten times the unset Kubernetes default. Also account for peak concurrent
+      # in-flight executions at shutdown, which that formula deliberately does not cover (see
+      # ai.ravenroot.server.GracefulShutdown's own Javadoc). This file does not pick a number for
+      # you; an operator running any long-lived deployments must set one explicitly.
       securityContext:
         runAsNonRoot: true
         # The PVC is mounted empty by Kubernetes (unlike Docker named-volume copy-up), so fsGroup

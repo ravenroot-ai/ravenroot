@@ -24,11 +24,13 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -126,6 +128,31 @@ class OpenAiCompatibleAssistantProviderTest {
             server.close();
             server = null;
         }
+    }
+
+    @Test
+    void nonJsonErrorBodyStillReachesAssistantStatusClassification() throws Exception {
+        String plantedBody = "plain upstream secret";
+        server = new Fixture(503, plantedBody.getBytes(StandardCharsets.UTF_8), Duration.ZERO,
+                new AtomicReference<>(), "text/plain");
+        AssistantProviderException failure = assertThrows(AssistantProviderException.class,
+                () -> localProvider(Duration.ofSeconds(2)).complete(oneTurn()));
+        assertEquals(AssistantOutcome.Reason.PROVIDER_UNAVAILABLE, failure.reason());
+        assertFalse(failure.getMessage().contains(plantedBody));
+    }
+
+    @Test
+    void assistantProjectionCeilingHasAnExactAndOneByteOverBoundary() throws Exception {
+        var turn = new AssistantProvider.Turn.Answer("answer", "m", false);
+        long exact = 64L + "answer".getBytes(StandardCharsets.UTF_8).length + 1L;
+        var accepted = new ai.ravenroot.api.node.service.ExternalIoLimits(1, 1, 1, exact, 1,
+                Duration.ofSeconds(1), Duration.ofSeconds(1), Set.of(), Set.of("identity"));
+        assertSame(turn, AssistantOutputLimit.requireWithin(turn, accepted));
+        var refused = new ai.ravenroot.api.node.service.ExternalIoLimits(1, 1, 1, exact - 1, 1,
+                Duration.ofSeconds(1), Duration.ofSeconds(1), Set.of(), Set.of("identity"));
+        AssistantProviderException failure = assertThrows(AssistantProviderException.class,
+                () -> AssistantOutputLimit.requireWithin(turn, refused));
+        assertEquals(AssistantOutcome.Reason.PROVIDER_UNREADABLE, failure.reason());
     }
 
     @Test
@@ -230,6 +257,11 @@ class OpenAiCompatibleAssistantProviderTest {
 
         private Fixture(int status, byte[] response, Duration delay,
                         AtomicReference<String> requestBody) throws IOException {
+            this(status, response, delay, requestBody, "application/json");
+        }
+
+        private Fixture(int status, byte[] response, Duration delay,
+                        AtomicReference<String> requestBody, String mediaType) throws IOException {
             listener = new ServerSocket();
             listener.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0));
             thread = Thread.ofPlatform().name("openai-compatible-fixture").start(() -> {
@@ -251,7 +283,7 @@ class OpenAiCompatibleAssistantProviderTest {
                             : status >= 400 ? "Rejected"
                             : status >= 300 ? "Redirect" : "OK";
                     byte[] responseHead = ("HTTP/1.1 " + status + " " + reason + "\r\n"
-                            + "Content-Type: application/json\r\n"
+                            + "Content-Type: " + mediaType + "\r\n"
                             + "Content-Length: " + response.length + "\r\n"
                             + "Connection: close\r\n\r\n").getBytes(StandardCharsets.ISO_8859_1);
                     try {

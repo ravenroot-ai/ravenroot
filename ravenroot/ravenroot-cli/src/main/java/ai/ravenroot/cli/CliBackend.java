@@ -286,16 +286,50 @@ public interface CliBackend {
      * {@code bypassedNodes} alone does not -- a node with a plain single {@code continue} edge and
      * one with a branch point behind only custom outcomes are indistinguishable in that list, and only this
      * field tells them apart.</p>
+     * @param paused whether a pause is currently held on this execution, read live rather than
+     *               stored, and never {@code true} once {@code status} is terminal. A hold taken at a
+     *               boundary the runtime can write down survives a restart; one taken anywhere else
+     *               does not. Mirrors {@code ExecutionOutcome#paused()}; see that method's own Javadoc
+     *               for why this qualifies {@code status} instead of becoming a value of it.
+     * @param terminationReason why a terminal {@code status} was reached, when the status alone would
+     *                          misdescribe it, and {@code null} when nothing distinguishes it or the
+     *                          execution has not terminated. Mirrors {@code ExecutionOutcome
+     *                          #terminationReason()}. <b>A cancelled execution reports {@code status ==
+     *                          "FAILED"} here</b> -- read this field beside it, never {@code status}
+     *                          alone, exactly as every other type carrying both already documents.
      */
-    record ResultView(String executionId, String status, boolean degraded, List<String> visitedNodes,
+    record ResultView(String executionId, String status, boolean paused, boolean degraded, List<String> visitedNodes,
                        List<String> defaultedNodes, List<String> bypassedNodes, boolean handledFailure,
-                       List<String> handledFailureNodes, List<String> untakenEdges, String payload) {
+                       List<String> handledFailureNodes, List<String> untakenEdges, String payload,
+                       String terminationReason) {
         public ResultView {
             visitedNodes = List.copyOf(visitedNodes);
             defaultedNodes = List.copyOf(defaultedNodes);
             bypassedNodes = List.copyOf(bypassedNodes);
             handledFailureNodes = List.copyOf(handledFailureNodes);
             untakenEdges = List.copyOf(untakenEdges);
+        }
+
+        /** Compatibility constructor preserving the shape before a termination reason was carried. */
+        public ResultView(String executionId, String status, boolean paused, boolean degraded,
+                          List<String> visitedNodes, List<String> defaultedNodes, List<String> bypassedNodes,
+                          boolean handledFailure, List<String> handledFailureNodes, List<String> untakenEdges,
+                          String payload) {
+            this(executionId, status, paused, degraded, visitedNodes, defaultedNodes, bypassedNodes,
+                    handledFailure, handledFailureNodes, untakenEdges, payload, null);
+        }
+
+        /**
+         * Whether this result is reported as a cancellation rather than an ordinary failure.
+         *
+         * <p>Compares the wire name directly rather than parsing {@code terminationReason} into
+         * {@code ExecutionTerminationReason}: this interface deliberately carries no dependency on
+         * {@code ravenroot-application-api}'s enum types, the same boundary {@link RuntimeView}'s own
+         * Javadoc states, so both transports can fill this record with nothing but strings and
+         * primitives.</p>
+         */
+        public boolean cancelled() {
+            return "CANCELLED".equals(terminationReason);
         }
     }
 
@@ -304,9 +338,16 @@ public interface CliBackend {
      * carried as the transport's own string form ({@code Instant.toString()} on the embedded path,
      * whatever the wire sent on the remote one) rather than parsed back into an {@code Instant} --
      * this interface has no reason to commit to that type, and every caller so far only prints it.
+     * @param paused whether a pause is currently held on this traversal, so that it will not begin
+     *               another node until it is resumed. This listing is process-local, so a traversal
+     *               held before a restart is not in it at all -- not because the hold was lost, but
+     *               because no traversal of a process that is gone is live here. A hold taken at a
+     *               boundary the runtime can write down outlives its process and stays resumable and
+     *               cancellable. {@code false} for an ordinary running traversal and for one that
+     *               has never been paused.
      */
     record LiveView(String processInstanceId, String traversalId, String executionId, String graphVersion,
-                     String startedAt) {
+                     String startedAt, boolean paused) {
     }
 
     /**
@@ -316,10 +357,21 @@ public interface CliBackend {
      * absent, the same nullable-string convention {@link CredentialView} already uses for a field a
      * transport may not carry.
      * @param deploymentId hosting deployment, or {@code null} for a transient submission
+     * @param terminationReason why a terminal {@code status} was reached, or {@code null} when
+     *                          nothing distinguishes it or the instance has not terminated. Mirrors
+     *                          {@code ProcessInventoryEntry#terminationReason()}. A cancelled instance
+     *                          reports {@code status == "FAILED"} here -- read this field beside it.
      */
     record InventoryView(String processInstanceId, String status, String disposition, String graphVersion,
                          String deploymentId, String workloadId, String correlationId, int traversalCount,
-                         String createdAt, String updatedAt) {
+                         String createdAt, String updatedAt, String terminationReason) {
+        /** Compatibility constructor preserving the shape before a termination reason was carried. */
+        public InventoryView(String processInstanceId, String status, String disposition, String graphVersion,
+                             String deploymentId, String workloadId, String correlationId, int traversalCount,
+                             String createdAt, String updatedAt) {
+            this(processInstanceId, status, disposition, graphVersion, deploymentId, workloadId, correlationId,
+                    traversalCount, createdAt, updatedAt, null);
+        }
     }
 
     /**
@@ -339,7 +391,14 @@ public interface CliBackend {
 
     /** Mirrors {@code ai.ravenroot.api.persistence.TraversalInventoryEntry}. */
     record TraversalInventoryView(String traversalId, int position, String ingressNodeId, String status,
-                                  String disposition, int invocationCount, int parkedAttemptCount) {
+                                  String disposition, int invocationCount, int parkedAttemptCount,
+                                  String terminationReason) {
+        /** Compatibility constructor preserving the shape before a termination reason was carried. */
+        public TraversalInventoryView(String traversalId, int position, String ingressNodeId, String status,
+                                      String disposition, int invocationCount, int parkedAttemptCount) {
+            this(traversalId, position, ingressNodeId, status, disposition, invocationCount,
+                    parkedAttemptCount, null);
+        }
     }
 
     /**

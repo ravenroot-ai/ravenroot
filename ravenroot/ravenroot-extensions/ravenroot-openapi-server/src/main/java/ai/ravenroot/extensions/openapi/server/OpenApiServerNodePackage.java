@@ -15,7 +15,11 @@ import java.util.Optional;
 public final class OpenApiServerNodePackage implements NodePackage, IngressAuthorityContributor {
     private final OpenApiServerConfigurationResolver resolver;
     private final OpenApiAdmissionRegistry admission = new OpenApiAdmissionRegistry();
-    private final OpenApiReceiveNodeBehavior behavior = new OpenApiReceiveNodeBehavior(this::configuration, admission);
+    private final OpenApiResponseRegistry responses = new OpenApiResponseRegistry();
+    private final OpenApiReceiveNodeBehavior behavior = new OpenApiReceiveNodeBehavior(
+            this::configuration, admission);
+    private final OpenApiRequestReplyNodeBehavior requestReplyBehavior = new OpenApiRequestReplyNodeBehavior(
+            this::configuration, admission, responses);
     private volatile OpenApiServerConfiguration resolved;
 
     public OpenApiServerNodePackage() { this(new EnvironmentOpenApiServerConfigurationResolver()); }
@@ -27,7 +31,7 @@ public final class OpenApiServerNodePackage implements NodePackage, IngressAutho
     @Override public String id() { return OpenApiServerConfiguration.PACKAGE_ID; }
     @Override public String version() { return "1.0.0"; }
     @Override public String sdkContract() { return NodeSdk.CONTRACT; }
-    @Override public List<NodeBehavior> behaviors() { return List.of(behavior); }
+    @Override public List<NodeBehavior> behaviors() { return List.of(behavior, requestReplyBehavior); }
     @Override public List<IngressAuthorityDeclaration> ingressAuthorities() { return List.of(configuration().authority()); }
     @Override public Optional<IngressRequestProjectionPolicy> ingressRequestProjection() {
         return Optional.of(configuration().projection());

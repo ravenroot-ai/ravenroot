@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import tempfile
 import unittest
 from unittest import mock
 
@@ -17,7 +18,73 @@ CHECK = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(CHECK)
 
 
+VALID_ADR = """# {title}
+
+- Status: Accepted
+- Date: 2026-09-04
+
+## Context
+
+Context.
+
+## Decision
+
+Decision.
+
+## Consequences
+
+Consequences.
+"""
+
+
+def write_adr(directory: Path, name: str) -> None:
+    (directory / name).write_text(VALID_ADR.format(title=name), encoding="utf-8")
+
+
 class CheckPublicDocsTest(unittest.TestCase):
+    def test_adr_prefixes_are_unique_without_rejecting_non_numbered_or_nested_documents(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adr = root / "adr"
+            adr.mkdir()
+            (adr / "README.md").write_text("# Index\n", encoding="utf-8")
+            (adr / "CURATION-MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            (adr / "EVIDENCE.md").write_text("# Evidence\n", encoding="utf-8")
+            nested = adr / "guidance"
+            nested.mkdir()
+            write_adr(nested, "0001-nested-context.md")
+            (adr / "0001-directory.md").mkdir()
+            write_adr(adr, "0001-first-decision.md")
+            write_adr(adr, "0002-second-decision.md")
+
+            with mock.patch.object(CHECK, "ROOT", root):
+                errors = CHECK.adr_errors()
+
+        self.assertEqual([], errors)
+
+    def test_duplicate_adr_prefix_reports_every_conflicting_path_in_sorted_order(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            adr = root / "adr"
+            adr.mkdir()
+            (adr / "README.md").write_text("# Index\n", encoding="utf-8")
+            (adr / "CURATION-MANIFEST.md").write_text("# Manifest\n", encoding="utf-8")
+            write_adr(adr, "0002-unique.md")
+            write_adr(adr, "0001-third.md")
+            write_adr(adr, "0001-first.md")
+            write_adr(adr, "0001-second.md")
+
+            with mock.patch.object(CHECK, "ROOT", root):
+                errors = CHECK.adr_errors()
+
+        self.assertEqual(
+            [
+                "adr: duplicate ADR prefix 0001: "
+                "adr/0001-first.md, adr/0001-second.md, adr/0001-third.md"
+            ],
+            errors,
+        )
+
     def test_mermaid_failure_retains_actionable_output_before_stack_tail(self) -> None:
         document = ROOT / "docs" / "example.md"
         completed = subprocess.CompletedProcess(

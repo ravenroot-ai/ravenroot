@@ -17,6 +17,8 @@ import ai.ravenroot.api.persistence.GraphDefinitionStoreException;
 import ai.ravenroot.api.persistence.GraphDefinitionStoreFailure;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredGraphDefinition;
+import ai.ravenroot.core.graph.GraphMlLimits;
+import ai.ravenroot.core.graph.GraphMlParseException;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
 import ai.ravenroot.core.persistence.InMemoryGraphDefinitionStore;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
@@ -53,6 +55,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class DefaultRavenrootApplicationGraphDefinitionTest {
 
+    private static final int WIDENED_GRAPH_BYTES =
+            GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES + 4_096;
+    private static final int PADDING_PROPERTIES = 24;
+
     private static final String GRAPH = """
             <?xml version="1.0" encoding="UTF-8"?>
             <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
@@ -71,6 +77,40 @@ class DefaultRavenrootApplicationGraphDefinitionTest {
 
     @TempDir
     Path databaseDirectory;
+
+    @Test
+    void aWidenedLimitPersistsTheExactBoundaryAndRefusesTheNextByte() {
+        Path database = databaseDirectory.resolve("widened-limit.db");
+        byte[] exact = graphBytesAtSize(WIDENED_GRAPH_BYTES);
+        byte[] oversized = graphBytesAtSize(WIDENED_GRAPH_BYTES + 1);
+        GraphExecutionLimits limits = withGraphDocumentBytes(WIDENED_GRAPH_BYTES);
+
+        try (var executions = new SqliteExecutionStore(database, Clock.systemUTC());
+             var definitions = new SqliteGraphDefinitionStore(database, Clock.systemUTC(),
+                     GraphDefinitionReferences.NONE, WIDENED_GRAPH_BYTES)) {
+            var application = applicationWith(executions, definitions, limits);
+            try {
+                ExecutionSubmission submission = application.startGraphMl(TestIdentities.TENANT_A,
+                        UUID.randomUUID(), new ByteArrayInputStream(exact), "payload");
+                var storedKey = new GraphDefinitionKey(TestIdentities.TENANT_A.tenantId(),
+                        new GraphContentId(submission.graphVersion()));
+                assertArrayEquals(exact,
+                        definitions.load(storedKey).toCompletableFuture().join().canonical().bytes(),
+                        "the widened API boundary must retain the accepted canonical bytes exactly");
+
+                var rejection = assertThrows(GraphMlParseException.class,
+                        () -> application.startGraphMl(TestIdentities.TENANT_A, UUID.randomUUID(),
+                                new ByteArrayInputStream(oversized), "payload"));
+                assertEquals(GraphMlParseException.Reason.DOCUMENT_TOO_LARGE, rejection.reason());
+                var refusedKey = new GraphDefinitionKey(TestIdentities.TENANT_A.tenantId(),
+                        CanonicalGraphMl.of(oversized).contentId());
+                assertFalse(definitions.contains(refusedKey).toCompletableFuture().join(),
+                        "N+1 must be refused before the durable definition write");
+            } finally {
+                application.close();
+            }
+        }
+    }
 
     @Test
     void aServerThatLosesEveryInMemoryGraphObjectRecoversTheDocumentByteForByte() {
@@ -234,6 +274,17 @@ class DefaultRavenrootApplicationGraphDefinitionTest {
                 identities, executions, 0, UnknownBehaviorPolicy.passThrough(), definitions);
     }
 
+    private DefaultRavenrootApplication applicationWith(ExecutionStore executions,
+                                                        GraphDefinitionStore definitions,
+                                                        GraphExecutionLimits limits) {
+        return new DefaultRavenrootApplication(new SameThreadExecutionEngine(), new ExecutionMonitor(),
+                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                ExecutionIdentitySource.randomUuids(), executions, 0, UnknownBehaviorPolicy.passThrough(),
+                definitions, null, limits);
+    }
+
     /** Fixes the process-instance identity so a test can assert about the row that was not written. */
     private static ExecutionIdentitySource fixedIdentities(UUID processInstanceId) {
         return kind -> kind == ExecutionIdentityKind.PROCESS_INSTANCE
@@ -243,6 +294,69 @@ class DefaultRavenrootApplicationGraphDefinitionTest {
 
     private static byte[] graphBytes() {
         return GRAPH.getBytes(StandardCharsets.UTF_8);
+    }
+
+    private static GraphExecutionLimits withGraphDocumentBytes(int maximum) {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        GraphMlLimits graph = defaults.graphMl();
+        var graphMl = new GraphMlLimits(maximum, graph.maxNodes(), graph.maxEdges(), graph.maxProperties(),
+                graph.maxDepth(), graph.maxStringLength(), graph.maxKeys(), graph.maxElements(),
+                graph.maxAttributes(), graph.maxNamespaceDeclarations());
+        return new GraphExecutionLimits(graphMl, defaults.payload(), defaults.maxFanOut(),
+                defaults.maxResidentActors(), defaults.maxLiveActorsPerTraversal(),
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(),
+                defaults.maxTraversalSteps(), defaults.maxAmplifiedDeliveries(),
+                defaults.maxCumulativePayloadBytes(), defaults.maxRecoveryDeliveriesPerAttempt());
+    }
+
+    private static byte[] graphBytesAtSize(int targetBytes) {
+        var header = new StringBuilder("""
+                <?xml version="1.0" encoding="UTF-8"?>
+                <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+                  <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+                  <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+                """);
+        for (int index = 0; index < PADDING_PROPERTIES; index++) {
+            header.append("  <key id=\"padding-").append(index)
+                    .append("\" for=\"graph\" attr.name=\"padding-").append(index)
+                    .append("\" attr.type=\"string\"/>\n");
+        }
+        header.append("  <graph id=\"wiring\" edgedefault=\"directed\">\n");
+        String footer = """
+                    <node id="error"><data key="node-kind">ERROR</data></node>
+                    <node id="start"><data key="node-kind">START</data></node>
+                    <node id="end"><data key="node-kind">END</data></node>
+                    <edge id="start-end" source="start" target="end">
+                      <data key="edge-outcome">continue</data>
+                    </edge>
+                  </graph>
+                </graphml>
+                """;
+        int wrapperBytes = 0;
+        for (int index = 0; index < PADDING_PROPERTIES; index++) {
+            wrapperBytes += ("    <data key=\"padding-" + index + "\"></data>\n")
+                    .getBytes(StandardCharsets.UTF_8).length;
+        }
+        int payloadBytes = targetBytes
+                - header.toString().getBytes(StandardCharsets.UTF_8).length
+                - footer.getBytes(StandardCharsets.UTF_8).length
+                - wrapperBytes;
+        if (payloadBytes < 0 || payloadBytes > PADDING_PROPERTIES * GraphMlLimits.DEFAULTS.maxStringLength()) {
+            throw new IllegalArgumentException("target cannot be represented within GraphML string limits");
+        }
+
+        var graph = new StringBuilder(targetBytes).append(header);
+        int remaining = payloadBytes;
+        for (int index = 0; index < PADDING_PROPERTIES; index++) {
+            int chunk = remaining / (PADDING_PROPERTIES - index);
+            graph.append("    <data key=\"padding-").append(index).append("\">")
+                    .append("x".repeat(chunk)).append("</data>\n");
+            remaining -= chunk;
+        }
+        graph.append(footer);
+        byte[] bytes = graph.toString().getBytes(StandardCharsets.UTF_8);
+        assertEquals(targetBytes, bytes.length, "test fixture must meet the configured boundary exactly");
+        return bytes;
     }
 
     /** Refuses every write, so the acceptance path's ordering obligation is observable. */

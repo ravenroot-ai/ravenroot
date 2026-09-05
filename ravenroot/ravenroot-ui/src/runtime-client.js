@@ -4,6 +4,23 @@ const DEFAULT_RETRY_DELAY_MS = 1_000;
 const MIN_RETRY_DELAY_MS = 250;
 const MAX_RETRY_DELAY_MS = 30_000;
 
+export const MAX_GRAPH_DOCUMENT_BYTES = 256 * 1024 * 1024;
+
+/** Validate the versioned operator-owned limits exposed by the connected runtime. */
+export function validateRuntimeConfiguration(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+      || value.schemaVersion !== 1
+      || !Number.isSafeInteger(value.graphDocumentMaxBytes)
+      || value.graphDocumentMaxBytes < 1
+      || value.graphDocumentMaxBytes > MAX_GRAPH_DOCUMENT_BYTES) {
+    throw new Error('Runtime configuration is not a valid schema version 1 document');
+  }
+  return {
+    schemaVersion: 1,
+    graphDocumentMaxBytes: value.graphDocumentMaxBytes,
+  };
+}
+
 export class RuntimeAuthorizationError extends Error {
   constructor(message, status) {
     super(message);
@@ -438,6 +455,14 @@ export class RavenrootRuntimeClient {
     const result = await this.#json('/v1/node-types', { method: 'GET', headers: { Accept: 'application/json' } });
     if (!Array.isArray(result)) throw new Error('Node catalog response is not an array');
     return result;
+  }
+
+  /** The connected runtime's effective, operator-owned browser ingestion configuration. */
+  async configuration() {
+    const result = await this.#json('/v1/configuration', {
+      method: 'GET', headers: { Accept: 'application/json' },
+    });
+    return validateRuntimeConfiguration(result);
   }
 
   async programArtifacts() {

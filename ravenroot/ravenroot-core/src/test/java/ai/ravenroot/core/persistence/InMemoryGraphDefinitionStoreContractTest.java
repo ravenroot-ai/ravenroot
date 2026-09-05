@@ -6,6 +6,10 @@ import ai.ravenroot.testkit.persistence.GraphDefinitionStoreContract;
 
 import java.time.Clock;
 
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertThrows;
+
 /**
  * Binds the graph-definition conformance suite against the reference in-memory adapter.
  *
@@ -15,6 +19,15 @@ import java.time.Clock;
  * "reopen" here is really a fresh, empty store sharing the same clock.</p>
  */
 class InMemoryGraphDefinitionStoreContractTest extends GraphDefinitionStoreContract {
+
+    @Test
+    void explicitBoundsCannotEscapeTheSharedSafetyCeiling() {
+        assertThrows(IllegalArgumentException.class, () -> new InMemoryGraphDefinitionStore(
+                Clock.systemUTC(), GraphDefinitionReferences.NONE, 0));
+        assertThrows(IllegalArgumentException.class, () -> new InMemoryGraphDefinitionStore(
+                Clock.systemUTC(), GraphDefinitionReferences.NONE,
+                GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES + 1));
+    }
 
     @Override
     protected GraphDefinitionStore createStore(String storeId, Clock clock,

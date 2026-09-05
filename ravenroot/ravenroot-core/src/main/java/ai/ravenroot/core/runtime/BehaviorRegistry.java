@@ -6,6 +6,9 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptorValidator;
 import ai.ravenroot.api.catalog.NodeCatalogSource;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.persistence.PinnedNodePackage;
+import ai.ravenroot.api.publication.PublicationAuditSink;
+import ai.ravenroot.api.publication.PublicationPolicyResolver;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.runtime.builtin.StandardBehaviorFactories;
 
@@ -25,14 +28,51 @@ public final class BehaviorRegistry {
      */
     private final Map<String, NodeTypeDescriptor> resolvedDescriptors = new ConcurrentHashMap<>();
     private final Map<String, NodeCatalogSource> catalogSources = new ConcurrentHashMap<>();
+    /**
+     * The full identity of every node package that registered a behavior here, keyed by package id.
+     *
+     * <p>{@link NodeCatalogSource} carries a bundle id and nothing else, and it is a published
+     * catalog projection, so widening it would change a response shape for a reason unrelated to the
+     * catalog. This map is held beside it instead, and records — as a digest, never as text — the two
+     * facts a package declares about itself that the registry previously read and discarded: its own
+     * build version, and the Node SDK contract it was compiled against. Both are needed to say
+     * whether an execution's packages are the packages it was admitted with; a bundle id alone cannot
+     * distinguish two builds. Nothing here constrains what a package may declare; see
+     * {@link PinnedNodePackage} for why that is not a detail.</p>
+     *
+     * <p>Keyed by package id rather than by behavior name because a package is the versioned unit —
+     * the same reason {@link ai.ravenroot.api.node.NodePackage} states for versioning the package and
+     * not the individual behavior.</p>
+     */
+    private final Map<String, PinnedNodePackage> nodePackageIdentities = new ConcurrentHashMap<>();
 
     public static BehaviorRegistry standard() {
         return standard(BehaviorEnvironment.safeDefaults());
     }
 
     public static BehaviorRegistry standard(BehaviorEnvironment environment) {
+        return standard(environment, PublicationPolicyResolver.none(), PublicationAuditSink.noop());
+    }
+
+    /**
+     * Builds the core catalog with operator-owned publication profiles and payload-free audit.
+     * Existing overloads deliberately resolve no profiles, so {@code boundary-guard} remains visible
+     * but fails closed until an application explicitly supplies this authority.
+     */
+    public static BehaviorRegistry standard(BehaviorEnvironment environment,
+                                            PublicationPolicyResolver publicationPolicies,
+                                            PublicationAuditSink publicationAudit) {
+        return standard(environment, publicationPolicies, publicationAudit, null);
+    }
+
+    /** Builds the core catalog and arms {@code human-task} when a durable service is supplied. */
+    public static BehaviorRegistry standard(BehaviorEnvironment environment,
+                                            PublicationPolicyResolver publicationPolicies,
+                                            PublicationAuditSink publicationAudit,
+                                            ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         var registry = new BehaviorRegistry();
-        StandardBehaviorFactories.all(environment).forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
+        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit, humanTasks)
+                .forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
         return registry;
     }
 
@@ -83,8 +123,14 @@ public final class BehaviorRegistry {
         return registerFactory(factory, NodeCatalogSource.bundle("application"));
     }
 
-    BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId) {
-        return registerFactory(factory, NodeCatalogSource.bundle(packageId));
+    BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId,
+                                            PinnedNodePackage pinned) {
+        registerFactory(factory, NodeCatalogSource.bundle(packageId));
+        // Recorded after the registration succeeds, so a refused behavior never leaves an identity
+        // claiming a package contributed something it did not. The identity itself was built during
+        // planning, so nothing about it can fail here.
+        nodePackageIdentities.put(packageId, pinned);
+        return this;
     }
 
     private BehaviorRegistry registerFactory(NodeBehaviorFactory factory, NodeCatalogSource source) {
@@ -160,7 +206,23 @@ public final class BehaviorRegistry {
         return descriptor;
     }
 
-    /** Backward-compatible lookup for configuration-independent handlers. */
+    /**
+     * Looks up and materializes a configuration-independent handler registered under {@code name}.
+     *
+     * <p>This backward-compatible convenience method creates the handler with a synthetic
+     * property-less behavior node. A registered factory that requires node properties may therefore
+     * throw while the handler is being materialized. The {@link Optional} describes only whether a
+     * behavior name is registered; it does not turn a factory's configuration failure into an empty
+     * result.</p>
+     *
+     * <p>For a property-dependent behavior, use {@link #create(GraphNode)} with a graph node carrying
+     * the configuration required by the behavior's descriptor.</p>
+     *
+     * @param name the registered behavior name to look up
+     * @return the materialized handler, or empty when no behavior is registered under {@code name}
+     * @throws IllegalArgumentException when the registered factory cannot materialize a handler
+     *                                  without node properties
+     */
     public Optional<NodeHandler> find(String name) {
         var factory = factories.get(name);
         return factory == null ? Optional.empty()
@@ -171,6 +233,13 @@ public final class BehaviorRegistry {
         if (node == null || node.behavior() == null) return Optional.empty();
         var factory = factories.get(node.behavior());
         return factory == null ? Optional.empty() : Optional.of(factory.create(node));
+    }
+
+    /** Resolves durable re-entry only through the already registered trusted behavior factory. */
+    public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
+        if (node == null || node.behavior() == null) return Optional.empty();
+        var factory = factories.get(node.behavior());
+        return factory == null ? Optional.empty() : factory.createToolCallContinuation(node);
     }
 
     /**
@@ -229,6 +298,20 @@ public final class BehaviorRegistry {
     }
 
     public Map<String, NodeCatalogSource> catalogSources() { return Map.copyOf(catalogSources); }
+
+    /**
+     * The identity of every node package that contributed a behavior to this registry.
+     *
+     * <p>Sorted, so a manifest built from this list is stable across registration orders. Built-in
+     * behaviors contribute nothing here: they are part of the runtime rather than an installed
+     * dependency, and their identity is the build's, which a manifest pins through the format
+     * versions it already records.</p>
+     *
+     * @return immutable, sorted package identities; empty when only built-ins are registered.
+     */
+    public List<PinnedNodePackage> nodePackageIdentities() {
+        return nodePackageIdentities.values().stream().sorted().toList();
+    }
 
     private record LegacyNodeBehaviorFactory(String name, NodeHandler handler) implements NodeBehaviorFactory {
         @Override

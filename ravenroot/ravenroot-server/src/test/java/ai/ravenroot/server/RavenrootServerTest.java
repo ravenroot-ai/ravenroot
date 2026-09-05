@@ -4,6 +4,8 @@ import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.GraphExecutionLimitException;
+import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.core.ai.AgentRuntimeRegistry;
 import ai.ravenroot.core.ai.ModelProviderRegistry;
 import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
@@ -21,11 +23,14 @@ import ai.ravenroot.server.security.BrowserOriginPolicy;
 import ai.ravenroot.server.security.HttpSecurityConfiguration;
 import ai.ravenroot.server.security.SecurityHeadersPolicy;
 import ai.ravenroot.server.security.RequestAuthenticator;
+import ai.ravenroot.server.payload.StructuredSubmission;
+import ai.ravenroot.server.support.ForwardingRavenrootApplication;
 import ai.ravenroot.api.security.Role;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.net.URI;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.net.InetAddress;
@@ -53,6 +58,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RavenrootServerTest {
@@ -181,6 +187,11 @@ class RavenrootServerTest {
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(200, catalog.statusCode());
             assertTrue(catalog.body().contains("\"behavior\":\"cel-transform\""));
+            assertTrue(catalog.body().contains("\"behavior\":\"human-task\""));
+            assertTrue(catalog.body().contains("\"displayName\":\"Human task\""));
+            assertTrue(catalog.body().contains("\"name\":\"title\""));
+            assertTrue(catalog.body().contains("\"name\":\"responseKind\""));
+            assertTrue(catalog.body().contains("\"fromProperty\":\"cancelledOutcome\""));
             // Asserted on the wire and not on the registry: this is the route an installation actually
             // reads, and the defect is that a
             // distribution offered two node types nobody installing it could arm. Both halves are
@@ -321,6 +332,39 @@ class RavenrootServerTest {
             assertTrue(missingApi.headers().firstValue("Content-Security-Policy").orElseThrow()
                     .contains("frame-ancestors 'none'"));
             assertTrue(RavenrootHealthcheck.isHealthy(server.port()));
+        }
+    }
+
+    @Test
+    void graphExecutionLimitRefusalUsesAClosedPayloadFreeHttpCode() throws Exception {
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-graph-limit-test")) {
+            var delegate = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            var application = new ForwardingRavenrootApplication(delegate) {
+                @Override
+                public ai.ravenroot.api.application.ExecutionSubmission startGraphMl(
+                        ai.ravenroot.api.security.SecurityContext security, UUID executionId,
+                        java.io.InputStream graphMl, Object payload,
+                        ai.ravenroot.api.application.ExecutionPolicy policy) {
+                    throw new GraphExecutionLimitException(
+                            GraphExecutionLimitException.Reason.FAN_OUT, 99, 64);
+                }
+            };
+            try (var server = testServer(application, null)) {
+                server.start();
+                HttpResponse<String> response = HttpClient.newHttpClient().send(
+                        HttpRequest.newBuilder(URI.create("http://localhost:" + server.port() + "/v1/executions"))
+                                .POST(HttpRequest.BodyPublishers.ofString(EXECUTABLE_GRAPH)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+
+                assertEquals(413, response.statusCode());
+                Object decoded = ai.ravenroot.api.payload.PayloadJson.read(
+                        response.body().getBytes(StandardCharsets.UTF_8),
+                        ai.ravenroot.api.payload.PayloadLimits.DEFAULTS).toJava();
+                Map<?, ?> fields = assertInstanceOf(Map.class, decoded);
+                assertEquals("GRAPH_LIMIT_FAN_OUT_EXCEEDED", fields.get("code"), response.body());
+                assertFalse(fields.containsKey("observed"), response.body());
+                assertFalse(fields.containsKey("limit"), response.body());
+            }
         }
     }
 
@@ -730,6 +774,62 @@ class RavenrootServerTest {
     }
 
     @Test
+    void servesAndEnforcesAnExplicitGraphDocumentBudgetAtTheExactBoundary() throws Exception {
+        byte[] exact = EXECUTABLE_GRAPH.getBytes(StandardCharsets.UTF_8);
+        var defaults = GraphMlLimits.DEFAULTS;
+        var limit = new GraphMlLimits(exact.length, defaults.maxNodes(), defaults.maxEdges(),
+                defaults.maxProperties(), defaults.maxDepth(), defaults.maxStringLength(), defaults.maxKeys(),
+                defaults.maxElements(), defaults.maxAttributes(), defaults.maxNamespaceDeclarations());
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-explicit-parser-limit-test");
+             var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null, limit)) {
+            server.start();
+            var client = HttpClient.newHttpClient();
+
+            var configuration = client.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port() + "/v1/configuration")).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, configuration.statusCode());
+            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length + "}",
+                    configuration.body());
+            assertEquals("private, no-store", configuration.headers().firstValue("Cache-Control").orElseThrow());
+
+            for (String path : new String[]{"/v1/graphs/inspect", "/v1/executions"}) {
+                var accepted = client.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + server.port() + path))
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(exact)).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertTrue(accepted.statusCode() == 200 || accepted.statusCode() == 202, accepted.body());
+
+                var rejected = client.send(HttpRequest.newBuilder(
+                                URI.create("http://localhost:" + server.port() + path))
+                        .POST(HttpRequest.BodyPublishers.ofByteArray(
+                                (EXECUTABLE_GRAPH + " ").getBytes(StandardCharsets.UTF_8))).build(),
+                        HttpResponse.BodyHandlers.ofString());
+                assertEquals(413, rejected.statusCode(), rejected.body());
+                assertTrue(rejected.body().contains("\"code\":\"GRAPHML_DOCUMENT_TOO_LARGE\""));
+            }
+
+            String structured = "{\"contract\":\"" + StructuredSubmission.CONTRACT
+                    + "\",\"graphml\":" + jsonQuote(EXECUTABLE_GRAPH) + "}";
+            var structuredAccepted = client.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port() + "/v1/executions"))
+                    .header("Content-Type", StructuredSubmission.MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofString(structured, StandardCharsets.UTF_8)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(202, structuredAccepted.statusCode(), structuredAccepted.body());
+
+            String structuredOversized = "{\"contract\":\"" + StructuredSubmission.CONTRACT
+                    + "\",\"graphml\":" + jsonQuote(EXECUTABLE_GRAPH + " ") + "}";
+            var structuredRejected = client.send(HttpRequest.newBuilder(
+                            URI.create("http://localhost:" + server.port() + "/v1/executions"))
+                    .header("Content-Type", StructuredSubmission.MEDIA_TYPE)
+                    .POST(HttpRequest.BodyPublishers.ofString(structuredOversized, StandardCharsets.UTF_8)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(413, structuredRejected.statusCode(), structuredRejected.body());
+        }
+    }
+
+    @Test
     void exposesTheExplicitDevelopmentArtifactLifecycleWithoutReturningSource() throws Exception {
         var runtime = new ProgramRuntime() {
             @Override
@@ -853,7 +953,7 @@ class RavenrootServerTest {
             // The result must expose the produced payload.
             assertTrue(body.contains("\"payload\":"), () -> "the result carries no payload at all: " + body);
             assertEquals("hello", jsonString(body, "payload"), () -> body);
-            assertTrue(body.contains("\"visitedNodes\":[\"end\",\"future\",\"start\"]"), () -> body);
+            assertEquals(Set.of("start", "future", "end"), jsonStringSet(body, "visitedNodes"), () -> body);
             assertTrue(body.contains("\"defaultedNodes\":[]"), () -> body);
             assertTrue(body.contains("\"bypassedNodes\":[\"end\",\"future\",\"start\"]"),
                     () -> "Play/Test must report intentional bypass separately from unknown-behavior "
@@ -1020,10 +1120,22 @@ class RavenrootServerTest {
             producedInput.set(new UnsupportedInput());
             String unsupportedId = submitRunAndAwait(client, server, monitor, TERMINAL_FAILURE_GRAPH);
             var unsupported = readSettledResponse(client, server, unsupportedId);
-            assertEquals(400, unsupported.statusCode(), unsupported.body());
+            // 410 EXECUTION_RESULT_REDACTED, and deliberately not the rejection's own 400. A read of
+            // this execution used to answer PAYLOAD_UNSUPPORTED_TYPE while the process that ran it
+            // still held the rejection in memory, and EXECUTION_RESULT_REDACTED from every other
+            // instance and from this one once the entry aged out -- one id, two wire codes, decided
+            // by nothing a caller can see. The durable record has only the coarser distinction to
+            // offer, so the warm answer is the one that gives ground: payloadState still separates a
+            // budget an operator configures from a value no configuration would admit.
+            assertEquals(410, unsupported.statusCode(), unsupported.body());
             assertTrue(unsupported.headers().firstValue("Content-Type").orElse("")
                     .startsWith("application/json"), unsupported.headers().toString());
-            assertTrue(unsupported.body().contains("\"code\":\"PAYLOAD_UNSUPPORTED_TYPE\""), unsupported.body());
+            assertTrue(unsupported.body().contains("\"code\":\"EXECUTION_RESULT_REDACTED\""),
+                    unsupported.body());
+            assertTrue(unsupported.body().contains("\"payloadState\":\"UNCONVERTIBLE\""),
+                    () -> "a value outside the closed payload model is not a limit anybody can raise, "
+                            + "and the body has to keep saying so: " + unsupported.body());
+            assertEquals("FAILED", jsonString(unsupported.body(), "status"), unsupported.body());
             assertFalse(unsupported.body().contains("secret-input-must-not-leak"), unsupported.body());
             ai.ravenroot.api.payload.PayloadJson.read(unsupported.body().getBytes(StandardCharsets.UTF_8),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
@@ -1036,11 +1148,20 @@ class RavenrootServerTest {
                     "the in-memory PayloadValue must exceed the default collection bound by exactly one");
             String overLimitId = submitRunAndAwait(client, server, monitor, TERMINAL_FAILURE_GRAPH);
             var overLimit = readSettledResponse(client, server, overLimitId);
-            assertEquals(413, overLimit.statusCode(), overLimit.body());
+            // The other half of the same rule, and the half that shows what payloadState is for: this
+            // rejection came from a budget the deployment configures, so it is WITHHELD where the
+            // unsupported type above is UNCONVERTIBLE. The finer PAYLOAD_COLLECTION_LIMIT_EXCEEDED is
+            // still what a caller gets when a *request* payload is refused; it cannot survive to a
+            // read of a result, because the durable record does not store it and a warm answer that
+            // published it would be an answer only this instance could give.
+            assertEquals(410, overLimit.statusCode(), overLimit.body());
             assertTrue(overLimit.headers().firstValue("Content-Type").orElse("")
                     .startsWith("application/json"), overLimit.headers().toString());
-            assertTrue(overLimit.body().contains("\"code\":\"PAYLOAD_COLLECTION_LIMIT_EXCEEDED\""),
+            assertTrue(overLimit.body().contains("\"code\":\"EXECUTION_RESULT_REDACTED\""),
                     overLimit.body());
+            assertTrue(overLimit.body().contains("\"payloadState\":\"WITHHELD\""),
+                    () -> "a configured budget refused this payload, which is the distinction "
+                            + "WITHHELD carries and UNCONVERTIBLE does not: " + overLimit.body());
             ai.ravenroot.api.payload.PayloadJson.read(overLimit.body().getBytes(StandardCharsets.UTF_8),
                     ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
 
@@ -1103,14 +1224,27 @@ class RavenrootServerTest {
     private static HttpResponse<String> readSettledResponse(
             HttpClient client, RavenrootServer server, String executionId) throws Exception {
         HttpResponse<String> response = null;
+        IOException lastTransportFailure = null;
         for (int attempt = 0; attempt < 12; attempt++) {
-            response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.port()
-                    + "/v1/executions/" + executionId)).GET().build(), HttpResponse.BodyHandlers.ofString());
+            try {
+                response = client.send(HttpRequest.newBuilder(URI.create("http://localhost:" + server.port()
+                        + "/v1/executions/" + executionId)).GET().build(),
+                        HttpResponse.BodyHandlers.ofString());
+                lastTransportFailure = null;
+            } catch (IOException transientConnectionClosure) {
+                // The JDK client may reuse a keep-alive socket just as the lightweight test server
+                // closes it. Retry this idempotent GET within the same fixed polling bound; an
+                // unhealthy server still fails deterministically once the bound is exhausted.
+                lastTransportFailure = transientConnectionClosure;
+                Thread.sleep(250);
+                continue;
+            }
             if (response.statusCode() != 200 || !response.body().contains("\"status\":\"RUNNING\"")) {
                 return response;
             }
             Thread.sleep(250);
         }
+        if (response == null && lastTransportFailure != null) throw lastTransportFailure;
         throw new AssertionError("the execution never produced a terminal response: " + response.body());
     }
 
@@ -1190,6 +1324,20 @@ class RavenrootServerTest {
         return body.substring(valueStart, end);
     }
 
+    private static Set<String> jsonStringSet(String body, String field) {
+        String marker = "\"" + field + "\":[";
+        int start = body.indexOf(marker);
+        if (start < 0) throw new AssertionError("Missing JSON array field " + field + " in " + body);
+        int valueStart = start + marker.length();
+        int end = body.indexOf(']', valueStart);
+        if (end < 0) throw new AssertionError("Unterminated JSON array field " + field + " in " + body);
+        String values = body.substring(valueStart, end);
+        if (values.isEmpty()) return Set.of();
+        return java.util.Arrays.stream(values.split(","))
+                .map(value -> value.substring(1, value.length() - 1))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
     private static HttpResponse<String> post(HttpClient client, String uri, String token) throws Exception {
         return client.send(HttpRequest.newBuilder(URI.create(uri))
                         .header("Authorization", "Bearer " + token)
@@ -1207,6 +1355,18 @@ class RavenrootServerTest {
         return new RavenrootServer(application,
                 new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), ui,
                 authenticator);
+    }
+
+    private static RavenrootServer testServer(ai.ravenroot.api.application.RavenrootApplication application,
+                                               Path ui, GraphMlLimits graphMlLimits) {
+        return new RavenrootServer(application,
+                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), ui,
+                new DisabledLoopbackAuthenticator(), graphMlLimits);
+    }
+
+    private static String jsonQuote(String value) {
+        return "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"")
+                .replace("\r", "\\r").replace("\n", "\\n").replace("\t", "\\t") + "\"";
     }
 
     private static RequestAuthenticator lifecycleAuthenticator() {

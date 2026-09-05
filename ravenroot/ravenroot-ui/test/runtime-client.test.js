@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import {
+  MAX_GRAPH_DOCUMENT_BYTES,
   ProgramSourceRejectedError,
   RavenrootRuntimeClient,
   RuntimeAuthorizationError,
@@ -9,8 +10,55 @@ import {
   normalizeRuntimeEvent,
   parseEventFrame,
   validateLocalDeploymentStatus,
+  validateRuntimeConfiguration,
   validateSourceSessionStatus,
 } from '../src/runtime-client.js';
+
+describe('runtime configuration client', () => {
+  it.each([
+    1024,
+    20 * 1024 * 1024,
+    MAX_GRAPH_DOCUMENT_BYTES,
+  ])('accepts a positive safe byte limit within the supported ceiling: %s', graphDocumentMaxBytes => {
+    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes })).toEqual({
+      schemaVersion: 1, graphDocumentMaxBytes,
+    });
+  });
+
+  it.each([
+    null,
+    [],
+    {},
+    { schemaVersion: 2, graphDocumentMaxBytes: 1024 },
+    { schemaVersion: 1, graphDocumentMaxBytes: 0 },
+    { schemaVersion: 1, graphDocumentMaxBytes: -1 },
+    { schemaVersion: 1, graphDocumentMaxBytes: 1.5 },
+    { schemaVersion: 1, graphDocumentMaxBytes: '1024' },
+    { schemaVersion: 1, graphDocumentMaxBytes: MAX_GRAPH_DOCUMENT_BYTES + 1 },
+    { schemaVersion: 1, graphDocumentMaxBytes: Number.MAX_SAFE_INTEGER + 1 },
+  ])('rejects a malformed or unsupported configuration: %j', configuration => {
+    expect(() => validateRuntimeConfiguration(configuration))
+      .toThrow('Runtime configuration is not a valid schema version 1 document');
+  });
+
+  it('loads authenticated configuration from the connected service origin', async () => {
+    const configuration = { schemaVersion: 1, graphDocumentMaxBytes: 4096 };
+    const fetchImpl = vi.fn().mockResolvedValue({
+      ok: true, status: 200, text: async () => JSON.stringify(configuration),
+    });
+    const client = new RavenrootRuntimeClient('https://runtime.example', {
+      fetchImpl, accessToken: 'token',
+    });
+
+    await expect(client.configuration()).resolves.toEqual(configuration);
+    expect(fetchImpl).toHaveBeenCalledWith('https://runtime.example/v1/configuration', {
+      method: 'GET',
+      headers: { Accept: 'application/json', Authorization: 'Bearer token' },
+      credentials: 'omit',
+      cache: 'no-store',
+    });
+  });
+});
 
 describe('process-local source session client', () => {
   const listening = {

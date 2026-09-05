@@ -24,6 +24,7 @@ const GRAPHIFY = JSON.parse(
   readFileSync(resolve('public/examples/graphify-minimal.json'), 'utf8'),
 );
 const COMPACT_ELEMENT_BOMB = `<graphml>${'<x/>'.repeat(300_000)}</graphml>`;
+const TEST_DOCUMENT_MAX_BYTES = 64 * 1024;
 
 function limitDocuments() {
   return [
@@ -83,7 +84,7 @@ describe('GraphML compatibility', () => {
   });
   it('keeps topology, Ravenroot attributes and GraphML auto-detection', () => {
     const parsed = parseGraphML(GRAPHML);
-    const detected = detectAndParse(GRAPHML, 'workflow.graphml');
+    const detected = detectAndParse(GRAPHML, 'workflow.graphml', TEST_DOCUMENT_MAX_BYTES);
 
     expect(parsed.nodes).toHaveLength(2);
     expect(parsed.edges).toHaveLength(1);
@@ -274,7 +275,7 @@ describe('GraphML compatibility', () => {
   it('rejects a compact 300k-element document before constructing DOMParser', () => {
     expect(new TextEncoder().encode(COMPACT_ELEMENT_BOMB).length).toBeGreaterThan(1_200_000);
     expect(new TextEncoder().encode(COMPACT_ELEMENT_BOMB).length).toBeLessThan(
-      GRAPH_INPUT_LIMITS.maxBytes,
+      2 * 1024 * 1024,
     );
     const domParser = vi.fn();
     vi.stubGlobal('DOMParser', domParser);
@@ -301,42 +302,68 @@ describe('GraphML compatibility', () => {
   });
 
   it('accepts the byte limit and rejects N+1 bytes before parsing', () => {
-    expect(() => assertInputWithinByteLimit('x'.repeat(GRAPH_INPUT_LIMITS.maxBytes))).not.toThrow();
-    expect(() => assertInputWithinByteLimit('x'.repeat(GRAPH_INPUT_LIMITS.maxBytes + 1)))
-      .toThrow('GraphML input rejected: document exceeds the 10 MiB byte limit');
+    expect(() => assertInputWithinByteLimit('x'.repeat(64), 64)).not.toThrow();
+    expect(() => assertInputWithinByteLimit('x'.repeat(65), 64))
+      .toThrow('GraphML input rejected: document exceeds the configured byte limit');
+  });
+
+  it('counts UTF-8 bytes rather than JavaScript code units', () => {
+    expect(() => assertInputWithinByteLimit('€', 3)).not.toThrow();
+    expect(() => assertInputWithinByteLimit('€', 2))
+      .toThrow('GraphML input rejected: document exceeds the configured byte limit');
+  });
+
+  it('accepts a local file exactly at the configured boundary', () => {
+    const file = new File(['x'.repeat(64)], 'exact.graphml');
+    const parseAndRender = vi.fn();
+    const reader = {
+      readAsText: vi.fn(function readAsText() {
+        this.onload({ target: { result: 'x'.repeat(64) } });
+      }),
+    };
+    const handlers = {
+      createReader: vi.fn(() => reader), onStart: vi.fn(), parseAndRender,
+      onRejected: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
+    };
+
+    expect(loadLocalGraphInput(file, 64, handlers)).toBe(true);
+    expect(reader.readAsText).toHaveBeenCalledWith(file);
+    expect(parseAndRender).toHaveBeenCalledWith('x'.repeat(64));
+    expect(handlers.onRejected).not.toHaveBeenCalled();
+    expect(handlers.onComplete).toHaveBeenCalledOnce();
   });
 
   it('rejects an oversized local File before its reader, parser, or renderer runs', () => {
     const file = new File(['x'], 'oversized.graphml', { type: 'application/graphml+xml' });
-    Object.defineProperty(file, 'size', { value: GRAPH_INPUT_LIMITS.maxBytes + 1 });
+    Object.defineProperty(file, 'size', { value: 65 });
     const handlers = {
       createReader: vi.fn(), onStart: vi.fn(), parseAndRender: vi.fn(),
       onRejected: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
     };
 
-    expect(loadLocalGraphInput(file, handlers)).toBe(false);
+    expect(loadLocalGraphInput(file, 64, handlers)).toBe(false);
     expect(handlers.createReader).not.toHaveBeenCalled();
     expect(handlers.onStart).not.toHaveBeenCalled();
     expect(handlers.parseAndRender).not.toHaveBeenCalled();
     expect(handlers.onComplete).not.toHaveBeenCalled();
     expect(handlers.onRejected).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'GraphML input rejected: document exceeds the 10 MiB byte limit',
+      message: 'GraphML input rejected: document exceeds the configured byte limit',
     }));
   });
 
   it('rejects an oversized URL Content-Length before parse or render runs', async () => {
     const fetchImpl = vi.fn().mockResolvedValue(new Response('', {
-      headers: { 'content-length': String(GRAPH_INPUT_LIMITS.maxBytes + 1) },
+      headers: { 'content-length': '65' },
     }));
     const handlers = {
       fetchImpl, onStart: vi.fn(), parseAndRender: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
     };
 
-    await expect(loadUrlGraphInput('https://example.test/oversized.graphml', handlers)).resolves.toBe(false);
+    await expect(loadUrlGraphInput('https://example.test/oversized.graphml', 64, handlers)).resolves.toBe(false);
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(handlers.parseAndRender).not.toHaveBeenCalled();
     expect(handlers.onError).toHaveBeenCalledWith(expect.objectContaining({
-      message: 'GraphML input rejected: document exceeds the 10 MiB byte limit',
+      message: 'GraphML input rejected: document exceeds the configured byte limit',
     }));
     expect(handlers.onComplete).toHaveBeenCalledOnce();
   });
@@ -344,7 +371,7 @@ describe('GraphML compatibility', () => {
   it('cancels an N+1 chunked URL body before parse or render runs', async () => {
     const reader = {
       read: vi.fn()
-        .mockResolvedValueOnce({ done: false, value: new Uint8Array(GRAPH_INPUT_LIMITS.maxBytes) })
+        .mockResolvedValueOnce({ done: false, value: new Uint8Array(64) })
         .mockResolvedValueOnce({ done: false, value: new Uint8Array([0]) }),
       cancel: vi.fn().mockResolvedValue(undefined),
       releaseLock: vi.fn(),
@@ -356,11 +383,77 @@ describe('GraphML compatibility', () => {
       fetchImpl, onStart: vi.fn(), parseAndRender: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
     };
 
-    await expect(loadUrlGraphInput('https://example.test/chunked.graphml', handlers)).resolves.toBe(false);
+    await expect(loadUrlGraphInput('https://example.test/chunked.graphml', 64, handlers)).resolves.toBe(false);
     expect(reader.cancel).toHaveBeenCalledOnce();
     expect(reader.releaseLock).toHaveBeenCalledOnce();
     expect(handlers.parseAndRender).not.toHaveBeenCalled();
     expect(handlers.onComplete).toHaveBeenCalledOnce();
+  });
+
+  it('accepts a streamed URL body exactly at the configured boundary', async () => {
+    const parseAndRender = vi.fn();
+    const handlers = {
+      fetchImpl: vi.fn().mockResolvedValue(new Response('x'.repeat(64), {
+        headers: { 'content-length': '64' },
+      })),
+      onStart: vi.fn(), parseAndRender, onError: vi.fn(), onComplete: vi.fn(),
+    };
+
+    await expect(loadUrlGraphInput('https://example.test/exact.graphml', 64, handlers))
+      .resolves.toBe(true);
+    expect(parseAndRender).toHaveBeenCalledWith('x'.repeat(64));
+    expect(handlers.onError).not.toHaveBeenCalled();
+  });
+
+  it.each([null, 'not-a-number', '1'])(
+    'enforces streamed bytes when Content-Length is absent, malformed, or misleading: %s',
+    async contentLength => {
+      const reader = {
+        read: vi.fn()
+          .mockResolvedValueOnce({ done: false, value: new Uint8Array(65) })
+          .mockResolvedValueOnce({ done: true }),
+        cancel: vi.fn().mockResolvedValue(undefined),
+        releaseLock: vi.fn(),
+      };
+      const handlers = {
+        fetchImpl: vi.fn().mockResolvedValue({
+          ok: true,
+          headers: { get: () => contentLength },
+          body: { getReader: () => reader },
+        }),
+        onStart: vi.fn(), parseAndRender: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
+      };
+
+      await expect(loadUrlGraphInput('https://example.test/untrusted-length.graphml', 64, handlers))
+        .resolves.toBe(false);
+      expect(reader.cancel).toHaveBeenCalledOnce();
+      expect(handlers.parseAndRender).not.toHaveBeenCalled();
+      expect(handlers.onError).toHaveBeenCalledWith(expect.objectContaining({
+        reason: GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
+      }));
+    },
+  );
+
+  it('keeps the byte-limit verdict when cancelling an oversized stream fails', async () => {
+    const reader = {
+      read: vi.fn().mockResolvedValueOnce({ done: false, value: new Uint8Array(65) }),
+      cancel: vi.fn().mockRejectedValue(new Error('transport cancellation failed')),
+      releaseLock: vi.fn(),
+    };
+    const handlers = {
+      fetchImpl: vi.fn().mockResolvedValue({
+        ok: true, headers: { get: () => null }, body: { getReader: () => reader },
+      }),
+      onStart: vi.fn(), parseAndRender: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
+    };
+
+    await expect(loadUrlGraphInput('https://example.test/cancel-fails.graphml', 64, handlers))
+      .resolves.toBe(false);
+    expect(handlers.onError).toHaveBeenCalledWith(expect.objectContaining({
+      message: 'GraphML input rejected: document exceeds the configured byte limit',
+      reason: GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
+    }));
+    expect(reader.releaseLock).toHaveBeenCalledOnce();
   });
 
   it('rejects a complexity-bounded local file before DOM parse or render', () => {
@@ -384,7 +477,7 @@ describe('GraphML compatibility', () => {
     const file = new File([COMPACT_ELEMENT_BOMB], 'compact.graphml');
     vi.stubGlobal('DOMParser', domParser);
     try {
-      expect(loadLocalGraphInput(file, handlers)).toBe(true);
+      expect(loadLocalGraphInput(file, 2 * 1024 * 1024, handlers)).toBe(true);
       expect(domParser).not.toHaveBeenCalled();
       expect(render).not.toHaveBeenCalled();
       expect(handlers.onError).toHaveBeenCalledWith(expect.objectContaining({
@@ -412,7 +505,7 @@ describe('GraphML compatibility', () => {
     };
     vi.stubGlobal('DOMParser', domParser);
     try {
-      await expect(loadUrlGraphInput('https://example.test/compact.graphml', handlers))
+      await expect(loadUrlGraphInput('https://example.test/compact.graphml', 2 * 1024 * 1024, handlers))
         .resolves.toBe(false);
       expect(domParser).not.toHaveBeenCalled();
       expect(render).not.toHaveBeenCalled();
@@ -458,7 +551,7 @@ describe('GraphML compatibility', () => {
 describe('Graphify JSON compatibility', () => {
   it('supports edges and automatic JSON detection', () => {
     const parsed = parseGraphifyJSON(GRAPHIFY);
-    const detected = detectAndParse(JSON.stringify(GRAPHIFY), 'graph.json');
+    const detected = detectAndParse(JSON.stringify(GRAPHIFY), 'graph.json', TEST_DOCUMENT_MAX_BYTES);
 
     expect(parsed.format).toBe('graphify');
     expect(parsed.nodes).toHaveLength(2);
@@ -472,6 +565,44 @@ describe('Graphify JSON compatibility', () => {
     const parsed = parseGraphifyJSON({ nodes: GRAPHIFY.nodes, links: GRAPHIFY.edges });
 
     expect(parsed.edges).toHaveLength(1);
+  });
+
+  it('uses the shared configured byte boundary before JSON parsing', () => {
+    const text = JSON.stringify(GRAPHIFY);
+    const bytes = new TextEncoder().encode(text).byteLength;
+
+    expect(detectAndParse(text, 'graph.json', bytes).format).toBe('graphify');
+    try {
+      detectAndParse(text, 'graph.json', bytes - 1);
+      throw new Error('expected Graphify byte rejection');
+    } catch (error) {
+      expect(error).toMatchObject({ reason: GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE });
+    }
+  });
+
+  it('loads Graphify through the same pre-read local-file boundary as GraphML', () => {
+    const text = JSON.stringify(GRAPHIFY);
+    const bytes = new TextEncoder().encode(text).byteLength;
+    const file = new File([text], 'graph.json', { type: 'application/json' });
+    const rendered = vi.fn();
+    const handlers = {
+      createReader: () => ({
+        readAsText() { this.onload({ target: { result: text } }); },
+      }),
+      onStart: vi.fn(),
+      parseAndRender: raw => rendered(detectAndParse(raw, file.name, bytes)),
+      onRejected: vi.fn(), onError: vi.fn(), onComplete: vi.fn(),
+    };
+
+    expect(loadLocalGraphInput(file, bytes, handlers)).toBe(true);
+    expect(rendered).toHaveBeenCalledWith(expect.objectContaining({ format: 'graphify' }));
+
+    const rejected = { ...handlers, createReader: vi.fn(), onRejected: vi.fn() };
+    expect(loadLocalGraphInput(file, bytes - 1, rejected)).toBe(false);
+    expect(rejected.createReader).not.toHaveBeenCalled();
+    expect(rejected.onRejected).toHaveBeenCalledWith(expect.objectContaining({
+      reason: GRAPH_INPUT_REJECTION_REASONS.DOCUMENT_TOO_LARGE,
+    }));
   });
 });
 

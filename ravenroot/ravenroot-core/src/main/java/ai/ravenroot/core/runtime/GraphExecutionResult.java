@@ -57,7 +57,13 @@ public record GraphExecutionResult(UUID processInstanceId, UUID traversalId, Obj
     }
 
     /**
-     * Which nodes this traversal reached — <strong>not how many times it reached each of them</strong>.
+     * Which nodes this traversal reached — <strong>not their visit order or how many times each was
+     * reached</strong>.
+     *
+     * <p>Iteration order is unspecified and must not be interpreted as execution order. Callers that
+     * need ordered execution history, including repeated visits, must use the {@link
+     * ai.ravenroot.api.application.NodeInvocation invocation} or {@link
+     * ai.ravenroot.api.application.ExecutionEvent event} history surfaces.</p>
      *
      * <p>Stated because the type does not state it and the difference is observable. A node can
      * be entered more than once in one traversal: by a cycle that passes back through it, or by any
@@ -67,12 +73,10 @@ public record GraphExecutionResult(UUID processInstanceId, UUID traversalId, Obj
      * join policy of its own</em> when it serialises a legacy state-machine document, so the shape
      * arrives on imported graphs rather than only on authored ones. This is a {@link Set}, so every
      * repeat collapses to one entry and no reader can recover the difference from here — including the
-     * CLI's {@code visited-nodes=} line, which sorts these ids but neither adds nor drops one, and the
-     * HTTP result's {@code visitedNodes} array, which passes them through unchanged. That array is a
-     * JSON list, which carries no set semantics to a client, and {@code docs/api/openapi.json} does not
-     * describe the field at all: this paragraph reaches a Java caller and nobody else, so an HTTP
-     * consumer who counted its entries to learn how many times a node ran would be wrong with nothing
-     * on their surface to warn them.</p>
+     * CLI's {@code visited-nodes=} line and the HTTP result's {@code visitedNodes} array. Those
+     * adapters sort the identifiers only to make repeated presentation deterministic; that lexical
+     * order is not traversal chronology. A JSON array or printed list carries no set semantics by
+     * itself, so callers must continue to treat both projections as unique membership.</p>
      *
      * <p>That collapse is the right shape for the question this field answers, and nothing is being
      * widened here. The surface that answers "how many times" is the durable diary: one

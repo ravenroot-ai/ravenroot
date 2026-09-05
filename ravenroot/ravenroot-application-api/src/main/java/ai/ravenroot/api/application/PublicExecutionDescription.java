@@ -77,12 +77,25 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case NODE_COMPLETED -> "Node completed.";
             case EDGE_TRAVERSED -> "Edge was traversed.";
             case NODE_FAILED -> "Node failed. Protected diagnostics may contain more detail.";
+            // No count and no delay: this is the classifier-less branch, so it knows neither. The
+            // ordinal and the wait are on the event's own components for a reader entitled to them.
+            case NODE_RETRY_SCHEDULED -> "Node attempt failed and another attempt was scheduled.";
             case JOIN_SATISFIED -> "Join conditions were satisfied.";
             case JOIN_ITERATION_BACKLOG -> "A join is holding state for several iterations.";
             case JOIN_ARRIVAL_DISCARDED -> "A duplicate or late join arrival was ignored.";
             case JOIN_FAILED -> "Join conditions could not be satisfied.";
+            // "Holding" rather than "stopped", because a paused traversal has not stopped: it keeps
+            // its state, it is still listed live and it is still cancellable. A reader told an
+            // execution had stopped would go looking for a result that is not coming.
+            case EXECUTION_PAUSED -> "Execution was paused and is holding before its next node.";
+            case EXECUTION_RESUMED -> "Execution was resumed and is running again.";
             case EXECUTION_COMPLETED -> "Execution completed successfully.";
             case EXECUTION_FAILED -> "Execution failed. Protected diagnostics may contain more detail.";
+            // No "failed", and no pointer to diagnostics either: there are none to read. A cancelled
+            // execution stopped because somebody with the authority to stop it did, and a sentence
+            // that sent an operator looking for a fault would recreate, in words, exactly the
+            // confusion this event type was added to remove.
+            case EXECUTION_CANCELLED -> "Execution was cancelled before it produced a result.";
         };
         return normalizeAuthoredText(authored);
     }
@@ -118,6 +131,12 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case EXECUTION_FAILED -> "Execution failed with " + reason
                     + ". Protected diagnostics may contain more detail.";
             case JOIN_FAILED -> "Join conditions could not be satisfied: " + reason + ".";
+            // The classifier here is the failure's retry classification, a fixed vocabulary token
+            // from Retryability rather than a Java type name, so it is named rather than
+            // characterised for the same reason a routed outcome is: this class cannot know whether
+            // an author reads "retry-after-reread" as good news.
+            case NODE_RETRY_SCHEDULED -> "Node attempt failed as \"" + reason
+                    + "\" and another attempt was scheduled.";
             // Two different facts now share NODE_BYPASSED, and the difference matters to
             // whoever is reading the activity view: one says the run itself is not executing
             // anything, the other says one node is switched off in the saved graph while the rest of

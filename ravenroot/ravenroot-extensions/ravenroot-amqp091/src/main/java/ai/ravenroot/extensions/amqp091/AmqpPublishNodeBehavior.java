@@ -11,6 +11,7 @@ import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 
 import java.nio.charset.StandardCharsets;
@@ -53,6 +54,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
     private final AmqpRuntimeControls controls;
     private final LongSupplier ticker;
     private final Sleeper sleeper;
+    private final ReservedNetworkPolicy destinationPolicy;
 
     public AmqpPublishNodeBehavior() {
         this(new EnvironmentAmqpCredentialResolver(), new EnvironmentAmqpProfileResolver());
@@ -65,12 +67,19 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
 
     AmqpPublishNodeBehavior(CredentialResolver credentials, AmqpProfileResolver profiles, AmqpProtocol protocol,
                             AmqpRuntimeControls controls, LongSupplier ticker, Sleeper sleeper) {
+        this(credentials, profiles, protocol, controls, ticker, sleeper,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+    AmqpPublishNodeBehavior(CredentialResolver credentials, AmqpProfileResolver profiles, AmqpProtocol protocol,
+                            AmqpRuntimeControls controls, LongSupplier ticker, Sleeper sleeper,
+                            ReservedNetworkPolicy destinationPolicy) {
         this.credentials = Objects.requireNonNull(credentials);
         this.profiles = Objects.requireNonNull(profiles);
         this.protocol = Objects.requireNonNull(protocol);
         this.controls = Objects.requireNonNull(controls);
         this.ticker = Objects.requireNonNull(ticker);
         this.sleeper = Objects.requireNonNull(sleeper);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override
@@ -137,7 +146,7 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             final Payload payload;
             AmqpRuntimeControls.Admission acquired = null;
             try {
-                settings = Settings.from(configuration, profiles, message.tenantId());
+                settings = Settings.from(configuration, profiles, destinationPolicy, message.tenantId());
                 payload = Payload.from(message.payload(), settings);
                 acquired = controls.acquire(message.tenantId(), settings.profile, settings.maxConcurrency, actionGates);
                 if (!acquired.acquired())
@@ -541,7 +550,8 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
                             String messageId, String correlationId, String replyTo, String type, String appId,
                             Map<String, Object> headers, int timeoutMs, int maxConcurrency, int retries) {
 
-        static Settings from(NodeConfiguration configuration, AmqpProfileResolver resolver, String tenant) {
+        static Settings from(NodeConfiguration configuration, AmqpProfileResolver resolver,
+                             ReservedNetworkPolicy destinationPolicy, String tenant) {
             for (String name : configuration.properties().keySet())
                 if (!CONFIGURATION_FIELDS.contains(name)) throw Refusal.rejected("UNKNOWN_GRAPH_PROPERTY");
             String profileName = configuration.property("brokerProfile")
@@ -556,6 +566,8 @@ public final class AmqpPublishNodeBehavior implements NodeBehavior {
             if (profile == null) throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE");
             if (!tenant.equals(profile.tenant()) || !profileName.equals(profile.name()))
                 throw Refusal.rejected("BROKER_PROFILE_FORBIDDEN");
+            try { destinationPolicy.requireAllowedLiteral(profile.host()); }
+            catch (SecurityException refused) { throw Refusal.permanent("BROKER_PROFILE_UNAVAILABLE"); }
             if (!strictBoolean(configuration, "mandatory", true))
                 throw Refusal.rejected("MANDATORY_REQUIRED");
             String exchange = configured(configuration, "exchange", profile.defaultExchange(), 255, true);

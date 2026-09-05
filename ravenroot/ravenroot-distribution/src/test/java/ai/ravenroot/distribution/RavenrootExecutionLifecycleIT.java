@@ -1,5 +1,7 @@
 package ai.ravenroot.distribution;
 
+import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadLimits;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -19,12 +21,15 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -198,8 +203,13 @@ class RavenrootExecutionLifecycleIT {
         assertEquals("COMPLETED", jsonString(result.body(), "status"), () -> result.body());
         assertEquals("hello", jsonString(result.body(), "payload"), () -> result.body());
         assertEquals(executionId, jsonString(result.body(), "executionId"), () -> result.body());
-        assertTrue(result.body().contains("\"visitedNodes\":[\"end\",\"future\",\"start\"]"),
-                () -> "expected all three nodes visited: " + result.body());
+        Object decoded = PayloadJson.read(
+                result.body().getBytes(StandardCharsets.UTF_8), PayloadLimits.DEFAULTS).toJava();
+        Map<?, ?> fields = assertInstanceOf(Map.class, decoded);
+        List<?> visitedNodes = assertInstanceOf(List.class, fields.get("visitedNodes"));
+        assertEquals(3, visitedNodes.size(), () -> "expected three unique visited nodes: " + result.body());
+        assertEquals(Set.of("start", "future", "end"), Set.copyOf(visitedNodes),
+                () -> "expected visited-node membership, independent of presentation order: " + result.body());
     }
 
     private HttpResponse<String> pollUntilTerminal(String executionId) throws Exception {

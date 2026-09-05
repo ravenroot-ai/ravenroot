@@ -491,7 +491,380 @@ final class SqliteSchema {
                             retained_from_epoch_second  INTEGER NOT NULL,
                             retained_from_nano          INTEGER NOT NULL
                         )
-                        """)));
+                        """)),
+                // Tool approvals build on the lifecycle/inventory shape introduced by version 7.
+                // Keeping this as a distinct migration makes each user_version name exactly one
+                // database structure and preserves the downgrade guard across independently landed
+                // features.
+                new SchemaMigration(8, "durable scoped tool approvals", List.of(
+                """
+                CREATE TABLE tool_approval (
+                    tenant_id             TEXT    NOT NULL,
+                    process_instance_id   TEXT    NOT NULL,
+                    approval_id           TEXT    NOT NULL,
+                    position              INTEGER NOT NULL,
+                    traversal_id          TEXT    NOT NULL,
+                    invocation_id         TEXT    NOT NULL,
+                    attempt_id            TEXT    NOT NULL,
+                    call_id               TEXT    NOT NULL,
+                    node_id               TEXT    NOT NULL,
+                    tool                  TEXT    NOT NULL,
+                    canonical_arguments   BLOB    NOT NULL,
+                    arguments_digest      TEXT    NOT NULL,
+                    requester_request_id  TEXT    NOT NULL,
+                    requester_subject     TEXT    NOT NULL,
+                    requester_principal_type TEXT NOT NULL,
+                    requester_issuer      TEXT    NOT NULL,
+                    graph_version_pin     TEXT    NOT NULL,
+                    policy_version        TEXT    NOT NULL,
+                    expires_at_epoch_second INTEGER NOT NULL,
+                    expires_at_nano         INTEGER NOT NULL,
+                    required_roles        TEXT    NOT NULL,
+                    required_scopes       TEXT    NOT NULL,
+                    requester_may_approve INTEGER NOT NULL CHECK(requester_may_approve IN (0, 1)),
+                    continuation_version  INTEGER NOT NULL,
+                    continuation          BLOB    NOT NULL,
+                    continuation_digest   TEXT    NOT NULL,
+                    status                TEXT    NOT NULL,
+                    actor                 TEXT    NOT NULL,
+                    revision              INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, approval_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                "CREATE INDEX tool_approval_pending_expiry ON tool_approval "
+                        + "(tenant_id, status, expires_at_epoch_second, expires_at_nano)")),
+                new SchemaMigration(9, "first-class durable human tasks", List.of(
+                """
+                CREATE TABLE human_task (
+                    tenant_id               TEXT    NOT NULL,
+                    process_instance_id     TEXT    NOT NULL,
+                    task_id                 TEXT    NOT NULL,
+                    traversal_id            TEXT    NOT NULL,
+                    invocation_id           TEXT    NOT NULL,
+                    attempt_id              TEXT    NOT NULL,
+                    node_id                 TEXT    NOT NULL,
+                    correlation_key         TEXT    NOT NULL,
+                    deduplication_key       TEXT    NOT NULL,
+                    title                   TEXT    NOT NULL,
+                    description             TEXT    NOT NULL,
+                    response_content_type   TEXT    NOT NULL,
+                    response_schema         TEXT    NOT NULL,
+                    response_schema_version TEXT    NOT NULL,
+                    response_kind           TEXT    NOT NULL,
+                    response_max_bytes      INTEGER NOT NULL,
+                    required_roles          TEXT    NOT NULL,
+                    required_scopes         TEXT    NOT NULL,
+                    requester_request_id    TEXT    NOT NULL,
+                    requester_subject       TEXT    NOT NULL,
+                    requester_principal_type TEXT   NOT NULL,
+                    requester_issuer        TEXT    NOT NULL,
+                    graph_version_pin       TEXT    NOT NULL,
+                    escalate_at_epoch_second INTEGER,
+                    escalate_at_nano         INTEGER,
+                    expires_at_epoch_second INTEGER NOT NULL,
+                    expires_at_nano         INTEGER NOT NULL,
+                    resolved_outcome        TEXT    NOT NULL,
+                    denied_outcome          TEXT    NOT NULL,
+                    expired_outcome         TEXT    NOT NULL,
+                    cancelled_outcome       TEXT    NOT NULL,
+                    status                  TEXT    NOT NULL,
+                    actor                   TEXT    NOT NULL,
+                    generation              INTEGER NOT NULL,
+                    revision                INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, task_id),
+                    UNIQUE (tenant_id, deduplication_key),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                "CREATE UNIQUE INDEX human_task_live_correlation ON human_task "
+                        + "(tenant_id, correlation_key) WHERE status IN ('WAITING', 'ESCALATED')",
+                "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")),
+                 // A hold is a child of its process instance and dies with it, like every other
+                // durable decision record here. It carries its own continuation because a handler
+                // by contract carries none, and the continuation is the only reason a held
+                // traversal can be continued at all by a process that did not take the hold.
+                new SchemaMigration(10, "durable operator holds on traversals", List.of(
+                """
+                CREATE TABLE execution_pause (
+                    tenant_id                TEXT    NOT NULL,
+                    process_instance_id      TEXT    NOT NULL,
+                    pause_id                 TEXT    NOT NULL,
+                    position                 INTEGER NOT NULL,
+                    traversal_id             TEXT    NOT NULL,
+                    after_invocation_id      TEXT    NOT NULL,
+                    node_id                  TEXT    NOT NULL,
+                    command_directive        TEXT    NOT NULL,
+                    command_name             TEXT    NOT NULL,
+                    requester_request_id     TEXT    NOT NULL,
+                    requester_subject        TEXT    NOT NULL,
+                    requester_principal_type TEXT    NOT NULL,
+                    requester_issuer         TEXT    NOT NULL,
+                    graph_version_pin        TEXT    NOT NULL,
+                    continuation_version     INTEGER NOT NULL,
+                    continuation             BLOB    NOT NULL,
+                    continuation_digest      TEXT    NOT NULL,
+                    status                   TEXT    NOT NULL,
+                    actor                    TEXT    NOT NULL,
+                    revision                 INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id, pause_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """,
+                // The uniqueness that makes "is this traversal held" a single deterministic answer
+                // for a process that has just started and knows only a traversal id. Settled holds
+                // are excluded so a traversal resumed and held again resolves to its current hold
+                // rather than to its history.
+                "CREATE UNIQUE INDEX execution_pause_held_traversal ON execution_pause "
+                        + "(tenant_id, traversal_id) WHERE status = 'HELD'",
+                "CREATE INDEX execution_pause_by_traversal ON execution_pause "
+                        + "(tenant_id, traversal_id)")),
+                new SchemaMigration(11, "process-rooted agent authority budgets", List.of(
+                """
+                CREATE TABLE agent_authority_budget (
+                    tenant_id            TEXT NOT NULL,
+                    process_instance_id  TEXT NOT NULL,
+                    aggregate            BLOB NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """)),
+                new SchemaMigration(12, "store-global agent authority control epoch", List.of(
+                """
+                CREATE TABLE agent_authority_control (
+                    singleton             INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    state                 TEXT    NOT NULL CHECK(state IN ('ACTIVE', 'KILLED')),
+                    epoch                 INTEGER NOT NULL CHECK(epoch >= 0),
+                    changed_at_epoch_second INTEGER NOT NULL,
+                    changed_at_nano         INTEGER NOT NULL
+                )
+                """,
+                "INSERT INTO agent_authority_control "
+                        + "(singleton, state, epoch, changed_at_epoch_second, changed_at_nano) "
+                        + "VALUES (1, 'ACTIVE', 0, 0, 0)")),
+                 new SchemaMigration(13, "agent authority kill release aggregate", List.of(
+                 "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
+                         + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")),
+                new SchemaMigration(14, "human-task graph continuation budget", List.of(
+                        "ALTER TABLE human_task ADD COLUMN continuation_version INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE human_task ADD COLUMN continuation BLOB NOT NULL DEFAULT X''",
+                        "ALTER TABLE human_task ADD COLUMN continuation_digest TEXT NOT NULL DEFAULT "
+                                + "'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'")),
+                // The resolved dependency set one execution was accepted against, in the same database
+                // as that execution and as the definition it pins. There is deliberately no foreign key
+                // to `process_instance`: the manifest is committed BEFORE the acceptance that
+                // references it, so the parent row does not exist yet and a constraint would make the
+                // required ordering inexpressible. The relationship is enforced at removal instead, by
+                // asking whether the instance exists inside the deleting transaction.
+                new SchemaMigration(15, "immutable resolved execution manifests", List.of(
+                        """
+                        CREATE TABLE execution_manifest (
+                            tenant_id           TEXT    NOT NULL,
+                            process_instance_id TEXT    NOT NULL,
+                            format_version      INTEGER NOT NULL,
+                            digest              TEXT    NOT NULL CHECK(length(digest) = 64),
+                            graph_content_id    TEXT    NOT NULL CHECK(length(graph_content_id) = 64),
+                            graph_id            TEXT    NOT NULL,
+                            version_id          TEXT    NOT NULL,
+                            graph_schema_version      INTEGER NOT NULL,
+                            definition_format_version INTEGER NOT NULL,
+                            execution_policy       TEXT NOT NULL,
+                            unknown_behavior_mode  TEXT NOT NULL,
+                            engine_digest          TEXT NOT NULL CHECK(length(engine_digest) = 64),
+                            store_digest           TEXT NOT NULL CHECK(length(store_digest) = 64),
+                            limits_digest          TEXT NOT NULL CHECK(length(limits_digest) = 64),
+                            program_runtime_digest TEXT NOT NULL CHECK(length(program_runtime_digest) = 64),
+                            pinned_at_epoch_second    INTEGER NOT NULL,
+                            pinned_at_nano            INTEGER NOT NULL,
+                            committed_at_epoch_second INTEGER NOT NULL,
+                            committed_at_nano         INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, process_instance_id)
+                        )
+                        """,
+                        """
+                        CREATE TABLE execution_manifest_package (
+                            tenant_id           TEXT NOT NULL,
+                            process_instance_id TEXT NOT NULL,
+                            package_id          TEXT NOT NULL,
+                            identity_digest     TEXT NOT NULL CHECK(length(identity_digest) = 64),
+                            PRIMARY KEY (tenant_id, process_instance_id, package_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES execution_manifest (tenant_id, process_instance_id)
+                                ON DELETE CASCADE
+                        )
+                        """)),
+                // Recovery's own bookkeeping, on the attempt it is about. Zero is the honest default
+                // for every pre-existing row: an attempt written before this column existed was never
+                // withheld by a mechanism that did not exist, so the subtraction it feeds is a no-op
+                // and the delivery limit behaves exactly as it did. Nothing rewrites old rows, and a
+                // binary that predates the column still reads every row it wrote, because the column
+                // is additive and carries a default rather than a new status name.
+                new SchemaMigration(16, "recovery records the deliveries it withheld", List.of(
+                        "ALTER TABLE attempt ADD COLUMN withheld_through_delivery "
+                                + "INTEGER NOT NULL DEFAULT 0")),
+                // Why a nullable column and not a new status name. A cancelled execution keeps the
+                // status it has always had -- FAILED on both rows -- and gains a reason beside it.
+                //
+                //   Additive on the DATA. No row is rewritten and none needs to be. NULL already
+                //   means exactly what every pre-existing terminal row means: nothing distinguishes
+                //   this termination. There is no backfill because there is no value a backfill
+                //   could honestly write -- a row that ended before a reason could be recorded did
+                //   not secretly carry one, and inferring "not cancelled" from the status would be a
+                //   guess written down as data. So the column is left NULL and read as unstated,
+                //   which is the truth about it. Nothing here rewrites a status, so every reader
+                //   that folds these rows today folds them identically after this migration.
+                //
+                //   NOT additive on the ROLLBACK, and this is the half an earlier version of this
+                //   comment got backwards. Like every step in this file, this one raises
+                //   PRAGMA user_version, and migrate() refuses a database whose version exceeds what
+                //   the binary understands BEFORE it reads a single row. So from the moment this
+                //   step runs, a binary that predates it cannot open the file at all -- the same
+                //   rule migration 6 above already states for the handler tables, and it holds here
+                //   with no exception. The gate is total, immediate, and independent of whether any
+                //   execution was ever cancelled. There is no sense in which an older binary
+                //   "simply does not SELECT the column": it never gets that far.
+                //
+                //   That makes this the STRICTER of the two designs on the rollback axis rather than
+                //   the freer one, so the reason to prefer it has to be stated where it actually
+                //   lives. A CANCELLED member of ProcessInstanceStatus/TraversalStatus would need no
+                //   migration at all -- statuses are stored by name -- so it would not raise
+                //   user_version, and an older binary would still open the file and fail only on the
+                //   first row carrying the unknown name, as Corrupted, per aggregate. Cheaper to
+                //   roll back; far more expensive everywhere else. Those two enums are a lifecycle
+                //   state machine, not just persisted tokens: canTransitionTo and terminal() are
+                //   built on their membership, every exhaustive switch over them here and downstream
+                //   would need a new arm, RequestReplyOutcome's invariant that a FAILED waiter state
+                //   implies a FAILED process status would break at that boundary rather than in
+                //   storage, and every REST, CLI and UI projection would receive a status token it
+                //   has never seen. The column costs one schema gate -- which this store charges for
+                //   every durable change already -- and leaves all of that untouched.
+                //
+                // Unknown NAMES in the column are still refused rather than misread: the reason is
+                // stored by name like every status, so a value from a newer build surfaces as
+                // Corrupted, never as an absent reason on a run that was in fact cancelled.
+                new SchemaMigration(17, "terminated executions record why, beside an unchanged status",
+                        List.of("ALTER TABLE process_instance ADD COLUMN termination_reason TEXT",
+                                "ALTER TABLE traversal ADD COLUMN termination_reason TEXT")),
+                // The canonical result of a terminal execution, so a client can read what a run
+                // produced after the process that ran it is gone. Everything before this step keeps
+                // lifecycle state; none of it keeps the answer, which lived in one JVM's memory and
+                // died with it.
+                //
+                //   Normalized, not serialized, like every other table here. The five node and edge
+                //   sets go in execution_result_node rather than into an encoded column, because a
+                //   blob would make the on-disk format an encoding of a Java type and nothing in it
+                //   would be queryable -- the workload aggregation this unblocks has to reach these
+                //   rows without deserializing every result of the tenant. `position` is stored for
+                //   the reason traversal.position is: the order is part of the validated value, since
+                //   the result's fingerprint is computed over it, and a schema that let SQLite choose
+                //   a row order would read back a record whose digest no longer matches what was
+                //   written.
+                //
+                //   The sets are capped rather than unbounded, and the cap is visible in the data.
+                //   A traversal may enter as many nodes as the graph has, so a faithful copy lets one
+                //   pathological run write an unbounded number of rows; ExecutionResultNodes bounds
+                //   each set and appends RuntimeActivityData.TRUNCATION_MARKER when it does, which is
+                //   the marker convention this codebase already uses for a bounded projection. The
+                //   overflow is therefore recorded rather than dropped, and a reader that already
+                //   knows what a truncated Runtime projection looks like recognises this one.
+                //
+                //   ADDITIVE on the data. Two new tables, one new watermark table and two indexes;
+                //   no existing row is read, rewritten or reinterpreted, and no existing column
+                //   changes meaning. A database upgraded by this step describes exactly the same
+                //   executions it described before, plus results for the ones that terminate after
+                //   it.
+                //
+                //   NOT additive on the ROLLBACK, and this is stated plainly rather than softened.
+                //   Like every step in this file it raises PRAGMA user_version, and migrate() refuses
+                //   a database whose version exceeds what the binary understands BEFORE it reads a
+                //   single row. From the moment this step runs, a binary that predates it cannot open
+                //   the file at all. There is no sense in which an older binary "simply does not
+                //   SELECT the new tables": it never gets that far. The gate is total, immediate, and
+                //   independent of whether any result was ever recorded.
+                //
+                // The foreign key to process_instance is ON DELETE CASCADE and is load-bearing in
+                // both directions. A result names the instance and the traversal it belongs to, so a
+                // result outliving its instance would name a row the inventory can no longer
+                // describe -- the dangling-reference failure terminalRetention already refuses to
+                // create against journalRetention. The cascade makes that unreachable, and
+                // SqliteStoreConfig refuses a result window longer than terminalRetention so the
+                // cascade can never cut a result's declared window short either.
+                new SchemaMigration(18, "canonical results for terminal executions", List.of(
+                        """
+                        CREATE TABLE execution_result (
+                            tenant_id             TEXT    NOT NULL,
+                            process_instance_id   TEXT    NOT NULL,
+                            traversal_id          TEXT    NOT NULL,
+                            graph_version_pin     TEXT    NOT NULL,
+                            status                TEXT    NOT NULL,
+                            termination_reason    TEXT,
+                            started_at_epoch_second   INTEGER NOT NULL,
+                            started_at_nano           INTEGER NOT NULL,
+                            ended_at_epoch_second     INTEGER NOT NULL,
+                            ended_at_nano             INTEGER NOT NULL,
+                            recorded_at_epoch_second  INTEGER NOT NULL,
+                            recorded_at_nano          INTEGER NOT NULL,
+                            retained_until_epoch_second INTEGER NOT NULL,
+                            retained_until_nano         INTEGER NOT NULL,
+                            payload_state         TEXT    NOT NULL,
+                            payload_redacted      INTEGER NOT NULL CHECK(payload_redacted IN (0, 1)),
+                            payload_truncated     INTEGER NOT NULL CHECK(payload_truncated IN (0, 1)),
+                            payload_bytes         INTEGER NOT NULL CHECK(payload_bytes >= 0),
+                            payload_content_type  TEXT,
+                            payload               BLOB,
+                            failure_classifier    TEXT,
+                            fingerprint           TEXT    NOT NULL CHECK(length(fingerprint) = 64),
+                            PRIMARY KEY (tenant_id, traversal_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES process_instance (tenant_id, process_instance_id)
+                                ON DELETE CASCADE
+                        )
+                        """,
+                        """
+                        CREATE TABLE execution_result_node (
+                            tenant_id     TEXT    NOT NULL,
+                            traversal_id  TEXT    NOT NULL,
+                            node_set      TEXT    NOT NULL,
+                            position      INTEGER NOT NULL,
+                            value         TEXT    NOT NULL,
+                            PRIMARY KEY (tenant_id, traversal_id, node_set, position),
+                            FOREIGN KEY (tenant_id, traversal_id)
+                                REFERENCES execution_result (tenant_id, traversal_id) ON DELETE CASCADE
+                        )
+                        """,
+                        // Modelled on inventory_watermark, and a table rather than a column for the
+                        // same reason: the floor must outlive every row it describes. Derived from
+                        // the surviving rows it would reset to "nothing was ever forgotten" the
+                        // moment the last purged tenant's rows were gone, and a caller reading it
+                        // would treat an expired result as one that never existed.
+                        """
+                        CREATE TABLE execution_result_watermark (
+                            tenant_id                   TEXT    NOT NULL PRIMARY KEY,
+                            retained_from_epoch_second  INTEGER NOT NULL,
+                            retained_from_nano          INTEGER NOT NULL
+                        )
+                        """,
+                        // The purge walks exactly this axis: one tenant's rows in deadline order.
+                        // tenant_id leads because it leads every key in this schema; an index that
+                        // did not would let a scan touch another tenant's pages before the filter
+                        // discarded them.
+                        "CREATE INDEX execution_result_retention ON execution_result "
+                                + "(tenant_id, retained_until_epoch_second, retained_until_nano)",
+                        // The primary key leads with traversal_id, so resolving an instance to its
+                        // results is the opposite direction and would otherwise scan.
+                        "CREATE INDEX execution_result_instance ON execution_result "
+                                + "(tenant_id, process_instance_id)",
+                        // workload_id has been on process_instance since version 7 with no index of
+                        // its own, which was affordable while nothing aggregated by workload.
+                        // Aggregating results at workload level resolves a workload to its instances
+                        // and then to their results, so without this the first hop is a full scan of
+                        // the tenant's instances on every query.
+                        "CREATE INDEX idx_process_instance_workload ON process_instance "
+                                + "(tenant_id, workload_id)")));
     }
 
     static int currentVersion() {

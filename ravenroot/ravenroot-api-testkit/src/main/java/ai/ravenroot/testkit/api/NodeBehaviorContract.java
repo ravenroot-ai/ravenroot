@@ -18,11 +18,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -186,6 +192,28 @@ public abstract class NodeBehaviorContract {
     }
 
     /**
+     * Every descriptor-declared adapter binding may remain blank while a graph is being configured,
+     * but reaching that node must fail without producing content.
+     *
+     * <p>The property list is read exclusively from the descriptor. This keeps the contract valid for
+     * third-party adapters and for behaviors that declare more than one deployment-owned binding; no
+     * behavior or property name receives a special case. Each binding is blanked independently while
+     * every other property retains the package's conforming fixture value.</p>
+     */
+    @Test
+    void everyBlankAdapterBindingRefusesWithoutProducingAResult() {
+        for (NodeBehavior behavior : requireBehaviors()) {
+            NodeTypeDescriptor descriptor = requireDescriptor(behavior);
+            for (NodePropertyDescriptor binding : descriptor.properties().stream()
+                    .filter(NodePropertyDescriptor::adapterBinding).toList()) {
+                for (String blank : List.of("", " \t\r\n", new String(Character.toChars(0x3000)))) {
+                    assertBlankAdapterBindingRefuses(behavior, descriptor, binding, blank);
+                }
+            }
+        }
+    }
+
+    /**
      * The reserved namespace is the runtime's own operative state — identity, provenance and the rest.
      * Anything a node returns under it is discarded unread, so returning one is not an attack but it
      * is a bug: the author believes they are setting something and nothing downstream will ever see it.
@@ -308,6 +336,52 @@ public abstract class NodeBehaviorContract {
         } catch (RuntimeException declined) {
             return false;
         }
+    }
+
+    private void assertBlankAdapterBindingRefuses(NodeBehavior behavior, NodeTypeDescriptor descriptor,
+                                                   NodePropertyDescriptor binding, String blank) {
+        NodeConfiguration baseline = configurationFor(descriptor);
+        var properties = new LinkedHashMap<>(baseline.properties());
+        properties.put(binding.name(), blank);
+        var configuration = new NodeConfiguration(baseline.nodeId(), baseline.behavior(), properties);
+        String subject = "behavior '" + descriptor.behavior() + "' with blank adapter binding '"
+                + binding.name() + "'";
+
+        NodeAction action;
+        try {
+            action = behavior.create(configuration);
+        } catch (RuntimeException thrown) {
+            throw new AssertionError(subject + " threw while constructing its action. An unconfigured "
+                    + "adapter must keep the graph constructible and refuse only when reached.", thrown);
+        }
+        assertNotNull(action, () -> subject + " returned no action");
+
+        CompletionStage<NodeResult> stage;
+        try {
+            stage = action.handle(conformanceMessage(descriptor));
+        } catch (RuntimeException thrown) {
+            throw new AssertionError(subject + " threw synchronously instead of returning an exceptionally "
+                    + "completed stage", thrown);
+        }
+        assertNotNull(stage, () -> subject + " returned a null stage");
+
+        var produced = new AtomicReference<NodeResult>();
+        var refusal = new AtomicReference<Throwable>();
+        try {
+            produced.set(stage.toCompletableFuture().get(10, TimeUnit.SECONDS));
+        } catch (ExecutionException failed) {
+            refusal.set(failed.getCause());
+        } catch (CancellationException cancelled) {
+            refusal.set(cancelled);
+        } catch (TimeoutException timedOut) {
+            throw new AssertionError(subject + " did not refuse within 10 seconds", timedOut);
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("interrupted while checking " + subject, interrupted);
+        }
+
+        assertNull(produced.get(), () -> subject + " produced a NodeResult instead of refusing");
+        assertNotNull(refusal.get(), () -> subject + " completed normally instead of refusing");
     }
 
     private NodeMessage conformanceMessage(NodeTypeDescriptor descriptor) {

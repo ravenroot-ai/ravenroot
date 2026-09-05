@@ -12,6 +12,7 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/runtime` | Selected engine and runtime capabilities |
 | `GET /v1/node-types` | Effective node catalog |
 | `POST /v1/graphs/inspect` | Validate and inspect GraphML without executing it |
+| `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget |
 | `POST /v1/drain` | Stop admission and drain accepted work |
 
 ## Execution and events
@@ -19,17 +20,18 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | Method and path | Result |
 |---|---|
 | `POST /v1/executions?mode=test\|run` | HTTP 202 plus execution ID |
-| `GET /v1/executions/live` | Current non-terminal executions, from process-local runtime state |
-| `GET /v1/executions/{id}` | State or terminal result |
-| `GET /v1/executions/inventory` | One page of the tenant's durable process inventory, read from storage and surviving a restart. Three optional query parameters are named exactly like the field each response row carries: `status`, `ownerWorkerId`, `deploymentId`. Three describe the page instead: `includeTerminal` (excluded by default) has no response counterpart, `limit` is bounded by `maxPageSize`, and `cursor` takes a previous page's `nextCursor`. A parameter outside that set is refused as `400 INVALID_REQUEST`, and so is a recognised name carrying a blank value, rather than either being silently dropped. The response always carries `retainedFrom` and `maxPageSize` (this deployment's declared page-size bound). `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
-| `GET /v1/executions/{id}/traversals` | The durable inventory's traversals for one process instance, alongside the same tenant's `retainedFrom` that the inventory listing carries. **`{id}` here is a `processInstanceId`, not the execution/traversal ID every other `/v1/executions` route below takes** — see the callout after this table. `404 UNKNOWN_PROCESS_INSTANCE` when the instance is absent, belongs to another tenant, or aged past its terminal-retention window; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
+| `GET /v1/executions/live` | Current non-terminal executions, from process-local runtime state; each row's `paused` field distinguishes a deliberate hold from an ordinary running execution |
+| `GET /v1/executions/{id}` | State or terminal result. An execution still in flight is answered from a process-local cache; every terminal answer is read from the durable, tenant-and-traversal-keyed result store, the cache's own warm result included, so a result readable before a restart or from another instance is readable after one, and stops being served by the instance that ran it at the same moment it stops being served anywhere else. Applies wherever a durable, result-capable store is composed; without one the route falls back to that process's cache alone. `paused` distinguishes a held execution from an ordinary running one, always `false` once terminal. `terminationReason` and `cancelled` qualify a terminal `status` the same way `paused` qualifies `RUNNING` — always present (`null`/`false` when nothing distinguishes the termination), and carried on the `200` body and on both `410` bodies below. A cancelled execution reports `status=FAILED`; read `terminationReason` beside it, never `status` alone. `410 EXECUTION_RESULT_EXPIRED` reports an execution whose result aged past its retention deadline; `410 EXECUTION_RESULT_REDACTED` reports one whose payload was never retained in the first place — refused by a configured payload budget, or not projecting onto the closed payload model at all — and additionally carries `payloadState` (`WITHHELD` or `UNCONVERTIBLE`) naming which. A traversal that terminated on a rejected payload reports `WITHHELD` or `UNCONVERTIBLE` here too, from every instance including the one that ran it, rather than the rejection's own `413` or `400`. Both `410` bodies still carry `status`, `terminationReason` and `cancelled` |
+| `GET /v1/executions/inventory` | One page of the tenant's durable process inventory, read from storage and surviving a restart. Three optional query parameters are named exactly like the field each response row carries: `status`, `ownerWorkerId`, `deploymentId`. Three describe the page instead: `includeTerminal` (excluded by default) has no response counterpart, `limit` is bounded by `maxPageSize`, and `cursor` takes a previous page's `nextCursor`. A parameter outside that set is refused as `400 INVALID_REQUEST`, and so is a recognised name carrying a blank value, rather than either being silently dropped. Each row carries `terminationReason` and `cancelled` beside `status`, for the same reason and with the same always-present convention as `GET /v1/executions/{id}`. The response always carries `retainedFrom` and `maxPageSize` (this deployment's declared page-size bound). `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
+| `GET /v1/executions/{id}/traversals` | The durable inventory's traversals for one process instance, alongside the same tenant's `retainedFrom` that the inventory listing carries. Each traversal row also carries `terminationReason` and `cancelled` beside `status`. **`{id}` here is a `processInstanceId`, not the execution/traversal ID every other `/v1/executions` route below takes** — see the callout after this table. `404 UNKNOWN_PROCESS_INSTANCE` when the instance is absent, belongs to another tenant, or aged past its terminal-retention window; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable inventory-capable store is composed |
+| `GET /v1/executions/{id}/manifest` | The identity of the dependency set one process instance was accepted against, and whether this deployment still resolves it. **`{id}` here is a `processInstanceId`**, for the same reason the `/traversals` route above takes one. Reports `manifestFormatVersion`, `manifestDigest`, the pinned `graphVersion`, `graphId`, `graphVersionId`, `pinnedAt`, a `compatible` verdict, an `incompatibleDimensions` list of dimension names and `dimensionsTruncated`. It reports no value from the pinned dependency set and no count of one: no capability sets, no limits, no node-package identity and no package count, because those describe the deployment rather than the caller's execution. The comparison's own values stay in the server-side diagnostic a refused recovery raises. `404 UNKNOWN_PROCESS_INSTANCE` when no record is pinned for the instance, when it belongs to another tenant, and when it was accepted before this deployment began recording them, all three indistinguishable; `501 PROCESS_INVENTORY_UNAVAILABLE` when no durable record store is composed, or when the stored record no longer verifies |
 | `POST /v1/executions/{id}/cancel` | Cancellation request |
 | `POST /v1/executions/{id}/pause` | Pause after in-flight work |
 | `POST /v1/executions/{id}/resume` | Resume dispatch |
 | `GET /v1/events` | Live SSE |
 | `GET /v1/events/recent` | Cursor-based retained events |
 
-> **`{id}` names two different things on adjacent routes.** `GET /v1/executions/{id}` and the cancel/pause/resume trio all take an execution ID, which is a traversal ID. `GET /v1/executions/{id}/traversals` is the one exception: its `{id}` is a **process instance ID**, because a process instance can contain more than one traversal and a traversal ID could not address "this instance's traversals" at all. The two ID spaces are both UUIDs and are not interchangeable — passing a traversal ID to the `/traversals` route returns `404 UNKNOWN_PROCESS_INSTANCE`, indistinguishable from an ID that never existed.
+> **`{id}` names two different things on adjacent routes.** `GET /v1/executions/{id}` and the cancel/pause/resume trio all take an execution ID, which is a traversal ID. `GET /v1/executions/{id}/traversals` and `GET /v1/executions/{id}/manifest` are the exceptions: their `{id}` is a **process instance ID**, because a process instance can contain more than one traversal and a traversal ID could not address "this instance's traversals" at all, and because a manifest is pinned once per process instance. The two ID spaces are both UUIDs and are not interchangeable — passing a traversal ID to either route returns `404 UNKNOWN_PROCESS_INSTANCE`, indistinguishable from an ID that never existed.
 
 ## Governed resources
 
@@ -75,4 +77,36 @@ CLI validation exit codes are 0 accepted, 1 refused or invalid, and 2 misuse. Au
 
 `ravenroot inventory` follows the HTTP route's own `nextCursor` internally until the tenant's whole answer is read, so its output is never a truncated first page; there is no `--after`-style flag because there is nothing left to continue. `ravenroot traversals` lists one instance's traversals directly — that listing is not paginated on either transport.
 
-See [Application and HTTP integration](../integrator-guide/application-http.md) and [Authentication troubleshooting](../troubleshooting/identity-browser.md).
+`GET /v1/executions/{id}` returns `visitedNodes` as unique membership, not a path or timeline. The
+`ravenroot result` command presents the same membership as `visited-nodes=`. HTTP and CLI currently
+sort node identifiers for deterministic presentation, but that lexical order is not visit order and
+must not be interpreted as one. Use invocation or event history when chronology or repeated visits
+matter.
+
+`ravenroot result` prints `termination-reason=` only when the terminal status is qualified — the
+common case leaves nothing to act on, matching the convention this command already uses for
+`defaulted-nodes=`, `bypassed-nodes=`, and `handled-failure=`. `ravenroot inventory` and
+`ravenroot traversals` print `termination-reason=` unconditionally on every row, matching each
+command's own existing convention of always printing `disposition=` and the other row fields. On every
+one of these, a cancelled execution or instance prints `status=FAILED`; `termination-reason=CANCELLED`
+is the line that tells it apart from an ordinary failure, and it must be read beside `status=`, never
+in place of it.
+
+`ravenroot result` reports the same two `410` conditions as `GET /v1/executions/{id}`, on both the
+embedded and the remote CLI backend, with matching diagnostic text: `410 EXECUTION_RESULT_EXPIRED` and
+`410 EXECUTION_RESULT_REDACTED`, each followed by `(status=...)`, plus `, terminationReason=...` when
+the termination is qualified, plus — for a redacted result only — `, payloadState=...` naming
+`WITHHELD` or `UNCONVERTIBLE`. An execution id that was never submitted, that belongs to another
+tenant, or that has aged past the process-local tombstone horizon with no durable store composed, is
+reported identically as `404 UNKNOWN_EXECUTION` — the three are indistinguishable by design.
+
+Submitting the same execution id twice does not make the second submission's outcome the one `result`
+or `GET /v1/executions/{id}` return. The traversal that reused the id still runs, but its result is
+refused when the store tries to record it, because a result store keeps whichever terminal outcome it
+recorded first for a given id and never overwrites it. A caller reading back an id it resubmitted
+therefore always sees the first run's result, not the most recent one — a durable store does not
+notice a reused id is a mistake, so avoiding one is the caller's responsibility, not something either
+transport reports as an error at submission time.
+
+See [Durable execution results](../architecture/execution-results.md),
+[Application and HTTP integration](../integrator-guide/application-http.md) and [Authentication troubleshooting](../troubleshooting/identity-browser.md).

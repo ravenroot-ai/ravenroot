@@ -4,6 +4,7 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -12,6 +13,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -41,6 +43,8 @@ import java.util.function.LongSupplier;
  */
 final class McpSession {
 
+    private record ExchangeResult(PayloadValue.MapValue value, long maximumOutputBytes) { }
+
     private final McpProfile profile;
     private final NodePackageServices services;
     private final NodeMessage message;
@@ -61,6 +65,8 @@ final class McpSession {
      * read on whichever thread the loop is running on afterwards.</p>
      */
     private volatile List<McpProtocol.Announced> announced = List.of();
+    /** Effective managed ceiling attached to the catalogue response that produced {@link #announced}. */
+    private volatile long announcedMaximumOutputBytes = Long.MAX_VALUE;
     /**
      * The server's session handle, when it issued one.
      *
@@ -97,10 +103,12 @@ final class McpSession {
                 .thenCompose(ignored -> session.exchange(McpProtocol.initialized(), false))
                 .thenCompose(ignored -> session.exchange(
                         McpProtocol.listTools(session.nextId.getAndIncrement()), true))
-                .thenApply(result -> {
+                .thenApply(exchange -> {
                     // The SAME object all the way through, deliberately: it is carrying the session
                     // handle and the id counter, and a second object would start both from scratch.
-                    session.announced = McpProtocol.readTools(result);
+                    session.announced = McpProtocol.readTools(
+                            exchange.value(), exchange.maximumOutputBytes());
+                    session.announcedMaximumOutputBytes = exchange.maximumOutputBytes();
                     return session;
                 });
     }
@@ -112,6 +120,11 @@ final class McpSession {
     /** What the server said it has. Filtering it against the operator's list is not this class's job. */
     List<McpProtocol.Announced> announced() {
         return announced;
+    }
+
+    /** Ceiling that must still hold after server names are added to the model-facing catalogue. */
+    long announcedMaximumOutputBytes() {
+        return announcedMaximumOutputBytes;
     }
 
     /**
@@ -130,8 +143,9 @@ final class McpSession {
             return CompletableFuture.failedFuture(refused);
         }
         return exchange(McpProtocol.callTool(nextId.getAndIncrement(), toolName, arguments), true)
-                .thenApply(result -> new AgentTool.Result(McpProtocol.readToolContent(result),
-                        McpProtocol.isToolError(result)
+                .thenApply(exchange -> new AgentTool.Result(McpProtocol.readToolContent(
+                                exchange.value(), exchange.maximumOutputBytes()),
+                        McpProtocol.isToolError(exchange.value())
                                 ? AgentTool.Outcome.FAILED : AgentTool.Outcome.SUCCEEDED));
     }
 
@@ -142,7 +156,7 @@ final class McpSession {
      *     answers with 202 and an empty body — parsing that as a JSON-RPC response would refuse a
      *     correct server
      */
-    private CompletionStage<PayloadValue.MapValue> exchange(byte[] body, boolean expectsResult) {
+    private CompletionStage<ExchangeResult> exchange(byte[] body, boolean expectsResult) {
         long remaining = Math.min(profile.timeoutMs(), remainingRunMillis.getAsLong());
         if (remaining <= 0) {
             return CompletableFuture.failedFuture(new McpRefusal(McpRefusal.Reason.SERVER_TIMED_OUT));
@@ -151,7 +165,12 @@ final class McpSession {
         try {
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                     profile.endpoint(), "POST", headers(), body, Duration.ofMillis(remaining),
-                    profile.credentialBinding().orElse(null)));
+                    profile.credentialBinding().orElse(null), null,
+                    ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                            profile.maxResponseBytes(), profile.maxResponseBytes(),
+                            profile.maxResponseBytes(), 100, Duration.ofMillis(remaining),
+                            expectsResult ? Set.of("application/json", "text/event-stream") : Set.of()),
+                    ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
         } catch (RuntimeException failure) {
             return CompletableFuture.failedFuture(refusalFor(failure));
         }
@@ -170,10 +189,13 @@ final class McpSession {
                 sessionId = issued;
             }
             if (!expectsResult) {
-                return new PayloadValue.MapValue(Map.of());
+                return new ExchangeResult(new PayloadValue.MapValue(Map.of()),
+                        response.effectiveMaximumOutputBytes());
             }
-            return McpProtocol.readResult(response.body(),
-                    header(response.headers(), "content-type"), profile.maxResponseBytes());
+            int outputLimit = Math.toIntExact(Math.min(profile.maxResponseBytes(),
+                    response.effectiveMaximumOutputBytes()));
+            return new ExchangeResult(McpProtocol.readResult(response.body(),
+                    header(response.headers(), "content-type"), outputLimit), outputLimit);
         });
     }
 
@@ -254,8 +276,10 @@ final class McpSession {
                 // names only content-type and MCP needs three more.
                 case DESTINATION_FORBIDDEN, RESOLUTION_REFUSED, PROTOCOL_REFUSED, TLS_REFUSED ->
                         McpRefusal.Reason.SERVER_REQUEST_REFUSED;
-                case CREDENTIAL_UNAVAILABLE, ADMISSION_REFUSED, SERVICE_UNAVAILABLE, TRANSPORT_FAILED ->
+                case CREDENTIAL_UNAVAILABLE, ADMISSION_REFUSED, SERVICE_UNAVAILABLE, TRANSPORT_FAILED,
+                        EFFECT_OUTCOME_INDETERMINATE ->
                         McpRefusal.Reason.SERVER_UNREACHABLE;
+                case BUDGET_EXHAUSTED -> McpRefusal.Reason.SERVER_REQUEST_REFUSED;
             });
         }
         return new McpRefusal(McpRefusal.Reason.SERVER_UNREACHABLE);

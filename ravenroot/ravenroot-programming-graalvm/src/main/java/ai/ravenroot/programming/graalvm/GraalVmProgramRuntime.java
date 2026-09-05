@@ -36,7 +36,8 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
      * lets a response the worker was willing to produce be one the reader is not willing to accept.
      */
     private static final int MAX_RESPONSE_BYTES = ProgramWireProtocol.MAX_RESPONSE_BYTES;
-    private static final Duration REAP_TIMEOUT = Duration.ofSeconds(2);
+    static final int MAX_REQUEST_BYTES = 8 * 1024 * 1024;
+    static final Duration REAP_TIMEOUT = Duration.ofSeconds(2);
 
     private final SandboxSupervisorLauncher launcher;
     private final SandboxPolicy policy;
@@ -176,17 +177,19 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
         var session = new AtomicReference<SandboxSupervisorLauncher.SandboxSupervisorSession>();
         var cleaned = new AtomicBoolean();
         var cancelled = new AtomicBoolean();
+        var cleanupSettled = new CompletableFuture<Void>();
         var result = new CancellableFuture(() -> { cancelled.set(true); cleanup(session.get(), cleaned, SandboxSupervisorLauncher.SandboxTermination.CANCELLED); });
         if (admission != null) {
             // The other half of the control: an execution admitted a microsecond before a retirement
             // is legitimately admitted and its source may already be in the worker, so redemption
             // cannot stop it. Cancelling it is the only remaining remedy.
             admission.onRevoked(() -> result.cancel(true));
-            result.whenComplete((ignored, error) -> admission.close());
+            cleanupSettled.whenComplete((ignored, error) -> admission.close());
         }
         Thread.startVirtualThread(() -> {
             try { result.complete(invokeSupervisor(mode, source, request, session, cleaned, cancelled)); }
             catch (Throwable error) { if (!result.isCancelled()) result.completeExceptionally(error); }
+            finally { cleanupSettled.complete(null); }
         });
         return result;
     }
@@ -245,7 +248,8 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
             // every typed branch of RavenrootServer.artifactFailureCode and reached the author as
             // "the request was rejected as invalid", obscuring the actual timeout.
             try {
-                writeRequestBounded(session.workerInput(), mode, artifact, request, remaining(deadline));
+                writeRequestBounded(session.workerInput(), mode, artifact, request, remaining(deadline),
+                        policy.externalIoLimits().maximumRequestBytes());
             } catch (TimeoutException expired) {
                 throw deadlineExceeded("write_request", start, expired);
             }
@@ -477,11 +481,14 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
         }); return future;
     }
     private static void writeRequestBounded(java.io.OutputStream input, ProgramWireProtocol.Mode mode,
-                                            GeneratedArtifact artifact, ProgramRequest request, Duration remaining)
+                                            GeneratedArtifact artifact, ProgramRequest request, Duration remaining,
+                                            long maximumBytes)
             throws Exception {
         var written = new CompletableFuture<Void>();
         Thread.startVirtualThread(() -> {
-            try (input) { ProgramWireProtocol.writeRequest(input, mode, artifact, request); written.complete(null); }
+            try (input; var bounded = new BoundedOutputStream(input, maximumBytes)) {
+                ProgramWireProtocol.writeRequest(bounded, mode, artifact, request); written.complete(null);
+            }
             catch (Throwable error) { written.completeExceptionally(error); }
         });
         written.get(Math.max(1, remaining.toMillis()), TimeUnit.MILLISECONDS);
@@ -517,14 +524,39 @@ public final class GraalVmProgramRuntime implements ProgramRuntime {
         @Override public String describe() { return "RAVENROOT_GRAAL_SANDBOX_SUPERVISOR is not set"; }
     }
     private static final class CancellableFuture extends CompletableFuture<Object> {
-        private final Runnable cancellation; CancellableFuture(Runnable cancellation) { this.cancellation = cancellation; }
+        private final Runnable cancellation;
+        private final AtomicBoolean cancellationClaimed = new AtomicBoolean();
+        CancellableFuture(Runnable cancellation) { this.cancellation = cancellation; }
         @Override public boolean cancel(boolean mayInterruptIfRunning) {
-            // Claim the terminal CANCELLED state before cleanup unblocks the worker. Running cleanup
-            // first lets that worker complete this future exceptionally in the intervening window,
-            // making a cancellation which was actually accepted report false to its caller.
-            if (!super.cancel(mayInterruptIfRunning)) return false;
-            cancellation.run();
-            return true;
+            if (isDone() || !cancellationClaimed.compareAndSet(false, true)) return false;
+            try { cancellation.run(); }
+            finally { super.cancel(mayInterruptIfRunning); }
+            return isCancelled();
+        }
+        @Override public boolean complete(Object value) {
+            return !cancellationClaimed.get() && super.complete(value);
+        }
+        @Override public boolean completeExceptionally(Throwable failure) {
+            return !cancellationClaimed.get() && super.completeExceptionally(failure);
+        }
+    }
+
+    private static final class BoundedOutputStream extends java.io.FilterOutputStream {
+        private final long maximum;
+        private long written;
+        BoundedOutputStream(java.io.OutputStream output, long maximum) {
+            super(output);
+            maximum = Math.max(1, maximum);
+            this.maximum = maximum;
+        }
+        @Override public void write(int value) throws IOException {
+            require(1); out.write(value); written++;
+        }
+        @Override public void write(byte[] bytes, int offset, int length) throws IOException {
+            require(length); out.write(bytes, offset, length); written += length;
+        }
+        private void require(int length) throws IOException {
+            if (length < 0 || written > maximum - length) throw new IOException("SANDBOX_INPUT_LIMIT");
         }
     }
 }

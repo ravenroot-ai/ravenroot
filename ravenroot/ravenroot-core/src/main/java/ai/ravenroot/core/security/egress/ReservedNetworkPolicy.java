@@ -1,11 +1,6 @@
 package ai.ravenroot.core.security.egress;
 
 import java.net.InetAddress;
-import java.util.Collection;
-import java.util.EnumSet;
-import java.util.LinkedHashMap;
-import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -34,20 +29,20 @@ public final class ReservedNetworkPolicy {
     /** Names allowed to resolve into reserved space out of the box. */
     public static final String DEFAULT_EXCEPTIONS = "localhost:LOOPBACK";
 
-    private final Map<String, Set<ReservedNetwork>> exceptions;
+    private final ai.ravenroot.api.security.egress.ReservedNetworkPolicy delegate;
 
-    private ReservedNetworkPolicy(Map<String, Set<ReservedNetwork>> exceptions) {
-        this.exceptions = Map.copyOf(exceptions);
+    private ReservedNetworkPolicy(ai.ravenroot.api.security.egress.ReservedNetworkPolicy delegate) {
+        this.delegate = delegate;
     }
 
     /** Denies every name any reserved address. Nothing is exempt, including {@code localhost}. */
     public static ReservedNetworkPolicy denyAllReserved() {
-        return new ReservedNetworkPolicy(Map.of());
+        return new ReservedNetworkPolicy(ai.ravenroot.api.security.egress.ReservedNetworkPolicy.denyAllReserved());
     }
 
     /** The shipped default: {@code localhost} may reach loopback, nothing else is exempt. */
     public static ReservedNetworkPolicy shippedDefault() {
-        return fromCommaSeparatedExceptions(DEFAULT_EXCEPTIONS);
+        return new ReservedNetworkPolicy(ai.ravenroot.api.security.egress.ReservedNetworkPolicy.shippedDefault());
     }
 
     /**
@@ -61,50 +56,8 @@ public final class ReservedNetworkPolicy {
      * narrowed an exception would look like a working configuration and fail only in production.
      */
     public static ReservedNetworkPolicy fromCommaSeparatedExceptions(String value) {
-        if (value == null || value.isBlank()) {
-            return fromEntries(DEFAULT_EXCEPTIONS.split(","));
-        }
-        return fromEntries(value.split(","));
-    }
-
-    private static ReservedNetworkPolicy fromEntries(String[] entries) {
-        Map<String, Set<ReservedNetwork>> parsed = new LinkedHashMap<>();
-        for (String raw : entries) {
-            String entry = raw == null ? "" : raw.trim();
-            if (entry.isEmpty()) {
-                continue;
-            }
-            int colon = entry.indexOf(':');
-            String name = (colon < 0 ? entry : entry.substring(0, colon)).trim().toLowerCase(Locale.ROOT);
-            if (name.isEmpty()) {
-                continue;
-            }
-            Set<ReservedNetwork> networks;
-            if (colon < 0) {
-                networks = EnumSet.complementOf(EnumSet.of(ReservedNetwork.PUBLIC));
-            } else {
-                networks = EnumSet.noneOf(ReservedNetwork.class);
-                for (String token : entry.substring(colon + 1).split("\\|")) {
-                    String network = token.trim().toUpperCase(Locale.ROOT);
-                    if (network.isEmpty()) {
-                        continue;
-                    }
-                    try {
-                        networks.add(ReservedNetwork.valueOf(network));
-                    } catch (IllegalArgumentException e) {
-                        throw new IllegalArgumentException(
-                                "Unknown reserved network in egress exception '" + entry + "': " + network);
-                    }
-                }
-            }
-            parsed.merge(name, Set.copyOf(networks), (a, b) -> {
-                var merged = EnumSet.noneOf(ReservedNetwork.class);
-                merged.addAll(a);
-                merged.addAll(b);
-                return Set.copyOf(merged);
-            });
-        }
-        return new ReservedNetworkPolicy(parsed);
+        return new ReservedNetworkPolicy(
+                ai.ravenroot.api.security.egress.ReservedNetworkPolicy.fromCommaSeparatedExceptions(value));
     }
 
     /**
@@ -113,17 +66,16 @@ public final class ReservedNetworkPolicy {
      * network.
      */
     public boolean permits(String name, InetAddress address) {
-        ReservedNetwork network = ReservedNetwork.of(address);
-        if (!network.isReserved()) {
-            return true;
-        }
-        String key = name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
-        Set<ReservedNetwork> allowed = exceptions.get(key);
-        return allowed != null && allowed.contains(network);
+        return delegate.permits(name, address);
     }
 
     /** Names carrying an exception, for diagnostics. Never used to make a decision. */
     public Set<String> exemptNames() {
-        return exceptions.keySet();
+        return delegate.exemptNames();
+    }
+
+    /** Returns the shared API policy used by connectors and the resolver guard. */
+    ai.ravenroot.api.security.egress.ReservedNetworkPolicy delegate() {
+        return delegate;
     }
 }

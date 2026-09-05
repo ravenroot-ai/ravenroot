@@ -43,6 +43,14 @@ public interface NodePackageServices {
     }
 
     /**
+     * Returns finite agent authority/economic mediation. Kept additive and deny-only for older SDKs.
+     * @return agent authority service, deny-only unless explicitly composed
+     */
+    default AgentResourceService agentResources() {
+        return AgentResourceService.unavailable();
+    }
+
+    /**
      * Deny-only view used for legacy packages and deployments which composed no grants.
      * @return a reusable deny-only view that advertises no capabilities and fails every operation
      */

@@ -9,7 +9,9 @@ public enum NodePackageCapability {
     /** Permission to open sessions through the constrained managed WebSocket client. */
     OUTBOUND_WEBSOCKET("outbound-websocket"),
     /** Access to the server-owned decision point for model-requested tool calls. */
-    TOOL_AUTHORIZATION("tool-authorization");
+    TOOL_AUTHORIZATION("tool-authorization"),
+    /** Mandatory finite authority and economic accounting for first-party agent execution. */
+    AGENT_RESOURCES("agent-resources");
 
     private final String capabilityName;
 

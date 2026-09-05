@@ -935,6 +935,14 @@
     .unsaved-document-dialog p { color: var(--tx-2); font-size: 12px; line-height: 1.5; }
     .inspector-unsaved-dialog { max-width: min(420px, calc(100vw - 32px)); }
     .inspector-unsaved-dialog .unsaved-document-actions { flex-wrap: wrap; }
+    .close-all-documents-dialog { max-width: min(520px, calc(100vw - 32px)); }
+    .close-all-documents-list {
+      max-height: min(240px, 35vh); overflow: auto; margin: 12px 0; padding-left: 24px;
+      color: var(--tx-2); font-size: 12px; line-height: 1.5;
+    }
+    .close-all-documents-status:empty { display: none; }
+    .close-all-documents-status[data-state="error"] { color: var(--err); }
+    .close-all-documents-dialog .unsaved-document-actions { flex-wrap: wrap; }
     .unsaved-document-actions {
       display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; margin-top: 20px;
     }

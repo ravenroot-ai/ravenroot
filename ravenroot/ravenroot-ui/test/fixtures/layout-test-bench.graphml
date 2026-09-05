@@ -1,0 +1,508 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Layout test bench for the design editor's automatic arrangements.
+
+  One coordinator delegates to twelve peers that fan back into one join, behind a linear intake
+  chain and ahead of a gate/review/merge tail; escalation, human-task, audit, error and recovery
+  nodes are reachable from almost everywhere, and several edges run backwards (no-issue, rework,
+  changes-requested, retry). 27 nodes, 82 edges. Edges into the ERROR node carry the
+  default outcome and are therefore implicit failure routes.
+-->
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="name" for="node" attr.name="name" attr.type="string"/>
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="classification" for="node" attr.name="classification" attr.type="string"/>
+  <key id="x" for="node" attr.name="layoutX" attr.type="double"/>
+  <key id="y" for="node" attr.name="layoutY" attr.type="double"/>
+  <key id="w" for="node" attr.name="layoutWidth" attr.type="double"/>
+  <key id="h" for="node" attr.name="layoutHeight" attr.type="double"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <graph id="layout-test-bench" edgedefault="directed">
+    <node id="start">
+      <data key="name">Start</data>
+      <data key="kind">START</data>
+      <data key="x">60</data>
+      <data key="y">370</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="poll">
+      <data key="name">Poll every 10 seconds</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="x">130</data>
+      <data key="y">370</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="handler">
+      <data key="name">GitHub Issue Handler</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="x">225</data>
+      <data key="y">370</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="eligibility">
+      <data key="name">Eligibility, Claim &amp; Idempotency</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="x">325</data>
+      <data key="y">370</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="leader">
+      <data key="name">Operational Leader</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">435</data>
+      <data key="y">370</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="product-architecture">
+      <data key="name">Product Architecture</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">545</data>
+      <data key="y">130</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="core-runtime">
+      <data key="name">Core Runtime Engineering</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">655</data>
+      <data key="y">130</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="integrations">
+      <data key="name">Integrations &amp; Connectors</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">770</data>
+      <data key="y">130</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="frontend">
+      <data key="name">Frontend &amp; Interaction</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">545</data>
+      <data key="y">275</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="graph-rendering">
+      <data key="name">Graph Rendering &amp; Visual Design</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">655</data>
+      <data key="y">275</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="qa">
+      <data key="name">QA &amp; Reliability</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">770</data>
+      <data key="y">275</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="platform">
+      <data key="name">Platform &amp; Release</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">545</data>
+      <data key="y">420</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="ai-agents">
+      <data key="name">AI &amp; Agent Systems</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">655</data>
+      <data key="y">420</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="open-source">
+      <data key="name">Open Source &amp; Community</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">770</data>
+      <data key="y">420</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="legal">
+      <data key="name">Legal &amp; Compliance</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">545</data>
+      <data key="y">565</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="security">
+      <data key="name">Security Assurance</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">655</data>
+      <data key="y">565</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="docs">
+      <data key="name">Documentation &amp; Knowledge</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">770</data>
+      <data key="y">565</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="escalation">
+      <data key="name">Decision Escalation</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="x">900</data>
+      <data key="y">95</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="human">
+      <data key="name">Human Task</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="x">1005</data>
+      <data key="y">95</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="fanin">
+      <data key="name">Parallel Result Fan-in</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">flow</data>
+      <data key="x">900</data>
+      <data key="y">365</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="gate">
+      <data key="name">Test &amp; Evidence Gate</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">system</data>
+      <data key="x">1005</data>
+      <data key="y">365</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="review">
+      <data key="name">Review &amp; Pull Request</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">1110</data>
+      <data key="y">365</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="approval">
+      <data key="name">Approval &amp; Merge</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">1220</data>
+      <data key="y">365</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="end">
+      <data key="name">End</data>
+      <data key="kind">END</data>
+      <data key="x">1330</data>
+      <data key="y">365</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="audit">
+      <data key="name">Agentic Audit Log</data>
+      <data key="kind">PASSTHROUGH</data>
+      <data key="classification">handler</data>
+      <data key="x">900</data>
+      <data key="y">625</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="error">
+      <data key="name">Error</data>
+      <data key="kind">ERROR</data>
+      <data key="x">1005</data>
+      <data key="y">720</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <node id="recovery">
+      <data key="name">Troubleshooting &amp; Recovery</data>
+      <data key="kind">BEHAVIOR</data>
+      <data key="classification">agent</data>
+      <data key="x">1110</data>
+      <data key="y">720</data>
+      <data key="w">80</data>
+      <data key="h">80</data>
+    </node>
+    <edge id="start__poll" source="start" target="poll">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="poll__handler" source="poll" target="handler">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="handler__eligibility" source="handler" target="eligibility">
+      <data key="outcome">issue-found</data>
+    </edge>
+    <edge id="handler__poll" source="handler" target="poll">
+      <data key="outcome">no-issue</data>
+    </edge>
+    <edge id="eligibility__leader" source="eligibility" target="leader">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="eligibility__poll" source="eligibility" target="poll">
+      <data key="outcome">no-issue</data>
+    </edge>
+    <edge id="leader__error" source="leader" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="leader__escalation" source="leader" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="leader__audit" source="leader" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__product-architecture" source="leader" target="product-architecture">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="product-architecture__fanin" source="product-architecture" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="product-architecture__error" source="product-architecture" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="product-architecture__escalation" source="product-architecture" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="product-architecture__audit" source="product-architecture" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__core-runtime" source="leader" target="core-runtime">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="core-runtime__fanin" source="core-runtime" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="core-runtime__error" source="core-runtime" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="core-runtime__escalation" source="core-runtime" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="leader__integrations" source="leader" target="integrations">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="integrations__fanin" source="integrations" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="integrations__error" source="integrations" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="integrations__escalation" source="integrations" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="integrations__audit" source="integrations" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__frontend" source="leader" target="frontend">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="frontend__fanin" source="frontend" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="frontend__error" source="frontend" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="frontend__escalation" source="frontend" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="leader__graph-rendering" source="leader" target="graph-rendering">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="graph-rendering__fanin" source="graph-rendering" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="graph-rendering__error" source="graph-rendering" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="graph-rendering__escalation" source="graph-rendering" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="graph-rendering__audit" source="graph-rendering" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__qa" source="leader" target="qa">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="qa__fanin" source="qa" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="qa__error" source="qa" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="qa__escalation" source="qa" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="leader__platform" source="leader" target="platform">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="platform__fanin" source="platform" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="platform__error" source="platform" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="platform__escalation" source="platform" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="platform__audit" source="platform" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__ai-agents" source="leader" target="ai-agents">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="ai-agents__fanin" source="ai-agents" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="ai-agents__error" source="ai-agents" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="ai-agents__escalation" source="ai-agents" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="leader__open-source" source="leader" target="open-source">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="open-source__fanin" source="open-source" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="open-source__error" source="open-source" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="open-source__escalation" source="open-source" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="open-source__audit" source="open-source" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__legal" source="leader" target="legal">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="legal__fanin" source="legal" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="legal__error" source="legal" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="legal__escalation" source="legal" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="leader__security" source="leader" target="security">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="security__fanin" source="security" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="security__error" source="security" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="security__escalation" source="security" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="security__audit" source="security" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="leader__docs" source="leader" target="docs">
+      <data key="outcome">delegate</data>
+    </edge>
+    <edge id="docs__fanin" source="docs" target="fanin">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="docs__error" source="docs" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="docs__escalation" source="docs" target="escalation">
+      <data key="outcome">needs-human</data>
+    </edge>
+    <edge id="fanin__gate" source="fanin" target="gate">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="fanin__error" source="fanin" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="gate__review" source="gate" target="review">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="gate__error" source="gate" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="gate__leader" source="gate" target="leader">
+      <data key="outcome">rework</data>
+    </edge>
+    <edge id="review__approval" source="review" target="approval">
+      <data key="outcome">approved</data>
+    </edge>
+    <edge id="review__leader" source="review" target="leader">
+      <data key="outcome">changes-requested</data>
+    </edge>
+    <edge id="review__error" source="review" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="approval__end" source="approval" target="end">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="approval__error" source="approval" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="approval__audit" source="approval" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+    <edge id="escalation__human" source="escalation" target="human">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="human__fanin" source="human" target="fanin">
+      <data key="outcome">resolved</data>
+    </edge>
+    <edge id="human__end" source="human" target="end">
+      <data key="outcome">abandoned</data>
+    </edge>
+    <edge id="human__error" source="human" target="error">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="error__recovery" source="error" target="recovery">
+      <data key="outcome">continue</data>
+    </edge>
+    <edge id="recovery__poll" source="recovery" target="poll">
+      <data key="outcome">retry</data>
+    </edge>
+    <edge id="recovery__end" source="recovery" target="end">
+      <data key="outcome">give-up</data>
+    </edge>
+    <edge id="recovery__audit" source="recovery" target="audit">
+      <data key="outcome">audit</data>
+    </edge>
+  </graph>
+</graphml>

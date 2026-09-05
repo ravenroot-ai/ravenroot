@@ -163,6 +163,33 @@ public record NodeInvocation(UUID invocationId, String nodeId, Set<UUID> parentI
         return replaceLatest(attemptId, latest -> latest.park(cause));
     }
 
+    /**
+     * Records that recovery withheld the named attempt through {@code delivery}.
+     *
+     * <p>Unlike every other attempt mutation here this one does not move the attempt's status and is
+     * legal in any non-terminal invocation state: it records what recovery declined to do, not
+     * something that happened to the effect. It is also not restricted to the latest attempt for the
+     * same reason -- it changes no lifecycle -- though in practice only the latest is ever claimed.</p>
+     *
+     * @param attemptId the attempt recovery withheld.
+     * @param delivery the recovery delivery on which it was withheld.
+     * @return this invocation with the attempt's high-water mark raised.
+     */
+    public NodeInvocation recordRecoveryWithheld(UUID attemptId, int delivery) {
+        if (attemptId == null) throw new IllegalArgumentException("attemptId cannot be null");
+        var updated = new ArrayList<>(attempts);
+        boolean found = false;
+        for (int index = 0; index < updated.size(); index++) {
+            if (updated.get(index).attemptId().equals(attemptId)) {
+                updated.set(index, updated.get(index).withheldThrough(delivery));
+                found = true;
+                break;
+            }
+        }
+        if (!found) throw new IllegalArgumentException("Unknown attemptId: " + attemptId);
+        return new NodeInvocation(invocationId, nodeId, parentInvocationIds, status, updated, command);
+    }
+
 /**
  * Closes a parked attempt as verified-done by a human; the invocation may then complete.
  * @param attemptId the stable attempt id used to identify the requested resource.

@@ -118,9 +118,34 @@ class StandardBehaviorFactoriesTest {
         // ANTI-VACUITY: the two assertions above are absences, and an absence over an empty catalog
         // is not an assertion. This pins what the catalog does contain, so an accidental emptying
         // fails here instead of turning the three lines above green for the wrong reason.
-        assertEquals(new java.util.TreeSet<>(java.util.Set.of("cel-decision", "cel-transform", "delay",
-                "http-request", "json-parse", "json-path", "log", "program", "template")), behaviors,
+        assertEquals(new java.util.TreeSet<>(java.util.Set.of("boundary-guard", "cel-decision", "cel-transform", "delay",
+                "http-request", "human-task", "json-parse", "json-path", "log", "program", "template")), behaviors,
                 "the core catalog changed shape; update this roster deliberately");
+    }
+
+    @Test
+    void humanTaskCatalogIsBoundedAccessibleAndFailsClosedWithoutDurability() throws Exception {
+        var registry = BehaviorRegistry.standard();
+        var descriptor = registry.descriptor("human-task").orElseThrow();
+        var properties = descriptor.properties().stream().collect(java.util.stream.Collectors.toMap(
+                ai.ravenroot.api.catalog.NodePropertyDescriptor::name, java.util.function.Function.identity()));
+
+        assertEquals("Human task", descriptor.displayName());
+        assertTrue(descriptor.capabilities().contains("restart-safe"));
+        assertTrue(properties.get("title").required());
+        assertEquals(ai.ravenroot.api.catalog.NodePropertyType.TEXT,
+                properties.get("description").type());
+        assertEquals(java.util.List.of("SCALAR", "LIST", "MAP"),
+                properties.get("responseKind").allowedValues());
+        assertEquals(java.util.Set.of("resolved", "denied", "expired", "cancelled"),
+                descriptor.resolveOutcomes(name -> properties.get(name).defaultValue()));
+
+        var node = node("human-task", Map.of("title", "Review release"));
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
+                () -> registry.create(node).orElseThrow().handle(new NodeMessage(TestIdentities.TENANT_A,
+                        EXECUTION_ID, UUID.randomUUID(), node.id(), null, Map.of()))
+                        .toCompletableFuture().get(1, TimeUnit.SECONDS));
+        assertTrue(failure.getCause().getMessage().contains("requires durable human-task"));
     }
 
     @Test

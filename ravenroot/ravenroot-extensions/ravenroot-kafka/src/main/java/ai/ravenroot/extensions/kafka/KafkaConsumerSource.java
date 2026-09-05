@@ -6,6 +6,7 @@ import ai.ravenroot.api.deployment.IngressReceipt;
 import ai.ravenroot.api.deployment.IngressTarget;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.CredentialResolver;
+import ai.ravenroot.api.security.egress.ReservedNetworkPolicy;
 import ai.ravenroot.api.security.SecretValue;
 import org.apache.kafka.common.errors.AuthenticationException;
 import org.apache.kafka.common.errors.AuthorizationException;
@@ -43,6 +44,7 @@ final class KafkaConsumerSource implements InboundSource {
     private final KafkaConsumerProtocol protocol;
     private final Executor executor;
     private final Clock clock;
+    private final ReservedNetworkPolicy destinationPolicy;
     private final Object lifecycle = new Object();
 
     private volatile State state = State.STOPPED;
@@ -55,12 +57,20 @@ final class KafkaConsumerSource implements InboundSource {
     KafkaConsumerSource(NodeConfiguration configuration, CredentialResolver credentials,
                         KafkaConsumerProfileResolver profiles, KafkaConsumerProtocol protocol,
                         Executor executor, Clock clock) {
+        this(configuration, credentials, profiles, protocol, executor, clock,
+                ReservedNetworkPolicy.fromEnvironment(System.getenv()));
+    }
+
+    KafkaConsumerSource(NodeConfiguration configuration, CredentialResolver credentials,
+                        KafkaConsumerProfileResolver profiles, KafkaConsumerProtocol protocol,
+                        Executor executor, Clock clock, ReservedNetworkPolicy destinationPolicy) {
         this.configuration = Objects.requireNonNull(configuration);
         this.credentials = Objects.requireNonNull(credentials);
         this.profiles = Objects.requireNonNull(profiles);
         this.protocol = Objects.requireNonNull(protocol);
         this.executor = Objects.requireNonNull(executor);
         this.clock = Objects.requireNonNull(clock);
+        this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
     @Override public CompletionStage<Void> start(InboundSourceContext context) {
@@ -120,7 +130,7 @@ final class KafkaConsumerSource implements InboundSource {
         char[] password = null;
         RuntimeState runtime = null;
         try {
-            settings = Settings.resolve(configuration, context, profiles);
+            settings = Settings.resolve(configuration, context, profiles, destinationPolicy);
             probeDurableIngress(context, settings.profile.startupTimeoutMs());
             Optional<SecretValue> resolved = credentials.resolve(settings.profile.credentialRef());
             if (resolved == null || resolved.isEmpty()) throw new SourceFailure("credential-unavailable");
@@ -413,7 +423,8 @@ final class KafkaConsumerSource implements InboundSource {
                             int maxInFlight, int pollTimeoutMs, int drainTimeoutMs, int retryBackoffMs,
                             int maxRetryBackoffMs, int poisonAttempts, String poisonPolicy) {
         static Settings resolve(NodeConfiguration c, InboundSourceContext context,
-                                KafkaConsumerProfileResolver profiles) {
+                                KafkaConsumerProfileResolver profiles,
+                                ReservedNetworkPolicy destinationPolicy) {
             for (String property : c.properties().keySet()) {
                 if (!KafkaConsumeNodeBehavior.knownConfiguration().contains(property)) {
                     throw new SourceFailure("unknown-graph-property");
@@ -426,6 +437,9 @@ final class KafkaConsumerSource implements InboundSource {
             if (profile == null || !profile.tenant().equals(context.identity().tenantId()) || !profile.name().equals(name)) {
                 throw new SourceFailure("cluster-profile-unavailable");
             }
+            try { EnvironmentKafkaProfileResolver.requireDestinations(
+                    String.join(",", profile.bootstrapServers()), destinationPolicy); }
+            catch (SecurityException refused) { throw new SourceFailure("cluster-profile-unavailable"); }
             String group = c.property("group", profile.groupLogicalName());
             if (!group.equals(profile.groupLogicalName())) throw new SourceFailure("group-forbidden");
             String mode = c.property("subscriptionMode", "profile");

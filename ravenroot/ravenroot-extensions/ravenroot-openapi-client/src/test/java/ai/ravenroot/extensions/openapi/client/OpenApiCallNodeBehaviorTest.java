@@ -29,6 +29,10 @@ class OpenApiCallNodeBehaviorTest {
         assertEquals("GET", transport.request.get().method());
         assertEquals(List.of("trace-1"), transport.request.get().headers().get("x-trace"));
         assertTrue(transport.request.get().credential().isEmpty());
+        assertTrue(transport.request.get().limits().maximumOutputBytes() > profile.maxResponseBytes());
+        assertEquals(Set.of("application/json"), transport.request.get().limits().acceptedMediaTypes());
+        assertTrue(transport.request.get().representationPolicy().validates(200));
+        assertFalse(transport.request.get().representationPolicy().validates(429));
         Map<?, ?> output = (Map<?, ?>) result.payload();
         assertEquals("openapi.call.result.v1", output.get("version"));
         assertEquals(200L, output.get("status"));
@@ -49,6 +53,19 @@ class OpenApiCallNodeBehaviorTest {
         assertEquals("bearer", transport.request.get().credential().orElseThrow().bindingId());
         assertEquals("pets-token", transport.request.get().credential().orElseThrow().reference());
         assertEquals(201L, ((Map<?, ?>) result.payload()).get("status"));
+    }
+
+    @Test void managedOperatorOutputCeilingCannotBeWidenedByOpenApiProjection() {
+        var transport = new OpenApiClientTestSupport.HttpDouble();
+        transport.response = CompletableFuture.completedFuture(new OutboundHttpResponse(200,
+                Map.of("content-type", List.of("application/json")),
+                "{\"id\":1,\"name\":\"Milo\"}".getBytes(StandardCharsets.UTF_8), 32));
+        var action = behavior(OpenApiClientTestSupport.profile(Set.of("getPet"), 2), "getPet", transport);
+
+        assertFailure(action.handle(OpenApiClientTestSupport.message(input("milo"))),
+                OpenApiClientException.Code.RESPONSE_TOO_LARGE);
+        assertTrue(transport.request.get().limits().maximumOutputBytes() > 32,
+                "the profile request was wider than the managed operator response authority");
     }
 
     @Test void rejectsUnknownParametersSlashAndSchemaFailuresBeforeTransport() {

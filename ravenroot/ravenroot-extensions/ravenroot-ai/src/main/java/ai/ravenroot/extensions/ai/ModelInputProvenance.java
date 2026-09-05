@@ -46,6 +46,29 @@ final class ModelInputProvenance {
         return List.copyOf(entries);
     }
 
+    /** Restores only the bounded payload-free projection written by {@link #snapshot()}. */
+    void restore(Object value) {
+        if (!(value instanceof List<?> restored) || restored.size() > MAX_ENTRIES) {
+            throw new IllegalArgumentException("invalid model input provenance checkpoint");
+        }
+        entries.clear();
+        for (int index = 0; index < restored.size(); index++) {
+            if (!(restored.get(index) instanceof Map<?, ?> raw) || raw.size() != 4
+                    || !(raw.get("sequence") instanceof Number sequence)
+                    || sequence.longValue() != index + 1L
+                    || !(raw.get("kind") instanceof String kind)
+                    || !(raw.get("source") instanceof String source)
+                    || !(raw.get("digest") instanceof String digest)
+                    || !source.equals(safeSource(source))
+                    || !digest.matches("(?:sha256:[0-9a-f]{64}|unbound)")) {
+                throw new IllegalArgumentException("invalid model input provenance checkpoint");
+            }
+            Kind.valueOf(kind);
+            entries.add(Map.of("sequence", index + 1, "kind", kind,
+                    "source", source, "digest", digest));
+        }
+    }
+
     private static String safeSource(String source) {
         String raw = source == null ? "" : source;
         var safe = new StringBuilder(Math.min(raw.length(), 128));

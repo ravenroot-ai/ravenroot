@@ -3,6 +3,7 @@ package ai.ravenroot.extensions.mail;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecretValue;
 import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.Test;
 
@@ -162,7 +163,8 @@ class MailProfilePolicyTest {
     }
     private static MailSendNodeBehavior plaintext(String host, boolean allowed, String username, String credential) {
         return new MailSendNodeBehavior(ref -> { throw new AssertionError("secret resolver must not run"); }, (tenant, name) -> Optional.of(new MailProfile(tenant, name, host, 1, "SMTP", allowed, username, credential, "from@example.test",
-                Set.of("from@example.test"), Set.of(), Set.of("*"), Set.of(), 100, 40, 8192, 1024, 10, 5, 8, 8, 100, 100, 100, 0, 16)));
+                Set.of("from@example.test"), Set.of(), Set.of("*"), Set.of(), 100, 40, 8192, 1024, 10, 5, 8, 8, 100, 100, 100, 0, 16)),
+                SecretValue::copy, String::new, MailTestSupport.loopbackPolicy(host));
     }
     private static Map<String, Object> attachment(byte[] bytes) { return Map.of("name", "a.txt", "contentType", "text/plain", "content", bytes); }
     private static Map<String, Object> base64Attachment(String value) { return Map.of("name", "a.txt", "contentType", "text/plain", "content", value); }

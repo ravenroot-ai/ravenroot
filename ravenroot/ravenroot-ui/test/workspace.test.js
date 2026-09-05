@@ -147,6 +147,16 @@ describe('closing a document moves the activation deterministically', () => {
     expect(workspace.close('doc-99')).toBeNull();
     expect(workspace.size).toBe(1);
   });
+
+  it('removes a captured set while preserving a later active document', () => {
+    const workspace = workspaceOf('a', 'b');
+    workspace.add(createDocumentRecord({ id: 'later', name: 'later' }));
+
+    expect(workspace.closeMany(['doc-1', 'doc-2']).map(document_ => document_.id))
+      .toEqual(['doc-1', 'doc-2']);
+    expect(workspace.documents.map(document_ => document_.id)).toEqual(['later']);
+    expect(workspace.active.id).toBe('later');
+  });
 });
 
 // ── Isolation between documents ──────────────────────────────────────────────────────────────────

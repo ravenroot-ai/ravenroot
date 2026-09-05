@@ -1,5 +1,6 @@
 package ai.ravenroot.api.persistence;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.TraversalStatus;
 
 import java.util.UUID;
@@ -28,11 +29,16 @@ import java.util.UUID;
  *                           as a count and not a flag because it is the size of the operator's
  *                           outstanding work, and one parked attempt and nine are not the same
  *                           situation
+ * @param terminationReason  why a terminal {@code status} was reached when the status alone would
+ *                           misdescribe it, and {@code null} when nothing distinguishes it or the
+ *                           traversal has not terminated. A cancelled traversal reports
+ *                           {@code status == FAILED} and {@code terminationReason == CANCELLED}; read
+ *                           the two together, exactly as {@code Traversal}'s own Javadoc requires.
  */
 public record TraversalInventoryEntry(ExecutionKey key, UUID traversalId, int position,
                                       String ingressNodeId, TraversalStatus status,
                                       InventoryDisposition disposition, int invocationCount,
-                                      int parkedAttemptCount) {
+                                      int parkedAttemptCount, ExecutionTerminationReason terminationReason) {
 
     /** Rejects a traversal row that could not describe a real stored traversal. */
     public TraversalInventoryEntry {
@@ -48,5 +54,40 @@ public record TraversalInventoryEntry(ExecutionKey key, UUID traversalId, int po
         if (parkedAttemptCount < 0) {
             throw new IllegalArgumentException("parkedAttemptCount cannot be negative");
         }
+        // Mirrors ExecutionOutcome's own rule -- a non-terminal row cannot carry a termination reason.
+        terminationReason = status.terminal() ? terminationReason : null;
+    }
+
+    /**
+     * Compatibility constructor preserving the shape before a termination reason was carried.
+     * Reports an absent reason, correct for every producer that has not been taught to record one.
+     *
+     * @param key                the containing instance's tenant-scoped identity
+     * @param traversalId        identity of this traversal, distinct from the instance's
+     * @param position           insertion order within the instance, from zero
+     * @param ingressNodeId      the node this traversal entered at
+     * @param status             authoritative stored traversal status
+     * @param disposition        recovery classification derived at read time; see
+     *                           {@link InventoryDisposition}
+     * @param invocationCount    number of node invocations recorded under this traversal
+     * @param parkedAttemptCount number of attempts in this traversal awaiting a human decision
+     */
+    public TraversalInventoryEntry(ExecutionKey key, UUID traversalId, int position, String ingressNodeId,
+                                   TraversalStatus status, InventoryDisposition disposition,
+                                   int invocationCount, int parkedAttemptCount) {
+        this(key, traversalId, position, ingressNodeId, status, disposition, invocationCount,
+                parkedAttemptCount, null);
+    }
+
+    /**
+     * Whether this row's terminal status is reported because it was stopped on request.
+     *
+     * @return whether this traversal's termination is recorded as a cancellation. A cancelled
+     *         traversal reports {@link #status()} {@code == FAILED}, so a caller that branches on the
+     *         status alone reads every deliberate stop as a fault; this is the read that separates
+     *         them.
+     */
+    public boolean cancelled() {
+        return ExecutionTerminationReason.isCancellation(terminationReason);
     }
 }

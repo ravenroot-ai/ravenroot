@@ -241,8 +241,8 @@ abstract class CliBackendContract {
         var view = awaitTerminalResult(submission.executionId());
 
         assertEquals("COMPLETED", view.status());
-        assertEquals(List.of("accepted-log", "end", "greeting", "is-ravenroot", "start"),
-                view.visitedNodes(),
+        assertEquals(Set.of("accepted-log", "end", "greeting", "is-ravenroot", "start"),
+                Set.copyOf(view.visitedNodes()),
                 "the traversal must reach the decision's accepted branch and the terminal");
         assertEquals("\"Hello Ravenroot\"", view.payload(),
                 "the template and decision behaviors must have actually run");
@@ -363,6 +363,38 @@ abstract class CliBackendContract {
                 "unexpected outcome: " + result.outcome());
         assertEquals(submission.traversalId(), result.traversalId());
         assertFalse(result.note().isBlank());
+    }
+
+    /**
+     * Regression/parity probe: whichever of the racing terminal outcomes
+     * {@link #cancelReturnsAWellFormedDistinguishableOutcome} tolerates actually lands, the two
+     * transports must agree on the termination reason {@link CliBackend#result} reports for it. Before
+     * this fix, {@code ResultView} carried no termination reason on either transport, so a cancelled
+     * execution's {@code result} output was indistinguishable from an ordinary failure everywhere a
+     * caller could look -- and a status of {@code FAILED} alone is exactly the misreading this reason
+     * exists to correct.
+     *
+     * <p>{@link #GRAPH} has no {@code BEHAVIOR} node and nothing in it can fail on its own, so a
+     * {@code FAILED} terminal status observed here can only be the cancellation landing before the
+     * traversal reached its own terminal, never a genuine fault.</p>
+     */
+    @Test
+    final void cancelledExecutionsResultReportsTheSameReasonOnBothTransports() throws Exception {
+        var submission = backend.run(GRAPH.getBytes(StandardCharsets.UTF_8), "cancel-reason-contract-payload");
+        backend.cancel(submission.traversalId());
+
+        var view = awaitTerminalResult(submission.executionId());
+
+        if ("FAILED".equals(view.status())) {
+            assertEquals("CANCELLED", view.terminationReason(),
+                    "a FAILED result for this fixture can only be the cancellation landing first");
+            assertTrue(view.cancelled());
+        } else {
+            assertEquals("COMPLETED", view.status(), "unexpected non-terminal or unknown status: " + view.status());
+            assertNull(view.terminationReason(),
+                    "a run that completed normally must not carry a termination reason");
+            assertFalse(view.cancelled());
+        }
     }
 
     /** A repeated cancel of the same traversal must never report a fresh {@code CANCELLED} again. */

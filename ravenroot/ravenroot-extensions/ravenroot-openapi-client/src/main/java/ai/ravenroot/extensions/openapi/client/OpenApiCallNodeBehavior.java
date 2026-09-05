@@ -12,6 +12,7 @@ import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.payload.PayloadJson;
@@ -100,7 +101,12 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
             Duration remaining = Duration.ofNanos(Math.max(1, deadline - System.nanoTime()));
             call = services.outboundHttp().execute(message, new OutboundHttpRequest(prepared.destination,
                     settings.operation.method(), prepared.headers, prepared.body, remaining,
-                    settings.operation.authenticated() ? settings.profile.credential().orElse(null) : null));
+                    settings.operation.authenticated() ? settings.profile.credential().orElse(null) : null,
+                    null, ExternalIoLimits.compressedHttp(Math.max(1, prepared.body.length),
+                            settings.maxResponseBytes, settings.maxResponseBytes,
+                            projectedOutputLimit(settings.maxResponseBytes),
+                            100, remaining, Set.of("application/json")),
+                    settings.operation.representationPolicy()));
         } catch (RuntimeException failure) {
             lease.close();
             return CompletableFuture.failedFuture(sanitize(failure, false));
@@ -169,7 +175,25 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
         Map<String, Object> output = new LinkedHashMap<>();
         output.put("version", "openapi.call.result.v1"); output.put("operationId", settings.operation.id());
         output.put("status", (long) status); output.put("headers", Map.copyOf(projected)); output.put("body", body);
+        try {
+            long outputLimit = Math.min(projectedOutputLimit(settings.maxResponseBytes),
+                    response.effectiveMaximumOutputBytes());
+            new PayloadLimits(Math.toIntExact(outputLimit),
+                    32, 50_000, 100_000, settings.maxResponseBytes, 2_048)
+                    .enforceAndMeasure(output);
+        } catch (RuntimeException oversized) {
+            throw new OpenApiClientException(OpenApiClientException.Code.RESPONSE_TOO_LARGE);
+        }
         return NodeResult.continueWith(java.util.Collections.unmodifiableMap(output));
+    }
+
+    private static long projectedOutputLimit(int responseBytes) {
+        try {
+            return Math.min(64L * 1024 * 1024,
+                    Math.addExact(Math.multiplyExact((long) responseBytes, 6L), 64L * 1024));
+        } catch (ArithmeticException overflow) {
+            return 64L * 1024 * 1024;
+        }
     }
 
     private static RuntimeException sanitize(Throwable raw, boolean ambiguous) {
@@ -192,8 +216,10 @@ public final class OpenApiCallNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE -> OpenApiClientException.Code.REQUEST_TOO_LARGE;
                 case RESPONSE_TOO_LARGE -> OpenApiClientException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> OpenApiClientException.Code.DEADLINE_EXCEEDED;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> OpenApiClientException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> OpenApiClientException.Code.TRANSPORT_UNAVAILABLE;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED ->
+                        OpenApiClientException.Code.CAPACITY_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        OpenApiClientException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new OpenApiClientException(ambiguous ? OpenApiClientException.Code.AMBIGUOUS

@@ -175,6 +175,64 @@ class TelemetryEndToEndTest {
         }
     }
 
+    /**
+     * The span-ended half of the cross-module cancellation proof (the admission-slot and audit-row
+     * halves are {@code CancellationConsistencyIntegrationTest} in {@code ravenroot-server}, the only
+     * module that can see both {@code ActiveExecutionRegistry} and {@code AuditTrailExecutionSink}).
+     * A real {@link GraphRunner} traversal, cancelled from inside its own dispatched node -- not a
+     * synthetic {@code ExecutionEvent} handed straight to the bridge, which
+     * {@code TelemetryBridgeSpanAndMetricTest} already covers and which cannot prove the runner
+     * actually reaches {@code EXECUTION_CANCELLED} for a real cancellation the way this does.
+     *
+     * <p><b>Why the cancel call sits inside the node's own behavior.</b>
+     * {@code GraphRunner.cancelTraversal} does not preempt a dispatch already in flight -- it refuses
+     * the traversal's <em>next</em> hop. {@link SameThreadEngine} dispatches synchronously with no
+     * concurrency to race, so calling {@code cancelTraversal} from a separate thread while
+     * {@code execute()} is running would never overlap a dispatch at all. Calling it from inside
+     * {@code node}'s own behavior, synchronously, before that behavior returns its own (otherwise
+     * ordinary) {@code continue} outcome, is what puts a real refusal on the very next hop -- the
+     * edge to {@code end} -- reproducing {@code RunawayLoopCancellationTest}'s model on the simplest
+     * graph that can show it, with no loop and no join-policy semantics needed.</p>
+     */
+    @Test
+    void aRealCancellationEndsTheTraversalSpanThroughARealGraphRunner() throws Exception {
+        var monitor = new ExecutionMonitor();
+        var bridge = new TelemetryBridge(openTelemetry);
+        UUID traversalId = UUID.randomUUID();
+        // Boxed so the behavior closure below can call back into the runner that will hold it --
+        // the runner does not exist yet when the behavior is registered.
+        var runnerBox = new GraphRunner[1];
+
+        try (var unsubscribe = monitor.subscribe(bridge);
+             var engine = new SameThreadEngine();
+             var runner = new GraphRunner(linearGraph("node"), engine,
+                     new BehaviorRegistry().register("node", message -> {
+                         runnerBox[0].cancelTraversal(traversalId);
+                         return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+                     }), monitor)) {
+            runnerBox[0] = runner;
+            var security = new SecurityContext("request-1", "tenant-a", "alice", PrincipalType.USER,
+                    "urn:ravenroot:test");
+            assertThrows(Exception.class, () -> runner.execute(security, traversalId, Map.of("ok", true),
+                            "embedded")
+                    .toCompletableFuture().get(5, TimeUnit.SECONDS),
+                    "a traversal refused at its next hop must not resolve as a success");
+        } finally {
+            bridge.close();
+        }
+
+        List<SpanData> traversalSpans = spans.getFinishedSpanItems().stream()
+                .filter(span -> span.getName().equals("ravenroot.execution")).toList();
+        assertEquals(1, traversalSpans.size(),
+                "regression: a cancelled traversal's span must be ended, not leaked open forever -- "
+                        + "TelemetryBridge previously matched only EXECUTION_COMPLETED/EXECUTION_FAILED "
+                        + "and left EXECUTION_CANCELLED's span open");
+        assertEquals(io.opentelemetry.api.trace.StatusCode.UNSET,
+                traversalSpans.get(0).getStatus().getStatusCode(),
+                "a cancellation is neither the success EXECUTION_COMPLETED reports nor the error "
+                        + "EXECUTION_FAILED reports");
+    }
+
     private static GraphManager linearGraph(String middleNodeBehavior) {
         return GraphManager.from(new GraphDefinition(
                 List.of(GraphNode.start("start"), GraphNode.behavior("middle", middleNodeBehavior),

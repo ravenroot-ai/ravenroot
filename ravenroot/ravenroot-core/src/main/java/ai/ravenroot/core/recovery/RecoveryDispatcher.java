@@ -13,17 +13,41 @@ import ai.ravenroot.api.persistence.PendingWork;
  * attempt that was never sent is indistinguishable from one whose outcome is unknown, so the next
  * sweep would park work that had provably never started.</p>
  *
- * <h2>{@link #NONE} is the production wiring today, and that is a scope fact, not an oversight</h2>
- * <p>Re-dispatching a recovered attempt means executing a node of a graph, and the graph bytes are
- * stored nowhere — {@code GraphVersionPin} holds a hash, and no definition store exists. PERS-04's
- * scope is therefore "make pending work dispatchable with correct lease, fencing
- * and idempotency semantics", not "resume execution". {@link #NONE} declines everything, so recovered
- * work stays claimable and unacknowledged, which loses nothing and parks nothing spuriously.</p>
+ * <p>Generic recovered attempts still require a host-specific dispatcher. A reserved handler may
+ * instead be paired with a trusted bounded-continuation dispatcher. {@link #NONE} is the additive,
+ * fail-closed default: unsupported work stays claimable and unacknowledged rather than being lost or
+ * spuriously completed.</p>
  */
 public interface RecoveryDispatcher {
 
     /** Whether this dispatcher is able to send {@code item} at all. */
     boolean canDispatch(PendingWork item);
+
+    /**
+     * Whether recovery may act on {@code item}'s execution at all on this pass, and if not, whether
+     * waiting could change that.
+     *
+     * <p>Separate from {@link #canDispatch} because the recovery loop disposes of the two answers
+     * differently, and collapsing them loses the distinction that decides what happens to an
+     * ambiguous attempt. {@code canDispatch} answers "can I send this"; a {@code false} there still
+     * lets the loop park an ambiguous attempt, which is right, because the effect happened and a
+     * human is owed a decision regardless of what this deployment could have re-sent. This method
+     * answers whether the execution's own preconditions hold here — its pinned document and its
+     * manifest — and a refusal is not disposed of as a park immediately: a
+     * {@link RecoveryAdmission.Disposition#WITHHELD_RETRYABLE} refusal waits, and a
+     * {@link RecoveryAdmission.Disposition#WITHHELD_DETERMINISTIC} one waits a bounded number of
+     * deliveries and then parks naming the deployment fault. See {@link RecoveryAdmission}.</p>
+     *
+     * <p>The default admits everything, so a dispatcher written before this existed behaves exactly
+     * as it did. Implementations must be side-effect free: this is asked before any claim is acted
+     * on and may be asked more than once for one item.</p>
+     *
+     * @param item claimed work item whose execution is being considered.
+     * @return whether the item proceeds, waits, or waits and then parks.
+     */
+    default RecoveryAdmission admits(PendingWork item) {
+        return RecoveryAdmission.admitted();
+    }
 
     /**
      * Sends {@code item}, presenting {@code idempotencyKey} as the effect identity.
@@ -38,7 +62,16 @@ public interface RecoveryDispatcher {
      */
     void dispatch(PendingWork item, String idempotencyKey);
 
-    /** Declines everything. See the class comment for why this is the current production wiring. */
+    /**
+     * Releases dispatcher-owned resources after recovery has acknowledged the claimed work.
+     *
+     * <p>The recovery service remains the sole owner of the store acknowledgement. Dispatchers
+     * that must retain a fenced process lease until that acknowledgement completes can release it
+     * here. The default is deliberately additive for existing dispatchers.</p>
+     */
+    default void afterAcknowledged(PendingWork item) { }
+
+    /** Declines everything for hosts that install no recovery dispatcher. */
     RecoveryDispatcher NONE = new RecoveryDispatcher() {
         @Override
         public boolean canDispatch(PendingWork item) {

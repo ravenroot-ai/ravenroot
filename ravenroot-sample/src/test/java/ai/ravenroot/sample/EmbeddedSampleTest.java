@@ -4,6 +4,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.Set;
+
 class EmbeddedSampleTest {
 
     @Test
@@ -20,6 +22,6 @@ class EmbeddedSampleTest {
         var result = EmbeddedSample.execute("embedded");
 
         assertEquals("EMBEDDED", result.payload());
-        assertEquals(4, result.visitedNodes().size());
+        assertEquals(Set.of("start", "input", "uppercase", "end"), result.visitedNodes());
     }
 }

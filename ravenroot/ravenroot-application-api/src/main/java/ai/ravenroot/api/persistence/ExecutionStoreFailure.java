@@ -1,5 +1,7 @@
 package ai.ravenroot.api.persistence;
 
+import ai.ravenroot.api.application.ProcessInstanceStatus;
+
 import java.util.UUID;
 
 /**
@@ -447,6 +449,106 @@ public sealed interface ExecutionStoreFailure {
         public String describe() {
             return "handler " + handlerName + " already has a live registration for correlation key "
                     + correlationKey;
+        }
+    }
+
+    /**
+     * A tool-approval lifecycle transition is illegal for the committed state or ineligible at the
+     * store clock's current time.
+     *
+     * <p>This includes conflicts with a durable lifecycle winner, expiry attempted before the
+     * absolute deadline, and approval, denial, or consumption attempted at or after that
+     * deadline.</p>
+     *
+     * @param approvalId target approval identity
+     * @param current currently committed status
+     * @param requested requested successor status
+     */
+    record ToolApprovalNotResolvable(UUID approvalId, ToolApprovalStatus current,
+                                     ToolApprovalStatus requested) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "tool approval " + approvalId + " is " + current
+                    + " and cannot transition to " + requested;
+        }
+    }
+
+    /**
+     * A human-task transition lost its generation fence or conflicts with the first winner.
+     *
+     * @param taskId target task identity.
+     * @param current currently committed status.
+     * @param requested requested successor status.
+     * @param expectedGeneration generation presented by the caller.
+     * @param actualGeneration currently committed generation.
+     */
+    record HumanTaskNotResolvable(UUID taskId, HumanTaskStatus current, HumanTaskStatus requested,
+                                  long expectedGeneration, long actualGeneration)
+            implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "human task " + taskId + " is " + current + " at generation " + actualGeneration
+                    + " and cannot transition to " + requested + " from expected generation "
+                    + expectedGeneration;
+        }
+    }
+
+    /**
+     * An execution-pause transition conflicts with the first durable lifecycle winner.
+     *
+     * @param pauseId target hold identity.
+     * @param current currently committed status.
+     * @param requested requested successor status.
+     */
+    record ExecutionPauseNotResolvable(UUID pauseId, ExecutionPauseStatus current,
+                                       ExecutionPauseStatus requested) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "execution pause " + pauseId + " is " + current
+                    + " and cannot transition to " + requested;
+        }
+    }
+
+    /**
+     * A second, different terminal result was offered for a traversal that already has one.
+     *
+     * <p>The refusal that makes result recording exactly-once without ever overwriting. Recording is
+     * idempotent by <em>comparison</em>: a re-delivery whose
+     * {@link DurableExecutionResult#fingerprint()} equals the stored one changes nothing and
+     * succeeds, and only a genuinely different outcome reaches this failure. It carries both digests
+     * so an operator can see that the two differ and which one is already committed, without either
+     * value being echoed — a fingerprint is a digest over the record, so it cannot leak a payload
+     * fragment the way a rendered outcome could.</p>
+     *
+     * <p>Both terminal statuses are carried beside the digests because they are the fact an operator
+     * reads first, and because they are frequently equal: a cancelled execution and a faulted one
+     * both store {@code FAILED}, so two conflicting records can agree on status and differ in
+     * everything else. The digests are what actually decide, and the statuses are what make the
+     * message legible.</p>
+     *
+     * <p>Deliberately <em>not</em> {@link ConcurrencyConflict}, exactly as
+     * {@link HandlerNotResolvable} is not: that value invites the caller to re-read and retry, and a
+     * terminal result is immutable once written, so the answer after re-reading is the same refusal
+     * forever. A caller that retried this would loop.</p>
+     *
+     * @param traversalId          the execution whose result is already recorded.
+     * @param current              terminal status of the committed result.
+     * @param requested            terminal status the refused record asked to store.
+     * @param currentFingerprint   digest of the committed result.
+     * @param requestedFingerprint digest of the refused record.
+     */
+    record ExecutionResultNotRecordable(UUID traversalId, ProcessInstanceStatus current,
+                                        ProcessInstanceStatus requested, String currentFingerprint,
+                                        String requestedFingerprint) implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "execution result " + traversalId + " is already recorded as " + current + " ("
+                    + currentFingerprint + ") and cannot be replaced by " + requested + " ("
+                    + requestedFingerprint + ")";
         }
     }
 

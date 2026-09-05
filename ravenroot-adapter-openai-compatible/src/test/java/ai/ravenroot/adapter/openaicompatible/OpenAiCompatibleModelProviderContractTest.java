@@ -322,6 +322,15 @@ class OpenAiCompatibleModelProviderContractTest {
         assertStatus(503, ModelInvocationException.Reason.PROVIDER_UNAVAILABLE);
     }
 
+    @Test
+    void boundedNonJsonErrorStillReachesStatusClassification() {
+        endpoint.responds(429, "plain remote rejection", "text/plain");
+        ModelInvocationException failure = failureOf(authenticated());
+        assertEquals(ModelInvocationException.Reason.RATE_LIMITED, failure.reason());
+        assertEquals(429, failure.httpStatus());
+        assertFalse(failure.getMessage().contains("plain remote rejection"));
+    }
+
     private void assertStatus(int status, ModelInvocationException.Reason expected) {
         endpoint.responds(status, ChatCompletionsDouble.error("some_error", "an error body"));
         ModelInvocationException failure = failureOf(authenticated());

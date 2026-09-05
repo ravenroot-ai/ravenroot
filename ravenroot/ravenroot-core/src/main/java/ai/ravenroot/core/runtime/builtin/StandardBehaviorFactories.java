@@ -45,10 +45,20 @@ public final class StandardBehaviorFactories {
                                                 PublicationPolicyResolver publicationPolicies,
                                                 PublicationAuditSink publicationAudit,
                                                 ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
+        return all(environment, publicationPolicies, publicationAudit, humanTasks,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    /** Core catalog with one operator-owned Human Task policy. */
+    public static List<NodeBehaviorFactory> all(BehaviorEnvironment environment,
+                                                PublicationPolicyResolver publicationPolicies,
+                                                PublicationAuditSink publicationAudit,
+                                                ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         return List.of(
                 new LogNodeBehaviorFactory(),
                 new DelayNodeBehaviorFactory(),
-                new HumanTaskNodeBehaviorFactory(humanTasks),
+                new HumanTaskNodeBehaviorFactory(humanTasks, humanTaskPolicy),
                 new TemplateNodeBehaviorFactory(),
                 new JsonParseNodeBehaviorFactory(),
                 new CelTransformNodeBehaviorFactory(),

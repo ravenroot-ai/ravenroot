@@ -50,6 +50,7 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 import ai.ravenroot.api.persistence.HumanTaskPage;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
@@ -77,6 +78,7 @@ import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
 import ai.ravenroot.api.payload.PayloadKind;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
@@ -3321,7 +3323,8 @@ public abstract class ExecutionStoreContract {
                 template.responderRequirements(),
                 new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
                 template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
-                template.reentryMapping(), template.continuationVersion(), template.continuation(),
+                template.reentryMapping(), template.executionLimits(),
+                template.continuationVersion(), template.continuation(),
                 template.continuationDigest()));
     }
 
@@ -3338,6 +3341,8 @@ public abstract class ExecutionStoreContract {
                 new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
                 clock().instant().plus(Duration.ofMinutes(5)),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                new HumanTaskExecutionLimits(new PayloadLimits(4096, 7, 23, 41, 3072, 99),
+                        8192, 5),
                 2, new byte[] {1, 2, 3}, digest(new byte[] {1, 2, 3}));
     }
 
@@ -3347,6 +3352,7 @@ public abstract class ExecutionStoreContract {
                 source.attemptId(), source.nodeId(), correlationKey, deduplicationKey, source.metadata(),
                 source.responseSchema(), source.responderRequirements(), source.requester(),
                 source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping(),
+                source.executionLimits(),
                 source.continuationVersion(), source.continuation(), source.continuationDigest());
     }
 

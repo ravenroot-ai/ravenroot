@@ -19,6 +19,7 @@ import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
 import ai.ravenroot.api.persistence.RevisionExpectation;
@@ -125,7 +126,43 @@ class HumanTaskRouteTest {
         }
     }
 
+    @Test
+    void authorizedLookupUsesThePersistedBodyParserAndRetryPolicyAcrossStricterAndLooserReopens() {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        Path database = directory.resolve("human-task-pinned-policy.db");
+        HumanTaskPolicy policyA = policy(600_000, 700_000, 77, 5);
+        UUID taskId;
+        try (var store = new SqliteExecutionStore(database, clock, policyA)) {
+            taskId = request(store, clock, policyA, 500_000).taskId();
+        }
+        RequestContext approver = new RequestContext("request", "approver", PrincipalType.USER,
+                "urn:ravenroot:test", "tenant-a", Set.of(Role.APPROVER), Set.of());
+        RequestContext unauthorized = new RequestContext("request", "viewer", PrincipalType.USER,
+                "urn:ravenroot:test", "tenant-a", Set.of(), Set.of());
+        for (HumanTaskPolicy restarted : List.of(
+                policy(200_000, 250_000, 10, 1), policy(900_000, 1_000_000, 120, 9))) {
+            try (var reopened = new SqliteExecutionStore(database, clock, restarted)) {
+                var service = new HumanTaskService(reopened, clock, restarted);
+                var task = reopened.loadHumanTask("tenant-a", taskId).toCompletableFuture().join()
+                        .orElseThrow();
+                assertEquals(700_000, service.authorizedResponseBodyLimit(approver, taskId).orElseThrow());
+                assertTrue(service.authorizedResponseBodyLimit(unauthorized, taskId).isEmpty());
+                assertTrue(service.authorizedResponseBodyLimit(new RequestContext("request", "approver",
+                        PrincipalType.USER, "urn:ravenroot:test", "other", Set.of(Role.APPROVER),
+                        Set.of()), taskId).isEmpty());
+                assertEquals(77, task.request().executionLimits().responsePayload().maxDepth());
+                assertEquals(5, task.request().executionLimits().writeAttempts());
+                assertEquals(500_000, task.request().responseSchema().maxBytes());
+            }
+        }
+    }
+
     private static Fixture request(ExecutionStore store, Clock clock) {
+        return request(store, clock, HumanTaskPolicy.DEFAULTS, 4096);
+    }
+
+    private static Fixture request(ExecutionStore store, Clock clock, HumanTaskPolicy policy,
+                                   int responseMaxBytes) {
         var key = new ExecutionKey("tenant-a", UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();
         UUID invocationId = UUID.randomUUID();
@@ -139,15 +176,17 @@ class HumanTaskRouteTest {
                 .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
                         ProcessInstanceStatus.RUNNING, Map.of(traversalId, traversal)),
                         new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join().revision();
-        var service = new HumanTaskService(store, clock);
+        var service = new HumanTaskService(store, clock, policy);
         var requester = SecurityContext.of(new RequestContext("requester-request", "requester",
                 PrincipalType.USER, "urn:ravenroot:test", key.tenantId(), Set.of(), Set.of()));
         var message = new NodeMessage(requester, key.processInstanceId(), traversalId, invocationId,
                 attemptId, "review", Map.of("private", "not copied"), Map.of());
         var definition = new HumanTaskDefinition(new HumanTaskMetadata("Approve release", "Bounded facts only."),
-                new HumanTaskResponseSchema(CONTENT_TYPE, "release.decision", "1", PayloadKind.MAP, 4096),
+                new HumanTaskResponseSchema(CONTENT_TYPE, "release.decision", "1", PayloadKind.MAP,
+                        responseMaxBytes),
                 HandlerAuthorization.ofRoles(Role.APPROVER.name()), Optional.empty(), Duration.ofHours(1),
-                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                policy.executionLimits(responseMaxBytes));
         HumanTaskResult result;
         try (var recorder = ExecutionRecorder.open(store, key, "route-fixture", Duration.ofSeconds(30),
                 revision); var ignored = service.bindLive(key, recorder)) {
@@ -185,6 +224,19 @@ class HumanTaskRouteTest {
     }
 
     private record Fixture(HumanTaskService service, UUID taskId) { }
+
+    private static HumanTaskPolicy policy(int maxResponse, int decisionBody, int depth,
+                                          int writeAttempts) {
+        HumanTaskPolicy d = HumanTaskPolicy.DEFAULTS;
+        return new HumanTaskPolicy(Math.min(d.defaultResponseBytes(), maxResponse), maxResponse,
+                d.defaultEscalationSeconds(), d.maxEscalationSeconds(), d.defaultExpirySeconds(),
+                d.maxExpirySeconds(), d.maxTitleUtf8Bytes(), d.maxDescriptionUtf8Bytes(),
+                d.maxResponseSchemaUtf8Bytes(), d.maxAuthorizationTokens(),
+                d.maxAuthorizationTokenUtf8Bytes(), decisionBody, d.inboxDefaultPageSize(),
+                Math.max(250, d.inboxMaxPageSize()), depth, d.responseMaxCollectionSize(),
+                d.responseMaxValueCount(), d.responseMaxTextLength(), d.responseMaxKeyLength(),
+                writeAttempts);
+    }
 
     private static final class TenantApproverAuthenticator implements RequestAuthenticator {
         @Override public AuthenticatedPrincipal authenticate(Headers headers) {

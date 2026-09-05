@@ -30,6 +30,7 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
@@ -162,6 +163,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Duration journalRetention;
     private final Duration terminalRetention;
     private final Duration executionResultRetention;
+    private final HumanTaskPolicy humanTaskPolicy;
     private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
     private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
 
@@ -171,6 +173,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     public InMemoryExecutionStore(Clock clock) {
         this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
+    }
+
+    /** Reference store using the supplied Human Task page policy. */
+    public InMemoryExecutionStore(Clock clock, HumanTaskPolicy humanTaskPolicy) {
+        this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW,
+                DEFAULT_JOURNAL_RETENTION, DEFAULT_TERMINAL_RETENTION, DEFAULT_TERMINAL_RETENTION,
+                humanTaskPolicy);
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes) {
@@ -215,6 +224,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention,
                                   Duration terminalRetention, Duration executionResultRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                terminalRetention, executionResultRetention, HumanTaskPolicy.DEFAULTS);
+    }
+
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention, Duration executionResultRetention,
+                                  HumanTaskPolicy humanTaskPolicy) {
         this.executionResultRetention =
                 Objects.requireNonNull(executionResultRetention, "executionResultRetention");
         if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
@@ -261,9 +278,15 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
         this.maxPayloadBytes = maxPayloadBytes;
         this.maxClockSkew = Objects.requireNonNull(maxClockSkew, "maxClockSkew");
+        this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         if (maxClockSkew.isNegative()) {
             throw new IllegalArgumentException("maxClockSkew cannot be negative");
         }
+    }
+
+    @Override
+    public int maxHumanTaskPageSize() {
+        return humanTaskPolicy.inboxMaxPageSize();
     }
 
     @Override

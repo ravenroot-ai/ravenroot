@@ -84,12 +84,14 @@ public final class RavenrootServerMain {
         // Every downstream admission and recovery boundary receives this same typed value.
         var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits
                 .fromEnvironment(System.getenv());
+        var humanTaskPolicy = HumanTaskConfiguration.fromSystem(System.getProperties(), System.getenv());
         // This lease is the offline-maintenance authority shared with backup/restore. It is
         // acquired before the audit trail is opened and retained until both stores are closed.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
                 .fromEnvironment(System.getenv());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
-                executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl());
+                executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
+                humanTaskPolicy);
         try (var startupGuard = executionStoreOwner.startupGuard()) {
         var engine = ExecutionEngines.create(engineId, "ravenroot-server");
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
@@ -182,14 +184,14 @@ public final class RavenrootServerMain {
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.HUMAN_TASKS)
                 ? new ai.ravenroot.core.humantask.HumanTaskService(
-                        approvalStore, java.time.Clock.systemUTC()) : null;
+                        approvalStore, java.time.Clock.systemUTC(), humanTaskPolicy) : null;
         ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings = toolApprovals == null
                 ? null : ai.ravenroot.server.approval.ToolApprovalConfiguration
                         .fromEnvironment(System.getenv());
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
-                toolApprovals, toolApprovalSettings, agentBudgets, humanTasks);
+                toolApprovals, toolApprovalSettings, agentBudgets, humanTasks, humanTaskPolicy);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -435,7 +437,7 @@ public final class RavenrootServerMain {
                     server.installToolApprovals(toolApprovals, approvalRecovery::sweepTenant);
                 }
                 if (humanTasks != null) {
-                    server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant);
+                    server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant, humanTaskPolicy);
                 }
                 if (agentBudgets != null) {
                     server.installAgentAuthorityControl(agentBudgets);
@@ -664,7 +666,8 @@ public final class RavenrootServerMain {
             ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
             ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
             ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
-            ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
+            ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+            ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
                     new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
@@ -672,7 +675,8 @@ public final class RavenrootServerMain {
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment,
                             ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
-                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), humanTasks),
+                            ai.ravenroot.api.publication.PublicationAuditSink.noop(), humanTasks,
+                            humanTaskPolicy),
                     System.getenv(), services);
         } catch (RuntimeException activationFailed) {
             var diagnosis = PluginActivationDiagnostics.diagnose(activationFailed);

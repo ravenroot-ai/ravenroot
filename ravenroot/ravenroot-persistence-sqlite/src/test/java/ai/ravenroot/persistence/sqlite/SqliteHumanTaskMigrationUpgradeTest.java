@@ -41,6 +41,13 @@ class SqliteHumanTaskMigrationUpgradeTest {
             assertTrue(columnExists(connection, "human_task", "continuation_version"));
             assertTrue(columnExists(connection, "human_task", "continuation"));
             assertTrue(columnExists(connection, "human_task", "continuation_digest"));
+            assertTrue(columnExists(connection, "human_task", "decision_body_max_bytes"));
+            assertTrue(columnExists(connection, "human_task", "response_max_depth"));
+            assertTrue(columnExists(connection, "human_task", "response_max_collection_size"));
+            assertTrue(columnExists(connection, "human_task", "response_max_value_count"));
+            assertTrue(columnExists(connection, "human_task", "response_max_text_length"));
+            assertTrue(columnExists(connection, "human_task", "response_max_key_length"));
+            assertTrue(columnExists(connection, "human_task", "write_attempts"));
             assertEquals(1, indexCount(connection, "human_task_live_correlation"));
             assertEquals(1, historyRows(connection, humanTaskVersion));
             assertEquals(SqliteSchema.currentVersion(), SqliteSchema.migrate(connection, CLOCK));

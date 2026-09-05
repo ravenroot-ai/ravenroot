@@ -10,6 +10,7 @@ import ai.ravenroot.core.graph.ReservedGraphProperties;
 
 import java.math.BigDecimal;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -198,6 +199,7 @@ public final class BehaviorPropertySchema {
 
         requireType(node, property, value);
         requireAllowedValue(node, property, value);
+        requireBounds(node, property, value);
     }
 
     /**
@@ -314,6 +316,44 @@ public final class BehaviorPropertySchema {
         }
         throw new BehaviorPropertyException(node.id(), property.name(),
                 "must be one of " + allowed + " but was '" + value + "'");
+    }
+
+    private static void requireBounds(GraphNode node, NodePropertyDescriptor property, String value) {
+        if (!property.minimumValue().isEmpty() || !property.maximumValue().isEmpty()) {
+            BigDecimal parsed = new BigDecimal(value);
+            if (!property.minimumValue().isEmpty()
+                    && parsed.compareTo(new BigDecimal(property.minimumValue())) < 0) {
+                throw new BehaviorPropertyException(node.id(), property.name(),
+                        "must be at least " + property.minimumValue());
+            }
+            if (!property.maximumValue().isEmpty()
+                    && parsed.compareTo(new BigDecimal(property.maximumValue())) > 0) {
+                throw new BehaviorPropertyException(node.id(), property.name(),
+                        "must be at most " + property.maximumValue());
+            }
+        }
+        if (property.maximumUtf8Bytes() > 0
+                && value.getBytes(StandardCharsets.UTF_8).length > property.maximumUtf8Bytes()) {
+            throw new BehaviorPropertyException(node.id(), property.name(),
+                    "exceeds " + property.maximumUtf8Bytes() + " UTF-8 bytes");
+        }
+        if (property.maximumItems() > 0 || property.maximumItemUtf8Bytes() > 0) {
+            String[] items = value.split(",", -1);
+            if (property.maximumItems() > 0 && items.length > property.maximumItems()) {
+                throw new BehaviorPropertyException(node.id(), property.name(),
+                        "contains more than " + property.maximumItems() + " items");
+            }
+            if (property.maximumItemUtf8Bytes() > 0) {
+                for (String item : items) {
+                    if (item.strip().getBytes(StandardCharsets.UTF_8).length
+                            > property.maximumItemUtf8Bytes()) {
+                        throw new BehaviorPropertyException(node.id(), property.name(),
+                                "contains an item above " + property.maximumItemUtf8Bytes()
+                                        + " UTF-8 bytes");
+                    }
+                }
+            }
+        }
     }
 
     private static BehaviorPropertyException typeFailure(GraphNode node, NodePropertyDescriptor property,

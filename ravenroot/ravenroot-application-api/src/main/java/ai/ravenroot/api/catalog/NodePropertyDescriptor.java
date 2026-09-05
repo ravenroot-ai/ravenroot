@@ -14,6 +14,11 @@ import java.util.List;
  * @param adapterBinding whether this required value selects deployment-owned adapter configuration
  * @param visibleWhen condition controlling editor visibility; {@code null} is unconditional
  * @param requiredWhen condition controlling requiredness; {@code null} retains {@code required}
+ * @param minimumValue inclusive numeric minimum, or empty when not declared
+ * @param maximumValue inclusive numeric maximum, or empty when not declared
+ * @param maximumUtf8Bytes maximum encoded value bytes, or zero when not declared
+ * @param maximumItems maximum comma-separated items, or zero when not declared
+ * @param maximumItemUtf8Bytes maximum bytes per comma-separated item, or zero when not declared
  */
 public record NodePropertyDescriptor(
         String name,
@@ -25,7 +30,12 @@ public record NodePropertyDescriptor(
         List<String> allowedValues,
         boolean adapterBinding,
         PropertyCondition visibleWhen,
-        PropertyCondition requiredWhen) {
+        PropertyCondition requiredWhen,
+        String minimumValue,
+        String maximumValue,
+        int maximumUtf8Bytes,
+        int maximumItems,
+        int maximumItemUtf8Bytes) {
 
     /**
      * Normalizes presentation fields and takes immutable allowed-value snapshots while rejecting the
@@ -47,10 +57,56 @@ public record NodePropertyDescriptor(
         description = description == null ? "" : description;
         defaultValue = defaultValue == null ? "" : defaultValue;
         allowedValues = allowedValues == null ? List.of() : List.copyOf(allowedValues);
+        minimumValue = minimumValue == null ? "" : minimumValue.strip();
+        maximumValue = maximumValue == null ? "" : maximumValue.strip();
+        if ((!minimumValue.isEmpty() || !maximumValue.isEmpty())
+                && type != NodePropertyType.INTEGER && type != NodePropertyType.DECIMAL) {
+            throw new IllegalArgumentException("Numeric bounds require an integer or decimal property: " + name);
+        }
+        try {
+            java.math.BigDecimal minimum = minimumValue.isEmpty() ? null
+                    : new java.math.BigDecimal(minimumValue);
+            java.math.BigDecimal maximum = maximumValue.isEmpty() ? null
+                    : new java.math.BigDecimal(maximumValue);
+            if (minimum != null && maximum != null && minimum.compareTo(maximum) > 0) {
+                throw new IllegalArgumentException("Property minimum exceeds maximum: " + name);
+            }
+            if (!defaultValue.isBlank() && (minimum != null || maximum != null)) {
+                java.math.BigDecimal fallback = new java.math.BigDecimal(defaultValue);
+                if ((minimum != null && fallback.compareTo(minimum) < 0)
+                        || (maximum != null && fallback.compareTo(maximum) > 0)) {
+                    throw new IllegalArgumentException("Property default is outside its bounds: " + name);
+                }
+            }
+        } catch (NumberFormatException malformed) {
+            throw new IllegalArgumentException("Property numeric bound or default is malformed: " + name);
+        }
+        if (maximumUtf8Bytes < 0 || maximumItems < 0 || maximumItemUtf8Bytes < 0) {
+            throw new IllegalArgumentException("Property text bounds cannot be negative: " + name);
+        }
         // Absent means UNCONDITIONAL -- always visible, required exactly as declared. Every catalog
         // authored before conditional properties existed lands here, which makes the addition compatible without a
         // migration. Absent is not "a condition that always holds": the two are different statements
         // and only one of them is what an older descriptor meant.
+    }
+
+    /** Compatibility constructor preserving the canonical shape before numeric bounds. */
+    public NodePropertyDescriptor(String name, String displayName, NodePropertyType type,
+                                  boolean required, String description, String defaultValue,
+                                  List<String> allowedValues, boolean adapterBinding,
+                                  PropertyCondition visibleWhen, PropertyCondition requiredWhen) {
+        this(name, displayName, type, required, description, defaultValue, allowedValues,
+                adapterBinding, visibleWhen, requiredWhen, "", "", 0, 0, 0);
+    }
+
+    /** Compatibility constructor preserving the canonical shape before text bounds. */
+    public NodePropertyDescriptor(String name, String displayName, NodePropertyType type,
+                                  boolean required, String description, String defaultValue,
+                                  List<String> allowedValues, boolean adapterBinding,
+                                  PropertyCondition visibleWhen, PropertyCondition requiredWhen,
+                                  String minimumValue, String maximumValue) {
+        this(name, displayName, type, required, description, defaultValue, allowedValues,
+                adapterBinding, visibleWhen, requiredWhen, minimumValue, maximumValue, 0, 0, 0);
     }
 
     /**
@@ -80,7 +136,7 @@ public record NodePropertyDescriptor(
                                   String description, String defaultValue, List<String> allowedValues,
                                   boolean adapterBinding) {
         this(name, displayName, type, required, description, defaultValue, allowedValues, adapterBinding,
-                null, null);
+                null, null, "", "", 0, 0, 0);
     }
 
     /**
@@ -126,6 +182,26 @@ public record NodePropertyDescriptor(
     public static NodePropertyDescriptor optional(String name, String displayName, NodePropertyType type,
                                                    String description, String defaultValue) {
         return new NodePropertyDescriptor(name, displayName, type, false, description, defaultValue, List.of(), false);
+    }
+
+    /** Creates an optional numeric property with an authoritative inclusive range. */
+    public static NodePropertyDescriptor optionalBounded(String name, String displayName,
+                                                          NodePropertyType type, String description,
+                                                          String defaultValue, long minimum,
+                                                          long maximum) {
+        return new NodePropertyDescriptor(name, displayName, type, false, description, defaultValue,
+                List.of(), false, null, null, Long.toString(minimum), Long.toString(maximum));
+    }
+
+    /** Creates a text property with encoded and optional comma-separated item budgets. */
+    public static NodePropertyDescriptor boundedText(String name, String displayName,
+                                                      NodePropertyType type, boolean required,
+                                                      String description, String defaultValue,
+                                                      int maximumUtf8Bytes, int maximumItems,
+                                                      int maximumItemUtf8Bytes) {
+        return new NodePropertyDescriptor(name, displayName, type, required, description, defaultValue,
+                List.of(), false, null, null, "", "", maximumUtf8Bytes, maximumItems,
+                maximumItemUtf8Bytes);
     }
 
     /**

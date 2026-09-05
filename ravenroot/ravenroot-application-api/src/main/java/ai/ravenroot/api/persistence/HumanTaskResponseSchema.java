@@ -16,8 +16,8 @@ import java.util.Objects;
  */
 public record HumanTaskResponseSchema(String contentType, String schema, String schemaVersion,
                                       PayloadKind kind, int maxBytes) {
-    /** Maximum encoded schema size. */
-    public static final int MAX_SCHEMA_UTF8_BYTES = 16 * 1024;
+    /** Technical schema ceiling; the operator policy normally supplies a smaller maximum. */
+    public static final int MAX_SCHEMA_UTF8_BYTES = HumanTaskPolicy.HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES;
 
     /** Validates the bounded response contract. */
     public HumanTaskResponseSchema {

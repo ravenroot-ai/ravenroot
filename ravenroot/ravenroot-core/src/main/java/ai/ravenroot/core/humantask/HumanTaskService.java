@@ -8,7 +8,6 @@ import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadJson;
-import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.EventEnvelope;
@@ -22,6 +21,7 @@ import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
@@ -46,6 +46,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletionException;
@@ -57,16 +58,20 @@ import java.util.stream.Collectors;
 public final class HumanTaskService {
     public static final String HANDLER_NAME = "human-task";
     private static final String EVENT_CONTENT_TYPE = "application/vnd.ravenroot.human-task-event+json";
-    private static final int MAX_WRITE_ATTEMPTS = 3;
-
     private final ExecutionStore store;
     private final Clock clock;
+    private final HumanTaskPolicy policy;
     private final Map<ExecutionKey, LiveBinding> liveRecorders = new ConcurrentHashMap<>();
     private volatile Set<String> recoverableTenants;
 
     public HumanTaskService(ExecutionStore store, Clock clock) {
+        this(store, clock, HumanTaskPolicy.DEFAULTS);
+    }
+
+    public HumanTaskService(ExecutionStore store, Clock clock, HumanTaskPolicy policy) {
         this.store = Objects.requireNonNull(store, "store");
         this.clock = Objects.requireNonNull(clock, "clock");
+        this.policy = Objects.requireNonNull(policy, "policy");
         if (!store.supports(StoreCapability.DURABLE)
                 || !store.supports(StoreCapability.HUMAN_TASKS)
                 || !store.supports(StoreCapability.DURABLE_HANDLERS)
@@ -130,7 +135,7 @@ public final class HumanTaskService {
                 "human-task:" + message.attemptId(), definition.metadata(), definition.responseSchema(),
                 definition.responderRequirements(), message.security(), recorder.graphVersionPin(),
                 definition.escalationDelay().map(now::plus), now.plus(definition.expiryDelay()),
-                definition.reentryMapping(), continuationVersion, continuation,
+                definition.reentryMapping(), definition.executionLimits(), continuationVersion, continuation,
                 ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation));
         DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         if (existing != null) {
@@ -164,9 +169,9 @@ public final class HumanTaskService {
     public HumanTaskPage inbox(RequestContext context, HumanTaskQuery query) {
         Objects.requireNonNull(context, "context");
         Objects.requireNonNull(query, "query");
-        if (query.limit() < 1 || query.limit() > store.maxHumanTaskPageSize()) {
+        if (query.limit() < 1 || query.limit() > policy.inboxMaxPageSize()) {
             throw new IllegalArgumentException("human-task page limit must be between 1 and "
-                    + store.maxHumanTaskPageSize());
+                    + policy.inboxMaxPageSize());
         }
         return await(store.listHumanTasks(context.tenantId(), query));
     }
@@ -174,6 +179,24 @@ public final class HumanTaskService {
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response) {
         return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response);
+    }
+
+    /**
+     * Returns the persisted raw-envelope body budget only after tenant lookup and responder
+     * authorization. An empty result deliberately combines absent and unauthorized tasks so the
+     * HTTP adapter cannot disclose either task existence or its pinned policy before settlement.
+     */
+    public OptionalInt authorizedResponseBodyLimit(RequestContext context, UUID taskId) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(taskId, "taskId");
+        DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
+        if (task == null) return OptionalInt.empty();
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        if (!task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
+            return OptionalInt.empty();
+        }
+        return OptionalInt.of(task.request().executionLimits().decisionBodyMaxBytes());
     }
 
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration) {
@@ -299,8 +322,8 @@ public final class HumanTaskService {
             return false;
         }
         try {
-            PayloadEnvelope envelope = PayloadJson.readEnvelope(response.bytes(), new PayloadLimits(
-                    schema.maxBytes(), 32, 1024, 4096, 16 * 1024, 256));
+            PayloadEnvelope envelope = PayloadJson.readEnvelope(response.bytes(),
+                    task.request().executionLimits().responsePayload());
             return schema.schema().equals(envelope.schema())
                     && schema.schemaVersion().equals(envelope.schemaVersion())
                     && schema.kind() == envelope.kind();
@@ -311,7 +334,8 @@ public final class HumanTaskService {
 
     private HumanTaskResult nonTerminal(ExecutionKey key, UUID taskId, long expectedGeneration,
                                         String correlationId, Long fencingToken) {
-        for (int attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
+        int maxAttempts = originalWriteAttempts(key, taskId);
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             DurableHumanTask task = await(store.loadHumanTask(key.tenantId(), taskId))
                     .filter(candidate -> candidate.key().equals(key)).orElse(null);
             if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
@@ -339,7 +363,7 @@ public final class HumanTaskService {
                         await(store.loadHumanTask(key.tenantId(), taskId)).orElseThrow(), null);
             } catch (ExecutionStoreException conflict) {
                 if (conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
-                        && attempt < MAX_WRITE_ATTEMPTS) continue;
+                        && attempt < maxAttempts) continue;
                 throw conflict;
             }
         }
@@ -349,7 +373,8 @@ public final class HumanTaskService {
     private HumanTaskResult commitTerminal(DurableHumanTask original, long expectedGeneration,
                                            HumanTaskStatus target, String actor, OpaquePayload response,
                                            String correlationId, Long fencingToken) {
-        for (int attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
+        int maxAttempts = original.request().executionLimits().writeAttempts();
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
                     original.request().taskId())).orElse(null);
             if (task == null || !task.key().equals(original.key())) {
@@ -422,7 +447,7 @@ public final class HumanTaskService {
                         resumeTraversalId);
             } catch (ExecutionStoreException conflict) {
                 if (conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict
-                        && attempt < MAX_WRITE_ATTEMPTS) continue;
+                        && attempt < maxAttempts) continue;
                 if (conflict.failure() instanceof ExecutionStoreFailure.HumanTaskNotResolvable refusal) {
                     if (refusal.requested() == HumanTaskStatus.EXPIRED
                             && target != HumanTaskStatus.EXPIRED) {
@@ -431,7 +456,7 @@ public final class HumanTaskService {
                         return commitTerminal(current, current.generation(), HumanTaskStatus.EXPIRED,
                                 "", null, correlationId, fencingToken);
                     }
-                    if (attempt < MAX_WRITE_ATTEMPTS) continue;
+                    if (attempt < maxAttempts) continue;
                 }
                 throw conflict;
             }
@@ -440,7 +465,8 @@ public final class HumanTaskService {
     }
 
     private void auditOnly(DurableHumanTask task, String type, String correlationId) {
-        for (int attempt = 1; attempt <= MAX_WRITE_ATTEMPTS; attempt++) {
+        int maxAttempts = task.request().executionLimits().writeAttempts();
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             StoredProcessInstance stored = load(task.key());
             try {
                 await(store.apply(ExecutionBatch.to(task.key())
@@ -451,9 +477,16 @@ public final class HumanTaskService {
                 return;
             } catch (ExecutionStoreException conflict) {
                 if (!(conflict.failure() instanceof ExecutionStoreFailure.ConcurrencyConflict)
-                        || attempt == MAX_WRITE_ATTEMPTS) throw conflict;
+                        || attempt == maxAttempts) throw conflict;
             }
         }
+    }
+
+    private int originalWriteAttempts(ExecutionKey key, UUID taskId) {
+        DurableHumanTask task = await(store.loadHumanTask(key.tenantId(), taskId))
+                .filter(candidate -> candidate.key().equals(key)).orElse(null);
+        return task == null ? policy.writeAttempts()
+                : task.request().executionLimits().writeAttempts();
     }
 
     private boolean exactRedelivery(DurableHumanTask task, HumanTaskStatus target,

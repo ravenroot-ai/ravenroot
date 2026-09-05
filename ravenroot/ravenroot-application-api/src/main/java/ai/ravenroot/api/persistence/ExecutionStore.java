@@ -516,7 +516,7 @@ public interface ExecutionStore extends AutoCloseable {
      * @return positive implementation limit.
      */
     default int maxHumanTaskPageSize() {
-        return 100;
+        return HumanTaskPolicy.DEFAULTS.inboxMaxPageSize();
     }
 
     /**

@@ -70,8 +70,19 @@ public final class BehaviorRegistry {
                                             PublicationPolicyResolver publicationPolicies,
                                             PublicationAuditSink publicationAudit,
                                             ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
+        return standard(environment, publicationPolicies, publicationAudit, humanTasks,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    /** Builds the core catalog with the exact Human Task policy used by the running server. */
+    public static BehaviorRegistry standard(BehaviorEnvironment environment,
+                                            PublicationPolicyResolver publicationPolicies,
+                                            PublicationAuditSink publicationAudit,
+                                            ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                            ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         var registry = new BehaviorRegistry();
-        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit, humanTasks)
+        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit,
+                        humanTasks, humanTaskPolicy)
                 .forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
         return registry;
     }

@@ -30,6 +30,14 @@ export function nodePatchChanged(node, patch) {
   });
 }
 
+export function edgePatchChanged(edge, patch) {
+  if (!edge || !patch) return false;
+  return Object.entries(patch).some(([key, value]) => {
+    if (key === 'properties' || key === 'propertyTypes') return !sameRecord(edge[key], value);
+    return edge[key] !== value;
+  });
+}
+
 function sameRecord(left = {}, right = {}) {
   const leftKeys = Object.keys(left);
   const rightKeys = Object.keys(right);

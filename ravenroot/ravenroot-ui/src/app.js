@@ -294,6 +294,7 @@ import { requestGraphLifecycle } from './graph-lifecycle.js';
 import { createAppCommands, createNodeActionCatalog } from './app-commands.js';
 import { uiText } from './ui-text.js';
 import {
+  edgePatchChanged,
   nodePatchChanged,
   readInspectorAutosavePreference,
   writeInspectorAutosavePreference,
@@ -2443,6 +2444,9 @@ function replaceActiveDocumentFromText(
 
 function activateDocument(id) {
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
+  if (inspectorDraft?.form.isConnected) {
+    return runAfterInspectorDraft(() => activateDocument(id));
+  }
   retireElementSelectionGesture(cy);
   invalidateStableSelection();
   cancelNodeMoveGesture();
@@ -4655,7 +4659,7 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
   const edges = cy.edges(':selected');
   const desiredIds = [...nodes.map(node => node.id()), ...edges.map(edge => edge.id())];
   if (!skipDraftGuard && modifyEnabled && inspectorDraft?.form.isConnected
-      && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.nodeId) return;
+      && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.elementId) return;
   if (!skipDraftGuard && guardInspectorSelectionChange(desiredIds)) return;
   if (nodes.length > 1 && edges.empty()) {
     showMultiNodeInfo(nodes.map(node => node.id()));
@@ -4974,7 +4978,7 @@ function readNodeEditorPatch(form, model) {
 }
 
 function inspectNodeDraft(draft = inspectorDraft) {
-  const model = draft && graphData?.nodeMap?.[draft.nodeId];
+  const model = draft && graphData?.nodeMap?.[draft.elementId];
   if (!draft || !model || draft.documentId !== workspace.activeId || !draft.form.isConnected) {
     return { valid: false, changed: false, patch: null, model: null };
   }
@@ -4990,6 +4994,36 @@ function inspectNodeDraft(draft = inspectorDraft) {
   } catch {
     return { valid: false, changed: draft.dirty, patch: null, model };
   }
+}
+
+function inspectEdgeDraft(draft = inspectorDraft) {
+  const model = draft && graphData?.edges?.find(edge => edge.id === draft.elementId);
+  if (!draft || !model || draft.documentId !== workspace.activeId || !draft.form.isConnected) {
+    return { valid: false, changed: false, patch: null, model: null };
+  }
+  if (!draft.form.checkValidity()) return { valid: false, changed: draft.dirty, patch: null, model };
+  const id = String(draft.form.elements.id.value ?? '');
+  const source = String(draft.form.elements.source.value || '');
+  const target = String(draft.form.elements.target.value || '');
+  if (!validateEdgeId(graphData, id, { existingId: model.id }).ok
+      || !validateEdgeConnection(graphData, { source, target, edgeId: model.id }).ok) {
+    return { valid: false, changed: draft.dirty, patch: null, model };
+  }
+  try {
+    const patch = readEdgeEditorPatch(draft.form, model);
+    return {
+      valid: true,
+      changed: draft.baseline ? edgePatchChanged(draft.baseline, patch) : draft.dirty,
+      patch,
+      model,
+    };
+  } catch {
+    return { valid: false, changed: draft.dirty, patch: null, model };
+  }
+}
+
+function inspectInspectorDraft(draft = inspectorDraft) {
+  return draft?.elementType === 'edge' ? inspectEdgeDraft(draft) : inspectNodeDraft(draft);
 }
 
 /**
@@ -5027,6 +5061,16 @@ function syncAutosavedNodeRenderer(nodeId) {
   }
 }
 
+function syncAutosavedEdgeRenderer(edgeId) {
+  const element = cy?.getElementById(edgeId);
+  if (!element?.nonempty()) return;
+  const rendered = buildElements(graphData).find(candidate =>
+    candidate.data?.id === edgeId && Object.hasOwn(candidate.data, 'source'));
+  if (!rendered) return;
+  element.move({ source: rendered.data.source, target: rendered.data.target });
+  element.data(rendered.data);
+}
+
 function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
   if (!draft) return false;
   clearTimeout(draft.timer);
@@ -5035,30 +5079,54 @@ function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
   draft.dirty = assessment.changed;
   if (!assessment.valid) return false;
   if (!assessment.changed) return true;
-  const command = updateNodeFields(graphData, draft.nodeId, assessment.patch, editHistory, { coalesceKey });
+  const command = updateNodeFields(graphData, draft.elementId, assessment.patch, editHistory, { coalesceKey });
   if (!command) return false;
   draft.baseline = structuredClone(assessment.patch);
   draft.dirty = false;
-  syncAutosavedNodeRenderer(draft.nodeId);
+  syncAutosavedNodeRenderer(draft.elementId);
   updateHistoryUi();
   scheduleProgramGraphReadiness(workspace.active);
   return true;
 }
 
-function scheduleNodeDraftCommit(draft, immediate = false) {
+function commitEdgeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
+  if (!draft) return false;
+  clearTimeout(draft.timer);
+  draft.timer = null;
+  const assessment = inspectEdgeDraft(draft);
+  draft.dirty = assessment.changed;
+  if (!assessment.valid) return false;
+  if (!assessment.changed) return true;
+  const command = updateEdgeFields(graphData, draft.elementId, assessment.patch, editHistory,
+    { coalesceKey });
+  if (!command) return false;
+  draft.baseline = structuredClone(assessment.patch);
+  draft.dirty = false;
+  syncAutosavedEdgeRenderer(draft.elementId);
+  updateHistoryUi();
+  return true;
+}
+
+function commitInspectorDraft(draft = inspectorDraft, options = {}) {
+  return draft?.elementType === 'edge'
+    ? commitEdgeDraft(draft, options) : commitNodeDraft(draft, options);
+}
+
+function scheduleInspectorDraftCommit(draft, immediate = false) {
   if (!draft || draft !== inspectorDraft || !inspectorAutosave) return;
   clearTimeout(draft.timer);
-  const commit = () => commitNodeDraft(draft, { coalesceKey: draft.focusKey });
+  const commit = () => commitInspectorDraft(draft, { coalesceKey: draft.focusKey });
   if (immediate) commit();
   else draft.timer = setTimeout(commit, 180);
 }
 
-function bindNodeInspectorDraft(form, model, creating) {
+function bindInspectorDraft(form, model, elementType, creating) {
   if (creating) return;
   clearTimeout(inspectorDraft?.timer);
   const draft = {
     form,
-    nodeId: model.id,
+    elementType,
+    elementId: model.id,
     documentId: workspace.activeId,
     dirty: false,
     baseline: null,
@@ -5068,32 +5136,36 @@ function bindNodeInspectorDraft(form, model, creating) {
     lastFocusControl: null,
   };
   if (form.checkValidity()) {
-    try { draft.baseline = readNodeEditorPatch(form, model); } catch { /* invalid stays untouched */ }
+    try {
+      draft.baseline = elementType === 'edge'
+        ? readEdgeEditorPatch(form, model) : readNodeEditorPatch(form, model);
+    } catch { /* invalid stays untouched */ }
   }
   inspectorDraft = draft;
   form.addEventListener('focusin', event => {
-    if (!event.target.matches('input:not([readonly]), textarea')) return;
+    if (!event.target.matches('input:not([readonly]), textarea, select')) return;
+    draft.lastFocusControl = event.target;
+    if (!event.target.matches('input:not([readonly]):not([type="checkbox"]):not([type="radio"]), textarea')) return;
     if (draft.focusControl !== event.target) {
       draft.focusControl = event.target;
-      draft.lastFocusControl = event.target;
-      draft.focusKey = `node:${model.id}:edit:${++inspectorEditSequence}`;
+      draft.focusKey = `${elementType}:${model.id}:edit:${++inspectorEditSequence}`;
     }
   });
   form.addEventListener('focusout', event => {
     if (event.target !== draft.focusControl) return;
-    if (inspectorAutosave) commitNodeDraft(draft, { coalesceKey: draft.focusKey });
+    if (inspectorAutosave) commitInspectorDraft(draft, { coalesceKey: draft.focusKey });
     draft.focusControl = null;
     draft.focusKey = null;
   });
   form.addEventListener('input', () => {
     draft.dirty = true;
-    draft.dirty = inspectNodeDraft(draft).changed;
-    scheduleNodeDraftCommit(draft, false);
+    draft.dirty = inspectInspectorDraft(draft).changed;
+    scheduleInspectorDraftCommit(draft, false);
   });
   form.addEventListener('change', () => {
     draft.dirty = true;
-    draft.dirty = inspectNodeDraft(draft).changed;
-    scheduleNodeDraftCommit(draft, true);
+    draft.dirty = inspectInspectorDraft(draft).changed;
+    scheduleInspectorDraftCommit(draft, true);
   });
 }
 
@@ -5104,9 +5176,9 @@ function retireInspectorDraft(form = null) {
 }
 
 function restoreDraftSelection(draft) {
-  const node = cy?.getElementById(draft.nodeId);
-  if (!node?.nonempty()) return;
-  applyStableSelection(cy, [draft.nodeId]);
+  const element = cy?.getElementById(draft.elementId);
+  if (!element?.nonempty()) return;
+  applyStableSelection(cy, [draft.elementId]);
 }
 
 function guardInspectorSelectionChange(desiredIds) {
@@ -5115,12 +5187,12 @@ function guardInspectorSelectionChange(desiredIds) {
     if (pendingInspectorTransition) restoreDraftSelection(pendingInspectorTransition.draft);
     return Boolean(pendingInspectorTransition);
   }
-  if (desiredIds.length === 1 && desiredIds[0] === draft.nodeId) return false;
+  if (desiredIds.length === 1 && desiredIds[0] === draft.elementId) return false;
   clearTimeout(draft.timer);
   draft.timer = null;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
-    if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+    if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
       openInspectorUnsavedDialog(draft, desiredIds, false);
       return true;
     }
@@ -5159,7 +5231,7 @@ function completeInspectorTransition(action) {
   const pending = pendingInspectorTransition;
   if (!pending) return false;
   const dialog = document.getElementById('inspector-unsaved-dialog');
-  if (action === 'save' && !commitNodeDraft(pending.draft, { coalesceKey: pending.draft.focusKey })) {
+  if (action === 'save' && !commitInspectorDraft(pending.draft, { coalesceKey: pending.draft.focusKey })) {
     document.getElementById('inspector-unsaved-description').textContent =
       uiText('inspector.unsaved.invalidDescription');
     return false;
@@ -5190,10 +5262,10 @@ function runAfterInspectorDraft(action, { deferredAction = action, deferredResul
   if (!draft?.form.isConnected) return Boolean(action());
   clearTimeout(draft.timer);
   draft.timer = null;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
-    if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
-      openInspectorUnsavedDialog(draft, [draft.nodeId], false);
+    if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
+      openInspectorUnsavedDialog(draft, [draft.elementId], false);
       pendingInspectorTransition.complete = deferredAction;
       return deferredResult;
     }
@@ -5204,7 +5276,7 @@ function runAfterInspectorDraft(action, { deferredAction = action, deferredResul
     retireInspectorDraft(draft.form);
     return Boolean(action());
   }
-  openInspectorUnsavedDialog(draft, [draft.nodeId], assessment.valid);
+  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid);
   pendingInspectorTransition.complete = deferredAction;
   return deferredResult;
 }
@@ -5334,9 +5406,9 @@ function renderNodeForm(model, creating) {
     } else {
       const draft = inspectorDraft?.form === form ? inspectorDraft : null;
       if (draft) {
-        const assessment = inspectNodeDraft(draft);
+        const assessment = inspectInspectorDraft(draft);
         if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
-        if (assessment.changed && !commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+        if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
           return showFormError(form, 'This node is no longer part of the document');
         }
       } else if (nodePatchChanged(model, patch)
@@ -5361,7 +5433,7 @@ function renderNodeForm(model, creating) {
     });
   });
   bindProgramWorkspace(form, model);
-  bindNodeInspectorDraft(form, model, creating);
+  bindInspectorDraft(form, model, 'node', creating);
 }
 
 function catalogDescriptor(behavior) {
@@ -7020,6 +7092,37 @@ function applyProgramBuildResult(form, panel, result) {
   if (build && result.artifactId) build.textContent = 'Rebuild';
 }
 
+function readEdgeEditorPatch(form, model) {
+  const values = new FormData(form);
+  const custom = readPropertyEditor(form);
+  const failureRouteControl = form.querySelector('[data-failure-route-control]');
+  const boxGoverns = !failureRouteControl.hidden;
+  const boxTicked = boxGoverns && values.get('failureRoute') === 'on';
+  const outcome = boxTicked
+    ? DEFAULT_EDGE_OUTCOME
+    : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
+  const declaresFailureRoute = boxGoverns
+    ? boxTicked
+    : form.dataset.preserveImplicitFailureDeclaration === 'true'
+      && outcome === DEFAULT_EDGE_OUTCOME;
+  setEdgeFailureRoute(custom, declaresFailureRoute);
+  return {
+    source: String(values.get('source')),
+    target: String(values.get('target')),
+    outcome,
+    command: String(values.get('command') || '').trim().toLowerCase(),
+    label: outcome,
+    edgeType: outcomeToEdgeType(outcome),
+    edgeName: String(values.get('edgeName') || '').trim(),
+    status: Number(values.get('status')) || 0,
+    trafficWeight: values.get('trafficWeight') === '' ? null : Number(values.get('trafficWeight')),
+    parallel: values.get('parallel') === 'on',
+    description: String(values.get('description') || '').trim(),
+    properties: custom.properties,
+    propertyTypes: custom.propertyTypes,
+  };
+}
+
 function renderEdgeForm(model, creating) {
   contextualHelp.dismiss();
   const extras = additionalProperties(model, 'edge');
@@ -7061,6 +7164,23 @@ function renderEdgeForm(model, creating) {
   const form = document.getElementById('edge-editor');
   form.elements.source.value = model.source || graphData.nodes[0]?.id || '';
   form.elements.target.value = model.target || graphData.nodes[1]?.id || graphData.nodes[0]?.id || '';
+  form.dataset.preserveImplicitFailureDeclaration = String(
+    declared && graphData.nodeMap?.[model.target]?.kind === 'ERROR',
+  );
+  const forgetOriginalFailureDeclaration = event => {
+    if (event.target.matches('[name="target"], [name="outcome"], [name="failureRoute"]')) {
+      form.dataset.preserveImplicitFailureDeclaration = 'false';
+    }
+    if (event.target.matches('[name="outcome"]')
+        && graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR') {
+      // The checkbox is hidden for an Error target, but an imported explicit declaration can leave
+      // it checked. Naming an outcome removes that declaration; clear its hidden control state too,
+      // so moving the edge to an ordinary target cannot revive the route the author just replaced.
+      form.elements.failureRoute.checked = false;
+    }
+  };
+  form.addEventListener('input', forgetOriginalFailureDeclaration);
+  form.addEventListener('change', forgetOriginalFailureDeclaration);
 
   // There are three states an edge can be in. The Inspector STATES which one rather than leaving it
   // to be inferred from a name, so the panel always carries a sentence naming it.
@@ -7089,24 +7209,30 @@ function renderEdgeForm(model, creating) {
   let restorableOutcome = failureRoute
     ? DEFAULT_EDGE_OUTCOME
     : String(model.outcome || DEFAULT_EDGE_OUTCOME);
+  let coupledTarget = String(form.elements.target.value || '');
   function targetIsErrorNode() {
     return graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR';
   }
   function applyFailureRouteCoupling() {
     const errorTarget = targetIsErrorNode();
-    // The checkbox is meaningless against an ERROR target, and a stale tick left over from before
-    // the target changed would silently re-enter the model on submit.
+    const target = String(form.elements.target.value || '');
+    const targetChanged = target !== coupledTarget;
+    coupledTarget = target;
+    // The checkbox is meaningless against an ERROR target. Clear it when an author moves a declared
+    // route there, which normalizes the route to the target's implicit form. Keep an imported
+    // declaration in the hidden control until the author changes routing intent: if they first move
+    // it to an ordinary target, the visible checkbox must faithfully show the document's declaration.
     controlRow.hidden = errorTarget;
-    const clearedByTarget = errorTarget && failureRouteBox.checked;
-    if (errorTarget) failureRouteBox.checked = false;
+    const clearedByTarget = errorTarget && targetChanged && failureRouteBox.checked;
+    if (clearedByTarget) failureRouteBox.checked = false;
     const explicitOutcome = errorTarget
       && String(outcomeField.value || DEFAULT_EDGE_OUTCOME).trim() !== DEFAULT_EDGE_OUTCOME;
     const isFailureRoute = errorTarget ? !explicitOutcome : failureRouteBox.checked;
 
-    if (failureRouteBox.checked && !outcomeField.readOnly) {
+    if (!errorTarget && failureRouteBox.checked && !outcomeField.readOnly) {
       restorableOutcome = String(outcomeField.value || DEFAULT_EDGE_OUTCOME);
     }
-    if (failureRouteBox.checked) {
+    if (!errorTarget && failureRouteBox.checked) {
       outcomeField.value = DEFAULT_EDGE_OUTCOME;
       outcomeField.readOnly = true;
       outcomeField.setAttribute('aria-describedby', 'edge-kind-state');
@@ -7315,69 +7441,40 @@ function renderEdgeForm(model, creating) {
     // leading/trailing whitespace is significant and validated without normalization.
     const id = String(values.get('id') || '');
     if (creating && graphData.edges.some(edge => edge.id === id)) return showFormError(form, `Edge ID ${id} already exists`);
-    const custom = readPropertyEditor(form);
-    // When the checkbox governs, it is the authority on BOTH halves of the pair, so the
-    // outcome is forced back to the default here as well as held there in the field: a form can be
-    // submitted by Enter from another field, and the two states must not be able to disagree on the
-    // way to the model.
-    //
-    // When it does NOT govern -- an `ERROR` target, where the implicit failure-route default decides -- an explicit
-    // declaration already on the edge has to be re-applied by hand or it is lost:
-    // `readPropertyEditor` rebuilds the bag from the visible rows, and `failure.route` deliberately
-    // has no row. It is re-applied only while the edge is still a failure route, though. Naming an
-    // outcome against an `ERROR` target IS how an author overrides the default, and carrying the
-    // declaration past that override would hand the engine `failure.route` together with an
-    // explicit outcome -- the one combination it refuses AT LOAD. That would move the error from
-    // the drawing to the run, introduced by the code intended to preserve the author's declaration.
-    const boxGoverns = !controlRow.hidden;
-    const boxTicked = boxGoverns && values.get('failureRoute') === 'on';
-    const outcome = boxTicked
-      ? DEFAULT_EDGE_OUTCOME
-      : (String(values.get('outcome') || DEFAULT_EDGE_OUTCOME).trim() || DEFAULT_EDGE_OUTCOME);
-    const declaresFailureRoute = boxGoverns
-      ? boxTicked
-      : edgeDeclaresFailureRoute(model) && outcome === DEFAULT_EDGE_OUTCOME;
-    setEdgeFailureRoute(custom, declaresFailureRoute);
-    const patch = {
-      source: String(values.get('source')),
-      target: String(values.get('target')),
-      outcome,
-      command: String(values.get('command') || '').trim().toLowerCase(),
-      label: outcome,
-      // Was an inline 'continue'/'default' split that didn't recognize 'failed' or
-      // 'completed', so an edge authored or edited through this form here didn't pick up the
-      // renderer's red-dashed/green style until a save-and-reload round trip re-parsed it.
-      // The failure classification is deliberately NOT repeated here: `classifyFailureRoutes` runs
-      // over the whole document inside `buildElements` on the rebuild below, and it is the only
-      // place that can see the target node's kind. Computing it twice is how the two answers
-      // eventually disagree.
-      edgeType: outcomeToEdgeType(outcome),
-      edgeName: String(values.get('edgeName') || '').trim(),
-      status: Number(values.get('status')) || 0,
-      trafficWeight: values.get('trafficWeight') === '' ? null : Number(values.get('trafficWeight')),
-      parallel: values.get('parallel') === 'on',
-      description: String(values.get('description') || '').trim(),
-      properties: custom.properties,
-      propertyTypes: custom.propertyTypes,
-    };
+    const patch = readEdgeEditorPatch(form, model);
     if (creating) {
-      const created = createEdge(id, patch.source, patch.target, outcome);
+      const created = createEdge(id, patch.source, patch.target, patch.outcome);
       Object.assign(created, patch);
       insertEdgeElement(graphData, created, editHistory);
-    } else if (!updateEdgeFields(graphData, model.id, patch, editHistory)) {
-      return showFormError(form, 'This edge is no longer part of the document');
+    } else {
+      const draft = inspectorDraft?.form === form ? inspectorDraft : null;
+      if (draft) {
+        const assessment = inspectInspectorDraft(draft);
+        if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
+        if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
+          return showFormError(form, 'This edge is no longer part of the document');
+        }
+      } else if (edgePatchChanged(model, patch)
+          && !updateEdgeFields(graphData, model.id, patch, editHistory)) {
+        return showFormError(form, 'This edge is no longer part of the document');
+      }
     }
+    retireInspectorDraft(form);
     rebuildGraph();
     updateHistoryUi();
     showEdgeInfo(cy.getElementById(id));
   });
   document.getElementById('delete-edge')?.addEventListener('click', () => {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return;
-    deleteElements(graphData, [], [model.id], editHistory);
-    rebuildGraph();
-    updateHistoryUi();
-    closeInfo();
+    runAfterInspectorDraft(() => {
+      deleteElements(graphData, [], [model.id], editHistory);
+      rebuildGraph();
+      updateHistoryUi();
+      closeInfo();
+      return true;
+    });
   });
+  bindInspectorDraft(form, model, 'edge', creating);
 }
 
 function propertyEditorHtml(id, properties) {
@@ -8035,13 +8132,13 @@ function redoEdit() {
 function finalizeInspectorBeforeHistory() {
   const draft = inspectorDraft;
   if (!draft?.form.isConnected) return true;
-  const assessment = inspectNodeDraft(draft);
+  const assessment = inspectInspectorDraft(draft);
   if (!assessment.changed) {
     retireInspectorDraft(draft.form);
     return true;
   }
   if (inspectorAutosave && assessment.valid
-      && commitNodeDraft(draft, { coalesceKey: draft.focusKey })) {
+      && commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
     retireInspectorDraft(draft.form);
     return true;
   }
@@ -8313,7 +8410,7 @@ function toggleModify({ skipDraftGuard = false } = {}) {
 function toggleInspectorAutosave() {
   inspectorAutosave = !inspectorAutosave;
   writeInspectorAutosavePreference(inspectorAutosave);
-  if (inspectorAutosave && inspectorDraft) scheduleNodeDraftCommit(inspectorDraft, true);
+  if (inspectorAutosave && inspectorDraft) scheduleInspectorDraftCommit(inspectorDraft, true);
   refreshCommands();
 }
 
@@ -12099,7 +12196,12 @@ function completeCloseDocument(id) {
   return true;
 }
 
-function requestCloseDocument(id, origin = document.activeElement) {
+function requestCloseDocument(id, origin = document.activeElement, { skipDraftGuard = false } = {}) {
+  if (!skipDraftGuard && workspace.activeId === id && inspectorDraft?.form.isConnected) {
+    return runAfterInspectorDraft(
+      () => requestCloseDocument(id, origin, { skipDraftGuard: true }),
+    );
+  }
   captureActiveDocument();
   const target = workspace.find(id);
   if (!target) return false;
@@ -12407,10 +12509,10 @@ function closeActiveDeploymentDialog(outcome) {
 }
 
 const commandRegistry = createCommandRegistry(createAppCommands({
-  newDocument: () => openDocument(),
-  openFile: () => document.getElementById('file-inp').click(),
-  replaceActive: () => document.getElementById('replace-file-inp').click(),
-  save: () => exportGraphML(),
+  newDocument: () => runAfterInspectorDraft(() => openDocument()),
+  openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
+  replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
+  save: () => runAfterInspectorDraft(() => exportGraphML()),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),
@@ -12867,8 +12969,8 @@ document.addEventListener('click', event => {
     const form = removeProperty.closest('form');
     removeProperty.closest('.property-row')?.remove();
     if (form === inspectorDraft?.form) {
-      inspectorDraft.dirty = inspectNodeDraft(inspectorDraft).changed;
-      scheduleNodeDraftCommit(inspectorDraft, true);
+      inspectorDraft.dirty = inspectInspectorDraft(inspectorDraft).changed;
+      scheduleInspectorDraftCommit(inspectorDraft, true);
     }
     return;
   }
@@ -12887,7 +12989,7 @@ document.addEventListener('click', event => {
   const action = control.dataset.action;
   if (action === 'fit') fitGraph();
   else if (action === 'help') toggleHelp();
-  else if (action === 'new-document') openDocument();
+  else if (action === 'new-document') runAfterInspectorDraft(() => openDocument());
   else if (action === 'modify') toggleModify();
   else if (action === 'connect') toggleConnect();
   else if (action === 'add-node') showAddNodeForm();

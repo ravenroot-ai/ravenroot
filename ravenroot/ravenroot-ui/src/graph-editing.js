@@ -229,7 +229,7 @@ export function updateNodePropertiesBatch(graph, entries, history = null) {
     `Edit properties on ${entries.length} selected nodes`), history);
 }
 
-export function updateEdgeFields(graph, id, patch, history = null) {
+export function updateEdgeFields(graph, id, patch, history = null, options = {}) {
   if (!canModifyGraph(graph)) return null;
   const edge = graph.edges.find(candidate => candidate.id === id);
   if (!edge) return null;
@@ -244,7 +244,7 @@ export function updateEdgeFields(graph, id, patch, history = null) {
     };
     if (!validateEdgeConnection(graph, proposal).ok) return null;
   }
-  return run(graph, updateEdgeCommand(id, patch, `Edit edge ${id}`), history);
+  return run(graph, updateEdgeCommand(id, patch, `Edit edge ${id}`), history, options);
 }
 
 // One drag gesture is one undo step, however many nodes moved. Entries whose coordinates did not

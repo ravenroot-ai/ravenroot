@@ -379,6 +379,54 @@ public abstract class ExecutionEngineContract {
         }
     }
 
+    /**
+     * Issue #104's central claim, exercised through the engine's own contract rather than through a
+     * hand-built {@code DurableExecutionResult} or a fresh {@code ExecutionResultRegistry}: a
+     * terminal outcome reached by a real traversal, on a real engine, must be durably readable by an
+     * application instance that never ran it and holds no process-local cache entry for it at all --
+     * exactly what a second instance sharing the store looks like, and exactly what a restart looks
+     * like once the process-local registry is empty (see {@code ExecutionResultRegistry}'s own
+     * javadoc on that equivalence). {@code DefaultRavenrootApplication.close()} releases no store
+     * state, so the same {@link ai.ravenroot.core.persistence.InMemoryExecutionStore} instance can be
+     * handed from one application to the next the way a restart hands the same database file on.
+     */
+    @Test
+    final void aTerminalOutcomeIsDurablyReadableByAnApplicationInstanceThatNeverRanIt() throws Exception {
+        var executionStore = new ai.ravenroot.core.persistence.InMemoryExecutionStore();
+        try {
+            UUID traversalId = UUID.randomUUID();
+            var firstRegistry = new BehaviorRegistry().register("blocking-work",
+                    message -> CompletableFuture.completedFuture(NodeResult.continueWith("durable-output")));
+            ExecutionOutcome outcome;
+            try (var first = new DefaultRavenrootApplication(engine(), new ExecutionMonitor(), firstRegistry,
+                    new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), executionStore)) {
+                first.startGraphMl(TCK_IDENTITY, traversalId, blockingGraph(), "payload");
+                outcome = awaitTerminalOutcome(first, traversalId);
+            }
+            assertEquals(ProcessInstanceStatus.COMPLETED, outcome.status());
+
+            // A second application instance, sharing nothing with the first but the durable store: no
+            // registry entry, no process-local cache, exactly like a restarted process or a second one
+            // reading the same database.
+            try (var another = new DefaultRavenrootApplication(engine(), new ExecutionMonitor(),
+                    new BehaviorRegistry(), new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                    new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                    ExecutionIdentitySource.randomUuids(), executionStore)) {
+                var lookup = another.executionResult(TCK_IDENTITY.tenantId(), traversalId);
+                var found = assertInstanceOf(ExecutionLookup.Found.class, lookup,
+                        "a terminal outcome recorded through the store must be readable by an "
+                                + "application instance that never ran it, not merely by the one that did");
+                assertEquals(ProcessInstanceStatus.COMPLETED, found.outcome().status());
+                assertEquals("durable-output", found.outcome().payload(),
+                        "the durably-read payload must be the one the traversal actually produced");
+            }
+        } finally {
+            executionStore.close();
+        }
+    }
+
     private static ByteArrayInputStream blockingGraph() {
         return new ByteArrayInputStream(BLOCKING_GRAPH.getBytes(StandardCharsets.UTF_8));
     }

@@ -180,9 +180,12 @@ export function sharedRuns(polylines, { minLength, tolerance = 3, ignoreSharedEn
 /**
  * Cluster node centres into the columns the drawing actually shows. This is a description of the
  * geometry, not a criterion: any scatter of nodes clusters into some set of columns.
+ *
+ * <p>`axis` is the direction layers advance along: `x` for a left-to-right drawing, `y` for a
+ * top-down one, where the layers are rows and "column" is read as "layer".</p>
  */
-export function geometryColumns(nodes, { tolerance = 1 } = {}) {
-  const xs = nodes.map(node => node.x).sort((a, b) => a - b);
+export function geometryColumns(nodes, { tolerance = 1, axis = 'x' } = {}) {
+  const xs = nodes.map(node => node[axis]).sort((a, b) => a - b);
   const columns = [];
   for (const x of xs) {
     const last = columns[columns.length - 1];
@@ -202,7 +205,7 @@ export function geometryColumns(nodes, { tolerance = 1 } = {}) {
     let best = -1;
     let distance = Infinity;
     centres.forEach((centre, index) => {
-      const candidate = Math.abs(centre - node.x);
+      const candidate = Math.abs(centre - node[axis]);
       if (candidate < distance) {
         distance = candidate;
         best = index;
@@ -267,8 +270,8 @@ export function structuralLayering(nodes, edges) {
  * and not in general. Returns the violations, so a scatter of nodes fails loudly: its column
  * count exceeds the layer count, and edges run against the layer order.
  */
-export function layerDiscreteness(nodes, edges, { tolerance = 1 } = {}) {
-  const { columns, columnOf } = geometryColumns(nodes, { tolerance });
+export function layerDiscreteness(nodes, edges, { tolerance = 1, axis = 'x' } = {}) {
+  const { columns, columnOf } = geometryColumns(nodes, { tolerance, axis });
   const { layerOf, layerCount, backEdges } = structuralLayering(nodes, edges);
   const columnForLayer = new Map();
   const splitLayers = [];

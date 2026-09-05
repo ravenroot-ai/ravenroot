@@ -9,34 +9,40 @@
  * moved by hand the route no longer describes the drawing, and the editor is told which edges
  * are stale so it can fall back to its dynamic routing for those alone.</p>
  */
-import { computeLayeredDrawing, isLayeredMode } from './layered-drawing.js';
+import { computeLayeredDrawing, isLayeredMode, layeredLabelSide } from './layered-drawing.js';
 import { viewerControlPointStyle } from './viewer-edge-style.js';
 
 export const LAYERED_LAYOUT_NAME = 'rr-layered';
 const DRAWING_SCRATCH = '_rrLayeredDrawing';
 const POSITION_TOLERANCE = 0.5;
 
-/** Node body plus rendered label extent, in model pixels, as the drawing needs them. */
-export function measureLayeredNode(node) {
+/**
+ * Node body plus rendered label extent, in model pixels, as the drawing needs them.
+ *
+ * <p>`side` is where the editor is painting the label, which the caller states rather than the
+ * measurement guessing: a name wider than the card overhangs sideways even when it hangs
+ * underneath, so the overhang alone cannot tell the two apart. Beside the card the label is one
+ * line inside the card's own height, which a union bounding box cannot separate out; the card's
+ * height is taken instead, which reserves at least the line and never less.</p>
+ */
+export function measureLayeredNode(node, side = 'bottom') {
   const position = node.position();
   const width = node.outerWidth();
   const height = node.outerHeight();
   const labelled = node.boundingBox({ includeLabels: true, includeOverlays: false, includeEdges: false });
-  const labelHeight = Math.max(0, labelled.y2 - (position.y + height / 2));
-  const labelWidth = Math.max(0, labelled.w);
   const text = String(node.data('name') || node.data('label') || '');
-  return {
-    id: node.id(),
-    width,
-    height,
-    kind: node.data('kind'),
-    label: text && labelHeight > 0 ? { text, width: labelWidth, height: labelHeight } : null,
-  };
+  const beside = Math.max(0, labelled.x2 - (position.x + width / 2));
+  const below = Math.max(0, labelled.y2 - (position.y + height / 2));
+  const label = !text ? null
+    : side === 'right'
+      ? (beside > 0 ? { text, width: beside, height, side } : null)
+      : (below > 0 ? { text, width: Math.max(0, labelled.w), height: below, side } : null);
+  return { id: node.id(), width, height, kind: node.data('kind'), label };
 }
 
-export function layeredDrawingInputs(nodes, edges) {
+export function layeredDrawingInputs(nodes, edges, side = 'bottom') {
   return {
-    nodes: nodes.map(measureLayeredNode),
+    nodes: nodes.map(node => measureLayeredNode(node, side)),
     edges: edges.map(edge => ({ id: edge.id(), source: edge.source().id(), target: edge.target().id() })),
   };
 }
@@ -51,6 +57,10 @@ function LayeredLayout(options) {
 LayeredLayout.prototype.run = function run() {
   const { cy, eles, mode } = this.options;
   if (!isLayeredMode(mode)) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
+  // The drawing reserves room for the label on the side this mode needs it; painting it there is
+  // the editor's job, and it has to happen before the measurement, not after.
+  const labelSide = layeredLabelSide(mode);
+  this.options.prepareLabels?.(labelSide);
   const nodes = eles.nodes().filter(node => !node.isParent());
   const edges = eles.edges();
   const stillCurrent = () => !this.cancelled && !cy.destroyed()
@@ -59,7 +69,7 @@ LayeredLayout.prototype.run = function run() {
     this.emit('layoutready');
     this.emit('layoutstop');
   };
-  computeLayeredDrawing(layeredDrawingInputs(nodes, edges), mode, this.options.engine ? { elk: this.options.engine } : {})
+  computeLayeredDrawing(layeredDrawingInputs(nodes, edges, labelSide), mode, this.options.engine ? { elk: this.options.engine } : {})
     .then(drawing => {
       if (!stillCurrent()) {
         // A superseded request must still settle so the caller can release its slot, but it has

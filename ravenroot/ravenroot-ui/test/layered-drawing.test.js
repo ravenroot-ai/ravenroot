@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { parseGraphML } from '../src/graph-parsers.js';
 import {
   LAYERED_MODE_NAMES, buildLayeredElkGraph, computeLayeredDrawing, isLayeredMode, layeredElkOptions,
-  sectionPolyline,
+  layeredLabelSide, sectionPolyline,
 } from '../src/layered-drawing.js';
 import {
   backEdgesInsideBand, bodyOf, countCrossings, edgesThroughBoxes, geometryColumns, labelBoxOf, labelOverlaps,
@@ -33,20 +33,37 @@ function inputsFromGraph(graph) {
   };
 }
 
+// Layers advance along `main` and spread along `cross`: `x`/`y` for the left-to-right drawing,
+// `y`/`x` for the top-down one. The criteria are the same on either axis; only the reading is.
+function axesOf(drawing) {
+  return drawing.direction === 'DOWN' ? { main: 'y', cross: 'x' } : { main: 'x', cross: 'y' };
+}
+
+function labelBoxOfBox(box) {
+  if (!box.labelWidth) return null;
+  return box.labelSide === 'right'
+    ? {
+      left: box.x + box.width / 2, right: box.x + box.width / 2 + box.labelWidth,
+      top: box.y - box.labelHeight / 2, bottom: box.y + box.labelHeight / 2,
+    }
+    : {
+      left: box.x - box.labelWidth / 2, right: box.x + box.labelWidth / 2,
+      top: box.y + box.height / 2, bottom: box.y + box.height / 2 + box.labelHeight,
+    };
+}
+
 function judged(drawing, inputs) {
+  const axes = axesOf(drawing);
   const polylines = [...drawing.routes.values()].map(route => ({
     id: route.id, source: route.source, target: route.target, points: [route.start, ...route.points, route.end],
   }));
   const kinds = new Map(inputs.nodes.map(node => [node.id, node.kind]));
   const nodes = [...drawing.boxes.values()].map(box => ({
-    id: box.id, x: box.x, kind: kinds.get(box.id),
+    id: box.id, x: box.x, y: box.y, kind: kinds.get(box.id),
     body: { left: box.x - box.width / 2, right: box.x + box.width / 2, top: box.y - box.height / 2, bottom: box.y + box.height / 2 },
-    label: box.labelWidth ? {
-      left: box.x - box.labelWidth / 2, right: box.x + box.labelWidth / 2,
-      top: box.y + box.height / 2, bottom: box.y + box.height / 2 + box.labelHeight,
-    } : null,
+    label: labelBoxOfBox(box),
   }));
-  const { columnOf } = geometryColumns(nodes);
+  const { columnOf } = geometryColumns(nodes, { axis: axes.main });
   // Piled edges are judged at the stroke width; a fan from one node's adjacent ports is the one
   // exception the criteria allow, and it is reported separately rather than absorbed.
   const runs = sharedRuns(polylines, { minLength: NODE_SIZE, tolerance: 3, ignoreSharedEndpoints: true });
@@ -57,7 +74,7 @@ function judged(drawing, inputs) {
     throughLabels: edgesThroughBoxes(polylines, nodes, labelBoxOf),
     piles: [...runs],
     fans: runs.fans,
-    layering: layerDiscreteness(nodes, inputs.edges),
+    layering: layerDiscreteness(nodes, inputs.edges, { axis: axes.main }),
     backInsideBand: backEdgesInsideBand(polylines, nodes, columnOf),
     polylines, nodes,
   };
@@ -66,13 +83,14 @@ function judged(drawing, inputs) {
 const PEERS = ['product-architecture', 'core-runtime', 'integrations', 'frontend', 'graph-rendering', 'qa',
   'platform', 'ai-agents', 'open-source', 'legal', 'security', 'docs'];
 
-// The fan exemption is bounded at what each drawing produces plus a stated margin: Hierarchical
-// (new) draws none on the bench; Flow (new) draws one, leader -> error beside leader -> audit, for
-// 909 px; on the 200-node synthetic graph each mode draws one, 5035 px (orthogonal) and 4688 px
-// (polyline). A second fan, or a longer one, is a change to be looked at, not absorbed.
+// The fan exemption is bounded at what each drawing produces plus a stated margin: neither mode
+// draws one on the test bench; on the 200-node synthetic graph each draws exactly one, the same
+// pair `e285`/`e324`, measuring 5035 px left-to-right and 6683 px top-down — the top-down drawing
+// is the taller one, so its fan runs longer. A second fan, or a longer one, is a change to be
+// looked at, not absorbed.
 const FAN_BOUNDS = {
-  bench: { 'hierarchical-new': { count: 0, longest: 0 }, 'flow-new': { count: 1, longest: 1000 } },
-  synthetic: { 'hierarchical-new': { count: 1, longest: 5600 }, 'flow-new': { count: 1, longest: 5600 } },
+  bench: { 'hierarchical-new': { count: 0, longest: 0 }, 'layered-down': { count: 0, longest: 0 } },
+  synthetic: { 'hierarchical-new': { count: 1, longest: 5600 }, 'layered-down': { count: 1, longest: 7300 } },
 };
 const longestOf = fans => Math.max(0, ...fans.map(entry => entry.length));
 
@@ -108,14 +126,29 @@ export function syntheticWorkflow(nodeCount, edgeCount) {
 const testBench = parseGraphML(readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'layout-test-bench.graphml'), 'utf8'));
 
 describe('layered drawing', () => {
-  it('exposes exactly the two additive modes and their ELK options', () => {
-    expect(LAYERED_MODE_NAMES).toEqual(['hierarchical-new', 'flow-new']);
+  it('exposes exactly the two additive modes, one per axis of flow', () => {
+    expect(LAYERED_MODE_NAMES).toEqual(['hierarchical-new', 'layered-down']);
     expect(isLayeredMode('hierarchical')).toBe(false);
-    expect(isLayeredMode('flow-new')).toBe(true);
+    expect(isLayeredMode('layered-down')).toBe(true);
     expect(layeredElkOptions('hierarchical-new')['elk.edgeRouting']).toBe('ORTHOGONAL');
-    expect(layeredElkOptions('flow-new')['elk.edgeRouting']).toBe('POLYLINE');
-    expect(layeredElkOptions('flow-new')['elk.direction']).toBe('RIGHT');
+    expect(layeredElkOptions('layered-down')['elk.edgeRouting']).toBe('ORTHOGONAL');
+    expect(layeredElkOptions('hierarchical-new')['elk.direction']).toBe('RIGHT');
+    expect(layeredElkOptions('layered-down')['elk.direction']).toBe('DOWN');
+    // The label side is not a taste: under the card it would sit in the channel a top-down
+    // drawing routes through, so that mode declares it beside the card and the editor paints it
+    // there before the drawing measures anything.
+    expect(layeredLabelSide('hierarchical-new')).toBe('bottom');
+    expect(layeredLabelSide('layered-down')).toBe('right');
+    expect(layeredLabelSide('organic')).toBe('bottom');
     expect(() => layeredElkOptions('organic')).toThrow(/Unknown layered drawing mode/);
+  });
+
+  it('declares each mode\'s label placement to ELK, so spacing reserves the right side', () => {
+    const node = { id: 'a', width: 80, height: 80, kind: 'PASSTHROUGH', label: { text: 'A', width: 50, height: 30 } };
+    const placement = mode => buildLayeredElkGraph({ nodes: [node], edges: [] }, mode)
+      .children[0].layoutOptions['elk.nodeLabels.placement'];
+    expect(placement('hierarchical-new')).toBe('[H_CENTER, V_BOTTOM, OUTSIDE]');
+    expect(placement('layered-down')).toBe('[H_RIGHT, V_CENTER, OUTSIDE]');
   });
 
   it('builds an ELK graph with outside labels, centred layers, pinned terminals and no self-loops', () => {
@@ -171,16 +204,21 @@ describe('layered drawing', () => {
       // Measured 187 (orthogonal) and 191 (polyline) when the drawing was accepted; the guard
       // catches a regression of the engine options, not a specific number.
       expect(verdict.crossings).toBeLessThanOrEqual(220);
-      // Every failure route reaches the error node through its west side at its own port.
+      // Every failure route reaches the error node through its incoming side at its own port —
+      // the west side of a left-to-right drawing, the north side of a top-down one.
+      const axes = axesOf(drawing);
       const intoError = [...drawing.routes.values()].filter(route => route.target === 'error');
       expect(intoError.length).toBeGreaterThan(10);
       const errorBox = drawing.boxes.get('error');
-      expect(intoError.every(route => Math.abs(route.end.x - (errorBox.x - errorBox.width / 2)) < 0.01)).toBe(true);
+      const errorEdge = errorBox[axes.main] - (axes.main === 'x' ? errorBox.width : errorBox.height) / 2;
+      expect(intoError.every(route => Math.abs(route.end[axes.main] - errorEdge) < 0.01)).toBe(true);
       expect(new Set(intoError.map(route => route.targetEndpoint)).size).toBe(intoError.length);
     });
 
-    it('keeps START first and END last, and routes back edges east-out, west-in, under the band', async () => {
+    it('keeps START first and END last, and routes back edges out of the flow, beyond the band', async () => {
       const drawing = await computeLayeredDrawing(inputsFromGraph(testBench), mode);
+      const axes = axesOf(drawing);
+      expect(drawing.band.axis).toBe(axes.cross);
       expect(drawing.layers.get('start')).toBe(0);
       expect(drawing.layers.get('end')).toBe(drawing.columns.length - 1);
       expect(drawing.backEdges).toEqual(expect.arrayContaining(['handler__poll', 'eligibility__poll', 'gate__leader', 'review__leader', 'recovery__poll']));
@@ -190,9 +228,12 @@ describe('layered drawing', () => {
         expect(route.family).toBe('round-segments');
         const source = drawing.boxes.get(route.source);
         const target = drawing.boxes.get(route.target);
-        expect(route.start.x).toBeCloseTo(source.x + source.width / 2, 5);
-        expect(route.end.x).toBeCloseTo(target.x - target.width / 2, 5);
-        expect(Math.max(...route.points.map(point => point.y))).toBeGreaterThan(drawing.band.bottom);
+        const half = box => (axes.main === 'x' ? box.width : box.height) / 2;
+        // Out of the source's outgoing side, into the target's incoming side, and every bend of
+        // the way back lies beyond the far edge of the band.
+        expect(route.start[axes.main]).toBeCloseTo(source[axes.main] + half(source), 5);
+        expect(route.end[axes.main]).toBeCloseTo(target[axes.main] - half(target), 5);
+        expect(Math.max(...route.points.map(point => point[axes.cross]))).toBeGreaterThan(drawing.band.end);
       }
     });
 
@@ -204,7 +245,7 @@ describe('layered drawing', () => {
       const scattered = [...drawing.boxes.values()].map(box => ({
         id: box.id, kind: inputs.nodes.find(node => node.id === box.id).kind, x: random() * 3000, y: random() * 2000,
       }));
-      const verdict = layerDiscreteness(scattered, inputs.edges);
+      const verdict = layerDiscreteness(scattered, inputs.edges, { axis: axesOf(drawing).main });
       expect(verdict.ok).toBe(false);
       expect(verdict.columns.length).toBeGreaterThan(verdict.layerCount);
       expect(verdict.nonMonotone.length).toBeGreaterThan(0);

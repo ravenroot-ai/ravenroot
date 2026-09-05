@@ -89,7 +89,7 @@ test.describe('Design arrangements', () => {
     const labels = await page.locator('#application-menu .application-menu-item span:first-child').allTextContents();
     expect(labels.slice(-8)).toEqual([
       'Design', 'Monitoring', 'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
-      'Arrange — Hierarchical (new)', 'Arrange — Flow (new)',
+      'Arrange — Hierarchical (new)', 'Arrange — Layered (top-down)',
     ]);
     await page.screenshot({ path: '/tmp/ravenroot-648-arrange-menu.png', fullPage: true });
     await page.getByRole('menuitemradio', { name: 'Monitoring' }).click();

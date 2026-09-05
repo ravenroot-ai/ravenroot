@@ -2,6 +2,9 @@
 
 - Status: Accepted
 - Date: 2026-09-04
+- Amended: 2026-09-05 — the second arrangement is the top-down drawing rather than a second
+  left-to-right one, on the evidence recorded in Context; nothing had been released under the
+  earlier name
 - Supersedes: None
 - Superseded by: None
 - Public references: [ADR 0003](0003-graph-editor-and-live-execution-events.md)
@@ -39,37 +42,69 @@ rejected on evidence: 541 crossings on the test bench with edges through bodies 
 rejected: it runs a backward edge through the channel between node rows, which is precisely what
 the drawing must not do.
 
+The second arrangement was first drawn left to right like the first, differing only in edge routing
+(polyline instead of orthogonal), spacing and corner radius. On the test bench the two are the same
+drawing: the same engine, the same cycle breaking, layering, crossing minimisation and node
+placement, and both painted as rounded segments. Every node moves — up to 313 px — and the second
+is 5% narrower, but at the zoom that fits the graph the two are not told apart, and 187 crossings
+against 191 says the same thing. A menu offering both offers one drawing twice.
+
+The alternatives were measured on the same bench before choosing. ELK's `mrtree` draws 116
+crossings but 144 edges straight through node bodies: it has no obstacle awareness, so it is not a
+drawing of a workflow. `radial` exhausts the stack on a graph with cycles. The spline router,
+already rejected above, was re-measured through the whole pipeline and confirmed at 477 crossings
+with edges through bodies and labels. What is left is the axis: the same layered algorithm run top
+to bottom is a genuinely different drawing of the same quality — 179 crossings and no edge through
+a node body in the raw engine result — and it is the shape a reader of vertical process diagrams
+expects. It carries one condition. With the node's name painted under its card, as the editor
+paints it, every one of the 82 edges leaves its source straight through its own name, because the
+channel a top-down drawing routes through is exactly where the name sits. Moving the name beside
+the card for that arrangement removes all 82 without changing anything else.
+
 ## Decision
 
-**Two additive arrangements, `Hierarchical (new)` and `Flow (new)`, are drawn by ELK's layered
-algorithm called directly, consuming both its node coordinates and its edge sections.** The
-`cytoscape-elk` plugin stays where it is for the existing `Hierarchical`; the new arrangements do
-not go through it because it discards the routing this decision depends on. No new dependency is
-introduced.
+**Two additive arrangements, `Hierarchical (new)` and `Layered (top-down)`, are drawn by ELK's
+layered algorithm called directly, consuming both its node coordinates and its edge sections.**
+They differ in the axis they flow along, which is the one difference a reader can name from the
+menu and see on the canvas; a second arrangement that differed only in routing and spacing was
+drawn, measured, and rejected as the same drawing twice. The `cytoscape-elk` plugin stays where it
+is for the existing `Hierarchical`; the new arrangements do not go through it because it discards
+the routing this decision depends on. No new dependency is introduced.
 
 **Placement and routing are one result.** Each node is declared with its rendered body size and its
-rendered label as an outside bottom label, so ELK turns the label into a margin: spacing reserves
-room for it, routing keeps clear of it, and edges still attach to the body. Nodes of one layer share
-one centre column. `START` nodes are pinned to the first layer and `END` nodes to the last, and
-cycle breaking is depth-first from the sources so the edges reversed are the ones that actually run
-backwards in a workflow. `Hierarchical (new)` routes orthogonally with small rounded corners, the
-form yEd and Graphviz readers expect; `Flow (new)` places layers more tightly with polyline routing
-and larger rounded corners, so the drawing keeps its curves without letting them pile up. One
-exception is stated rather than hidden: two edges leaving one node from adjacent ports towards
+rendered label as an outside label, so ELK turns the label into a margin: spacing reserves room for
+it, routing keeps clear of it, and edges still attach to the body. Nodes of one layer share one
+centre line. `START` nodes are pinned to the first layer and `END` nodes to the last, and cycle
+breaking is depth-first from the sources so the edges reversed are the ones that actually run
+backwards in a workflow. Both arrangements route orthogonally with small rounded corners, the form
+yEd and Graphviz readers expect. One exception is stated rather than hidden: two edges leaving one node from adjacent ports towards
 distant targets, or arriving at one node from adjacent ports, run together for a stretch by
 construction — a fan, which the acceptance criteria allow. The check for piled edges exempts only
 pairs that share their source node or share their target node; two edges chained head to tail
 through a node are judged like any other pair. The exemption is bounded, not open: the tests pin
-the fan count and the longest fan run at what each drawing produces plus a margin — none for
-`Hierarchical (new)` on the test bench, one of at most 1000 px for `Flow (new)` (909 px measured),
-one of at most 5600 px per mode on a 200-node, 400-edge graph (5035 px and 4688 px measured).
+the fan count and the longest fan run at what each drawing produces plus a margin — none for either
+arrangement on the test bench, and one on a 200-node, 400-edge graph, of at most 5600 px
+left to right (5035 px measured) and 7300 px top-down (6683 px measured, the taller drawing
+carrying the longer fan).
+
+**The name is painted on the side the axis leaves free, and the drawing is told where.** The
+left-to-right arrangement keeps the editor's own placement, under the card. The top-down
+arrangement paints the name beside the card while it is displayed and puts it back underneath as
+soon as another arrangement or render mode is chosen, because a name under the card sits in the
+channel that drawing routes through. The arrangement asks the editor to move the names before it
+measures anything, so the geometry ELK is given is the geometry the canvas paints; a restyle of the
+nodes restates the placement rather than dragging the names back. This is the one place where an
+arrangement reaches into how a node is drawn, and it is stated here rather than left implicit.
 
 **Backward edges are routed by the editor, outside the band.** An edge whose target sits on the
-same or an earlier layer than its source leaves the source's east side from a port of its own,
-drops into a track below the band of node rows, runs back under everything, and rises into a port
-of its own on the target's west side. Shorter spans take the tracks nearest the band, so nested
-back edges never cross one another, and the verticals sit closer to a layer than any vertical ELK
-draws, so they overlap nothing. ELK still layers those edges; it just does not draw them.
+same or an earlier layer than its source leaves the source's outgoing side from a port of its own,
+steps into a track beyond the band of node rows, runs back outside everything, and returns into a
+port of its own on the target's incoming side — east out and west in, under the drawing, when the
+flow runs left to right; south out and north in, beside the drawing, when it runs top to bottom.
+Shorter spans take the tracks nearest the band, so nested back edges never cross one another, and
+the stubs sit closer to a layer than anything ELK draws there, so they overlap nothing. The
+geometry is written once against the axis of flow and read on either. ELK still layers those edges;
+it just does not draw them.
 
 **The routes are applied relative to their endpoints and fall back per edge.** A route becomes a
 `round-segments` Cytoscape edge with explicit endpoint offsets, so it stays attached to its nodes.
@@ -86,7 +121,7 @@ sampled from the rendered canvas, and the browser suite holds the new arrangemen
 committed test-bench graph while reporting the same numbers for the established ones.
 
 **The engine runs on the main thread, as the existing `Hierarchical` already does.** Engine time on
-the test bench is about 0.17 s (orthogonal) and 0.12 s (polyline); a 200-node, 400-edge workflow
+the test bench is about 0.19 s left to right and 0.15 s top-down; a 200-node, 400-edge workflow
 takes about 0.5–0.7 s in either mode. Node placement is Brandes–Köpf in both modes: network-simplex
 placement drew the same crossings and cost six times the engine time on the large graph. The busy state and the cancellation contract of the existing
 asynchronous layouts apply unchanged: one engine run per document at a time, cancelled before it
@@ -99,11 +134,12 @@ support.
 
 ## Consequences
 
-On the test bench, measured on the rendered canvas: `Hierarchical (new)` draws 187 crossings
-against 425 for `Hierarchical`, `Flow (new)` 191 against 402 for `Flow`, and both have no label
-collision, no edge through a body or a label, no two unrelated edges on the same line, one column per
-structural layer with every edge running forward across them, every back edge outside the band, and every failure edge reaching the error node at a port
-of its own through at most two sides.
+On the test bench, measured on the rendered canvas: `Hierarchical (new)` and `Layered (top-down)`
+each draw 187 crossings, against 425 for `Hierarchical`, 402 for `Flow` and 507 for `Organic`, and
+both have no label collision, no edge through a body or a label, no two unrelated edges on the same
+line, one layer per structural layer with every edge running forward across them, every back edge
+outside the band, and every failure edge reaching the error node at a port of its own through at
+most two sides.
 
 The existing arrangements, their command ids, labels, relative order and tests are unchanged; the
 two new commands form a sibling group after `Keep positions`, and the menu-ordering assertion

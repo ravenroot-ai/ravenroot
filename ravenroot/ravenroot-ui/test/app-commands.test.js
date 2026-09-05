@@ -149,11 +149,11 @@ describe('application command catalog', () => {
     const layered = commands.filter(command => command.group === 'design-arrange-layered');
     expect(layered.map(command => command.id)).toEqual([
       'layout.arrange.hierarchical-new',
-      'layout.arrange.flow-new',
+      'layout.arrange.layered-down',
     ]);
     expect(layered.map(command => command.label)).toEqual([
       'Arrange — Hierarchical (new)',
-      'Arrange — Flow (new)',
+      'Arrange — Layered (top-down)',
     ]);
     expect(Math.min(...layered.map(command => command.order)))
       .toBeGreaterThan(Math.max(...established.map(command => command.order)));
@@ -164,8 +164,8 @@ describe('application command catalog', () => {
     const arrange = vi.fn();
     const spied = Object.fromEntries(createAppCommands({ arrange }).map(command => [command.id, command]));
     spied['layout.arrange.hierarchical-new'].execute();
-    spied['layout.arrange.flow-new'].execute();
-    expect(arrange.mock.calls).toEqual([['hierarchical-new'], ['flow-new']]);
+    spied['layout.arrange.layered-down'].execute();
+    expect(arrange.mock.calls).toEqual([['hierarchical-new'], ['layered-down']]);
   });
 
   it('offers semantic Design arrangements as actions after the render modes', () => {

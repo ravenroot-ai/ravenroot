@@ -91,6 +91,11 @@ public static final String UNKNOWN_EVENT = "Execution activity was reported.";
             case EXECUTION_RESUMED -> "Execution was resumed and is running again.";
             case EXECUTION_COMPLETED -> "Execution completed successfully.";
             case EXECUTION_FAILED -> "Execution failed. Protected diagnostics may contain more detail.";
+            // No "failed", and no pointer to diagnostics either: there are none to read. A cancelled
+            // execution stopped because somebody with the authority to stop it did, and a sentence
+            // that sent an operator looking for a fault would recreate, in words, exactly the
+            // confusion this event type was added to remove.
+            case EXECUTION_CANCELLED -> "Execution was cancelled before it produced a result.";
         };
         return normalizeAuthoredText(authored);
     }

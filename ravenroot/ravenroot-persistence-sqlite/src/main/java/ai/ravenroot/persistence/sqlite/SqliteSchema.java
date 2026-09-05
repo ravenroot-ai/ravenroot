@@ -705,7 +705,38 @@ final class SqliteSchema {
                 // is additive and carries a default rather than a new status name.
                 new SchemaMigration(16, "recovery records the deliveries it withheld", List.of(
                         "ALTER TABLE attempt ADD COLUMN withheld_through_delivery "
-                                + "INTEGER NOT NULL DEFAULT 0")));
+                                + "INTEGER NOT NULL DEFAULT 0")),
+                // Why a nullable column and not a new status name. A cancelled execution keeps the
+                // status it has always had -- FAILED on both rows -- and gains a reason beside it.
+                // The two properties that decides:
+                //
+                //   Additive. No row is rewritten and none needs to be. NULL already means exactly
+                //   what every pre-existing terminal row means: nothing distinguishes this
+                //   termination. There is no backfill because there is no value a backfill could
+                //   honestly write -- a row that ended before a reason could be recorded did not
+                //   secretly carry one, and inferring "not cancelled" from the status would be a
+                //   guess written down as data. So the column is left NULL and read as unstated,
+                //   which is the truth about it. Nothing here rewrites a status, so every reader
+                //   that folds these rows today folds them identically after this migration.
+                //
+                //   Rollback stays safe, permanently, and that is the point of the shape rather
+                //   than a happy accident. Contrast the one-way gate that arrives with a new status
+                //   NAME: migration 3 above notes that the first PARKED attempt row makes a
+                //   downgrade unsafe, because an older binary's valueOf cannot read a name that did
+                //   not exist when it was built. A CANCELLED member of ProcessInstanceStatus or
+                //   TraversalStatus would create exactly that gate on the two busiest tables in the
+                //   schema. A column an older binary does not SELECT is invisible to it instead: it
+                //   reads the FAILED it has always read, writes rows this build still folds, and
+                //   loses only the qualification. There is therefore no first row after which a
+                //   downgrade becomes unsafe -- the asymmetric hazard migration 3 accepted does not
+                //   exist here, and not creating it is the whole reason for this design.
+                //
+                // Unknown NAMES in the column are still refused rather than misread: the reason is
+                // stored by name like every status, so a value from a newer build surfaces as
+                // Corrupted, never as an absent reason on a run that was in fact cancelled.
+                new SchemaMigration(17, "terminated executions record why, beside an unchanged status",
+                        List.of("ALTER TABLE process_instance ADD COLUMN termination_reason TEXT",
+                                "ALTER TABLE traversal ADD COLUMN termination_reason TEXT")));
     }
 
     static int currentVersion() {

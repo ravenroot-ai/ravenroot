@@ -160,6 +160,30 @@ public final class ExecutionMonitor {
     }
 
     /**
+     * Publishes a traversal that was stopped on request, as a termination of its own.
+     *
+     * <p>Byte for byte the bookkeeping {@link #executionFailed} does -- the same gauge decrement, the
+     * same discarded attempt starts -- and a different event type, because the event type is the only
+     * dimension this stream is labelled by. While a cancellation published
+     * {@code EXECUTION_FAILED}, the failure counter and the cancellation counter were the same
+     * series, so a deployment whose operators stopped more work reported itself as breaking more
+     * often. Nothing but a distinct type can separate them: a classifier on the event cannot, because
+     * it is not a metric dimension here.</p>
+     *
+     * <p>{@code publicReason} still carries the deepest cause's class, exactly as the failed event
+     * does. That class name was, until this type existed, the <em>only</em> way an observer could
+     * tell a cancellation from a fault, and it is retained rather than dropped so that an observer
+     * still matching on it is not silently blinded during the window in which it migrates to the
+     * type. It is no longer the contract: the type is, and a consumer should read the type.</p>
+     */
+    void executionCancelled(ExecutionIdentity identity, Throwable error) {
+        activeExecutions.decrementAndGet();
+        discardAttemptStarts(identity.traversalId());
+        publish(identity, null, null, ExecutionEventType.EXECUTION_CANCELLED, null, 0, false,
+                message(error), null, null, 0, failureClass(error));
+    }
+
+    /**
      * Publishes a traversal's hold.
      *
      * <p>Deliberately touches neither counter this class keeps. {@code activeExecutions} is not

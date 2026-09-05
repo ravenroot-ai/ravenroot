@@ -31,7 +31,7 @@ import java.util.UUID;
  *   <li>{@link Found} with {@code status == RUNNING} while the traversal is in flight;</li>
  *   <li>{@link Found} with a terminal status and a payload once it completes;</li>
  *   <li>{@link Expired} once the full result has been evicted but the tombstone survives — the
- *       terminal status is still reported, the payload is not;</li>
+ *       terminal status and its termination reason are still reported, the payload is not;</li>
  *   <li>{@link Unknown} once even the tombstone is evicted, <strong>after a process restart</strong>,
  *       or when the execution belongs to another tenant.</li>
  * </ul>
@@ -78,16 +78,48 @@ public sealed interface ExecutionLookup {
      * <p>Deliberately still carries the terminal status: knowing an execution completed is useful
      * even when its payload is gone, and it is the difference between "your run finished, ask
      * earlier next time" and "we have never heard of you".</p>
+     *
+     * <h4>And the termination reason, for the same reason the status is here</h4>
+     * <p>{@code status} alone past the retention horizon says a cancelled execution failed, which is
+     * worse than saying nothing: a caller reading an aged-out result would learn that its deliberate
+     * stop was an incident, and would learn it from the one answer it has no way to check against a
+     * live record. Carrying the reason into the tombstone costs one reference and keeps the
+     * distinction true for exactly as long as the status it qualifies is true. <b>Read the two
+     * together; the status on its own is a wrong answer, not a partial one.</b></p>
  * @param executionId the stable execution id used to identify the requested resource.
  * @param status lifecycle state represented by this value.
+ * @param terminationReason why this terminal {@code status} was reached, or {@code null} when
+ *                         nothing distinguishes it. See {@link ExecutionTerminationReason}.
      */
-    record Expired(UUID executionId, ProcessInstanceStatus status) implements ExecutionLookup {
+    record Expired(UUID executionId, ProcessInstanceStatus status,
+                   ExecutionTerminationReason terminationReason) implements ExecutionLookup {
 /**
  * Rejects incomplete execution lookup alternatives so callers cannot confuse absence with success.
  */
         public Expired {
             Objects.requireNonNull(executionId, "executionId");
             Objects.requireNonNull(status, "status");
+        }
+
+/**
+ * Compatibility constructor for the shape that predates a retained termination reason.
+ *
+ * <p>Reports an absent reason. Correct for a tombstone written by a producer that could not observe
+ * one, and wrong for a cancellation, which is why the retaining side records the reason at the same
+ * moment it records the status rather than reconstructing it later from the status alone.</p>
+ * @param executionId the stable execution id used to identify the requested resource.
+ * @param status lifecycle state represented by this value.
+ */
+        public Expired(UUID executionId, ProcessInstanceStatus status) {
+            this(executionId, status, null);
+        }
+
+/**
+ * Whether the execution this tombstone remembers was stopped on request rather than having broken.
+ * @return whether the retained termination is recorded as a cancellation.
+ */
+        public boolean cancelled() {
+            return ExecutionTerminationReason.isCancellation(terminationReason);
         }
     }
 

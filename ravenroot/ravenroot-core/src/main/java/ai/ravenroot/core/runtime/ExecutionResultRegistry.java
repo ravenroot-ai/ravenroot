@@ -2,6 +2,7 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionLookup;
 import ai.ravenroot.api.application.ExecutionOutcome;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 
 import java.util.LinkedHashMap;
@@ -47,9 +48,9 @@ public final class ExecutionResultRegistry {
 
     /**
      * Tombstones retained. Far larger than {@link #DEFAULT_MAX_RESULTS} on purpose and cheaply so:
-     * a tombstone is two references and an enum, so remembering that an execution existed costs a
-     * tiny fraction of remembering what it produced. Widening this bound is what buys the
-     * {@code Expired} answer instead of {@code Unknown} for a caller that read too late.
+     * a tombstone is a reference and two enums, so remembering that an execution existed, and how it
+     * ended, costs a tiny fraction of remembering what it produced. Widening this bound is what buys
+     * the {@code Expired} answer instead of {@code Unknown} for a caller that read too late.
      */
     public static final int DEFAULT_MAX_TOMBSTONES = 8_192;
 
@@ -68,7 +69,24 @@ public final class ExecutionResultRegistry {
     private final int maxTombstones;
     private final Map<Key, ExecutionOutcome> results = new LinkedHashMap<>();
     private final Map<Key, ai.ravenroot.api.payload.PayloadException> payloadFailures = new LinkedHashMap<>();
-    private final Map<Key, ProcessInstanceStatus> tombstones = new LinkedHashMap<>();
+    /**
+     * What survives eviction of a full result: the terminal status <em>and</em> why it was reached.
+     *
+     * <p>The reason is retained rather than recomputed because it cannot be recomputed — the status
+     * is {@code FAILED} for a cancellation and for a fault alike, so a tombstone holding only the
+     * status answers "this run broke" for a run that was deliberately stopped, and answers it with
+     * the confidence of a record. That is worse than the {@code Unknown} it replaced: a caller can
+     * act on a wrong answer, and past the retention horizon there is nothing left to check it
+     * against. Carrying one more enum reference is the whole cost of not lying.</p>
+     *
+     * @param status the terminal status the execution reached.
+     * @param terminationReason why it reached that status, or {@code null} when nothing
+     *                          distinguishes it.
+     */
+    private record Tombstone(ProcessInstanceStatus status, ExecutionTerminationReason terminationReason) {
+    }
+
+    private final Map<Key, Tombstone> tombstones = new LinkedHashMap<>();
 
     public ExecutionResultRegistry() {
         this(DEFAULT_MAX_RESULTS, DEFAULT_MAX_TOMBSTONES);
@@ -137,12 +155,34 @@ public final class ExecutionResultRegistry {
      * detail of a failed run lives in the event journal, which does carry it with causation.</p>
      */
     public synchronized void failed(Key key, UUID processInstanceId) {
+        terminated(key, processInstanceId, null);
+    }
+
+    /**
+     * Records a terminal cancellation: the execution was stopped on request and produced no result.
+     *
+     * <p>The status written is {@code FAILED}, the same status an ordinary failure writes, and that
+     * is the design rather than an oversight — see
+     * {@link ExecutionTerminationReason}. What separates the two is the reason recorded beside it, so
+     * a caller reading {@link #lookup} must read {@link ExecutionOutcome#cancelled()} as well;
+     * branching on the status alone reports every operator stop as an incident, which is exactly the
+     * defect this method exists to close.</p>
+     *
+     * @param key the tenant-scoped execution being recorded.
+     * @param processInstanceId the durable process that contained the cancelled traversal.
+     */
+    public synchronized void cancelled(Key key, UUID processInstanceId) {
+        terminated(key, processInstanceId, ExecutionTerminationReason.CANCELLED);
+    }
+
+    private synchronized void terminated(Key key, UUID processInstanceId,
+                                         ExecutionTerminationReason reason) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(processInstanceId, "processInstanceId");
         results.remove(key);
         payloadFailures.remove(key);
         put(key, new ExecutionOutcome(processInstanceId, key.executionId(), ProcessInstanceStatus.FAILED,
-                null, Set.of(), Set.of()));
+                null, Set.of(), Set.of(), Set.of(), Set.of(), Set.of(), false, reason));
     }
 
     /** Retains only the typed bounded payload refusal, never the rejected object or its text. */
@@ -161,9 +201,10 @@ public final class ExecutionResultRegistry {
         if (outcome != null) {
             return new ExecutionLookup.Found(outcome);
         }
-        ProcessInstanceStatus tombstone = tombstones.get(key);
+        Tombstone tombstone = tombstones.get(key);
         if (tombstone != null) {
-            return new ExecutionLookup.Expired(key.executionId(), tombstone);
+            return new ExecutionLookup.Expired(key.executionId(), tombstone.status(),
+                    tombstone.terminationReason());
         }
         return new ExecutionLookup.Unknown(key.executionId());
     }
@@ -185,12 +226,12 @@ public final class ExecutionResultRegistry {
             var eldest = results.entrySet().iterator().next();
             results.remove(eldest.getKey());
             payloadFailures.remove(eldest.getKey());
-            entomb(eldest.getKey(), eldest.getValue().status());
+            entomb(eldest.getKey(), eldest.getValue());
         }
     }
 
-    private void entomb(Key key, ProcessInstanceStatus status) {
-        tombstones.put(key, status);
+    private void entomb(Key key, ExecutionOutcome evicted) {
+        tombstones.put(key, new Tombstone(evicted.status(), evicted.terminationReason()));
         while (tombstones.size() > maxTombstones) {
             tombstones.remove(tombstones.entrySet().iterator().next().getKey());
         }

@@ -102,7 +102,8 @@ class CancelInStartupWindowTest {
              AutoCloseable subscription = monitor.subscribe(event -> {
                  if (traversalId.equals(event.traversalId())
                          && (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                             || event.type() == ExecutionEventType.EXECUTION_FAILED)) {
+                             || event.type() == ExecutionEventType.EXECUTION_FAILED
+                             || event.type() == ExecutionEventType.EXECUTION_CANCELLED)) {
                      terminal.countDown();
                  }
              })) {

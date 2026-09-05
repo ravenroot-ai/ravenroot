@@ -1,6 +1,7 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionLookup;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -9,7 +10,9 @@ import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -221,6 +224,71 @@ class ExecutionResultRegistryTest {
 
         var found = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
         assertEquals(ProcessInstanceStatus.FAILED, found.outcome().status());
+    }
+
+    /**
+     * The distinction the status cannot carry, on a live result.
+     *
+     * <p>Both entries report {@code FAILED} and that is deliberate: the durable status vocabulary was
+     * not widened, because a new status name would be unreadable to every reader that predates it.
+     * So the assertion pair here is the contract — a caller branching on {@code status()} alone sees
+     * two identical answers, and only {@code cancelled()} separates a run somebody stopped from a run
+     * that broke.</p>
+     */
+    @Test
+    @DisplayName("a cancelled execution is FAILED like a failure, and only its reason separates them")
+    void aCancelledExecutionIsDistinguishableFromAFailureWhileTheResultIsRetained() {
+        var registry = new ExecutionResultRegistry();
+        UUID cancelled = UUID.randomUUID();
+        UUID failed = UUID.randomUUID();
+        registry.started(key(cancelled), UUID.randomUUID());
+        registry.started(key(failed), UUID.randomUUID());
+        registry.cancelled(key(cancelled), UUID.randomUUID());
+        registry.failed(key(failed), UUID.randomUUID());
+
+        var stopped = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(cancelled)));
+        var broke = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(failed)));
+        assertEquals(ProcessInstanceStatus.FAILED, stopped.outcome().status());
+        assertEquals(ProcessInstanceStatus.FAILED, broke.outcome().status(),
+                "the two statuses are identical on purpose; the status is not the answer here");
+        assertTrue(stopped.outcome().cancelled());
+        assertEquals(ExecutionTerminationReason.CANCELLED, stopped.outcome().terminationReason());
+        assertFalse(broke.outcome().cancelled());
+        assertNull(broke.outcome().terminationReason());
+    }
+
+    /**
+     * And it survives eviction, which is the read where a wrong answer cannot be checked.
+     *
+     * <p>A tombstone that kept only the status would report a deliberate stop as an incident, with
+     * the confidence of a record and nothing left to contradict it. That is strictly worse than the
+     * {@code Unknown} the tombstone was introduced to replace: a caller can act on a wrong answer.
+     * The cost of not lying is one enum reference per tombstone.</p>
+     */
+    @Test
+    @DisplayName("an evicted cancelled result still reports cancellation, not a bare failure")
+    void anEvictedCancelledResultStillReportsCancellation() {
+        var registry = new ExecutionResultRegistry(1, 64);
+        UUID cancelled = UUID.randomUUID();
+        UUID failed = UUID.randomUUID();
+        registry.cancelled(key(cancelled), UUID.randomUUID());
+        registry.failed(key(failed), UUID.randomUUID());
+        // The second terminal result pushes the first past the result bound and into a tombstone.
+        registry.completed(key(UUID.randomUUID()),
+                result(UUID.randomUUID(), UUID.randomUUID(), "p", Set.of("start"), Set.of()));
+
+        var stopped = assertInstanceOf(ExecutionLookup.Expired.class, registry.lookup(key(cancelled)),
+                "the full result is gone; the tombstone is what still answers");
+        assertEquals(ProcessInstanceStatus.FAILED, stopped.status());
+        assertTrue(stopped.cancelled(),
+                "past the retention horizon there is nothing left to check this against, so it has "
+                        + "to be right the first time");
+        assertEquals(ExecutionTerminationReason.CANCELLED, stopped.terminationReason());
+
+        var broke = assertInstanceOf(ExecutionLookup.Expired.class, registry.lookup(key(failed)));
+        assertEquals(ProcessInstanceStatus.FAILED, broke.status());
+        assertFalse(broke.cancelled());
+        assertNull(broke.terminationReason());
     }
 
     @Test

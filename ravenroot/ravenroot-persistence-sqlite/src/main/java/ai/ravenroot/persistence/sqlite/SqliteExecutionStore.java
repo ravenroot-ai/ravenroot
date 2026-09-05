@@ -1,5 +1,6 @@
 package ai.ravenroot.persistence.sqlite;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
@@ -397,8 +398,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         ? existing.retainedUntil() : plusClamped(now, config.terminalRetention()))
                 : null;
 
-        writeInstanceRow(key, folded.status(), pin, revision, fencingToken, now, createdAt, generation,
-                origin, retainedUntil);
+        writeInstanceRow(key, folded.status(), folded.terminationReason(), pin, revision, fencingToken,
+                now, createdAt, generation, origin, retainedUntil);
         AggregateStorage.write(connection, key, folded);
         writeTimers(key, batch);
         // After the aggregate, because a registration may name an invocation this batch created and a
@@ -1725,8 +1726,10 @@ public final class SqliteExecutionStore implements ExecutionStore {
      *                           unmediated
      */
     private record InstanceMeta(long revision, long fencingToken, GraphVersionPin graphVersionPin,
-                                ProcessInstanceStatus status, Instant updatedAt, Instant createdAt,
-                                long lifecycleGeneration, ExecutionOrigin origin, Instant retainedUntil) {
+                                ProcessInstanceStatus status,
+                                ExecutionTerminationReason terminationReason, Instant updatedAt,
+                                Instant createdAt, long lifecycleGeneration, ExecutionOrigin origin,
+                                Instant retainedUntil) {
     }
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, UUID attemptId, int ordinal,
@@ -1735,7 +1738,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private InstanceMeta readMeta(ExecutionKey key) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT revision, fencing_token, graph_version_pin, status, updated_at_epoch_second, "
+                "SELECT revision, fencing_token, graph_version_pin, status, termination_reason, "
+                        + "updated_at_epoch_second, "
                         + "updated_at_nano, created_at_epoch_second, created_at_nano, "
                         + "lifecycle_generation, deployment_id, workload_id, correlation_id, "
                         + "retained_until_epoch_second, retained_until_nano FROM process_instance "
@@ -1749,6 +1753,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 return new InstanceMeta(rows.getLong("revision"), rows.getLong("fencing_token"),
                         new GraphVersionPin(rows.getString("graph_version_pin")),
                         processStatusOf(key, rows.getString("status")),
+                        terminationReasonOf(key, rows.getString("termination_reason")),
                         StoredInstant.read(rows, "updated_at"),
                         StoredInstant.read(rows, "created_at"),
                         rows.getLong("lifecycle_generation"),
@@ -1792,6 +1797,28 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
+    /**
+     * Maps a stored termination reason, distinguishing an absent one from an unreadable one.
+     *
+     * <p>NULL is the ordinary case and a meaningful one: nothing distinguishes this termination, and
+     * every row written before the column existed says exactly that. A <em>name</em> this build does
+     * not know is the rollback case, and it takes the same route an unknown status name takes --
+     * {@link ExecutionStoreFailure.Corrupted}, loudly. Reading it as an absent reason instead would
+     * report a run that was cancelled as one that failed, which is the misreading the reason exists
+     * to prevent, restored by the very code meant to carry it.</p>
+     */
+    private static ExecutionTerminationReason terminationReasonOf(ExecutionKey key, String name) {
+        if (name == null) {
+            return null;
+        }
+        try {
+            return ExecutionTerminationReason.valueOf(name);
+        } catch (IllegalArgumentException unknown) {
+            throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                    "termination reason '" + name + "' is not a reason this build understands"), unknown);
+        }
+    }
+
     private static TraversalStatus traversalStatusOf(ExecutionKey key, String name) {
         try {
             return TraversalStatus.valueOf(name);
@@ -1803,7 +1830,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private ProcessInstance readAggregate(ExecutionKey key, InstanceMeta meta) throws SQLException {
         try {
-            return AggregateStorage.read(connection, key, meta.status());
+            return AggregateStorage.read(connection, key, meta.status(), meta.terminationReason());
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             // The detection point the in-memory adapter can only simulate: rows that no longer
             // reconstruct into a legal aggregate must never escape into the runtime.
@@ -1812,7 +1839,8 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
-    private void writeInstanceRow(ExecutionKey key, ProcessInstanceStatus status, GraphVersionPin pin,
+    private void writeInstanceRow(ExecutionKey key, ProcessInstanceStatus status,
+                                  ExecutionTerminationReason terminationReason, GraphVersionPin pin,
                                   long revision, long fencingToken, Instant now, Instant createdAt,
                                   long lifecycleGeneration, ExecutionOrigin origin,
                                   Instant retainedUntil) throws SQLException {
@@ -1824,13 +1852,18 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // property of the statement rather than a rule the caller has to keep -- and write-once is
         // exactly what makes the inventory's ordering stable while writes continue.
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO process_instance (tenant_id, process_instance_id, status, graph_version_pin, "
+                "INSERT INTO process_instance (tenant_id, process_instance_id, status, "
+                        + "termination_reason, graph_version_pin, "
                         + "revision, fencing_token, updated_at_epoch_second, updated_at_nano, "
                         + "created_at_epoch_second, created_at_nano, lifecycle_generation, "
                         + "deployment_id, workload_id, correlation_id, retained_until_epoch_second, "
                         + "retained_until_nano) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
                         + "ON CONFLICT (tenant_id, process_instance_id) DO UPDATE SET status = excluded.status, "
+                        // Assigned on conflict, beside the status it qualifies and never apart from
+                        // it: the pair is one fact, so a row must never carry a new status with the
+                        // previous reason still attached to it.
+                        + "termination_reason = excluded.termination_reason, "
                         + "graph_version_pin = excluded.graph_version_pin, revision = excluded.revision, "
                         + "updated_at_epoch_second = excluded.updated_at_epoch_second, "
                         + "updated_at_nano = excluded.updated_at_nano, "
@@ -1842,10 +1875,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
             statement.setString(3, status.name());
-            statement.setString(4, pin.reference());
-            statement.setLong(5, revision);
-            statement.setLong(6, fencingToken);
-            int index = StoredInstant.bindValue(statement, 7, now);
+            statement.setString(4, terminationReason == null ? null : terminationReason.name());
+            statement.setString(5, pin.reference());
+            statement.setLong(6, revision);
+            statement.setLong(7, fencingToken);
+            int index = StoredInstant.bindValue(statement, 8, now);
             index = StoredInstant.bindValue(statement, index, createdAt);
             statement.setLong(index++, lifecycleGeneration);
             statement.setString(index++, origin.deploymentId().orElse(null));

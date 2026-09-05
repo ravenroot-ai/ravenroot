@@ -64,11 +64,18 @@ import java.util.UUID;
  * @param paused            whether a pause is currently held on this traversal. See
  *                          {@link #paused()} for why this qualifies {@code status} instead of
  *                          becoming a value of it, and why a terminal outcome never carries it.
+ * @param terminationReason why a terminal {@code status} was reached, when the status alone would
+ *                          misdescribe it, and {@code null} when nothing distinguishes it.
+ *                          <b>A cancelled execution reports {@code status == FAILED} and
+ *                          {@code terminationReason == CANCELLED}</b>; read the status without the
+ *                          reason and this type reports an incident that did not happen. See
+ *                          {@link #cancelled()} and {@link ExecutionTerminationReason}.
  */
 public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, ProcessInstanceStatus status,
                                Object payload, Set<String> visitedNodes, Set<String> defaultedNodes,
                                Set<String> bypassedNodes, Set<String> handledFailureNodes,
-                               Set<String> untakenEdges, boolean paused) {
+                               Set<String> untakenEdges, boolean paused,
+                               ExecutionTerminationReason terminationReason) {
 /**
  * Freezes all node collections so callers cannot rewrite the reported execution history, and
  * forces the one combination that has no meaning: a terminal execution that is also holding.
@@ -91,6 +98,14 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
         handledFailureNodes = Set.copyOf(handledFailureNodes == null ? Set.of() : handledFailureNodes);
         untakenEdges = Set.copyOf(untakenEdges == null ? Set.of() : untakenEdges);
         paused = paused && !status.terminal();
+        // Dropped rather than rejected, for the reason paused is dropped one line above, and
+        // deliberately the same rule so this type has one story about non-terminal outcomes rather
+        // than two opposite ones: an execution that has not ended has not terminated, so it cannot
+        // have a termination reason, and a read that raced a cancellation is out of date rather than
+        // malformed. The loud check lives where it belongs -- ProcessInstance and Traversal refuse
+        // the contradictory combination outright, because their canonical constructors are what
+        // classify stored rows as corrupt, and this is a projection of state they already validated.
+        terminationReason = status.terminal() ? terminationReason : null;
     }
 
 /**
@@ -117,7 +132,36 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
                             Set<String> bypassedNodes, Set<String> handledFailureNodes,
                             Set<String> untakenEdges) {
         this(processInstanceId, traversalId, status, payload, visitedNodes, defaultedNodes, bypassedNodes,
-                handledFailureNodes, untakenEdges, false);
+                handledFailureNodes, untakenEdges, false, null);
+    }
+
+/**
+ * Compatibility constructor preserving the canonical shape before a termination reason was carried.
+ *
+ * <p>Reports an absent reason, which reads as "nothing distinguishes this termination" and is
+ * therefore correct for every producer that has not been taught to record one -- a plain failure and
+ * an outcome built by an older adapter arrive here identically, and neither is a cancellation. What
+ * this shape cannot express is the case this component was added for, so a producer that can observe
+ * a cancellation must use the canonical constructor; building a cancelled execution through this one
+ * would report it as an ordinary failure, which is the exact defect the component removes.</p>
+ *
+ * @param processInstanceId durable process that contains this traversal
+ * @param traversalId caller-facing traversal identity
+ * @param status lifecycle state at the time the outcome was observed
+ * @param payload terminal payload, or {@code null} while unavailable
+ * @param visitedNodes graph nodes entered during this traversal
+ * @param defaultedNodes entered nodes that ran with their unresolved default behavior
+ * @param bypassedNodes entered nodes deliberately bypassed
+ * @param handledFailureNodes entered nodes whose failures were handled by graph semantics
+ * @param untakenEdges labels for bypassed-node edges that could not be selected
+ * @param paused whether a pause is currently held on this traversal
+ */
+    public ExecutionOutcome(UUID processInstanceId, UUID traversalId, ProcessInstanceStatus status,
+                            Object payload, Set<String> visitedNodes, Set<String> defaultedNodes,
+                            Set<String> bypassedNodes, Set<String> handledFailureNodes,
+                            Set<String> untakenEdges, boolean paused) {
+        this(processInstanceId, traversalId, status, payload, visitedNodes, defaultedNodes, bypassedNodes,
+                handledFailureNodes, untakenEdges, paused, null);
     }
 
 /**
@@ -295,6 +339,27 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
             return this;
         }
         return new ExecutionOutcome(processInstanceId, traversalId, status, payload, visitedNodes,
-                defaultedNodes, bypassedNodes, handledFailureNodes, untakenEdges, effective);
+                defaultedNodes, bypassedNodes, handledFailureNodes, untakenEdges, effective,
+                terminationReason);
+    }
+
+    /**
+     * Whether this execution was stopped on request rather than having broken.
+     *
+     * <p>The read this record's {@code status} cannot give on its own, and the reason every type in
+     * this chain repeats the warning: a cancelled execution reports {@code FAILED}, so a caller that
+     * branches on {@link #status()} alone turns every deliberate stop into an incident. That is not a
+     * missing feature of the status enum, it is a compatibility decision -- adding a status value
+     * would make the first cancelled row unreadable to every reader that predates it, while a
+     * reason beside an unchanged status leaves those readers seeing exactly what they saw before.
+     * {@link ExecutionTerminationReason} states the argument in full.</p>
+     *
+     * <p>Exactly the {@link #degraded()} and {@link #handledFailure()} shape: a boolean derived from
+     * a component, placed here so the derivation is written once rather than in each adapter.</p>
+     *
+     * @return whether this execution's termination is recorded as a cancellation.
+     */
+    public boolean cancelled() {
+        return ExecutionTerminationReason.isCancellation(terminationReason);
     }
 }

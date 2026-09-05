@@ -914,7 +914,8 @@ final class DurablePausedExecutionRecoveryTest {
                     paused.countDown();
                 }
                 if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                        || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                        || event.type() == ExecutionEventType.EXECUTION_FAILED
+                        || event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
                     terminal.countDown();
                 }
             });

@@ -1037,8 +1037,8 @@ public final class GraphRunner implements AutoCloseable {
                                 traversalId, state.resultPayload(), state.visitedNodes, state.defaultedNodes,
                                 state.bypassedNodes, handledFailures, state.untakenEdges));
                     }
-                    state.executionFailed();
-                    monitor.executionFailed(identity, outcome);
+                    state.executionFailed(ExecutionTermination.reasonOf(outcome));
+                    publishTermination(identity, outcome);
                     return CompletableFuture.<GraphExecutionResult>failedFuture(outcome);
                 });
     }
@@ -1144,7 +1144,9 @@ public final class GraphRunner implements AutoCloseable {
                     try {
                         if (failure == null) state.executionCompleted();
                         else if (!(outcome instanceof VerifiedToolApprovalSuspension)
-                                && !(outcome instanceof VerifiedHumanTaskSuspension)) state.executionFailed();
+                                && !(outcome instanceof VerifiedHumanTaskSuspension)) {
+                            state.executionFailed(ExecutionTermination.reasonOf(outcome));
+                        }
                     } finally {
                         release(traversalId, coordinator).toCompletableFuture().join();
                     }
@@ -1236,8 +1238,8 @@ public final class GraphRunner implements AutoCloseable {
                             monitor.executionCompleted(identity, state.handledFailureNodes());
                         } else if (!(outcome instanceof VerifiedHumanTaskSuspension)
                                 && !(outcome instanceof VerifiedToolApprovalSuspension)) {
-                            state.executionFailed();
-                            monitor.executionFailed(identity, outcome);
+                            state.executionFailed(ExecutionTermination.reasonOf(outcome));
+                            publishTermination(identity, outcome);
                         }
                     } finally {
                         release(traversalId, coordinator).toCompletableFuture().join();
@@ -1355,8 +1357,8 @@ public final class GraphRunner implements AutoCloseable {
                             monitor.executionCompleted(identity, state.handledFailureNodes());
                         } else if (!(outcome instanceof VerifiedHumanTaskSuspension)
                                 && !(outcome instanceof VerifiedToolApprovalSuspension)) {
-                            state.executionFailed();
-                            monitor.executionFailed(identity, outcome);
+                            state.executionFailed(ExecutionTermination.reasonOf(outcome));
+                            publishTermination(identity, outcome);
                         }
                     } finally {
                         release(traversalId, coordinator).toCompletableFuture().join();
@@ -1370,6 +1372,24 @@ public final class GraphRunner implements AutoCloseable {
                     if (failure != null) throw new CompletionException(outcome);
                     return null;
                 });
+    }
+
+    /**
+     * Publishes the one terminal event a non-completing traversal gets, and chooses which it is.
+     *
+     * <p>Every terminal handler routes through here rather than calling the monitor directly, so the
+     * event type and the durable termination reason are decided by one classifier reading one
+     * throwable. Two independent decisions would drift silently: an execution recorded as cancelled
+     * in the aggregate and published as {@code EXECUTION_FAILED} is self-consistent from either side
+     * alone, and the disagreement would only ever be found by someone comparing a metric against a
+     * durable read.</p>
+     */
+    private void publishTermination(ExecutionMonitor.ExecutionIdentity identity, Throwable outcome) {
+        if (ExecutionTermination.isCancellation(outcome)) {
+            monitor.executionCancelled(identity, outcome);
+        } else {
+            monitor.executionFailed(identity, outcome);
+        }
     }
 
     private CompletionStage<Void> release(UUID traversalId, JoinCoordinator coordinator) {
@@ -5355,7 +5375,24 @@ public final class GraphRunner implements AutoCloseable {
             closing = true;
         }
 
-        private synchronized void executionFailed() {
+        /**
+         * Commits the traversal's non-completing end, recording why when the status alone would
+         * misdescribe it.
+         *
+         * <p><b>A cancelled traversal is written as {@code FAILED} here, deliberately.</b> The status
+         * vocabulary is unchanged and the reason is what carries the distinction, so this method
+         * looks exactly like the bug it fixes unless the two columns are read together — see
+         * {@link ai.ravenroot.api.application.ExecutionTerminationReason} for why a new status name
+         * was rejected. {@code reason} rides in the same transitions as the status, in the same
+         * batch, so no committed state ever reports a cancellation as a plain fault, not even for one
+         * revision.</p>
+         *
+         * @param reason {@link ai.ravenroot.api.application.ExecutionTerminationReason#CANCELLED}
+         *               when the traversal was stopped on request, and {@code null} for an ordinary
+         *               failure.
+         */
+        private synchronized void executionFailed(
+                ai.ravenroot.api.application.ExecutionTerminationReason reason) {
             // A held traversal has not failed; it is waiting, and its hold says so. See #durablyHeld.
             if (durablyHeld) {
                 return;
@@ -5364,10 +5401,11 @@ public final class GraphRunner implements AutoCloseable {
             Traversal traversal = lifecycle.traversals().get(traversalId);
             if (!traversal.status().terminal()) {
                 transitions.add(new ExecutionTransition.TraversalTransitioned(traversalId,
-                        TraversalStatus.FAILED));
+                        TraversalStatus.FAILED, reason));
             }
             if (!lifecycle.status().terminal()) {
-                transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED));
+                transitions.add(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        reason));
             }
             // No event; see executionCompleted().
             record(transitions, List.of());

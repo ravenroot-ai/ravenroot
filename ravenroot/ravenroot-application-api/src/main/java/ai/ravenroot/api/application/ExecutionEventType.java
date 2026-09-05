@@ -141,5 +141,31 @@ public enum ExecutionEventType {
     /** The execution reached its normal terminal result. */
     EXECUTION_COMPLETED,
     /** The execution reached a failed terminal result. */
-    EXECUTION_FAILED
+    EXECUTION_FAILED,
+
+    /**
+     * The execution was stopped on request and reached its terminal state without a result.
+     *
+     * <h4>It replaces {@link #EXECUTION_FAILED}, it does not accompany it</h4>
+     * <p>The same rule {@link #NODE_RETRY_SCHEDULED} follows one level down, and here it is what the
+     * type exists for. This stream is labelled by event type and by nothing else, so the event type
+     * <em>is</em> the failure counter: while a cancellation published {@code EXECUTION_FAILED}, every
+     * operator stop raised the failure rate, and a system whose users cancel more work looked like a
+     * system that was breaking more often. Publishing both would keep that defect intact under a new
+     * name.</p>
+     *
+     * <h4>The durable record still says {@code FAILED}, and that is deliberate</h4>
+     * <p>This event is the observability half of a decision whose durable half is a nullable
+     * {@code ExecutionTerminationReason} beside an unchanged status: a cancelled execution is stored
+     * as {@code FAILED} and qualified as {@code CANCELLED}, so that a reader which predates the
+     * change still reads a status it understands rather than a name it cannot parse. The event
+     * stream and the durable read therefore describe the same termination with different shapes, and
+     * a consumer correlating the two must expect a {@code FAILED} status under this event type. See
+     * {@link ExecutionTerminationReason}.</p>
+     *
+     * <p>It is a traversal-terminal event and obeys every rule {@link #EXECUTION_COMPLETED} and
+     * {@link #EXECUTION_FAILED} obey: exactly one of the three per traversal, never followed by
+     * {@link #EXECUTION_PAUSED}, and published after the traversal has stopped dispatching.</p>
+     */
+    EXECUTION_CANCELLED
 }

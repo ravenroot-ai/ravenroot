@@ -1,6 +1,6 @@
 /**
- * Layered graph drawing for the design editor's additive `Hierarchical (new)` and `Flow (new)`
- * arrangements.
+ * Layered graph drawing for the design editor's additive `Hierarchical (new)` and
+ * `Layered (top-down)` arrangements.
  *
  * <p>The existing arrangements hand node positions to Cytoscape and then re-route every edge from
  * its endpoints alone, one edge at a time. This module treats placement and routing as one
@@ -8,8 +8,14 @@
  * with node labels declared as outside labels so the spacing reserves room for them, and then
  * converts the sections into absolute polylines Cytoscape can draw. Backward edges — those whose
  * target sits on the same or an earlier layer than their source — are not drawn through the
- * channels between layers; they are routed in dedicated tracks below the band of node rows, so
+ * channels between layers; they are routed in dedicated tracks beyond the band of node rows, so
  * they never cut across the main flow.</p>
+ *
+ * <p>The two arrangements differ in the axis they flow along, so every formula below is written
+ * once against a `main` axis — the one layers advance along — and a `cross` axis — the one a
+ * single layer spreads over. The label side follows the axis rather than being a taste: a label
+ * under the node card sits in the channel a top-down drawing routes through, so the top-down
+ * arrangement carries its labels beside the card instead. The caller paints them there.</p>
  *
  * <p>This module is pure: no DOM, no Cytoscape. The caller measures nodes and labels and applies
  * the result. Keeping it pure is what lets the acceptance criteria be checked in unit tests with
@@ -24,16 +30,50 @@ const BACK_TRACK_OFFSET = 28;
 const BACK_TRACK_GAP = 14;
 const BACK_STUB_BASE = 8;
 const BACK_STUB_STEP = 6;
-const COLUMN_TOLERANCE = 2;
+const LAYER_TOLERANCE = 2;
+
+/**
+ * The two drawing axes. `main` is the direction of flow — layers advance along it — and `cross` is
+ * the axis one layer spreads over. `bodyMain`/`bodyCross` read a node's own size along each, and
+ * `at` builds a point from a pair of axis coordinates, so the geometry below never names `x` or
+ * `y` directly and reads identically in either direction.
+ */
+const AXES = Object.freeze({
+  RIGHT: Object.freeze({
+    main: 'x', cross: 'y',
+    mainStart: 'left', mainEnd: 'right', crossStart: 'top', crossEnd: 'bottom',
+    bodyMain: box => box.width, bodyCross: box => box.height,
+    at: (main, cross) => ({ x: main, y: cross }),
+  }),
+  DOWN: Object.freeze({
+    main: 'y', cross: 'x',
+    mainStart: 'top', mainEnd: 'bottom', crossStart: 'left', crossEnd: 'right',
+    bodyMain: box => box.height, bodyCross: box => box.width,
+    at: (main, cross) => ({ x: cross, y: main }),
+  }),
+});
+
+// Where the caller paints a node's label, and therefore where this module must reserve room for
+// it. `bottom` is the design editor's own placement; `right` is what a top-down drawing needs,
+// because a label under the card would sit in the channel the drawing routes through.
+const LABEL_PLACEMENTS = Object.freeze({
+  bottom: '[H_CENTER, V_BOTTOM, OUTSIDE]',
+  right: '[H_RIGHT, V_CENTER, OUTSIDE]',
+});
 
 export const LAYERED_MODES = Object.freeze({
   'hierarchical-new': Object.freeze({
+    direction: 'RIGHT', labelSide: 'bottom',
     routing: 'ORTHOGONAL', family: 'round-segments', radius: 12,
     nodeNode: 44, betweenLayers: 96, edgeEdge: 14, edgeNode: 26,
   }),
-  'flow-new': Object.freeze({
-    routing: 'POLYLINE', family: 'round-segments', radius: 22,
-    nodeNode: 30, betweenLayers: 72, edgeEdge: 10, edgeNode: 22,
+  'layered-down': Object.freeze({
+    direction: 'DOWN', labelSide: 'right',
+    // Layers are rows here, so `nodeNode` separates a node from its neighbour's label along the
+    // row and has to clear the widest name; `betweenLayers` is the vertical channel, which no
+    // longer carries labels and is therefore tighter than the left-to-right drawing's.
+    routing: 'ORTHOGONAL', family: 'round-segments', radius: 12,
+    nodeNode: 56, betweenLayers: 72, edgeEdge: 14, edgeNode: 26,
   }),
 });
 
@@ -43,12 +83,21 @@ export function isLayeredMode(mode) {
   return Object.prototype.hasOwnProperty.call(LAYERED_MODES, String(mode));
 }
 
+/** The side of the node card the caller must paint labels on for this mode: `bottom` or `right`. */
+export function layeredLabelSide(mode) {
+  return LAYERED_MODES[mode]?.labelSide || 'bottom';
+}
+
+function axisOf(spec) {
+  return AXES[spec.direction];
+}
+
 export function layeredElkOptions(mode) {
   const spec = LAYERED_MODES[mode];
   if (!spec) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
   return {
     'elk.algorithm': 'layered',
-    'elk.direction': 'RIGHT',
+    'elk.direction': spec.direction,
     'elk.edgeRouting': spec.routing,
     // Depth-first cycle breaking from the sources reverses the edges that actually run backwards
     // in a workflow (retry, rework, no-issue) instead of whichever edges a greedy pass finds
@@ -83,17 +132,19 @@ function labelOf(node) {
   return width > 0 && height > 0 ? { text: String(label.text ?? ''), width, height } : null;
 }
 
-/** The ELK input graph for one drawing mode: node bodies with outside bottom labels. */
+/** The ELK input graph for one drawing mode: node bodies with outside labels on the mode's side. */
 export function buildLayeredElkGraph(inputs, mode) {
+  const spec = LAYERED_MODES[mode];
+  if (!spec) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
   const children = (inputs?.nodes || []).map(node => {
     const label = labelOf(node);
     const layoutOptions = {
-      // Every node of a layer shares one centre column, so the drawing reads as discrete levels
-      // even when node bodies differ in width.
+      // Every node of a layer shares one centre line, so the drawing reads as discrete levels
+      // even when node bodies differ in size.
       'elk.alignment': 'CENTER',
       // Declared as an outside label, the label becomes a node margin: spacing and routing keep
       // clear of it while edges still attach to the node body.
-      'elk.nodeLabels.placement': '[H_CENTER, V_BOTTOM, OUTSIDE]',
+      'elk.nodeLabels.placement': LABEL_PLACEMENTS[spec.labelSide],
     };
     if (node.kind === 'START') layoutOptions['elk.layered.layering.layerConstraint'] = 'FIRST';
     else if (node.kind === 'END') layoutOptions['elk.layered.layering.layerConstraint'] = 'LAST';
@@ -154,58 +205,60 @@ function makeRoute(id, source, target, polyline, boxes, family, radius, kind) {
   });
 }
 
-function clusterColumns(xs) {
-  const columns = [];
-  for (const x of [...xs].sort((a, b) => a - b)) {
-    const last = columns[columns.length - 1];
-    if (last && Math.abs(x - last) <= COLUMN_TOLERANCE) continue;
-    columns.push(x);
+function clusterLayers(coordinates) {
+  const layers = [];
+  for (const at of [...coordinates].sort((a, b) => a - b)) {
+    const last = layers[layers.length - 1];
+    if (last != null && Math.abs(at - last) <= LAYER_TOLERANCE) continue;
+    layers.push(at);
   }
-  return columns;
+  return layers;
 }
 
 /**
- * Backward edges leave the source's east side from a port of their own, drop below the band of
- * node rows into a track of their own, run back under everything, and rise into a port of their
- * own on the target's west side. Shorter spans take
- * the tracks nearest the band so nested back edges never cross each other; the little stubs that
- * carry an edge from its port to its vertical are ordered so two back edges sharing a node do not
- * cross either. The verticals sit inside the channel next to the layer's label extent, closer to
- * the layer than any vertical ELK draws there, so they cross no label and overlap no ELK segment.
+ * Backward edges leave the source's outgoing side from a port of their own, step out of the band
+ * of node rows into a track of their own, run back outside everything, and return into a port of
+ * their own on the target's incoming side. Shorter spans take the tracks nearest the band so
+ * nested back edges never cross each other; the little stubs that carry an edge from its port to
+ * its track are ordered so two back edges sharing a node do not cross either. The stubs sit
+ * inside the channel next to the layer's extent, closer to the layer than anything ELK draws
+ * there, so they cross no label and overlap no ELK segment.
  */
 const PORT_STEP = 6;
 const PORT_INSET = 8;
 const PORT_CLEARANCE = 4;
 
-// The next port slot on one node side, counted up from the bottom, that no forward edge already
-// uses there; back edges of the same node take successive slots.
-function freePort(box, usedYs, taken) {
+// The next port slot on one node side, counted inward from the far end of the body, that no
+// forward edge already uses there; back edges of the same node take successive slots.
+function freePort(box, axis, used, taken) {
+  const centre = box[axis.cross];
+  const half = axis.bodyCross(box) / 2;
   for (let slot = 0; slot < 64; slot++) {
-    const y = box.y + box.height / 2 - PORT_INSET - slot * PORT_STEP;
-    if (y < box.y - box.height / 2 + PORT_INSET) break;
-    if ([...usedYs, ...taken].some(used => Math.abs(used - y) < PORT_CLEARANCE)) continue;
-    taken.push(y);
-    return y;
+    const at = centre + half - PORT_INSET - slot * PORT_STEP;
+    if (at < centre - half + PORT_INSET) break;
+    if ([...used, ...taken].some(other => Math.abs(other - at) < PORT_CLEARANCE)) continue;
+    taken.push(at);
+    return at;
   }
-  const y = box.y;
-  taken.push(y);
-  return y;
+  taken.push(centre);
+  return centre;
 }
 
-function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, forwardRoutes, betweenLayers) {
+function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandEnd, forwardRoutes, spec) {
+  const axis = axisOf(spec);
   // The stubs of one node must all fit inside its own half of the channel; with many back edges
-  // on one node they close up rather than reach into the neighbouring layer's label extent.
-  const maxStub = Math.max(BACK_STUB_BASE, Math.floor(betweenLayers / 2) - 6);
-  const eastPorts = new Map();
-  const westPorts = new Map();
+  // on one node they close up rather than reach into the neighbouring layer's extent.
+  const maxStub = Math.max(BACK_STUB_BASE, Math.floor(spec.betweenLayers / 2) - 6);
+  const outgoingPorts = new Map();
+  const incomingPorts = new Map();
   for (const route of forwardRoutes) {
-    if (!eastPorts.has(route.source)) eastPorts.set(route.source, []);
-    eastPorts.get(route.source).push(route.start.y);
-    if (!westPorts.has(route.target)) westPorts.set(route.target, []);
-    westPorts.get(route.target).push(route.end.y);
+    if (!outgoingPorts.has(route.source)) outgoingPorts.set(route.source, []);
+    outgoingPorts.get(route.source).push(route.start[axis.cross]);
+    if (!incomingPorts.has(route.target)) incomingPorts.set(route.target, []);
+    incomingPorts.get(route.target).push(route.end[axis.cross]);
   }
-  const takenEast = new Map();
-  const takenWest = new Map();
+  const takenOutgoing = new Map();
+  const takenIncoming = new Map();
   const span = edge => Math.abs(layerOf.get(edge.source) - layerOf.get(edge.target));
   const ordered = [...backEdges].sort((a, b) => span(a) - span(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const track = new Map(ordered.map((edge, index) => [edge.id, index]));
@@ -224,31 +277,53 @@ function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, for
     return BACK_STUB_BASE + position * step;
   };
   return ordered.map(edge => {
-    const trackY = bandBottom + BACK_TRACK_OFFSET + track.get(edge.id) * BACK_TRACK_GAP;
+    const trackAt = bandEnd + BACK_TRACK_OFFSET + track.get(edge.id) * BACK_TRACK_GAP;
     const sourceBox = boxes.get(edge.source);
     const targetBox = boxes.get(edge.target);
     const sourceExtent = layerExtents[layerOf.get(edge.source)];
     const targetExtent = layerExtents[layerOf.get(edge.target)];
-    if (!takenEast.has(edge.source)) takenEast.set(edge.source, []);
-    if (!takenWest.has(edge.target)) takenWest.set(edge.target, []);
-    const start = { x: sourceBox.x + sourceBox.width / 2, y: freePort(sourceBox, eastPorts.get(edge.source) || [], takenEast.get(edge.source)) };
-    const end = { x: targetBox.x - targetBox.width / 2, y: freePort(targetBox, westPorts.get(edge.target) || [], takenWest.get(edge.target)) };
-    const x1 = sourceExtent.right + stubFor(leaving.get(edge.source), edge.id, false);
-    const x2 = targetExtent.left - stubFor(entering.get(edge.target), edge.id, true);
+    if (!takenOutgoing.has(edge.source)) takenOutgoing.set(edge.source, []);
+    if (!takenIncoming.has(edge.target)) takenIncoming.set(edge.target, []);
+    const startCross = freePort(sourceBox, axis, outgoingPorts.get(edge.source) || [], takenOutgoing.get(edge.source));
+    const endCross = freePort(targetBox, axis, incomingPorts.get(edge.target) || [], takenIncoming.get(edge.target));
+    const start = axis.at(sourceBox[axis.main] + axis.bodyMain(sourceBox) / 2, startCross);
+    const end = axis.at(targetBox[axis.main] - axis.bodyMain(targetBox) / 2, endCross);
+    const outward = sourceExtent.end + stubFor(leaving.get(edge.source), edge.id, false);
+    const inward = targetExtent.start - stubFor(entering.get(edge.target), edge.id, true);
     const polyline = dedupe([
       start,
-      { x: x1, y: start.y },
-      { x: x1, y: trackY },
-      { x: x2, y: trackY },
-      { x: x2, y: end.y },
+      axis.at(outward, startCross),
+      axis.at(outward, trackAt),
+      axis.at(inward, trackAt),
+      axis.at(inward, endCross),
       end,
     ]);
     return makeRoute(edge.id, edge.source, edge.target, polyline, boxes, 'round-segments', BACK_EDGE_RADIUS, 'back');
   });
 }
 
+// A node's drawn extent: the body, plus the label on the side this mode paints it. The label of a
+// left-to-right drawing hangs under the card and widens the node; the label of a top-down drawing
+// sits beside it and lengthens the node along the row.
+function boxOfChild(child, label, labelSide) {
+  const width = number(child.width);
+  const height = number(child.height);
+  const x = number(child.x) + width / 2;
+  const y = number(child.y) + height / 2;
+  const labelWidth = label ? label.width : 0;
+  const labelHeight = label ? label.height : 0;
+  const beside = labelSide === 'right';
+  return Object.freeze({
+    id: child.id, x, y, width, height, labelWidth, labelHeight, labelSide,
+    left: beside ? x - width / 2 : Math.min(x - width / 2, x - labelWidth / 2),
+    right: beside ? x + width / 2 + labelWidth : Math.max(x + width / 2, x + labelWidth / 2),
+    top: beside ? Math.min(y - height / 2, y - labelHeight / 2) : y - height / 2,
+    bottom: beside ? Math.max(y + height / 2, y + labelHeight / 2) : y + height / 2 + labelHeight,
+  });
+}
+
 /**
- * Turn an ELK result into node centres, per-layer columns, and one route per edge.
+ * Turn an ELK result into node centres, per-layer coordinates, and one route per edge.
  *
  * <p>`boxes` carry each node's body and its label extent so both the routing of back edges and
  * the metrics used to judge the drawing see the same geometry the editor will paint.</p>
@@ -256,42 +331,35 @@ function routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, for
 export function layeredDrawingFromResult(result, inputs, mode) {
   const spec = LAYERED_MODES[mode];
   if (!spec) throw new TypeError(`Unknown layered drawing mode: ${mode}`);
+  const axis = axisOf(spec);
   const inputById = new Map((inputs?.nodes || []).map(node => [String(node.id), node]));
   const boxes = new Map();
   for (const child of result?.children || []) {
-    const label = labelOf(inputById.get(child.id));
-    const width = number(child.width);
-    const height = number(child.height);
-    const x = number(child.x) + width / 2;
-    const y = number(child.y) + height / 2;
-    const labelWidth = label ? label.width : 0;
-    const labelHeight = label ? label.height : 0;
-    boxes.set(child.id, Object.freeze({
-      id: child.id, x, y, width, height, labelWidth, labelHeight,
-      left: Math.min(x - width / 2, x - labelWidth / 2),
-      right: Math.max(x + width / 2, x + labelWidth / 2),
-      top: y - height / 2,
-      bottom: y + height / 2 + labelHeight,
-    }));
+    boxes.set(child.id, boxOfChild(child, labelOf(inputById.get(child.id)), spec.labelSide));
   }
-  const columns = clusterColumns([...boxes.values()].map(box => box.x));
+  const columns = clusterLayers([...boxes.values()].map(box => box[axis.main]));
   const layerOf = new Map();
-  boxes.forEach(box => layerOf.set(box.id, columns.findIndex(column => Math.abs(column - box.x) <= COLUMN_TOLERANCE)));
-  const layerExtents = columns.map((x, index) => {
-    let left = Infinity;
-    let right = -Infinity;
+  boxes.forEach(box => layerOf.set(box.id,
+    columns.findIndex(column => Math.abs(column - box[axis.main]) <= LAYER_TOLERANCE)));
+  // The extent of a layer along the axis of flow: where a back edge's stub may sit without
+  // touching the layer it is leaving or the one it is returning to.
+  const layerExtents = columns.map((at, index) => {
+    let start = Infinity;
+    let end = -Infinity;
     boxes.forEach(box => {
       if (layerOf.get(box.id) !== index) return;
-      left = Math.min(left, box.left);
-      right = Math.max(right, box.right);
+      start = Math.min(start, box[axis.mainStart]);
+      end = Math.max(end, box[axis.mainEnd]);
     });
-    return { x, left, right };
+    return { at, start, end };
   });
-  let bandTop = Infinity;
-  let bandBottom = -Infinity;
+  // The band is the extent of the whole drawing across the flow. Back-edge tracks are laid beyond
+  // its far side, which is what keeps them out of the drawing.
+  let bandStart = Infinity;
+  let bandEnd = -Infinity;
   boxes.forEach(box => {
-    bandTop = Math.min(bandTop, box.top);
-    bandBottom = Math.max(bandBottom, box.bottom);
+    bandStart = Math.min(bandStart, box[axis.crossStart]);
+    bandEnd = Math.max(bandEnd, box[axis.crossEnd]);
   });
 
   const routes = new Map();
@@ -309,19 +377,22 @@ export function layeredDrawingFromResult(result, inputs, mode) {
     routes.set(edge.id, makeRoute(edge.id, source, target, polyline, boxes, spec.family, spec.radius, 'forward'));
   }
   const forwardRoutes = [...routes.values()];
-  for (const route of routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandBottom, forwardRoutes, spec.betweenLayers)) {
+  for (const route of routeBackEdges(backEdges, boxes, layerOf, layerExtents, bandEnd, forwardRoutes, spec)) {
     routes.set(route.id, route);
   }
 
   return {
     mode,
+    direction: spec.direction,
+    labelSide: spec.labelSide,
     positions: [...boxes.values()].map(box => ({ id: box.id, x: box.x, y: box.y })),
     boxes,
     routes,
     layers: layerOf,
     columns,
     backEdges: backEdges.map(edge => edge.id),
-    band: { top: bandTop, bottom: bandBottom },
+    // Across the flow: `y` for a left-to-right drawing, `x` for a top-down one.
+    band: { axis: axis.cross, start: bandStart, end: bandEnd },
   };
 }
 

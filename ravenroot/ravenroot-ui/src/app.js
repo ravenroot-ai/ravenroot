@@ -2,7 +2,7 @@ import cytoscape from 'cytoscape';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
-import { isLayeredMode } from './layered-drawing.js';
+import { isLayeredMode, layeredLabelSide } from './layered-drawing.js';
 import {
   LAYERED_LAYOUT_NAME, applyLayeredEdgeRoutes, clearLayeredDrawing, layeredDrawingOf, registerLayeredLayout,
 } from './layered-layout.js';
@@ -3634,6 +3634,9 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
     });
     applyRuntimeVisual(n);
   });
+  // Restated after the per-node style above, which writes this family's placement inline: a
+  // restyle must not drag the names back under the cards of a top-down drawing.
+  applyLayeredLabelSide(target, layeredLabelSide(owner?.layoutMode), owner);
 }
 
 // ── Snap all nodes to a regular grid ─────────────────────────────────────
@@ -3833,6 +3836,31 @@ function scheduleHierarchicalEdgeRoutes(owner, target, token, complete = null) {
     if (layoutRequestIsCurrent(token)) applyHierarchicalEdgeRoutes(target);
     complete?.();
   });
+}
+
+// Where the node name is painted while a layered arrangement is displayed. A top-down drawing
+// routes through the channel under each card — exactly where the n8n family paints the name — so
+// that arrangement carries the name beside the card instead. The drawing measures the labels only
+// after this has run, so the two never disagree.
+const SIDE_LABEL_STYLE = Object.freeze({
+  'text-valign': 'center', 'text-halign': 'right', 'text-margin-x': 10, 'text-margin-y': 0,
+});
+const N8N_LABEL_STYLE = Object.freeze({
+  'text-valign': 'bottom', 'text-halign': 'center', 'text-margin-x': 0, 'text-margin-y': 10,
+});
+const LABEL_PLACEMENT_PROPERTIES = 'text-valign text-halign text-margin-x text-margin-y';
+
+// Any side but `right` hands the name back to whoever paints this render mode: under the card in
+// the n8n family, and centred inside the node by the base stylesheet everywhere else. Restoring by
+// removal rather than by writing one placement is what keeps the non-n8n modes untouched.
+function applyLayeredLabelSide(target = cy, side = 'bottom', owner = workspace.active) {
+  if (!target) return;
+  if (side === 'right') {
+    target.nodes().style(SIDE_LABEL_STYLE);
+    return;
+  }
+  target.nodes().removeStyle(LABEL_PLACEMENT_PROPERTIES);
+  if (isN8nFamilyLayout(owner?.visualStyle ?? visualStyle)) target.nodes().style(N8N_LABEL_STYLE);
 }
 
 // The layered arrangements draw placement and routing as one result. Edges the drawing still
@@ -4069,7 +4097,7 @@ const ELK_LAYOUT_MODES = new Set(['elk', 'hierarchical', 'n8n', 'n8n2', 'n8n3', 
 // as ELK-backed modes even though only ELK modes need the per-document serialisation slot. Keeping
 // the two concerns separate prevents an ELK -> native queue hand-off from briefly publishing idle
 // while the replacement layout is already registered and about to start.
-const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'flow-new', ...ELK_LAYOUT_MODES]);
+const FINITE_ASYNC_LAYOUT_MODES = new Set(['dagre', 'cose', 'hierarchical-new', 'layered-down', ...ELK_LAYOUT_MODES]);
 const layoutJobs = new Map();
 
 const DESIGN_ARRANGEMENTS = Object.freeze({
@@ -4079,7 +4107,7 @@ const DESIGN_ARRANGEMENTS = Object.freeze({
   keep: Object.freeze({ preservePositions: true }),
   // Additive layered drawings (ADR 0036). The four entries above are untouched by design.
   'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
-  'flow-new': Object.freeze({ layout: 'flow-new' }),
+  'layered-down': Object.freeze({ layout: 'layered-down' }),
 });
 
 function renderModeLabel(mode) {
@@ -4289,6 +4317,7 @@ function runOwnedLayout(token) {
     name: LAYERED_LAYOUT_NAME, mode: token.mode,
     animate, animationDuration: animate ? 600 : 0, animationEasing: 'ease-in-out',
     fit: !fitAfterLayout, padding: 70,
+    prepareLabels: side => applyLayeredLabelSide(target, side, owner),
     isCurrent: () => layoutRequestIsCurrent(token),
     onError: error => console.error('Layered arrangement failed; positions are unchanged.', error),
   });
@@ -4364,6 +4393,9 @@ function setLayout(name, options = {}) {
   // A layered drawing describes one arrangement; leaving the layered modes discards it so no
   // later repaint can attach an old drawing to positions another layout produced.
   if (!isLayeredMode(name)) clearLayeredDrawing(target);
+  // Node names follow the incoming arrangement: beside the card for the top-down drawing, back to
+  // this render mode's own placement for everything else, including a plain render-mode change.
+  applyLayeredLabelSide(target, layeredLabelSide(name), owner);
   layoutMode = name;
   if (owner) {
     owner.layoutMode = name;

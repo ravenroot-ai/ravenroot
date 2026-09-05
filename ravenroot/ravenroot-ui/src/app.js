@@ -274,6 +274,7 @@ import {
   validateEdgeId,
 } from './edge-gestures.js';
 import {
+  commandPositionNodeIds,
   commandTargets,
   createCommandHistory,
   discardChangesMessage,
@@ -5048,7 +5049,7 @@ function syncAutosavedEdgeRenderer(edgeId) {
 }
 
 function syncGraphRendererInPlace({
-  nodeIds = [], edgeIds = [], refreshDependentEdges = false, restoreModelPositions = false,
+  nodeIds = [], edgeIds = [], refreshDependentEdges = false, restoreModelPositionIds = null,
 } = {}) {
   const owner = workspace.active;
   const target = cy;
@@ -5079,7 +5080,7 @@ function syncGraphRendererInPlace({
         width: element.width(), height: element.height(),
       };
       element.data(next.data);
-      if (restoreModelPositions) element.position(next.position);
+      if (restoreModelPositionIds?.has(id)) element.position(next.position);
       if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(element, owner);
       else applyRuntimeVisual(element);
       const after = {
@@ -8154,6 +8155,12 @@ function rebuildGraph(options = {}) {
   initCy(buildElements(graphData), graphData, {
     visualStyle: activeStyle,
   });
+  if (options.retainedNodePositions) {
+    cy.batch(() => options.retainedNodePositions.forEach((position, id) => {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.position(position);
+    }));
+  }
   if (viewport) cy.viewport(viewport);
   const retainedSelection = selectedIds.filter(id => cy.getElementById(id).nonempty());
   if (retainedSelection.length) applyStableSelection(cy, retainedSelection);
@@ -8200,12 +8207,15 @@ function applyHistoryStep(command, verb) {
   retireInspectorDraft();
   dragSnapshot = null;
   resetConnectGesture();
+  const modelPositionIds = new Set(commandPositionNodeIds(command));
+  const retainedNodePositions = new Map(cy?.nodes().map(node => [node.id(), node.position()]) || []);
+  modelPositionIds.forEach(id => retainedNodePositions.delete(id));
   // History commands are disabled while a layout owns the document. Retire any later paint-only
   // route frame left by ordinary node movement before restoring authoritative model positions.
   clearDynamicEdgeGeometry(workspace.active);
   if (!syncGraphRendererInPlace({
-    nodeIds: null, edgeIds: null, restoreModelPositions: true,
-  })) rebuildGraph({ syncPositions: false });
+    nodeIds: null, edgeIds: null, restoreModelPositionIds: modelPositionIds,
+  })) rebuildGraph({ syncPositions: false, retainedNodePositions });
   selectCommandTargets(command);
   updateHistoryUi();
   addActivityMessage('editor', `${verb}: ${command.label}`, 'completed');

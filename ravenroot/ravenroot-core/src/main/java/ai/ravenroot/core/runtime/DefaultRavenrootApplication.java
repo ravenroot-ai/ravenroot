@@ -1444,27 +1444,40 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * still never reach a caller, a log, or a retry: it would simply vanish, indistinguishably from a
      * refusal that never happened. {@link #LOGGER} is what replaces that silence.</p>
      *
-     * <p>Two decisions, deliberately not softened. First, the execution's already-completed outcome is
-     * never rewound: {@link ExecutionResultRegistry#completed}/{@code failed}/{@code cancelled} already
-     * committed the in-memory answer this method's caller reads immediately, and a run that genuinely
-     * finished does not become a failure because a bookkeeping write after the fact could not proceed --
-     * that would be a worse lie than the one being fixed. Second, this is never retried: the one
-     * documented cause of {@link ExecutionStoreException} here,
+     * <p>The execution's own already-completed outcome is never rewound by any of this: a run that
+     * genuinely finished does not become a failure because a bookkeeping write after the fact could
+     * not proceed -- that would be a worse lie than the one being fixed. And this is never retried:
+     * the one documented cause of {@link ExecutionStoreException} here that this method distinguishes,
      * {@link ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable}, is a
      * {@link ai.ravenroot.api.persistence.Retryability#DETERMINISTIC_REJECT} -- {@code traversalId} was
      * reused across two submissions, which {@link DurableExecutionResult}'s own Javadoc requires be
      * unique per tenant, and retrying an identical write repeats an identical, deterministic refusal.
-     * The durable record therefore keeps whichever of the two submissions recorded first, permanently,
-     * by the store's own idempotent-by-refusal design (see {@code ExecutionStore#recordExecutionResult});
-     * a caller reading the reused id once the in-memory entry for the second submission is gone observes
-     * the first submission's result, which is a property of that design and not something this method
-     * changes. What changes is that the refusal now leaves a trace instead of none. Whether a reused id
-     * should instead be refused at submission -- before a second execution ever runs and produces output
-     * that cannot be kept -- is a real question this method does not answer: it needs a synchronous
-     * existence check against the durable store on every submission's hot path, changes what a caller
-     * observes at submission time, and only closes the gap where a result-capable store is composed at
-     * all, so it is left to a change that can weigh that trade-off on its own rather than inherit it as
-     * a side effect of this one.</p>
+     *
+     * <h2>The cache is corrected, not merely told</h2>
+     * <p>{@link ExecutionResultRegistry#completed}/{@code failed}/{@code cancelled}/{@code
+     * payloadFailed} already committed <em>this</em> submission's outcome to the in-memory cache before
+     * this method ever ran, and {@link ExecutionResultRegistry.Durable#record} just refused to let it
+     * replace the durable record's own conflicting outcome for the same {@code traversalId} -- the
+     * durable authority keeps whichever submission recorded first. Left there, the cache and the
+     * durable record would disagree for as long as the cache entry survives: a live read of the reused
+     * id would answer with <em>this</em> submission's outcome while it is warm and with the
+     * <em>other</em> submission's once the entry ages out, a restart happens, or a second instance
+     * reads the same store -- the identical id giving two different answers depending on nothing but
+     * timing, which is exactly what "the durable record must be the source" rules out. So the refused
+     * write also erases this submission's cache entry via {@link ExecutionResultRegistry#forgetLocally},
+     * restoring the one property {@link ExecutionResultRegistry}'s own class Javadoc claims -- a cache
+     * in front of the durable record, never a second authority -- immediately rather than only once the
+     * entry would have aged out on its own. The next read of that id, warm or cold, therefore falls
+     * through to the durable record and answers with whichever submission recorded first, consistently,
+     * from the moment the refusal is discovered.</p>
+     *
+     * <p>Whether a reused id should instead be refused at submission -- before a second execution ever
+     * runs and produces output that cannot be kept, and before even this brief window in which a
+     * concurrent reader could observe the now-corrected cache entry -- is a real question this method
+     * does not answer: it needs a synchronous existence check against the durable store on every
+     * submission's hot path, changes what a caller observes at submission time, and only closes the gap
+     * where a result-capable store is composed at all, so it is left to a change that can weigh that
+     * trade-off on its own rather than inherit it as a side effect of this one.</p>
      */
     private void recordDurableResult(SecurityContext security, UUID processInstanceId, UUID traversalId,
                                      String graphVersion, Instant startedAt,
@@ -1486,17 +1499,28 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     startedAt, Instant.now(), payload, nodes, failure,
                     durableResults.maxPayloadBytes()));
         } catch (ExecutionStoreException notRecorded) {
+            boolean conflict = notRecorded.failure()
+                    instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable;
             // WARNING for the one classified, deterministic cause (a reused traversalId); anything
             // else this adapter could still throw here is unclassified for this call site and gets the
             // louder level, because it is not one this method's own reasoning has already accounted
             // for.
-            var level = notRecorded.retryability() == ai.ravenroot.api.persistence.Retryability.DETERMINISTIC_REJECT
-                    ? System.Logger.Level.WARNING : System.Logger.Level.ERROR;
+            var level = conflict ? System.Logger.Level.WARNING : System.Logger.Level.ERROR;
             LOGGER.log(level, "Durable execution result not recorded for tenantId={0} "
-                            + "processInstanceId={1} traversalId={2}: {3}. The execution''s own outcome is "
-                            + "unaffected and already answers a live read; this traversal id''s durable "
-                            + "record, if any, was written by whichever submission recorded first.",
-                    security.tenantId(), processInstanceId, traversalId, notRecorded.getMessage());
+                            + "processInstanceId={1} traversalId={2}: {3}.{4}",
+                    security.tenantId(), processInstanceId, traversalId, notRecorded.getMessage(),
+                    conflict
+                            ? " This submission's cache entry was corrected to fall through to the "
+                                    + "durable record, which was written by whichever submission "
+                                    + "recorded first."
+                            : " The execution's own outcome is unaffected and still answers a live "
+                                    + "read from this process; it was not durably recorded.");
+            if (conflict) {
+                // See this method's own Javadoc, "The cache is corrected, not merely told": leaving
+                // the cache entry in place here is exactly the disagreement this method exists to
+                // close, not a milder version of it.
+                executionResults.forgetLocally(new ExecutionResultRegistry.Key(security.tenantId(), traversalId));
+            }
         }
     }
 

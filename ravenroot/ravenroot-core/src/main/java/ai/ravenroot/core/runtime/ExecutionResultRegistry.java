@@ -316,6 +316,30 @@ public final class ExecutionResultRegistry {
     }
 
     /**
+     * Erases {@code key}'s entry from this process's local memory entirely -- the full result and any
+     * tombstone alike -- so the next {@link #lookup} for it falls straight through to the durable
+     * record, exactly as it would for a key this process never wrote to at all.
+     *
+     * <p>The one caller of this is a durable write that {@link #recordDurably} just refused because a
+     * conflicting outcome already occupies that key durably: the local entry this process wrote a
+     * moment earlier and the durable authority now disagree, and this class's own claim to be "a cache
+     * in front of the durable record, not the authority" is false for exactly as long as that
+     * disagreement stands. Local writes are not undone by any other path here -- a completed, failed
+     * or cancelled result stands until it is evicted on its own -- because in every other case nothing
+     * durable contradicts it. This is the one case something does, and it is why this method exists
+     * beside {@link #recordDurably} rather than as a general-purpose eviction a caller could reach for
+     * any other reason.</p>
+     *
+     * @param key the tenant-scoped execution to forget locally.
+     */
+    public synchronized void forgetLocally(Key key) {
+        Objects.requireNonNull(key, "key");
+        results.remove(key);
+        payloadFailures.remove(key);
+        tombstones.remove(key);
+    }
+
+    /**
      * Projects a durable record onto the answer a caller reads, which is the one place the four read
      * states are derived from the one stored payload state.
      *

@@ -154,28 +154,38 @@ class DefaultRavenrootApplicationExecutionStoreTest {
     }
 
     /**
-     * The defect an independent verification pass found in the seam the restart test above exercises:
-     * {@code startGraphMl}'s {@code execution.whenComplete(...)} return value is never observed, so an
-     * exception thrown from inside that action -- including {@code recordDurableResult}'s durable-write
-     * refusal -- used to vanish rather than reach a caller, a log, or a retry. A caller reusing a
-     * traversal id across two submissions is a real, deterministic conflict ({@code traversalId} must
-     * be unique per tenant, per {@code DurableExecutionResult}'s own Javadoc), and the store correctly
-     * refuses to let the second submission's outcome replace the first's -- but nothing said so.
+     * The defect an independent verification pass found in the seam the restart test above exercises,
+     * in two layers, and this test pins both.
      *
-     * <p>This proves two things about the fix rather than one. First, the refusal is now observable: a
-     * {@link java.util.logging.Handler} attached to the same logger name
-     * {@code recordDurableResult} logs through captures a record naming the reused id. Second, and
-     * deliberately unchanged: once neither submission's entry survives in the process-local registry --
-     * simulated here the same way {@link #executionResultSurvivesARestartByReadingTheDurableRecord}
-     * simulates a restart, with a fresh application over the same store -- a read of the reused id
-     * still answers with the <em>first</em> submission's payload. That is {@code recordExecutionResult}'s
-     * own idempotent-by-refusal design, stated on its own Javadoc, and this fix does not and must not
-     * change it: rewriting the durable record to prefer whichever submission happened to finish last
-     * would silently replace one caller's already-durable answer with another's, for two submissions
-     * that were never the same execution to begin with.</p>
+     * <p>Layer one: {@code startGraphMl}'s {@code execution.whenComplete(...)} return value is never
+     * observed, so an exception thrown from inside that action -- including
+     * {@code recordDurableResult}'s durable-write refusal -- used to vanish rather than reach a caller,
+     * a log, or a retry. A caller reusing a traversal id across two submissions is a real, deterministic
+     * conflict ({@code traversalId} must be unique per tenant, per {@code DurableExecutionResult}'s own
+     * Javadoc), and the store correctly refuses to let the second submission's outcome replace the
+     * first's -- but nothing said so. Fixed by logging the refusal, asserted below by attaching a
+     * {@link java.util.logging.Handler} to the logger {@code recordDurableResult} logs through.</p>
+     *
+     * <p>Layer two, found on a second review of the first fix: the in-memory cache is updated with the
+     * second submission's outcome <em>before</em> the durable write is attempted and refused, and the
+     * first fix left that cache entry in place. That made the cache disagree with the durable record it
+     * is supposed to be a view onto -- a live read while the cache entry was warm answered with the
+     * second submission's payload, the same read once that entry aged out (or after a restart, as
+     * {@code recordExecutionResult}'s own idempotent-by-refusal design requires) answered with the
+     * first's, and which of those two a caller got depended on nothing but timing. The fix is that a
+     * refused write also erases its own submission's cache entry
+     * ({@code ExecutionResultRegistry#forgetLocally}), so every read -- warm, cold, restarted -- falls
+     * through to the durable record and answers with the first submission's payload consistently. That
+     * is {@code recordExecutionResult}'s own idempotent-by-refusal design, stated on its own Javadoc,
+     * and this fix does not and must not change <em>which</em> submission wins: rewriting the durable
+     * record to prefer whichever submission happened to finish last would silently replace one caller's
+     * already-durable answer with another's, for two submissions that were never the same execution to
+     * begin with. What layer two changes is that the cache no longer contradicts that outcome while it
+     * is warm.</p>
      */
     @Test
-    void aReusedExecutionIdSilentlyMisreportsTheStaleFirstResultOnceNoCacheEntryRemains() throws Exception {
+    void aReusedExecutionIdConsistentlyReadsTheFirstSubmissionsResultWhetherOrNotTheCacheIsWarm()
+            throws Exception {
         var store = new InMemoryExecutionStore();
         var application = applicationWith(new StubExecutionEngine(), store);
         java.util.UUID reusedId = java.util.UUID.randomUUID();
@@ -215,6 +225,17 @@ class DefaultRavenrootApplicationExecutionStoreTest {
                 () -> "expected the reused traversal id among the log parameters: "
                         + List.of(refusal.getParameters()));
 
+        // Layer two, proved warm: the same application instance, no restart, reading immediately
+        // after the refusal. Before the cache-correction fix this answered "second-payload" -- the
+        // very entry the durable record had just refused to keep.
+        var warmRead = application.executionResult(TestIdentities.TENANT_A.tenantId(), reusedId);
+        var warmFound = assertInstanceOf(ai.ravenroot.api.application.ExecutionLookup.Found.class, warmRead,
+                () -> "a corrected cache entry falls through to the durable record, which still knows "
+                        + "this execution completed: " + warmRead);
+        assertEquals("first-payload", warmFound.outcome().payload(),
+                "a warm read must agree with the durable authority the instant the conflict is "
+                        + "discovered, not only once the cache entry would have aged out on its own");
+
         application.close();
 
         // The restart case, exactly as the neighbouring test performs it: a fresh application, a
@@ -225,9 +246,8 @@ class DefaultRavenrootApplicationExecutionStoreTest {
                 () -> "the durable record for the reused id must still answer as a completed execution, "
                         + "not as Unknown: " + afterRestart);
         assertEquals("first-payload", found.outcome().payload(),
-                "the durable store keeps whichever submission recorded first and never overwrites it "
-                        + "with a later, colliding one -- this is the documented, unchanged behaviour, "
-                        + "not the defect this test guards");
+                "the restarted read must agree with the warm one above -- the durable record is the "
+                        + "single source both are required to answer from");
 
         restarted.close();
         store.close();

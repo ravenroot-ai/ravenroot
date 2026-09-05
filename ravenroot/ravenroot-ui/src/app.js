@@ -4068,7 +4068,7 @@ const DESIGN_ARRANGEMENTS = Object.freeze({
   flow: Object.freeze({ layout: 'dagre' }),
   organic: Object.freeze({ layout: 'cose' }),
   keep: Object.freeze({ preservePositions: true }),
-  // Additive layered drawings (ADR 0034). The four entries above are untouched by design.
+  // Additive layered drawings (ADR 0035). The four entries above are untouched by design.
   'hierarchical-new': Object.freeze({ layout: 'hierarchical-new' }),
   'flow-new': Object.freeze({ layout: 'flow-new' }),
 });

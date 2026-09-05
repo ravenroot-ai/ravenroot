@@ -1,4 +1,4 @@
-# ADR 0034: Layered graph drawing in the design editor
+# ADR 0035: Layered graph drawing in the design editor
 
 - Status: Accepted
 - Date: 2026-09-04

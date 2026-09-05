@@ -2433,8 +2433,8 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             if (segments.length == 2 && "inventory".equals(segments[1])) {
-                // Issue 154: "inventory" is reserved the same way "live" is -- never a valid
-                // traversal id, so no legitimate /v1/executions/{id} read is ever shadowed by it.
+                // "inventory" is reserved the same way "live" is -- never a valid traversal id, so
+                // no legitimate /v1/executions/{id} read is ever shadowed by it.
                 if (!method(exchange, "GET")) {
                     return;
                 }
@@ -2465,8 +2465,8 @@ public final class RavenrootServer implements AutoCloseable {
                 return;
             }
             if (segments.length == 3 && !segments[1].isBlank() && "traversals".equals(segments[2])) {
-                // Issue 154: unlike every other sub-route under /v1/executions, {id} here names a
-                // durable process instance id, not a traversal/execution id -- see
+                // Unlike every other sub-route under /v1/executions, {id} here names a durable
+                // process instance id, not a traversal/execution id -- see
                 // #readProcessInstanceTraversals's own Javadoc for why that is deliberate rather than
                 // an inconsistency.
                 if (!method(exchange, "GET")) {
@@ -3094,13 +3094,20 @@ public final class RavenrootServer implements AutoCloseable {
      * <p>Submission answers 202 with identifiers, while this endpoint exposes the result that the
      * process computes and indexes by execution id.</p>
      *
-     * <h2>Three answers, none of them an empty body</h2>
-     * <p>The switch is exhaustive over a sealed type, so a fourth case cannot be added upstream
+     * <h2>Four answers, none of them an empty body</h2>
+     * <p>The switch is exhaustive over a sealed type, so a fifth case cannot be added upstream
      * without this method failing to compile — which is the point. {@code Found} is 200 and always
      * carries {@code defaultedNodes}, including when it is empty, so a client can tell "no nodes
-     * defaulted" from "this server does not report defaulting". {@code Expired} is 410 rather than
-     * 404 because the execution provably ran and its terminal status is still known; answering 404
-     * there would tell a caller its run never happened. {@code Unknown} is 404 and covers a
+     * defaulted" from "this server does not report defaulting". {@code Expired} is 410
+     * {@code EXECUTION_RESULT_EXPIRED} rather than 404 because the execution provably ran and its
+     * terminal status is still known; answering 404 there would tell a caller its run never happened.
+     * {@code Redacted} is a distinct 410, {@code EXECUTION_RESULT_REDACTED}: the execution provably
+     * ran, but its payload was never retained in the first place, rather than having aged out after
+     * being retained. The two are different facts calling for different operator responses — an
+     * expired result is a retention policy working as configured, a redacted one is either a size cap
+     * an operator can raise or a node returning a value no remote adapter could ever persist — so
+     * they carry different {@code code}s and {@code redactedExecutionJson}'s body adds
+     * {@code payloadState} to say which of the two. {@code Unknown} is 404 and covers a
      * nonexistent id, another tenant's id and a fully evicted one alike — see
      * {@code ExecutionLookup.Unknown} for why those three must not be distinguishable.</p>
      *
@@ -3131,6 +3138,15 @@ public final class RavenrootServer implements AutoCloseable {
                 case ai.ravenroot.api.application.ExecutionLookup.Expired expired ->
                         json(exchange, ErrorCode.EXECUTION_RESULT_EXPIRED.status(),
                                 expiredExecutionJson(expired,
+                                        AuthenticatedPrincipalAttribute.requestId(exchange)));
+                // Its own wire code and its own body field, distinct from Expired above: this
+                // execution's payload was refused at write time -- for size, or because it does not
+                // project onto the closed payload model -- rather than having aged out after being
+                // retained. See ErrorCode#EXECUTION_RESULT_REDACTED and redactedExecutionJson's own
+                // Javadoc for why the two are told apart rather than collapsed.
+                case ai.ravenroot.api.application.ExecutionLookup.Redacted redacted ->
+                        json(exchange, ErrorCode.EXECUTION_RESULT_REDACTED.status(),
+                                redactedExecutionJson(redacted,
                                         AuthenticatedPrincipalAttribute.requestId(exchange)));
                 case ai.ravenroot.api.application.ExecutionLookup.Unknown unknown ->
                         fail(exchange, ErrorCode.UNKNOWN_EXECUTION);
@@ -3628,6 +3644,43 @@ public final class RavenrootServer implements AutoCloseable {
                 .append(",\"terminationReason\":")
                 .append(expired.terminationReason() == null ? "null" : "\"" + expired.terminationReason() + "\"")
                 .append(",\"cancelled\":").append(expired.cancelled());
+        return body.append('}').toString();
+    }
+
+    /**
+     * The 410 body for {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}.
+     *
+     * <p>The same additive shape {@link #expiredExecutionJson} uses, and for the same reason: the
+     * first five members reproduce {@link ErrorEnvelope}'s own {@code toJson()} byte for byte, and
+     * {@code status}, {@code terminationReason} and {@code cancelled} carry the identical meaning
+     * {@code expiredExecutionJson} gives them -- read {@code status} and {@code terminationReason}
+     * together, never {@code status} alone, or a cancelled execution reads as an incident.</p>
+     *
+     * <p>{@code payloadState} is the member this body adds and {@code expiredExecutionJson} does not:
+     * one of {@code WITHHELD} (a configured budget refused the payload: either an encoded projection
+     * larger than the store's byte cap, or a value the runtime's payload limits rejected before any
+     * encoding of it existed, which terminates the traversal on that rejection) or
+     * {@code UNCONVERTIBLE} (the value does not project onto the closed payload model at all) --
+     * {@link ai.ravenroot.api.application.ExecutionLookup.Redacted}'s canonical constructor refuses
+     * every other {@link ai.ravenroot.api.persistence.ResultPayloadState}, so those are the only two
+     * this method ever renders. A caller reading it can tell "raise the configured cap" from "this
+     * node returns something no remote adapter could ever persist", which is exactly the distinction
+     * {@code EXECUTION_RESULT_EXPIRED} alone could not make -- see
+     * {@link ErrorCode#EXECUTION_RESULT_REDACTED}'s own Javadoc.</p>
+     */
+    private static String redactedExecutionJson(ai.ravenroot.api.application.ExecutionLookup.Redacted redacted,
+                                                String correlationId) {
+        ErrorEnvelope envelope = ErrorEnvelope.of(ErrorCode.EXECUTION_RESULT_REDACTED, correlationId);
+        var body = new StringBuilder("{\"contract\":\"").append(escape(envelope.contract())).append('"')
+                .append(",\"code\":\"").append(escape(envelope.code())).append('"')
+                .append(",\"message\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"error\":\"").append(escape(envelope.message())).append('"')
+                .append(",\"correlationId\":\"").append(escape(envelope.correlationId())).append('"')
+                .append(",\"status\":\"").append(redacted.status()).append('"')
+                .append(",\"terminationReason\":")
+                .append(redacted.terminationReason() == null ? "null" : "\"" + redacted.terminationReason() + "\"")
+                .append(",\"cancelled\":").append(redacted.cancelled())
+                .append(",\"payloadState\":\"").append(redacted.payloadState()).append('"');
         return body.append('}').toString();
     }
 

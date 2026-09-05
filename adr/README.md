@@ -45,6 +45,7 @@ their architecture status and wording are ready for publication.
 | 2026-09-04 | 0034 | Accepted | [Immutable resolved execution manifests](0034-immutable-resolved-execution-manifests.md) |
 | 2026-09-05 | 0035 | Accepted | [Cancellation as a distinct execution termination reason](0035-cancellation-as-a-distinct-termination-reason.md) |
 | 2026-09-04 | 0036 | Accepted | [Layered graph drawing in the design editor](0036-layered-graph-drawing-in-the-design-editor.md) |
+| 2026-09-05 | 0037 | Accepted | [Durable canonical execution results](0037-durable-execution-results.md) |
 
 ## Status vocabulary
 

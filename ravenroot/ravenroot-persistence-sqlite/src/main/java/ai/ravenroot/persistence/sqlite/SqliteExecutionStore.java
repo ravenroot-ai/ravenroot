@@ -4,6 +4,7 @@ import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
@@ -19,6 +20,9 @@ import ai.ravenroot.api.persistence.ExecutionStore;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionOrigin;
+import ai.ravenroot.api.persistence.ExecutionResultNodes;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.EventDigest;
 import ai.ravenroot.api.persistence.EventEnvelope;
@@ -178,7 +182,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
             StoreCapability.TOOL_APPROVALS,
             StoreCapability.HUMAN_TASKS,
             StoreCapability.EXECUTION_PAUSES,
-            StoreCapability.AGENT_AUTHORITY_BUDGETS);
+            StoreCapability.AGENT_AUTHORITY_BUDGETS,
+            // The result table lives in the same file as the process_instance row it
+            // cascades from, so a recorded result is durable, readable from any process
+            // that opens the file, and removed by the same purge that removes its
+            // instance. Recording refuses a conflicting outcome rather than overwriting
+            // one, and the refusal is decided from the stored fingerprint alone, so it
+            // is the same answer on every retry and across a reopen.
+            StoreCapability.EXECUTION_RESULTS);
 
     /**
      * The one projection every handler read uses, aliased so a correlated subquery cannot silently
@@ -1327,6 +1338,335 @@ public final class SqliteExecutionStore implements ExecutionStore {
             throw failure(ExecutionStoreFailure.invalid("a query that filters only for terminal "
                     + "statuses while excluding terminal rows can never match; an empty page would be "
                     + "indistinguishable from there being none"));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public Duration executionResultRetention() {
+        return config.executionResultRetention();
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return config.maxPayloadBytes();
+    }
+
+    /**
+     * Writes the result, or recognises that it is already written, inside one transaction.
+     *
+     * <p>The read and the decision share the transaction on purpose. Two processes recording the same
+     * terminal event concurrently would otherwise both see no row and both insert, and the loser
+     * would surface a primary-key violation as an adapter-specific error rather than as the
+     * idempotent success it actually is. Inside the write transaction the second one reads the first
+     * one's row and answers from the fingerprint, which is the same answer it would have given a
+     * second later.</p>
+     *
+     * <p>The deadline is computed from {@code endedAt} rather than from now, so the window a caller
+     * is promised starts when the execution ended and not when the write happened to land. A retry
+     * after an ambiguous write therefore reproduces the identical deadline, which is what lets the
+     * fingerprint comparison stay a comparison of what the producer decided.</p>
+     */
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return async(() -> {
+            Objects.requireNonNull(result, "result");
+            ExecutionKey key = result.key();
+            requireResultPayloadWithinLimit(result);
+            DurableExecutionResult candidate = result.withRetainedUntil(
+                    plusClamped(result.endedAt(), config.executionResultRetention()));
+            Instant now = clock.instant();
+            return inWriteTransaction(key, () -> {
+                DurableExecutionResult stored = readExecutionResult(key.tenantId(), result.traversalId());
+                if (stored != null) {
+                    if (stored.fingerprint().equals(candidate.fingerprint())) {
+                        return stored;
+                    }
+                    throw failure(new ExecutionStoreFailure.ExecutionResultNotRecordable(
+                            result.traversalId(), stored.status(), candidate.status(),
+                            stored.fingerprint(), candidate.fingerprint()));
+                }
+                requireInstanceExists(key);
+                insertExecutionResult(candidate, now);
+                return candidate;
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                UUID traversalId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            Instant now = clock.instant();
+            return inReadTransaction(null, () -> {
+                DurableExecutionResult stored = readExecutionResult(tenantId, traversalId);
+                if (stored == null) {
+                    return Optional.<DurableExecutionResult>empty();
+                }
+                // Retained while now < retainedUntil, strictly, so the boundary matches the purge's
+                // exactly: a row eligible for collection is a row whose payload this read no longer
+                // offers. Any other pairing would produce an instant at which a result is purgeable
+                // and still readable in full, or readable as expired and not yet purgeable.
+                return Optional.of(now.isBefore(stored.retainedUntil()) ? stored : stored.expired());
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            return inReadTransaction(null, () -> executionResultFloorOf(tenantId));
+        });
+    }
+
+    /**
+     * Purges in <strong>two</strong> transactions, floor first and deletions second, exactly as
+     * {@link #purgeExpiredProcessInstances(String)} does and for the reason recorded there: an
+     * interrupted run must leave the conservative half committed. A floor ahead of the deletions
+     * raises a false alarm that the surviving row itself answers; deletions ahead of the floor leave
+     * rows genuinely gone under a floor claiming completeness.
+     */
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Instant now = clock.instant();
+            Instant floor = inWriteTransaction(null, () -> latestExpiredResultDeadline(tenantId, now));
+            if (floor == null) {
+                // A purge that removed nothing must leave the floor where it is. Advancing it would
+                // report a retention gap that does not exist, on every tick of a periodic job.
+                return 0L;
+            }
+            inWriteTransaction(null, () -> {
+                advanceExecutionResultFloor(tenantId, floor);
+                return null;
+            });
+            return inWriteTransaction(null, () -> {
+                // ON DELETE CASCADE clears execution_result_node. Nothing else references a result.
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "DELETE FROM execution_result WHERE tenant_id = ? AND "
+                                + StoredInstant.atOrBefore("retained_until"))) {
+                    statement.setString(1, tenantId);
+                    StoredInstant.bindComparison(statement, 2, now);
+                    return (long) statement.executeUpdate();
+                }
+            });
+        });
+    }
+
+    // ---------------------------------------------------------------- execution result helpers
+
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+        ExecutionResultPayload payload = result.payload();
+        if (payload.state() == ResultPayloadState.RETAINED
+                && payload.bytes() > config.maxPayloadBytes()) {
+            // Refused rather than silently relabelled WITHHELD. The projection decides what to keep,
+            // and a store that rewrote that decision would report a payload as refused for size by an
+            // adapter the caller never asked about the size of.
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(),
+                    config.maxPayloadBytes()));
+        }
+        if (payload.state() == ResultPayloadState.EXPIRED) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "EXPIRED describes a record's age and is produced by a read; it cannot be stored"));
+        }
+    }
+
+    private void requireInstanceExists(ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT 1 FROM process_instance WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            statement.setString(2, key.processInstanceId().toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    // Indistinguishable from another tenant's instance, which is the point: the key
+                    // carries the tenant, so a cross-tenant record is refused by the same miss.
+                    throw failure(new ExecutionStoreFailure.NotFound(key));
+                }
+            }
+        }
+    }
+
+    private void insertExecutionResult(DurableExecutionResult result, Instant recordedAt)
+            throws SQLException {
+        ExecutionResultPayload payload = result.payload();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_result (tenant_id, process_instance_id, traversal_id, "
+                        + "graph_version_pin, status, termination_reason, started_at_epoch_second, "
+                        + "started_at_nano, ended_at_epoch_second, ended_at_nano, "
+                        + "recorded_at_epoch_second, recorded_at_nano, retained_until_epoch_second, "
+                        + "retained_until_nano, payload_state, payload_redacted, payload_truncated, "
+                        + "payload_bytes, payload_content_type, payload, failure_classifier, "
+                        + "fingerprint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        + "?, ?, ?, ?)")) {
+            int index = 1;
+            statement.setString(index++, result.key().tenantId());
+            statement.setString(index++, result.key().processInstanceId().toString());
+            statement.setString(index++, result.traversalId().toString());
+            statement.setString(index++, result.graphVersionPin().reference());
+            statement.setString(index++, result.status().name());
+            statement.setString(index++, result.terminationReason() == null ? null
+                    : result.terminationReason().name());
+            index = StoredInstant.bindValue(statement, index, result.startedAt());
+            index = StoredInstant.bindValue(statement, index, result.endedAt());
+            index = StoredInstant.bindValue(statement, index, recordedAt);
+            index = StoredInstant.bindValue(statement, index, result.retainedUntil());
+            statement.setString(index++, payload.state().name());
+            statement.setInt(index++, payload.redacted() ? 1 : 0);
+            statement.setInt(index++, payload.truncated() ? 1 : 0);
+            statement.setInt(index++, payload.bytes());
+            statement.setString(index++, payload.contentType());
+            statement.setBytes(index++, payload.retained() == null ? null : payload.retained().bytes());
+            statement.setString(index++, result.failureClassifier());
+            statement.setString(index, result.fingerprint());
+            statement.executeUpdate();
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_result_node (tenant_id, traversal_id, node_set, position, "
+                        + "value) VALUES (?, ?, ?, ?, ?)")) {
+            for (ExecutionResultNodes.Kind kind : ExecutionResultNodes.Kind.values()) {
+                List<String> entries = result.nodes().entries(kind);
+                for (int position = 0; position < entries.size(); position++) {
+                    statement.setString(1, result.key().tenantId());
+                    statement.setString(2, result.traversalId().toString());
+                    statement.setString(3, kind.name());
+                    statement.setInt(4, position);
+                    statement.setString(5, entries.get(position));
+                    statement.addBatch();
+                }
+            }
+            statement.executeBatch();
+        }
+    }
+
+    private DurableExecutionResult readExecutionResult(String tenantId, UUID traversalId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT * FROM execution_result WHERE tenant_id = ? AND traversal_id = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, traversalId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    return null;
+                }
+                var key = new ExecutionKey(tenantId,
+                        StoredUuid.required(rows, "execution_result", "process_instance_id", tenantId));
+                return new DurableExecutionResult(key, traversalId,
+                        new GraphVersionPin(rows.getString("graph_version_pin")),
+                        processStatusOf(key, rows.getString("status")),
+                        terminationReasonOf(key, rows.getString("termination_reason")),
+                        StoredInstant.read(rows, "started_at"), StoredInstant.read(rows, "ended_at"),
+                        StoredInstant.read(rows, "retained_until"), readResultPayload(key, rows),
+                        rows.getString("failure_classifier"), readResultNodes(tenantId, traversalId));
+            }
+        }
+    }
+
+    private static ExecutionResultPayload readResultPayload(ExecutionKey key, ResultSet rows)
+            throws SQLException {
+        String name = rows.getString("payload_state");
+        ResultPayloadState state;
+        try {
+            state = ResultPayloadState.valueOf(name);
+        } catch (IllegalArgumentException | NullPointerException unknown) {
+            // The same route an unknown status name takes, and never a fallback to "no payload": a
+            // state this build cannot read is a rollback, and reporting it as an absent payload would
+            // tell a caller the run produced nothing when it produced something unreadable.
+            throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(key,
+                    "payload state '" + name + "' is not a state this build understands"), unknown);
+        }
+        return new ExecutionResultPayload(state, rows.getInt("payload_redacted") != 0,
+                rows.getInt("payload_truncated") != 0, rows.getInt("payload_bytes"),
+                rows.getString("payload_content_type"),
+                state == ResultPayloadState.RETAINED
+                        ? OpaquePayload.of(rows.getBytes("payload"),
+                                rows.getString("payload_content_type"))
+                        : null);
+    }
+
+    private ExecutionResultNodes readResultNodes(String tenantId, UUID traversalId) throws SQLException {
+        var byKind = new java.util.EnumMap<ExecutionResultNodes.Kind, List<String>>(
+                ExecutionResultNodes.Kind.class);
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT node_set, value FROM execution_result_node WHERE tenant_id = ? AND "
+                        + "traversal_id = ? ORDER BY node_set, position")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, traversalId.toString());
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    String setName = rows.getString("node_set");
+                    ExecutionResultNodes.Kind kind;
+                    try {
+                        kind = ExecutionResultNodes.Kind.valueOf(setName);
+                    } catch (IllegalArgumentException unknown) {
+                        throw new ExecutionStoreException(new ExecutionStoreFailure.Corrupted(
+                                new ExecutionKey(tenantId, traversalId),
+                                "node set '" + setName + "' is not a set this build understands"),
+                                unknown);
+                    }
+                    byKind.computeIfAbsent(kind, ignored -> new java.util.ArrayList<>())
+                            .add(rows.getString("value"));
+                }
+            }
+        }
+        return new ExecutionResultNodes(byKind.getOrDefault(ExecutionResultNodes.Kind.VISITED, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.DEFAULTED, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.BYPASSED, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.HANDLED_FAILURE, List.of()),
+                byKind.getOrDefault(ExecutionResultNodes.Kind.UNTAKEN_EDGE, List.of()));
+    }
+
+    /**
+     * The <strong>latest</strong> retention deadline among the rows this purge will remove, or
+     * {@code null} when none is eligible. This is the floor, and it is the latest for the reason
+     * {@link #latestExpiredDeadline(String, Instant, Instant)} records at length: the guarantee runs
+     * in the direction "everything past this is still here", so the floor must sit at or beyond every
+     * boundary the purge crossed.
+     */
+    private Instant latestExpiredResultDeadline(String tenantId, Instant now) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT retained_until_epoch_second, retained_until_nano FROM execution_result "
+                        + "WHERE tenant_id = ? AND " + StoredInstant.atOrBefore("retained_until")
+                        + " ORDER BY retained_until_epoch_second DESC, retained_until_nano DESC "
+                        + "LIMIT 1")) {
+            statement.setString(1, tenantId);
+            StoredInstant.bindComparison(statement, 2, now);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? StoredInstant.read(rows, "retained_until") : null;
+            }
+        }
+    }
+
+    private Instant executionResultFloorOf(String tenantId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT retained_from_epoch_second, retained_from_nano FROM execution_result_watermark "
+                        + "WHERE tenant_id = ?")) {
+            statement.setString(1, tenantId);
+            try (ResultSet rows = statement.executeQuery()) {
+                // An absent row IS Instant.MIN. Writing one when a tenant first appears would record a
+                // forgetting that never happened, in a table whose only purpose is to record one.
+                return rows.next() ? StoredInstant.read(rows, "retained_from") : Instant.MIN;
+            }
+        }
+    }
+
+    private void advanceExecutionResultFloor(String tenantId, Instant floor) throws SQLException {
+        // Monotonically non-decreasing: a floor never retreats, whatever order purges arrive in.
+        if (!floor.isAfter(executionResultFloorOf(tenantId))) {
+            return;
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_result_watermark (tenant_id, retained_from_epoch_second, "
+                        + "retained_from_nano) VALUES (?, ?, ?) ON CONFLICT (tenant_id) DO UPDATE SET "
+                        + "retained_from_epoch_second = excluded.retained_from_epoch_second, "
+                        + "retained_from_nano = excluded.retained_from_nano")) {
+            statement.setString(1, tenantId);
+            StoredInstant.bindValue(statement, 2, floor);
+            statement.executeUpdate();
         }
     }
 

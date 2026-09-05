@@ -70,6 +70,8 @@
       url: /architecture/durability-events.html
     - title: Durable process inventory
       url: /architecture/process-inventory.html
+    - title: Durable execution results
+      url: /architecture/execution-results.html
     - title: AI, programs, and extensions
       url: /architecture/ai-extension-boundaries.html
     - title: Embedded projection security model

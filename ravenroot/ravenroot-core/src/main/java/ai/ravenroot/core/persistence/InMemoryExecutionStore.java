@@ -5,11 +5,14 @@ import ai.ravenroot.api.application.NodeAttemptStatus;
 import ai.ravenroot.api.application.NodeInvocation;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.Traversal;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
 import ai.ravenroot.api.persistence.AgentAuthorityControl;
 import ai.ravenroot.api.persistence.AgentAuthorityControlState;
@@ -158,6 +161,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Duration maxClockSkew;
     private final Duration journalRetention;
     private final Duration terminalRetention;
+    private final Duration executionResultRetention;
+    private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
+    private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
 
     public InMemoryExecutionStore() {
         this(Clock.systemUTC(), DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
@@ -185,6 +191,46 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention,
                                   Duration terminalRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention, terminalRetention,
+                terminalRetention);
+    }
+
+    /**
+     * Composes the store with an independent result retention window.
+     *
+     * <p>Every shorter constructor defaults it to {@code terminalRetention}, which is the same
+     * default {@code SqliteStoreConfig} ships and for the same reason: the two windows answer one
+     * operational question — how long after a run ends can somebody still find out what happened —
+     * and defaulting them apart would silently lose a result for an instance that is still
+     * discoverable.</p>
+     *
+     * @param clock                    the store's own clock authority.
+     * @param maxLeaseTtl              longest lease this store issues.
+     * @param maxPayloadBytes          largest payload this store accepts.
+     * @param maxClockSkew             budget within which a caller's issuance instant is accepted.
+     * @param journalRetention         how long journal records are retained.
+     * @param terminalRetention        how long terminal instances are retained.
+     * @param executionResultRetention how long recorded terminal results are retained.
+     */
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention, Duration executionResultRetention) {
+        this.executionResultRetention =
+                Objects.requireNonNull(executionResultRetention, "executionResultRetention");
+        if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
+            throw new IllegalArgumentException("executionResultRetention must be positive");
+        }
+        if (terminalRetention != null && terminalRetention.compareTo(executionResultRetention) < 0) {
+            // The same guard SqliteStoreConfig applies, on both adapters for the reason the journal
+            // guard is on both: it is a property of the contract rather than of the medium. A result
+            // names the instance and traversal it belongs to, so a result outliving its instance names
+            // a row the inventory can no longer describe. Enforcing it in only one adapter would let a
+            // deployment reach a state through the reference store that the durable store refuses, and
+            // discover the difference on the day it swapped them.
+            throw new IllegalArgumentException("terminalRetention " + terminalRetention
+                    + " cannot be shorter than executionResultRetention " + executionResultRetention
+                    + ": results would outlive the instance they name");
+        }
         this.terminalRetention = Objects.requireNonNull(terminalRetention, "terminalRetention");
         if (terminalRetention.isZero() || terminalRetention.isNegative()) {
             throw new IllegalArgumentException("terminalRetention must be positive");
@@ -241,7 +287,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 StoreCapability.DURABLE_HANDLERS,
                 StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
                 StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
-                StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS);
+                StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
+                // EXECUTION_RESULTS joins them on the same rule and makes no durability
+                // claim: idempotent refusal, tenant scoping, the four read states and
+                // retention are all properties of the mechanism rather than of the
+                // medium, and this adapter honours every one of them exactly. What it
+                // cannot honour is survival of process death, which is what DURABLE
+                // says and what this adapter still does not say.
+                StoreCapability.EXECUTION_RESULTS);
     }
 
     @Override
@@ -1006,6 +1059,137 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
+    // ---------------------------------------------------------------- durable execution results
+
+    @Override
+    public Duration executionResultRetention() {
+        return executionResultRetention;
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return maxPayloadBytes;
+    }
+
+    @Override
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            Objects.requireNonNull(result, "result");
+            requireResultPayloadWithinLimit(result);
+            DurableExecutionResult candidate = result.withRetainedUntil(
+                    plusClamped(result.endedAt(), executionResultRetention));
+            var lookup = new ResultKey(result.key().tenantId(), result.traversalId());
+            synchronized (monitor) {
+                DurableExecutionResult stored = executionResults.get(lookup);
+                if (stored != null) {
+                    // Identity is the fingerprint and not record equality, because two writes of the
+                    // same result differ in nothing a producer decided and the collections inside it
+                    // have no defined iteration order at the source. Comparing the digest is what
+                    // makes a duplicate terminal event free rather than a conflict.
+                    if (stored.fingerprint().equals(candidate.fingerprint())) {
+                        return stored;
+                    }
+                    throw new ExecutionStoreException(
+                            new ExecutionStoreFailure.ExecutionResultNotRecordable(result.traversalId(),
+                                    stored.status(), candidate.status(), stored.fingerprint(),
+                                    candidate.fingerprint()));
+                }
+                if (!instances.containsKey(result.key())) {
+                    // Indistinguishable from another tenant's instance, which is the point: the key
+                    // carries the tenant, so a cross-tenant record is refused by the same miss.
+                    throw new ExecutionStoreException(new ExecutionStoreFailure.NotFound(result.key()));
+                }
+                executionResults.put(lookup, candidate);
+                return candidate;
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                UUID traversalId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            synchronized (monitor) {
+                DurableExecutionResult stored = executionResults.get(new ResultKey(tenantId, traversalId));
+                if (stored == null) {
+                    return Optional.<DurableExecutionResult>empty();
+                }
+                Instant now = clock.instant();
+                // Retained while now < retainedUntil, strictly, so the boundary matches the purge's
+                // exactly: a row eligible for collection is one whose payload this read no longer
+                // offers. The SQLite adapter pairs them the same way, and a disagreement here would
+                // produce an instant at which the two stores answer differently for the same result.
+                return Optional.of(now.isBefore(stored.retainedUntil()) ? stored : stored.expired());
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                return executionResultsRetainedFrom.getOrDefault(tenantId, Instant.MIN);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return complete(() -> {
+            requireCapability(StoreCapability.EXECUTION_RESULTS);
+            requireTenantId(tenantId);
+            synchronized (monitor) {
+                Instant now = clock.instant();
+                var doomed = new ArrayList<ResultKey>();
+                Instant latest = null;
+                for (var recorded : executionResults.entrySet()) {
+                    if (!recorded.getKey().tenantId().equals(tenantId)) {
+                        continue;
+                    }
+                    Instant deadline = recorded.getValue().retainedUntil();
+                    if (deadline.isAfter(now)) {
+                        continue;
+                    }
+                    doomed.add(recorded.getKey());
+                    if (latest == null || deadline.isAfter(latest)) {
+                        latest = deadline;
+                    }
+                }
+                if (doomed.isEmpty()) {
+                    // A purge that removed nothing leaves the floor exactly where it was. Advancing it
+                    // would report a retention gap that does not exist, on every tick of a periodic job.
+                    return 0L;
+                }
+                doomed.forEach(executionResults::remove);
+                // The LATEST deadline crossed, for the reason purgeExpiredProcessInstances records:
+                // the guarantee runs in the direction "everything past this is still here", and the
+                // earliest inverts the ambiguity into the unsafe direction.
+                Instant floor = latest;
+                executionResultsRetainedFrom.merge(tenantId, floor,
+                        (current, candidate) -> candidate.isAfter(current) ? candidate : current);
+                return (long) doomed.size();
+            }
+        });
+    }
+
+    private void requireResultPayloadWithinLimit(DurableExecutionResult result) {
+        ExecutionResultPayload payload = result.payload();
+        if (payload.state() == ResultPayloadState.RETAINED && payload.bytes() > maxPayloadBytes) {
+            throw new ExecutionStoreException(
+                    new ExecutionStoreFailure.PayloadTooLarge(payload.bytes(), maxPayloadBytes));
+        }
+        if (payload.state() == ResultPayloadState.EXPIRED) {
+            throw new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                    "EXPIRED describes a record's age and is produced by a read; it cannot be stored"));
+        }
+    }
+
     // ---------------------------------------------------------------- inventory helpers
 
     /**
@@ -1176,6 +1360,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             idempotency.clear();
             forgottenBefore.clear();
             inventoryRetainedFrom.clear();
+            executionResults.clear();
+            executionResultsRetainedFrom.clear();
         }
     }
 
@@ -2517,6 +2703,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, NodeAttempt attempt,
                                     ai.ravenroot.api.execution.NodeCommand command) {
+    }
+
+    /** A recorded result, addressable only with the tenant that owns it. */
+    private record ResultKey(String tenantId, UUID traversalId) {
     }
 
     private record IdempotencyKey(String tenantId, String key) {

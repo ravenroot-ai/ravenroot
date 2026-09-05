@@ -503,17 +503,49 @@ public final class RemoteBackend implements CliBackend {
      * Renders {@code ErrorEnvelope}'s wire shape ({@code {"code":..., "message":...}}) as the
      * exception message a caller's own error path (already routed through
      * {@code RavenrootCli#sanitizeForConsole}) will print. Never includes the raw response body
-     * verbatim -- only the two fields the server's own vocabulary defines -- so a caller cannot be
+     * verbatim -- only the fields the server's own closed vocabulary defines -- so a caller cannot be
      * shown more than the server chose to say.
+     *
+     * <p>{@link #tombstoneDetail} appends the same three fields
+     * {@code RavenrootServer#expiredExecutionJson} and {@code #redactedExecutionJson} carry beside
+     * the envelope, when the body carries them, so a 410 {@code EXECUTION_RESULT_EXPIRED} or
+     * {@code EXECUTION_RESULT_REDACTED} answer renders identically to what
+     * {@code EmbeddedBackend#tombstoneDetail} produces for the same execution on the other transport.
+     * Every other error body has no {@code status} key at all, so the suffix is empty for them.</p>
      */
     private static IOException renderError(HttpResponse<String> response) {
         try {
             Map<String, Object> envelope = MinimalJson.asObject(MinimalJson.parse(response.body()));
             String code = String.valueOf(envelope.getOrDefault("code", "UNKNOWN"));
             String message = String.valueOf(envelope.getOrDefault("message", "request failed"));
-            return new IOException(response.statusCode() + " " + code + ": " + message);
+            return new IOException(response.statusCode() + " " + code + ": " + message
+                    + tombstoneDetail(envelope));
         } catch (RuntimeException malformed) {
             return new IOException("HTTP " + response.statusCode());
         }
+    }
+
+    /**
+     * The {@code status}/{@code terminationReason}/{@code payloadState} suffix carried by an
+     * execution-result tombstone body, or the empty string when {@code envelope} carries none of
+     * them -- every error body that is not one of the two execution-result tombstones. {@code status}
+     * is unconditional once present, exactly as {@code EmbeddedBackend#tombstoneDetail} makes it:
+     * reading it without {@code terminationReason} reports a cancelled execution as an ordinary
+     * failure.
+     */
+    private static String tombstoneDetail(Map<String, Object> envelope) {
+        if (!envelope.containsKey("status")) {
+            return "";
+        }
+        var detail = new StringBuilder(" (status=").append(envelope.get("status"));
+        Object reason = envelope.get("terminationReason");
+        if (reason != null) {
+            detail.append(", terminationReason=").append(reason);
+        }
+        Object payloadState = envelope.get("payloadState");
+        if (payloadState != null) {
+            detail.append(", payloadState=").append(payloadState);
+        }
+        return detail.append(')').toString();
     }
 }

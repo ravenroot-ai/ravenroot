@@ -29,5 +29,6 @@ The recovery service can discover interrupted instances — non-terminal rows wi
 ## Related reading
 
 - [Durability, events, and recovery](durability-events.md)
+- [Durable execution results](execution-results.md)
 - [Persistence, lifecycle, and recovery](../operator-guide/persistence-lifecycle.md)
 - [HTTP API and CLI](../reference/api-cli.md)

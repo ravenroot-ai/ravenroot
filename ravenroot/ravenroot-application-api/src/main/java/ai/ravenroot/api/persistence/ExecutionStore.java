@@ -933,6 +933,166 @@ public interface ExecutionStore extends AutoCloseable {
      */
     CompletionStage<Long> purgeExpiredProcessInstances(String tenantId);
 
+    // ------------------------------------------------------------- durable execution results
+
+    /**
+     * How long a recorded terminal result is retained before
+     * {@link #purgeExpiredExecutionResults(String)} may remove it, and before a read stops offering
+     * its payload. Static self-description, therefore synchronous.
+     *
+     * <p>{@link Duration#ZERO} means this adapter retains no results at all, which is what an adapter
+     * that does not declare {@link StoreCapability#EXECUTION_RESULTS} reports. That is an honest
+     * answer rather than a placeholder: the bound a caller needs is "how long is this readable", and
+     * for a store that never writes one the answer is no time at all.</p>
+     *
+     * <p><strong>It must not exceed {@link #terminalRetention()}.</strong> A result names the process
+     * instance and the traversal it belongs to, so a result outliving its instance would name a row
+     * the inventory can no longer describe — the same dangling reference {@code terminalRetention}
+     * already refuses to create against {@link #journalRetention()}, in the same direction. Adapters
+     * enforce the ordering in configuration rather than discovering it as a missing parent row.</p>
+     *
+     * @return the retention window applied to recorded terminal results.
+     */
+    default Duration executionResultRetention() {
+        return Duration.ZERO;
+    }
+
+    /**
+     * The largest stored result payload this adapter accepts, in bytes. Static self-description,
+     * therefore synchronous.
+     *
+     * <p>Defaults to {@link #maxPayloadBytes()} because a result payload is a payload and a second
+     * unrelated number would be one more thing to keep in step for no gain. It is published
+     * separately all the same, because a caller projecting a result needs to know the cap it will be
+     * measured against before it builds the record, and
+     * {@link DurableExecutionResult#project(Object, int)} takes exactly this number.</p>
+     *
+     * @return the byte cap above which a result payload is recorded as
+     *         {@link ResultPayloadState#WITHHELD}.
+     */
+    default int maxExecutionResultPayloadBytes() {
+        return maxPayloadBytes();
+    }
+
+    /**
+     * Records one terminal execution's canonical result, or accepts that it is already recorded.
+     *
+     * <h4>Idempotent by refusal, never by overwrite</h4>
+     * <p>Three outcomes, and no fourth. No record exists: it is written, with
+     * {@link DurableExecutionResult#retainedUntil()} assigned from the store's clock and
+     * {@link #executionResultRetention()}. A record exists whose
+     * {@link DurableExecutionResult#fingerprint()} equals this one's: nothing is written and the
+     * stored record is returned, so a duplicate terminal event is free and a retry after an
+     * ambiguous write is safe. A record exists with a different fingerprint: the call fails with
+     * {@link ExecutionStoreFailure.ExecutionResultNotRecordable}, which carries both digests, and
+     * the committed outcome is left exactly as it was.</p>
+     *
+     * <p>The third case is a refusal and not a merge on purpose. A terminal outcome is the answer
+     * other systems have already been given; replacing it would make a result that was read once and
+     * a result read again disagree, with nothing in either read to say which is current. Refusing
+     * makes the disagreement visible at the write, where it can still be diagnosed.</p>
+     *
+     * <h4>Rejections</h4>
+     * <p>Fails with {@link ExecutionStoreFailure.NotFound} when the record names a process instance
+     * this tenant does not have — a result whose instance does not exist is a dangling row, and it is
+     * refused rather than written and later found orphaned. Fails with
+     * {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#EXECUTION_RESULTS} is declared.</p>
+     *
+     * @param result the record to store, built with {@link DurableExecutionResult#of}, which is
+     *               where the payload boundary is crossed.
+     * @return the stored record, carrying the deadline the store assigned.
+     */
+    default CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        return executionResultsUnsupported();
+    }
+
+    /**
+     * Reads one traversal's recorded result.
+     *
+     * <p><strong>Empty is the answer for a traversal that has no result, for one belonging to another
+     * tenant, and for one whose record has been purged, and the three are indistinguishable by
+     * design</strong> — the rule {@link #load(ExecutionKey)} and
+     * {@link #findProcessInstance(ExecutionKey)} already follow, for the reason they follow it: a
+     * distinguishable denial would make the store a cross-tenant existence oracle. A caller that
+     * needs to separate "purged by policy" from "never existed" compares against
+     * {@link #executionResultsRetainedFrom(String)}.</p>
+     *
+     * <p>A record whose retention deadline has passed on the store's clock is still returned, with
+     * its payload dropped and {@link ResultPayloadState#EXPIRED} in its place. That is a real,
+     * reachable state rather than a formality, because retention here is an explicit purge and never
+     * a side effect of a read: between the deadline and the next purge the record is present and its
+     * payload is not, which is exactly the answer "it ran, here is how it ended, its output is
+     * gone".</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#EXECUTION_RESULTS} is declared.</p>
+     *
+     * @param tenantId    the stable tenant id used to identify the requested resource.
+     * @param traversalId the caller-facing execution id to read.
+     * @return the recorded result, or empty when it is absent, purged, or not visible to this tenant.
+     */
+    default CompletionStage<Optional<DurableExecutionResult>> loadExecutionResult(String tenantId,
+                                                                                 UUID traversalId) {
+        return executionResultsUnsupported();
+    }
+
+    /**
+     * The per-tenant result retention floor: the <strong>latest retention deadline this tenant has
+     * actually crossed</strong>. Every recorded result whose deadline is strictly after this instant
+     * is still present; one whose deadline is at or before it may have been purged. Monotonically
+     * non-decreasing, never retreating, and {@link java.time.Instant#MIN} until something is purged.
+     *
+     * <p>The exact shape of {@link #inventoryRetainedFrom(String)}, deliberately, including its two
+     * non-obvious halves. It is the <em>latest</em> deadline crossed rather than the earliest,
+     * because the guarantee runs in the direction "everything past this is still here" — publishing
+     * the earliest breaks as soon as one run removes two rows whose deadlines are further apart than
+     * the retention window, and a caller following the rule then concludes a genuinely completed
+     * execution never existed. And the boundary is <em>exclusive</em>, because collection is
+     * inclusive: a row is purged when its deadline is at or before the store's now, so the row
+     * sitting exactly on the floor is precisely one that was removed.</p>
+     *
+     * <p>Asynchronous because it reads stored state.</p>
+     *
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the earliest instant from which this tenant's recorded results are complete.
+     */
+    default CompletionStage<java.time.Instant> executionResultsRetainedFrom(String tenantId) {
+        return executionResultsUnsupported();
+    }
+
+    /**
+     * Removes {@code tenantId}'s recorded results whose {@link #executionResultRetention()} window
+     * has elapsed, returning how many were removed, and advances that tenant's
+     * {@link #executionResultsRetainedFrom(String)} floor — and <strong>only</strong> that tenant's.
+     *
+     * <p><strong>Nothing is ever deleted implicitly on a read</strong>, exactly as
+     * {@link #purgeExpiredProcessInstances(String)} and {@link #compactJournal(String)} state.
+     * Retention is an explicit operator or scheduler action, so two identical reads return identical
+     * answers and a result's lifetime does not depend on who happened to look at it.</p>
+     *
+     * <p>A tenant that lost nothing must keep its floor exactly where it was, at
+     * {@link java.time.Instant#MIN} if it has never purged. Advancing a floor for a tenant that
+     * forgot nothing would report a retention gap that does not exist, and a periodic purge job would
+     * report one on every tick.</p>
+     *
+     * <p>Fails with {@link ExecutionStoreFailure.CapabilityNotSupported} unless
+     * {@link StoreCapability#EXECUTION_RESULTS} is declared.</p>
+     *
+     * @param tenantId the stable tenant id used to identify the requested resource.
+     * @return the number of expired results removed.
+     */
+    default CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return executionResultsUnsupported();
+    }
+
+    private static <T> CompletionStage<T> executionResultsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_RESULTS)));
+        return refused;
+    }
+
     /**
      * Releases what the <em>process</em> owns and <strong>no lease</strong>.
      *

@@ -1,5 +1,6 @@
 package ai.ravenroot.core.runtime;
 
+import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -13,9 +14,9 @@ import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.ProcessInventoryEntry;
 import ai.ravenroot.api.persistence.ProcessInventoryPage;
 import ai.ravenroot.api.persistence.ProcessInventoryQuery;
-import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
+import ai.ravenroot.api.persistence.TraversalInventoryEntry;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -25,73 +26,50 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
 
 /**
- * An {@link ExecutionStore} that delegates everything and lets a test observe or perturb the two
- * lease operations under test: the fenced write, and the claim that takes the lease.
- *
- * <p>Used instead of a blocking graph node so that the observation point is the write itself rather
- * than a timing window — a sleep-based approximation would make the coexistence assertion depend on
- * scheduling rather than on the guard under test.
+ * An {@link ExecutionStore} that delegates everything except {@link StoreCapability#EXECUTION_RESULTS},
+ * which it withholds -- both the declaration and the behaviour, unlike
+ * {@link JournalFreeExecutionStore}'s treatment of the equivalent journal methods. Those are abstract
+ * on the interface, so a caller that ignores {@code capabilities()} and calls them anyway still
+ * observes the delegate's real behaviour; the execution-result operations are {@code default} methods
+ * that already fail closed with {@link ExecutionStoreFailure.CapabilityNotSupported} when not
+ * overridden, so failing them here directly -- rather than forwarding to a delegate that would
+ * actually perform them -- is what makes this double behave as an adapter that never declared the
+ * capability, for a caller such as {@link AuditedExecutionResultPurgeTest} that (correctly, per the
+ * port's own contract) calls the operation without checking {@code supports(...)} first.
  */
-final class ObservableExecutionStore implements ExecutionStore {
+final class NoExecutionResultsExecutionStore implements ExecutionStore {
 
     private final ExecutionStore delegate;
-    private final List<ExecutionKey> fencedWrites = new CopyOnWriteArrayList<>();
-    private final Consumer<ExecutionKey> onFirstFencedWrite;
-    private final boolean refuseEveryClaim;
-    private volatile boolean fired;
 
-    private ObservableExecutionStore(ExecutionStore delegate, Consumer<ExecutionKey> onFirstFencedWrite,
-                                     boolean refuseEveryClaim) {
+    NoExecutionResultsExecutionStore(ExecutionStore delegate) {
         this.delegate = delegate;
-        this.onFirstFencedWrite = onFirstFencedWrite;
-        this.refuseEveryClaim = refuseEveryClaim;
     }
 
-    /** Observes the first write made under a fence, which is the moment the traversal is live. */
-    static ObservableExecutionStore observing(ExecutionStore delegate, Consumer<ExecutionKey> observer) {
-        return new ObservableExecutionStore(delegate, observer, false);
+    @Override
+    public Set<StoreCapability> capabilities() {
+        var without = new java.util.HashSet<>(delegate.capabilities());
+        without.remove(StoreCapability.EXECUTION_RESULTS);
+        return Set.copyOf(without);
     }
 
-    /** Reports every instance as held by another worker — the only way to reach the busy branch. */
-    static ObservableExecutionStore alwaysBusy(ExecutionStore delegate) {
-        return new ObservableExecutionStore(delegate, key -> { }, true);
-    }
-
-    /** Every process-instance key this store has seen written under a fence, in order. */
-    List<ExecutionKey> fencedWrites() {
-        return List.copyOf(fencedWrites);
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        var refused = new CompletableFuture<Long>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_RESULTS)));
+        return refused;
     }
 
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
-        if (batch.fencingToken().isPresent()) {
-            fencedWrites.add(batch.key());
-            if (!fired) {
-                fired = true;
-                onFirstFencedWrite.accept(batch.key());
-            }
-        }
         return delegate.apply(batch);
     }
 
     @Override
     public CompletionStage<LeaseHandle> claim(ExecutionKey key, String workerId, Duration ttl) {
-        if (refuseEveryClaim) {
-            return CompletableFuture.failedFuture(new ExecutionStoreException(
-                    new ExecutionStoreFailure.LeaseHeldByAnother(key, "another-worker", Instant.MAX)));
-        }
         return delegate.claim(key, workerId, ttl);
-    }
-
-    // ------------------------------------------------------------------ plain delegation below
-
-    @Override
-    public Set<StoreCapability> capabilities() {
-        return delegate.capabilities();
     }
 
     @Override
@@ -174,7 +152,7 @@ final class ObservableExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<Boolean> recordInboxDelivery(String tenantId, String consumerId, UUID eventId,
-                                                         Duration retention) {
+                                                        Duration retention) {
         return delegate.recordInboxDelivery(tenantId, consumerId, eventId, retention);
     }
 
@@ -207,10 +185,6 @@ final class ObservableExecutionStore implements ExecutionStore {
     public Duration journalRetention() {
         return delegate.journalRetention();
     }
-
-    // The durable inventory is pure delegation here. This double exists to perturb one
-    // named operation; forwarding everything else unchanged is what keeps the perturbation the only
-    // difference between it and the store it wraps.
 
     @Override
     public int maxInventoryPageSize() {
@@ -248,42 +222,12 @@ final class ObservableExecutionStore implements ExecutionStore {
         return delegate.purgeExpiredProcessInstances(tenantId);
     }
 
-    // Forwarded rather than left on the interface defaults. Every method below is a `default` that
-    // refuses with CapabilityNotSupported, so a decorator that publishes the delegate's capabilities
-    // while inheriting them would declare EXECUTION_RESULTS and then refuse every result call -- a
-    // wrapper that behaves unlike the store it wraps, in exactly the direction that makes a passing
-    // test evidence about nothing.
-
     @Override
-    public java.time.Duration executionResultRetention() {
-        return delegate.executionResultRetention();
-    }
-
-    @Override
-    public int maxExecutionResultPayloadBytes() {
-        return delegate.maxExecutionResultPayloadBytes();
-    }
-
-    @Override
-    public CompletionStage<ai.ravenroot.api.persistence.DurableExecutionResult> recordExecutionResult(
-            ai.ravenroot.api.persistence.DurableExecutionResult result) {
-        return delegate.recordExecutionResult(result);
-    }
-
-    @Override
-    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionResult>>
-            loadExecutionResult(String tenantId, java.util.UUID traversalId) {
-        return delegate.loadExecutionResult(tenantId, traversalId);
-    }
-
-    @Override
-    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
-        return delegate.executionResultsRetainedFrom(tenantId);
-    }
-
-    @Override
-    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
-        return delegate.purgeExpiredExecutionResults(tenantId);
+    public CompletionStage<DurableExecutionResult> recordExecutionResult(DurableExecutionResult result) {
+        var refused = new CompletableFuture<DurableExecutionResult>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.EXECUTION_RESULTS)));
+        return refused;
     }
 
     @Override

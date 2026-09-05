@@ -292,6 +292,44 @@ final class ThreadRecordingExecutionStore implements ExecutionStore {
         return delegate.purgeExpiredProcessInstances(tenantId);
     }
 
+    // Forwarded rather than left on the interface defaults. Every method below is a `default` that
+    // refuses with CapabilityNotSupported, so a decorator that publishes the delegate's capabilities
+    // while inheriting them would declare EXECUTION_RESULTS and then refuse every result call -- a
+    // wrapper that behaves unlike the store it wraps, in exactly the direction that makes a passing
+    // test evidence about nothing.
+
+    @Override
+    public java.time.Duration executionResultRetention() {
+        return delegate.executionResultRetention();
+    }
+
+    @Override
+    public int maxExecutionResultPayloadBytes() {
+        return delegate.maxExecutionResultPayloadBytes();
+    }
+
+    @Override
+    public CompletionStage<ai.ravenroot.api.persistence.DurableExecutionResult> recordExecutionResult(
+            ai.ravenroot.api.persistence.DurableExecutionResult result) {
+        return delegate.recordExecutionResult(result);
+    }
+
+    @Override
+    public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionResult>>
+            loadExecutionResult(String tenantId, java.util.UUID traversalId) {
+        return delegate.loadExecutionResult(tenantId, traversalId);
+    }
+
+    @Override
+    public CompletionStage<Instant> executionResultsRetainedFrom(String tenantId) {
+        return delegate.executionResultsRetainedFrom(tenantId);
+    }
+
+    @Override
+    public CompletionStage<Long> purgeExpiredExecutionResults(String tenantId) {
+        return delegate.purgeExpiredExecutionResults(tenantId);
+    }
+
     @Override
     public CompletionStage<java.util.Optional<ai.ravenroot.api.persistence.DurableExecutionPause>>
             loadExecutionPause(ExecutionKey key, java.util.UUID pauseId) {

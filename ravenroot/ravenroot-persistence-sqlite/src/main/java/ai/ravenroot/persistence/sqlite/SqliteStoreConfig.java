@@ -25,11 +25,13 @@ import java.util.Objects;
  *                        {@link SqliteExecutionStore#maxInventoryPageSize()}
  * @param terminalRetention the window published by
  *                        {@link SqliteExecutionStore#terminalRetention()}
+ * @param executionResultRetention the window published by
+ *                        {@link SqliteExecutionStore#executionResultRetention()}
  */
 public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTimeout,
                                 Duration maxLeaseTtl, int maxPayloadBytes, Duration maxClockSkew,
                                 Duration journalRetention, int maxInventoryPageSize,
-                                Duration terminalRetention) {
+                                Duration terminalRetention, Duration executionResultRetention) {
 
     /**
      * How far SQLite flushes on commit.
@@ -77,7 +79,8 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public static SqliteStoreConfig defaults() {
         return new SqliteStoreConfig(SynchronousMode.FULL, Duration.ofSeconds(5), Duration.ofMinutes(5),
-                1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7));
+                1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7),
+                Duration.ofDays(7));
     }
 
     public SqliteStoreConfig {
@@ -118,16 +121,38 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
                     + " cannot be shorter than journalRetention " + journalRetention
                     + ": events would outlive the instance they name");
         }
+        Objects.requireNonNull(executionResultRetention, "executionResultRetention");
+        if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
+            throw new IllegalArgumentException("executionResultRetention must be positive");
+        }
+        if (terminalRetention.compareTo(executionResultRetention) < 0) {
+            // Same rule as the journal window above, in the same direction, and for the same reason:
+            // no retained record may name a record that has already been purged. A result carries the
+            // process instance and traversal it belongs to, so a result surviving its instance would
+            // name a row the inventory can no longer describe. The instance row is the cheaper of the
+            // two to keep -- it is a handful of columns, while a result carries a payload -- so it
+            // outlives the result rather than the other way round.
+            //
+            // The schema makes the violation unreachable anyway: execution_result cascades from
+            // process_instance, so purging an instance takes its results with it. That is exactly why
+            // the check is here rather than left implicit. Without it a longer result window would be
+            // accepted and then silently not honoured, and an operator who configured thirty days of
+            // results behind seven days of instances would discover the real number during an
+            // investigation.
+            throw new IllegalArgumentException("terminalRetention " + terminalRetention
+                    + " cannot be shorter than executionResultRetention " + executionResultRetention
+                    + ": results would outlive the instance they name");
+        }
     }
 
     public SqliteStoreConfig withSynchronousMode(SynchronousMode mode) {
         return new SqliteStoreConfig(mode, busyTimeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
-                journalRetention, maxInventoryPageSize, terminalRetention);
+                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention);
     }
 
     public SqliteStoreConfig withBusyTimeout(Duration timeout) {
         return new SqliteStoreConfig(synchronousMode, timeout, maxLeaseTtl, maxPayloadBytes, maxClockSkew,
-                journalRetention, maxInventoryPageSize, terminalRetention);
+                journalRetention, maxInventoryPageSize, terminalRetention, executionResultRetention);
     }
 
     /**
@@ -150,7 +175,7 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withTerminalRetention(Duration retention) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, journalRetention, maxInventoryPageSize, retention);
+                maxClockSkew, journalRetention, maxInventoryPageSize, retention, executionResultRetention);
     }
 
     /**
@@ -161,7 +186,7 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withMaxInventoryPageSize(int maximum) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, journalRetention, maximum, terminalRetention);
+                maxClockSkew, journalRetention, maximum, terminalRetention, executionResultRetention);
     }
 
     /**
@@ -174,6 +199,32 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      */
     public SqliteStoreConfig withJournalRetention(Duration retention) {
         return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
-                maxClockSkew, retention, maxInventoryPageSize, terminalRetention);
+                maxClockSkew, retention, maxInventoryPageSize, terminalRetention, executionResultRetention);
+    }
+
+    /**
+     * How long a recorded terminal result stays readable before
+     * {@link SqliteExecutionStore#purgeExpiredExecutionResults(String)} may remove it, and before a
+     * read stops offering its payload.
+     *
+     * <p>Seven days by default, matching {@link #terminalRetention()} rather than picking an
+     * independent number. The two windows answer the same operational question — how long after a run
+     * ends can somebody still find out what happened — and defaulting them apart would mean a
+     * terminal execution that is discoverable in the inventory and whose result has silently gone,
+     * for no reason an operator asked for.</p>
+     *
+     * <p>It may be shortened freely, and that is the case this knob exists for: a result carries a
+     * payload while an inventory row does not, so an operator under storage pressure reduces this one
+     * first. Lengthening it beyond {@link #terminalRetention()} is rejected rather than accepted and
+     * quietly not honoured — the result table cascades from {@code process_instance}, so a longer
+     * window would be cut short by the instance purge and the configured number would be a
+     * fiction.</p>
+     *
+     * @param retention how long recorded results are retained.
+     * @return a copy of this configuration with the given result retention.
+     */
+    public SqliteStoreConfig withExecutionResultRetention(Duration retention) {
+        return new SqliteStoreConfig(synchronousMode, busyTimeout, maxLeaseTtl, maxPayloadBytes,
+                maxClockSkew, journalRetention, maxInventoryPageSize, terminalRetention, retention);
     }
 }

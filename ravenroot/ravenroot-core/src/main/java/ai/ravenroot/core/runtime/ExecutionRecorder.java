@@ -403,6 +403,35 @@ public final class ExecutionRecorder implements AutoCloseable {
     public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
                                                   TraversalStatus traversalStatus,
                                                   ProcessInstanceStatus processStatus) {
+        settleExecutionPause(transition, traversalId, traversalStatus, processStatus, null);
+    }
+
+    /**
+     * Settles one durable hold and puts its traversal into the state its outcome calls for, recording
+     * why that state was reached.
+     *
+     * <p>The reason travels in the same batch as the statuses for the reason the statuses travel with
+     * the settlement: they are one decision. A hold given up by an operator ends its traversal as
+     * {@code FAILED}, which on its own describes a fault that did not occur — the reason beside it is
+     * the only thing that says the traversal was stopped rather than broken, so a batch that
+     * committed the status now and the reason later would leave a durable, restart-visible window
+     * reporting an incident. See {@link ai.ravenroot.api.application.ExecutionTerminationReason}.</p>
+     *
+     * @param transition the settlement to apply.
+     * @param traversalId the held traversal.
+     * @param traversalStatus the state the traversal moves to, or {@code null} when the caller's own
+     *                        teardown is about to write the traversal's end and a transition here
+     *                        would be the first of two, leaving the second illegal.
+     * @param processStatus the state the process instance moves to, under the same rule.
+     * @param terminationReason why those states were reached, or {@code null} when nothing
+     *                          distinguishes the termination. Ignored for a non-terminal status,
+     *                          which the aggregate refuses to qualify.
+     */
+    public synchronized void settleExecutionPause(ExecutionPauseTransition transition, UUID traversalId,
+                                                  TraversalStatus traversalStatus,
+                                                  ProcessInstanceStatus processStatus,
+                                                  ai.ravenroot.api.application.ExecutionTerminationReason
+                                                          terminationReason) {
         requireFence();
         Objects.requireNonNull(transition, "transition");
         Objects.requireNonNull(traversalId, "traversalId");
@@ -411,10 +440,12 @@ public final class ExecutionRecorder implements AutoCloseable {
                 .fencedBy(lease)
                 .applyExecutionPause(transition);
         if (traversalStatus != null) {
-            batch.apply(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus));
+            batch.apply(new ExecutionTransition.TraversalTransitioned(traversalId, traversalStatus,
+                    traversalStatus.terminal() ? terminationReason : null));
         }
         if (processStatus != null) {
-            batch.apply(new ExecutionTransition.ProcessTransitioned(processStatus));
+            batch.apply(new ExecutionTransition.ProcessTransitioned(processStatus,
+                    processStatus.terminal() ? terminationReason : null));
         }
         StoredProcessInstance applied = await(store.apply(batch.build()));
         revision = applied.revision();

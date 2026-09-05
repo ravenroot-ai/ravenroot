@@ -111,6 +111,34 @@ public abstract class ExecutionEngineContract {
             </graphml>
             """;
     /**
+     * One behaviour node whose handler is supplied per test, so a node can be held open (or made to
+     * fail) under the test's own control -- used to observe a traversal while it is genuinely
+     * mid-node rather than before start or after it ends.
+     */
+    private static final String BLOCKING_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="blocking-work" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="work">
+                  <data key="kind">BEHAVIOR</data>
+                  <data key="behavior">blocking-work</data>
+                </node>
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-work" source="start" target="work">
+                  <data key="outcome">continue</data>
+                </edge>
+                <edge id="work-end" source="work" target="end">
+                  <data key="outcome">continue</data>
+                </edge>
+              </graph>
+            </graphml>
+            """;
+    /**
      * The identity every conformance message and traversal runs as. An engine adapter is not a
      * security boundary — it transports {@code NodeMessage} opaquely — so one fixed context is enough
      * here. SEC-07 propagation itself is asserted in core and at the application layer, where the
@@ -284,6 +312,75 @@ public abstract class ExecutionEngineContract {
             assertNotEquals(firstStarted.invocationId(), secondStarted.invocationId(),
                     "the two reached-node attempts must have distinct invocation identities");
         }
+    }
+
+    /**
+     * A traversal cancelled mid-node reaches a terminal outcome through {@link #awaitTerminalOutcome}
+     * -- the exact poll every caller of {@code GET /v1/executions/{id}} rides, which gates only on
+     * {@code found.outcome().status().terminal()} (see {@link #pollTerminalOutcome}). Cancellation
+     * keeps the status {@code FAILED} rather than introducing a new {@link ProcessInstanceStatus}
+     * member precisely so this gate needs no change; had the design gone the other way, this poll
+     * would never see a cancelled run finish and would spin until the test's own timeout. The
+     * cancellation is also compared against an ordinary in-node failure reaching the identical gate,
+     * so a poll that simply never distinguishes terminal reasons could not pass this test by
+     * accident.
+     *
+     * <p>{@code GraphRunner.cancelTraversal} does not preempt a node computation already dispatched
+     * -- it only refuses the <em>next</em> hop and releases a pause gate or a retry backoff, per its
+     * own javadoc ("the node named here is the first hop that did <em>not</em> run"). So this
+     * fixture completes the blocked node's own future itself, after cancelling, to simulate the
+     * effect actually finishing; the cancellation then surfaces on the hop that would have followed
+     * it, which is the one that never runs.</p>
+     */
+    @Test
+    final void aCancelledTraversalReachesATerminalOutcomeThroughTheSamePollThatGatesOnStatusTerminal()
+            throws Exception {
+        var entered = new CountDownLatch(1);
+        var blocked = new CompletableFuture<NodeResult>();
+        var cancelledRegistry = new BehaviorRegistry().register("blocking-work", message -> {
+            entered.countDown();
+            return blocked;
+        });
+        var monitor = new ExecutionMonitor();
+        UUID cancelledTraversalId = UUID.randomUUID();
+        try (var application = new DefaultRavenrootApplication(engine(), monitor, cancelledRegistry)) {
+            application.startGraphMl(TCK_IDENTITY, cancelledTraversalId, blockingGraph(), "payload");
+            assertTrue(entered.await(10, TimeUnit.SECONDS),
+                    "the node must have been entered before it can be cancelled mid-flight");
+
+            assertTrue(application.cancelTraversal(cancelledTraversalId));
+            // The node's own effect already ran (entered fired) and is let to finish; only the next
+            // hop -- "end" -- is refused by the cancellation now in effect.
+            blocked.complete(NodeResult.continueWith("payload"));
+
+            ExecutionOutcome cancelledOutcome = awaitTerminalOutcome(application, cancelledTraversalId);
+            assertTrue(cancelledOutcome.status().terminal(),
+                    "the poll's own gate must have been satisfied for this test to reach here at all");
+            assertEquals(ProcessInstanceStatus.FAILED, cancelledOutcome.status());
+            assertTrue(cancelledOutcome.cancelled(),
+                    "a cancellation observed through the polling gate must still be a cancellation, "
+                            + "not merely a run that happened to stop");
+            assertNull(cancelledOutcome.payload(), "a cancelled run reaches no end node");
+        }
+
+        // The contrast: an ordinary in-node failure reaches the identical gate and must NOT read as
+        // cancelled, so the assertions above cannot be satisfied by a poll -- or an outcome -- that
+        // conflates every terminal FAILED run.
+        var failingRegistry = new BehaviorRegistry().register("blocking-work",
+                message -> CompletableFuture.failedFuture(new IllegalStateException("node broke")));
+        UUID failedTraversalId = UUID.randomUUID();
+        try (var application = new DefaultRavenrootApplication(engine(), new ExecutionMonitor(), failingRegistry)) {
+            application.startGraphMl(TCK_IDENTITY, failedTraversalId, blockingGraph(), "payload");
+            ExecutionOutcome failedOutcome = awaitTerminalOutcome(application, failedTraversalId);
+            assertEquals(ProcessInstanceStatus.FAILED, failedOutcome.status());
+            assertFalse(failedOutcome.cancelled(),
+                    "an ordinary node failure reaching the same terminal gate must not be misread as "
+                            + "a cancellation");
+        }
+    }
+
+    private static ByteArrayInputStream blockingGraph() {
+        return new ByteArrayInputStream(BLOCKING_GRAPH.getBytes(StandardCharsets.UTF_8));
     }
 
     private record RebindingFactory(ModelProviderRegistry providers) implements NodeBehaviorFactory {

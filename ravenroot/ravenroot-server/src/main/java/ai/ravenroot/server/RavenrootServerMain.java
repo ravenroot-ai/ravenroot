@@ -246,9 +246,24 @@ public final class RavenrootServerMain {
         // two composition sites was updated and the other was not, and the refusals that followed
         // would look like corrupt manifests rather than like a composition mistake.
         var executionManifests = application.executionManifests();
-        final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
-        if (toolApprovals == null && humanTasks == null) {
+        // Recovery is composed whenever there is durable state to recover, not only when a durable
+        // decision service happens to be enabled. The two are unrelated: work interrupted mid-flight
+        // is outstanding whether or not this deployment also approves tool calls, and gating the
+        // whole loop on the decision services left an ordinary deployment discovering nothing and
+        // classifying nothing after a restart.
+        //
+        // The condition is the execution store alone, and the pinned document store is not tested
+        // beside it even though a rebuild reads it. The bootstrap opens all three stores together or
+        // opens none, so a null document store beside a live execution store is a composition error
+        // rather than a supported shape. Tolerating it here would answer that error by silently
+        // running with no recovery at all — the failure mode hardest to notice and most expensive to
+        // have. The authority's own null check refuses it at startup instead, loudly, before a
+        // listener exists.
+        final ai.ravenroot.server.recovery.ExecutionRecoveryDriver approvalRecovery;
+        final ai.ravenroot.server.recovery.RecoveryStartupDiscovery recoveryDiscovery;
+        if (executionStore == null) {
             approvalRecovery = null;
+            recoveryDiscovery = null;
         } else {
             var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
                     .fromEnvironment(System.getenv());
@@ -274,14 +289,29 @@ public final class RavenrootServerMain {
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor));
             }
+            // One authority over the pinned document and the manifest, shared by the coordinator's
+            // fail-closed gate and by the declaration source below, so the answer a sweep acts on
+            // and the answer it reports cannot come from two objects that could drift apart.
+            var recoveryAuthority = new ai.ravenroot.core.recovery.PinnedGraphRecoveryAuthority(
+                    executionStore, executionStoreOwner.graphDefinitionStore(), executionManifests,
+                    behaviors::descriptor, graphExecutionLimits);
+            var recoveryCoordinator = new ai.ravenroot.core.recovery.ExecutionRecoveryCoordinator(
+                    recoveryAuthority, dispatchers);
             var recoveryService = new ai.ravenroot.core.recovery.ExecutionRecoveryService(
                     executionStore, recoveryConfiguration.tenantIds(), recoveryWorker,
                     recoveryConfiguration.batchLimit(), recoveryConfiguration.leaseTtl(),
-                    ai.ravenroot.core.recovery.RepeatabilityDeclarations.NONE_DECLARED,
-                    new ai.ravenroot.core.recovery.CompositeRecoveryDispatcher(dispatchers),
+                    // The declarations come from the coordinator's own authority rather than from
+                    // NONE_DECLARED. Before documents were retained there was no graph to read after
+                    // a restart, so every ambiguous attempt parked for want of a snapshot; the pinned
+                    // document is now readable, and an author's declaration survives the process that
+                    // accepted it.
+                    recoveryCoordinator.declarations(), recoveryCoordinator,
                     graphExecutionLimits.maxRecoveryDeliveriesPerAttempt());
-            approvalRecovery = new ai.ravenroot.server.approval.ToolApprovalRecoveryDriver(
+            approvalRecovery = new ai.ravenroot.server.recovery.ExecutionRecoveryDriver(
                     recoveryService, recoveryConfiguration.interval());
+            recoveryDiscovery = new ai.ravenroot.server.recovery.RecoveryStartupDiscovery(
+                    recoveryService, recoveryCoordinator, executionStore::supports,
+                    recoveryConfiguration.interval());
         }
         application.configureArtifactDualControl(artifactLifecycle.dualControl());
         serverStartup.installInto(application::installManagedIngress);
@@ -309,14 +339,22 @@ public final class RavenrootServerMain {
                         ? java.util.List.of(new ai.ravenroot.server.readiness.DependencyStatus("managed-ingress", true,
                                 serverStartup.readinessDetail()))
                         : java.util.List.of(),
+                // A deployment that composes no recovery loop has nothing to classify and is ready as
+                // soon as its dependencies are; one that does stays closed until it knows what it
+                // inherited. Refusals found by that pass do not hold the gate: they are inherited
+                // facts for an operator, not a reason to refuse traffic for unrelated tenants.
+                recoveryDiscovery == null ? () -> true : recoveryDiscovery::complete,
                 readinessConfiguration);
         // The two rejection-detail sinks route into the same durable audit trail as
         // everything else here rather than defaulting to RavenrootServer's stdout loggers -- see
         // AuditTrailGraphMlRejectionSink's Javadoc for why this satisfies rather than reopens FIX-03
         // and API-01's "server-side sink only" constraint on GraphMlRejectionDetail/PayloadException.
         // AuditTrailExecutionSink is a fifth subscriber alongside the stdout logger
-        // and whatever TelemetrySupport installs below -- see its own Javadoc for exactly which four
-        // ExecutionEventTypes it admits and why the other six stay off the chain.
+        // and whatever TelemetrySupport installs below -- see its own Javadoc, and the exhaustive
+        // switch in its `decisional` method, for which ExecutionEventTypes it admits and why the
+        // rest stay off the chain. Deliberately no count here: the previous wording named one, the
+        // set has grown twice since, and a number in a cross-reference goes stale silently while the
+        // switch it describes cannot.
         var authorization = new ai.ravenroot.api.security.DefaultAuthorizationService(
                 new AuditTrailAuthorizationSink(auditTrail));
         // The durable operator authority the packaged process was missing under the relevant contract. It is a
@@ -388,6 +426,8 @@ public final class RavenrootServerMain {
                         new AuditTrailExecutionControlSink(auditTrail),
                         assistantComposition.service(),
                         embedConfiguration, userCredentials);
+                // No null check on approvalRecovery: both services are composed only when the
+                // execution store is, which is the same condition that composes the loop.
                 if (toolApprovals != null) {
                     server.installToolApprovals(toolApprovals, approvalRecovery::sweepTenant);
                 }
@@ -452,6 +492,7 @@ public final class RavenrootServerMain {
                 startupHandle.gracefulShutdown();
             } finally {
                 if (approvalRecovery != null) approvalRecovery.close();
+                if (recoveryDiscovery != null) recoveryDiscovery.close();
                 try {
                     registered.activation().close();
                 } finally {
@@ -503,8 +544,12 @@ public final class RavenrootServerMain {
         }));
         try {
             startupHandle.start();
+            // Discovery starts before the sweep loop: the sweep claims and dispatches, and a process
+            // should know what it inherited before it begins acting on it.
+            if (recoveryDiscovery != null) recoveryDiscovery.start();
             if (approvalRecovery != null) approvalRecovery.start();
         } catch (RuntimeException | Error startFailure) {
+            if (recoveryDiscovery != null) recoveryDiscovery.close();
             if (approvalRecovery != null) approvalRecovery.close();
             userCredentials.close();
             closeEmbedRegistrations(embedRegistrations);

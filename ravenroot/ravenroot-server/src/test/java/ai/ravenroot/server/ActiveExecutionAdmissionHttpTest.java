@@ -170,7 +170,7 @@ class ActiveExecutionAdmissionHttpTest {
         }
     }
 
-    /** A terminated execution gives its slot back to its own tenant, on both terminal event types. */
+    /** A terminated execution gives its slot back to its own tenant, on every terminal event type. */
     @Test
     void aTerminatedExecutionReturnsItsSlotToItsTenant() throws Exception {
         try (var fixture = fixture(limits(builder -> builder.activeExecutions(4)))) {
@@ -188,6 +188,32 @@ class ActiveExecutionAdmissionHttpTest {
 
             fixture.application().terminate(held.get(1), ExecutionEventType.EXECUTION_FAILED);
             assertEquals(2, fixture.registry().activeFor("tenant-a"));
+            assertEquals(202, fixture.submit(client, "tenant-a").statusCode());
+        }
+    }
+
+    /**
+     * Regression probe: a cancelled execution must release its admission slot exactly like a
+     * completed or a failed one. {@code ActiveExecutionRegistry} previously matched only
+     * {@code EXECUTION_COMPLETED}/{@code EXECUTION_FAILED} and treated {@code EXECUTION_CANCELLED} as
+     * an unknown, no-op event type — a cancelled execution's entry never left the registry, so
+     * cancelling enough executions permanently exhausted a tenant's admission capacity.
+     */
+    @Test
+    void aCancelledExecutionReturnsItsSlotToItsTenant() throws Exception {
+        try (var fixture = fixture(limits(builder -> builder.activeExecutions(4)))) {
+            var client = HttpClient.newHttpClient();
+
+            var held = new ArrayList<UUID>();
+            for (int index = 0; index < 3; index++) {
+                held.add(fixture.executionId(fixture.submit(client, "tenant-a")));
+            }
+            assertEquals(429, fixture.submit(client, "tenant-a").statusCode());
+
+            fixture.application().terminate(held.get(0), ExecutionEventType.EXECUTION_CANCELLED);
+
+            assertEquals(2, fixture.registry().activeFor("tenant-a"),
+                    "a cancelled execution left its admission slot held forever");
             assertEquals(202, fixture.submit(client, "tenant-a").statusCode());
         }
     }

@@ -214,6 +214,59 @@ class ReadinessGateTest {
     }
 
     @Test
+    void staysClosedUntilStartupRecoveryClassificationCompletes() {
+        // A live signal the test flips, so the transition from closed to open is observed rather
+        // than constructed: a gate that could only be built against a finished pass would make
+        // "does this actually wait" untestable.
+        var classified = new AtomicBoolean(false);
+        gate = new ReadinessGate(() -> "RUNNING", StoreLivenessCheck.none(), List::of,
+                classified::get, ReadinessConfiguration.defaults());
+
+        var beforeThePass = gate.evaluate();
+        assertFalse(beforeThePass.ready(),
+                "a process that has not yet looked at the durable state cannot say it is able to "
+                        + "run the work already accepted into it");
+        assertEquals(ReadinessState.RECOVERING, beforeThePass.state());
+
+        classified.set(true);
+
+        var afterThePass = gate.evaluate();
+        assertTrue(afterThePass.ready());
+        assertEquals(ReadinessState.READY, afterThePass.state());
+    }
+
+    @Test
+    void anUnfinishedStartupPassOutranksAStoreFailureButNotDraining() {
+        StoreLivenessCheck alwaysFails = () -> {
+            throw new IllegalStateException("store is down");
+        };
+        gate = new ReadinessGate(() -> "RUNNING", alwaysFails, List::of, () -> false,
+                ReadinessConfiguration.defaults());
+
+        assertEquals(ReadinessState.RECOVERING, gate.evaluate().state(),
+                "an unfinished pass is the more specific fact; reporting a degraded store would send "
+                        + "an operator after storage that may be working");
+        gate.close();
+
+        gate = new ReadinessGate(() -> "DRAINING", StoreLivenessCheck.none(), List::of, () -> false,
+                ReadinessConfiguration.defaults());
+
+        assertEquals(ReadinessState.DRAINING, gate.evaluate().state(),
+                "a process already shutting down is not going to finish a startup pass, so reporting "
+                        + "it as still starting would be actively misleading");
+    }
+
+    @Test
+    void aDeploymentThatRunsNoStartupPassIsReadyAsSoonAsItsDependenciesAre() {
+        gate = new ReadinessGate(() -> "RUNNING", StoreLivenessCheck.none(), List::of,
+                ReadinessConfiguration.defaults());
+
+        assertEquals(ReadinessState.READY, gate.evaluate().state(),
+                "the four-argument gate is the additive default and must behave exactly as it did "
+                        + "before a startup pass existed");
+    }
+
+    @Test
     void dependenciesAreReportedButNeverGateReadiness() {
         gate = new ReadinessGate(() -> "RUNNING", StoreLivenessCheck.none(),
                 () -> List.of(new DependencyStatus("program-runtime", false, "disabled")),

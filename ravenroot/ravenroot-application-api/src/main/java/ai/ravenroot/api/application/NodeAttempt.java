@@ -16,9 +16,13 @@ import java.util.UUID;
  * @param status current state of this attempt in the attempt lifecycle
  * @param completion terminal conclusion, present only once the attempt is resolved
  * @param parkCause bounded operator-facing explanation retained while the attempt is parked
+ * @param withheldThroughDelivery highest recovery delivery on which this attempt was withheld because
+ *                                the deployment could not yet classify its execution; zero when it
+ *                                never was. See {@link #withheldThrough(int)}.
  */
 public record NodeAttempt(UUID attemptId, int ordinal, NodeAttemptStatus status,
-                          NodeAttemptCompletion completion, String parkCause) {
+                          NodeAttemptCompletion completion, String parkCause,
+                          int withheldThroughDelivery) {
 
     /**
      * Bound on the operator-facing cause, marker included, so a store row cannot become an unbounded
@@ -58,6 +62,62 @@ public record NodeAttempt(UUID attemptId, int ordinal, NodeAttemptStatus status,
         if (status != NodeAttemptStatus.PARKED && parkCause != null) {
             throw new IllegalArgumentException("only a parked attempt may have a park cause");
         }
+        if (withheldThroughDelivery < 0) {
+            throw new IllegalArgumentException("withheldThroughDelivery cannot be negative");
+        }
+    }
+
+/**
+ * Pre-withholding arity: an attempt recovery has never withheld.
+ * @param attemptId the stable attempt id used to identify the requested resource.
+ * @param ordinal the ordinal constraint applied while processing the request.
+ * @param status current state of this attempt in the attempt lifecycle
+ * @param completion terminal conclusion, present only once the attempt is resolved
+ * @param parkCause bounded operator-facing explanation retained while the attempt is parked
+ */
+    public NodeAttempt(UUID attemptId, int ordinal, NodeAttemptStatus status,
+                       NodeAttemptCompletion completion, String parkCause) {
+        this(attemptId, ordinal, status, completion, parkCause, 0);
+    }
+
+/**
+ * Records that recovery declined to act on this attempt through delivery {@code delivery}, because
+ * the deployment could not classify its execution and waiting might still change that.
+ *
+ * <h4>Why this is durable rather than a counter in the recovery process</h4>
+ * <p>The recovery delivery limit is evaluated against the store's own delivery counter, which counts
+ * <em>claims</em>. A claim on which nothing was dispatched is not a redelivery of anything, but it
+ * increments that counter all the same, so a dependency outage silently spends the budget and the
+ * limit fires the moment the outage ends -- parking an attempt that should have been decided on its
+ * merits, with a cause about a limit rather than about the effect. Subtracting this mark at
+ * evaluation is what makes a withheld delivery cost nothing. It lives in the aggregate because the
+ * outage and the recovery routinely straddle a restart: a mark held in the recovering process would
+ * be gone exactly when it was needed, which is the case it exists for.</p>
+ *
+ * <p>A high-water mark rather than a running total, because writing the same value twice is a no-op
+ * and a retried write therefore cannot corrupt it. The cost is that a dependency which flaps --
+ * withheld, admitted, withheld again -- under-counts the admitted deliveries between the withholdings
+ * and so allows a few more than the configured budget. That direction is deliberate: it delays a park
+ * rather than causing one nobody asked for, and this whole mechanism exists to stop spurious parks.</p>
+ *
+ * @param delivery the recovery delivery on which the attempt was withheld; lower values are ignored.
+ * @return this attempt with the mark raised, or itself when the mark already covers {@code delivery}.
+ */
+    public NodeAttempt withheldThrough(int delivery) {
+        if (delivery <= withheldThroughDelivery) {
+            return this;
+        }
+        return new NodeAttempt(attemptId, ordinal, status, completion, parkCause, delivery);
+    }
+
+/**
+ * The recovery deliveries that actually reached a decision, which is what the delivery limit bounds.
+ *
+ * @param deliveryAttempt the store's one-based claim counter for this attempt.
+ * @return {@code deliveryAttempt} less the deliveries recovery withheld, never below zero.
+ */
+    public int decidedDeliveries(int deliveryAttempt) {
+        return Math.max(0, deliveryAttempt - withheldThroughDelivery);
     }
 
 /**
@@ -112,7 +172,8 @@ public record NodeAttempt(UUID attemptId, int ordinal, NodeAttemptStatus status,
             throw new IllegalStateException("Illegal node attempt transition: " + status + " -> " + next);
         }
         return new NodeAttempt(attemptId, ordinal, next,
-                next == NodeAttemptStatus.COMPLETED ? NodeAttemptCompletion.SUCCEEDED : null, null);
+                next == NodeAttemptStatus.COMPLETED ? NodeAttemptCompletion.SUCCEEDED : null, null,
+                withheldThroughDelivery);
     }
 
 /**
@@ -144,7 +205,8 @@ public record NodeAttempt(UUID attemptId, int ordinal, NodeAttemptStatus status,
             throw new IllegalStateException(
                     "Illegal node attempt transition: " + status + " -> " + NodeAttemptStatus.PARKED);
         }
-        return new NodeAttempt(attemptId, ordinal, NodeAttemptStatus.PARKED, null, cause);
+        return new NodeAttempt(attemptId, ordinal, NodeAttemptStatus.PARKED, null, cause,
+                withheldThroughDelivery);
     }
 
     /**

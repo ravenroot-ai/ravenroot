@@ -1,5 +1,6 @@
 package ai.ravenroot.api.persistence;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 
 import java.time.Instant;
@@ -69,6 +70,15 @@ import java.util.Optional;
  * @param retainedUntil       when a terminal row becomes eligible for
  *                            {@link ExecutionStore#purgeExpiredProcessInstances(String)}; absent while
  *                            the instance is non-terminal, because retention has not started
+ * @param terminationReason   why a terminal {@code status} was reached when the status alone would
+ *                            misdescribe it, and {@code null} when nothing distinguishes it or the
+ *                            instance has not terminated. <b>A cancelled instance reports
+ *                            {@code status == FAILED} and {@code terminationReason == CANCELLED}</b> —
+ *                            read the two together, exactly as {@code ProcessInstance}'s own Javadoc
+ *                            requires of every type that carries both, so that the durable inventory
+ *                            does not misreport a deliberate stop as an incident after a restart, once
+ *                            live in-memory state (and any richer termination signal it carried) is
+ *                            gone and this row is the only place left to ask.
  */
 public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus status,
                                     InventoryDisposition disposition, long revision,
@@ -77,7 +87,8 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
                                     Optional<String> correlationId, Optional<String> ownerWorkerId,
                                     long fencingToken, Optional<Instant> leaseExpiresAt,
                                     int traversalCount, Instant createdAt, Instant updatedAt,
-                                    Optional<Instant> retainedUntil) {
+                                    Optional<Instant> retainedUntil,
+                                    ExecutionTerminationReason terminationReason) {
 
     /** Rejects an inventory row that could not describe a real stored instance. */
     public ProcessInventoryEntry {
@@ -97,6 +108,48 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
         ownerWorkerId = ownerWorkerId == null ? Optional.empty() : ownerWorkerId;
         leaseExpiresAt = leaseExpiresAt == null ? Optional.empty() : leaseExpiresAt;
         retainedUntil = retainedUntil == null ? Optional.empty() : retainedUntil;
+        // Mirrors ExecutionOutcome's own rule: a row that has not terminated cannot carry a
+        // termination reason, dropped rather than rejected because a read racing a transition is
+        // out of date, not malformed -- see ExecutionOutcome's canonical constructor for the
+        // identical reasoning.
+        terminationReason = status.terminal() ? terminationReason : null;
+    }
+
+    /**
+     * Compatibility constructor preserving the shape before a termination reason was carried.
+     * Reports an absent reason, correct for every producer that has not been taught to record one.
+     *
+     * @param key                 tenant-scoped identity of the instance
+     * @param status              authoritative stored lifecycle status
+     * @param disposition         recovery classification derived at read time; see
+     *                            {@link InventoryDisposition} for the precedence
+     * @param revision            the store revision this row was read at, strictly increasing per instance
+     * @param lifecycleGeneration count of authoritative status transitions applied to this instance
+     * @param graphVersionPin     the write-once definition this instance replays against
+     * @param deploymentId        hosting deployment, absent for a transient submission
+     * @param workloadId          owning workload, when the caller models one
+     * @param correlationId       caller correlation identity for the causing request
+     * @param ownerWorkerId       worker holding an unexpired lease, absent when none does
+     * @param fencingToken        the instance's current fencing token, which outlives every lease
+     * @param leaseExpiresAt      expiry of the live lease on the store's clock, absent when none is live
+     * @param traversalCount      number of traversals contained by this instance
+     * @param createdAt           when the instance was first written; immutable, and the primary
+     *                            pagination axis
+     * @param updatedAt           when it was last written; diagnostic only, never an ordering primitive
+     * @param retainedUntil       when a terminal row becomes eligible for purge; absent while the
+     *                            instance is non-terminal, because retention has not started
+     */
+    public ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus status,
+                                 InventoryDisposition disposition, long revision,
+                                 long lifecycleGeneration, GraphVersionPin graphVersionPin,
+                                 Optional<String> deploymentId, Optional<String> workloadId,
+                                 Optional<String> correlationId, Optional<String> ownerWorkerId,
+                                 long fencingToken, Optional<Instant> leaseExpiresAt,
+                                 int traversalCount, Instant createdAt, Instant updatedAt,
+                                 Optional<Instant> retainedUntil) {
+        this(key, status, disposition, revision, lifecycleGeneration, graphVersionPin, deploymentId,
+                workloadId, correlationId, ownerWorkerId, fencingToken, leaseExpiresAt, traversalCount,
+                createdAt, updatedAt, retainedUntil, null);
     }
 
     /**
@@ -105,5 +158,17 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
      */
     public ExecutionOrigin origin() {
         return new ExecutionOrigin(deploymentId, workloadId, correlationId);
+    }
+
+    /**
+     * Whether this row's terminal status is reported because it was stopped on request.
+     *
+     * @return whether this instance's termination is recorded as a cancellation. A cancelled
+     *         instance reports {@link #status()} {@code == FAILED}, so a caller that branches on the
+     *         status alone reads every deliberate stop as a fault; this is the read that separates
+     *         them.
+     */
+    public boolean cancelled() {
+        return ExecutionTerminationReason.isCancellation(terminationReason);
     }
 }

@@ -201,7 +201,8 @@ class PauseGateReleaseThreadTest {
             this.subscription = monitor.subscribe(event -> {
                 if (traversalId.equals(event.traversalId())
                         && (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                            || event.type() == ExecutionEventType.EXECUTION_FAILED)) {
+                            || event.type() == ExecutionEventType.EXECUTION_FAILED
+                            || event.type() == ExecutionEventType.EXECUTION_CANCELLED)) {
                     terminalEventThread.set(Thread.currentThread().getName());
                     terminal.countDown();
                 }

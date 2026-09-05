@@ -82,7 +82,11 @@ final class PausedExecutionObservabilityTest {
                     || type == ExecutionEventType.EXECUTION_PAUSED
                     || type == ExecutionEventType.EXECUTION_RESUMED
                     || type == ExecutionEventType.EXECUTION_COMPLETED
-                    || type == ExecutionEventType.EXECUTION_FAILED).toList();
+                    || type == ExecutionEventType.EXECUTION_FAILED
+                    // A cancellation is a traversal-terminal event of its own now, so a filter that
+                    // omitted it would drop the very event the cancel test asserts on and report the
+                    // sequence as if the traversal had never ended.
+                    || type == ExecutionEventType.EXECUTION_CANCELLED).toList();
         }
     }
 
@@ -239,7 +243,8 @@ final class PausedExecutionObservabilityTest {
                  }
                  events.add(event.type());
                  if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                         || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                         || event.type() == ExecutionEventType.EXECUTION_FAILED
+                         || event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
                      terminal.countDown();
                  }
              })) {
@@ -261,9 +266,12 @@ final class PausedExecutionObservabilityTest {
             assertFalse(events.contains(ExecutionEventType.EXECUTION_RESUMED),
                     "cancelling a held traversal is not a resumption and must publish none: " + events);
             assertEquals(List.of(ExecutionEventType.EXECUTION_STARTED, ExecutionEventType.EXECUTION_PAUSED,
-                            ExecutionEventType.EXECUTION_FAILED),
+                            ExecutionEventType.EXECUTION_CANCELLED),
                     lifecycle(events),
-                    "a cancelled hold's whole traversal-level sequence is start, pause, failure");
+                    "a cancelled hold's whole traversal-level sequence is start, pause, cancellation "
+                            + "-- EXECUTION_CANCELLED and not EXECUTION_FAILED, because this stream is "
+                            + "labelled by event type alone, so publishing the failure here would count "
+                            + "an operator's deliberate stop in the failure rate");
             assertEquals(0, effects.get(), "the cancelled traversal must never have run its node");
         }
     }
@@ -560,7 +568,8 @@ final class PausedExecutionObservabilityTest {
                  }
                  events.add(event.type());
                  if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                         || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                         || event.type() == ExecutionEventType.EXECUTION_FAILED
+                         || event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
                      terminal.countDown();
                  }
              })) {
@@ -672,7 +681,8 @@ final class PausedExecutionObservabilityTest {
                  }
                  events.add(event.type());
                  if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                         || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                         || event.type() == ExecutionEventType.EXECUTION_FAILED
+                         || event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
                      terminal.countDown();
                  }
              })) {
@@ -749,7 +759,8 @@ final class PausedExecutionObservabilityTest {
                      paused.countDown();
                  }
                  if (event.type() == ExecutionEventType.EXECUTION_COMPLETED
-                         || event.type() == ExecutionEventType.EXECUTION_FAILED) {
+                         || event.type() == ExecutionEventType.EXECUTION_FAILED
+                         || event.type() == ExecutionEventType.EXECUTION_CANCELLED) {
                      terminal.countDown();
                  }
              })) {

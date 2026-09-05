@@ -18,6 +18,22 @@ Begin with process and readiness probes, then isolate bind, identity, engine, or
 
 **Verify:** Confirm `/ready`, `/v1/runtime`, and `/v1/node-types`; then submit a bounded Test execution.
 
+## `/ready` reports `RECOVERING`
+
+**Diagnosis:** The process has started but has not finished classifying the durable work it inherited, so it cannot yet say whether that work is runnable here. A pass that cannot read the execution store does not finish and retries.
+
+**Action:** Expect this briefly on every restart. If it persists, check the execution store is reachable — the same condition also shows as `STORE_DEGRADED` once the pass gets far enough to probe. Do not route traffic while it holds.
+
+**Verify:** Confirm `/ready` reaches `READY`, then read the startup log for the recovery classification line reporting how many inherited instances were found and how many were refused.
+
+## An inherited execution is refused after a restart
+
+**Diagnosis:** The retained graph document or the execution manifest for that instance does not resolve in this deployment: it is missing, does not verify, or the deployment now resolves something the manifest does not describe.
+
+**Action:** Read the refusal logged for that instance; it names the instance and the reason. Restore the deployment the execution was accepted under, or abandon that work deliberately. You have a bounded window: refused work is left untouched and still claimable while it waits, but an attempt that was already in flight when the process died is parked once its delivery budget is spent, with a cause naming this fault, because it stands for an effect whose outcome nobody knows. An attempt that had not started is never parked and waits for you indefinitely.
+
+**Verify:** Restart and confirm the instance no longer appears among the refusals in the recovery classification log line. If an attempt was parked while the deployment was wrong, correcting the deployment does not un-park it — parked attempts are resolved deliberately, never by a later sweep.
+
 ## The selected engine is unavailable
 
 **Diagnosis:** `RAVENROOT_ENGINE` names an adapter that is not installed or failed discovery.

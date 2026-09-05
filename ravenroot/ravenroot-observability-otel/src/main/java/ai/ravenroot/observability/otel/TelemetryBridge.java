@@ -233,43 +233,71 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
                 .buildWithCallback(measurement -> measurement.record(traversalSpans.size()));
     }
 
+    /**
+     * Dispatches one event to its span/metric handling.
+     *
+     * <h2>Exhaustive by construction, and why that is the point</h2>
+     * <p>This used to be a plain {@code switch} <em>statement</em> with no {@code default} arm --
+     * which compiles, and silently does nothing for any case it does not list. That shape is exactly
+     * what let {@link ExecutionEventType#EXECUTION_CANCELLED} fall through unhandled when it was
+     * added: the traversal span was never ended, leaking an entry in {@link #traversalSpans} and a
+     * trace that never terminates, and nothing here failed to compile to say so.
+     * {@link ExecutionEventType#EDGE_TRAVERSED} has the identical gap today, undetected for the same
+     * reason -- see its own arm below, which is the first time that omission has been stated rather
+     * than merely true.</p>
+     *
+     * <p>Assigning the {@code switch} to a {@link Runnable} rather than invoking each handler
+     * directly from a statement switch is what makes this exhaustive: a switch <em>expression</em>
+     * over an enum with no {@code default} must cover every constant to compile, so a future member
+     * added to {@link ExecutionEventType} without an arm here is a compile error in this one method,
+     * not a silent gap in whichever handler it would otherwise have skipped.</p>
+     */
     @Override
     public void accept(ExecutionEvent event) {
         eventCounter.add(1, Attributes.of(METRIC_ATTR_EVENT_TYPE, event.type().name()));
-        switch (event.type()) {
-            case EXECUTION_STARTED -> startTraversal(event);
-            case EXECUTION_COMPLETED, EXECUTION_FAILED -> endTraversal(event);
-            case NODE_STARTED -> startNode(event);
-            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> {
+        Runnable handler = switch (event.type()) {
+            case EXECUTION_STARTED -> () -> startTraversal(event);
+            case EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED -> () -> endTraversal(event);
+            case NODE_STARTED -> () -> startNode(event);
+            case NODE_COMPLETED, NODE_BYPASSED, NODE_FAILED -> () -> {
                 endNode(event);
                 recordConnectorRetries(event);
-            }
+            };
             // Ends the failed attempt's span, and it must: the retry runs under a NEW attempt id and
             // opens a span of its own, so leaving this one open would leak an entry in nodeSpans for
             // every retry and never close a trace an operator is reading. The retry's own span then
             // hangs off the same traversal, which is what makes a retry chain visible as a chain.
-            case NODE_RETRY_SCHEDULED -> {
+            case NODE_RETRY_SCHEDULED -> () -> {
                 endNode(event);
                 recordConnectorRetries(event);
                 orchestrationRetries.add(1, retryAttributes(event));
-            }
-            case NODE_DEFAULTED -> annotateNode(event, "ravenroot.node.defaulted");
+            };
+            case NODE_DEFAULTED -> () -> annotateNode(event, "ravenroot.node.defaulted");
             // Annotations on the traversal span rather than a start/end pair of their own. A hold is
             // not a unit of work with a duration this bridge can close: it lasts until an operator
             // ends it, which may be never, and a span left open for an unbounded human interval is
             // one the exporter eventually drops or reports as an error. The traversal span already
             // spans the hold, so marking its start and its release on that span is what makes a gap
             // in the node timeline explainable -- which is the whole reason a reader looks.
-            case EXECUTION_PAUSED -> annotateTraversal(event, "ravenroot.execution.paused");
-            case EXECUTION_RESUMED -> annotateTraversal(event, "ravenroot.execution.resumed");
-            case JOIN_SATISFIED -> annotateJoin(event, "ravenroot.join.satisfied", StatusCode.UNSET);
-            case JOIN_FAILED -> annotateJoin(event, "ravenroot.join.failed", StatusCode.ERROR);
-            case JOIN_ARRIVAL_DISCARDED -> annotateJoin(event, "ravenroot.join.arrival_discarded", StatusCode.UNSET);
+            case EXECUTION_PAUSED -> () -> annotateTraversal(event, "ravenroot.execution.paused");
+            case EXECUTION_RESUMED -> () -> annotateTraversal(event, "ravenroot.execution.resumed");
+            case JOIN_SATISFIED -> () -> annotateJoin(event, "ravenroot.join.satisfied", StatusCode.UNSET);
+            case JOIN_FAILED -> () -> annotateJoin(event, "ravenroot.join.failed", StatusCode.ERROR);
+            case JOIN_ARRIVAL_DISCARDED ->
+                    () -> annotateJoin(event, "ravenroot.join.arrival_discarded", StatusCode.UNSET);
             // UNSET, like the other two non-failures: an iteration backlog is a fact about how fast a
             // cycle is producing relative to how fast its join is satisfied, not an error with which
             // the span should be marked.
-            case JOIN_ITERATION_BACKLOG -> annotateJoin(event, "ravenroot.join.iteration_backlog", StatusCode.UNSET);
-        }
+            case JOIN_ITERATION_BACKLOG ->
+                    () -> annotateJoin(event, "ravenroot.join.iteration_backlog", StatusCode.UNSET);
+            // Explicit no-op, not an omission: an edge has no span or annotation of its own here --
+            // the traversal span already carries the node timeline through NODE_STARTED/NODE_COMPLETED,
+            // and EDGE_TRAVERSED's routing decision is exactly what event.detail() on those events (and
+            // GET /v1/events directly) already exists to show. Recorded on eventCounter above like
+            // every other type; nothing further to attach to a span or a metric.
+            case EDGE_TRAVERSED -> () -> { };
+        };
+        handler.run();
     }
 
     @Override
@@ -298,7 +326,18 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         }
         Span span = pending.span();
         span.setAttribute(ATTR_DETAIL, event.detail());
-        span.setStatus(event.type() == ExecutionEventType.EXECUTION_FAILED ? StatusCode.ERROR : StatusCode.OK);
+        // A cancellation is neither: it is not the error EXECUTION_FAILED reports (nothing in the
+        // traversal broke; an operator asked it to stop), and it is not the success EXECUTION_COMPLETED
+        // reports either (the graph never reached its own result). UNSET is the status this bridge
+        // already uses for every other traversal-scoped transition that is a fact rather than a
+        // failure -- see annotateJoin's non-failure branches -- and it keeps a cancelled traversal out
+        // of any dashboard that reads span ERROR status as an incident count, which is exactly what
+        // EXECUTION_CANCELLED exists to stop happening.
+        span.setStatus(switch (event.type()) {
+            case EXECUTION_FAILED -> StatusCode.ERROR;
+            case EXECUTION_CANCELLED -> StatusCode.UNSET;
+            default -> StatusCode.OK;
+        });
         span.end(event.occurredAt());
         executionDuration.record(secondsBetween(pending.startedAt(), event.occurredAt()),
                 Attributes.of(METRIC_ATTR_EVENT_TYPE, event.type().name()));

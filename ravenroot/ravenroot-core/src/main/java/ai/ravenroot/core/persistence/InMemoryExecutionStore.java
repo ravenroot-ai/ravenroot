@@ -926,7 +926,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     rows.add(new TraversalInventoryEntry(key, traversal.traversalId(), position++,
                             traversal.ingressNodeId(), traversal.status(),
                             InventoryDisposition.ofTraversal(traversal.status(), leaseLive, parked > 0),
-                            invocations, parked));
+                            invocations, parked, traversal.terminationReason()));
                 }
                 return List.copyOf(rows);
             }
@@ -1091,7 +1091,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 entry.fencingToken,
                 leaseLive ? Optional.of(entry.lease.expiresAt()) : Optional.empty(),
                 entry.state.traversals().size(), entry.createdAt, entry.updatedAt,
-                retainedUntilOf(entry));
+                retainedUntilOf(entry), entry.state.terminationReason());
     }
 
     private void requireInventoryQuery(ProcessInventoryQuery query) {
@@ -2498,8 +2498,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
          */
         private StoredProcessInstance toStoredRevalidated(ExecutionKey key) {
             try {
+                // Every component, including the termination reason. Reconstructing through the
+                // pre-reason shape would revalidate the aggregate and silently strip the one field
+                // that distinguishes a cancelled execution from a failed one -- a defence-in-depth
+                // check that quietly damaged what it was checking.
                 var revalidated = new ProcessInstance(state.processInstanceId(), state.status(),
-                        state.traversals());
+                        state.traversals(), state.terminationReason());
                 return new StoredProcessInstance(revalidated, revision, graphVersionPin, tenantId, updatedAt);
             } catch (IllegalArgumentException | IllegalStateException corrupted) {
                 throw new ExecutionStoreException(

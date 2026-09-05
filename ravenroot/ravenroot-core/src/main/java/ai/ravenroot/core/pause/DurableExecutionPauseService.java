@@ -1,6 +1,7 @@
 package ai.ravenroot.core.pause;
 
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
@@ -375,11 +376,18 @@ public final class DurableExecutionPauseService {
             // the settlement that clears the stale row impossible.
             Traversal heldTraversal = stored.traversals().get(traversalId);
             boolean traversalLive = heldTraversal != null && !heldTraversal.status().terminal();
+            // FAILED plus CANCELLED, not FAILED alone. The hold's own settlement has always recorded
+            // this correctly as a cancellation; the traversal beside it was written as a bare
+            // failure, so a restart read the two halves of one decision as an operator stop that had
+            // somehow also broken. The status stays FAILED on purpose -- see
+            // ExecutionTerminationReason for why the status vocabulary was not widened -- and the
+            // reason is what makes the pair honest.
             recorder.settleExecutionPause(
                     new ExecutionPauseTransition.Cancelled(pause.request().pauseId(), actor), traversalId,
                     traversalLive ? TraversalStatus.FAILED : null,
                     traversalLive && lastLiveTraversal && !stored.status().terminal()
-                            ? ProcessInstanceStatus.FAILED : null);
+                            ? ProcessInstanceStatus.FAILED : null,
+                    ExecutionTerminationReason.CANCELLED);
             if (agentBudgets != null && traversalLive && lastLiveTraversal) {
                 agentBudgets.finishProcess(key, false);
             }

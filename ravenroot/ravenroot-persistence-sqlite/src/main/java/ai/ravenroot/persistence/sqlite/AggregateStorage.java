@@ -1,5 +1,6 @@
 package ai.ravenroot.persistence.sqlite;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.NodeAttempt;
 import ai.ravenroot.api.application.NodeAttemptCompletion;
 import ai.ravenroot.api.application.NodeAttemptStatus;
@@ -50,7 +51,17 @@ final class AggregateStorage {
     private AggregateStorage() {
     }
 
-    static ProcessInstance read(Connection connection, ExecutionKey key, ProcessInstanceStatus status)
+    /**
+     * Rebuilds the aggregate, with the instance's own status and termination reason supplied by the
+     * caller because they live on the {@code process_instance} row this class does not read.
+     *
+     * @param terminationReason why the instance reached a terminal {@code status}, or {@code null}
+     *                          when nothing distinguishes it. A cancelled run is stored as
+     *                          {@code FAILED} plus {@code CANCELLED}, so dropping this on the way in
+     *                          would reconstruct every cancellation as a fault.
+     */
+    static ProcessInstance read(Connection connection, ExecutionKey key, ProcessInstanceStatus status,
+                                ExecutionTerminationReason terminationReason)
             throws SQLException {
         String tenantId = key.tenantId();
         String instanceId = key.processInstanceId().toString();
@@ -62,7 +73,7 @@ final class AggregateStorage {
 
         var traversals = new LinkedHashMap<UUID, Traversal>();
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT traversal_id, ingress_node_id, status FROM traversal "
+                "SELECT traversal_id, ingress_node_id, status, termination_reason FROM traversal "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY position")) {
             statement.setString(1, tenantId);
             statement.setString(2, instanceId);
@@ -74,7 +85,8 @@ final class AggregateStorage {
                         ordered.put(invocation.invocationId(), invocation);
                     }
                     traversals.put(traversalId, new Traversal(traversalId, rows.getString("ingress_node_id"),
-                            TraversalStatus.valueOf(rows.getString("status")), ordered));
+                            TraversalStatus.valueOf(rows.getString("status")), ordered,
+                            terminationReasonOf(rows.getString("termination_reason"))));
                 }
             }
         }
@@ -98,7 +110,7 @@ final class AggregateStorage {
         for (UUID invocationId : attempts.keySet()) {
             StoredUuid.requireKnown(invocationIds, invocationId, "attempt", "invocation_id", key);
         }
-        return new ProcessInstance(key.processInstanceId(), status, traversals);
+        return new ProcessInstance(key.processInstanceId(), status, traversals, terminationReason);
     }
 
     private static Map<UUID, List<NodeInvocation>> readInvocations(
@@ -151,7 +163,8 @@ final class AggregateStorage {
             throws SQLException {
         var attempts = new LinkedHashMap<UUID, List<NodeAttempt>>();
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT invocation_id, attempt_id, ordinal, status, completion, park_cause FROM attempt "
+                "SELECT invocation_id, attempt_id, ordinal, status, completion, park_cause, "
+                        + "withheld_through_delivery FROM attempt "
                         + "WHERE tenant_id = ? AND process_instance_id = ? ORDER BY invocation_id, ordinal")) {
             statement.setString(1, key.tenantId());
             statement.setString(2, key.processInstanceId().toString());
@@ -164,11 +177,27 @@ final class AggregateStorage {
                                     rows.getInt("ordinal"),
                                     NodeAttemptStatus.valueOf(rows.getString("status")),
                                     completion == null ? null : NodeAttemptCompletion.valueOf(completion),
-                                    rows.getString("park_cause")));
+                                    rows.getString("park_cause"),
+                                    rows.getInt("withheld_through_delivery")));
                 }
             }
         }
         return attempts;
+    }
+
+    /**
+     * Reads a stored termination reason, keeping absence and unreadability apart.
+     *
+     * <p>NULL is a legal, meaningful value -- nothing distinguishes this termination -- and every row
+     * written before the column existed carries it, so it must map to {@code null} rather than reach
+     * {@code valueOf} at all. A name this build does not know is the opposite case: it was written by
+     * a newer binary and reading it as "no reason" would report a cancelled run as an ordinary
+     * failure, silently. The {@link IllegalArgumentException} raised here is caught by the caller
+     * that owns the aggregate and classified as {@code Corrupted}, on the same path an unknown status
+     * name already takes.</p>
+     */
+    private static ExecutionTerminationReason terminationReasonOf(String name) {
+        return name == null ? null : ExecutionTerminationReason.valueOf(name);
     }
 
     static void write(Connection connection, ExecutionKey key, ProcessInstance state) throws SQLException {
@@ -184,7 +213,8 @@ final class AggregateStorage {
 
         try (PreparedStatement traversal = connection.prepareStatement(
                      "INSERT INTO traversal (tenant_id, process_instance_id, traversal_id, position, "
-                             + "ingress_node_id, status) VALUES (?, ?, ?, ?, ?, ?)");
+                             + "ingress_node_id, status, termination_reason) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?)");
              PreparedStatement invocation = connection.prepareStatement(
                      "INSERT INTO invocation (tenant_id, process_instance_id, traversal_id, invocation_id, "
                              + "position, node_id, status, node_command) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
@@ -193,7 +223,8 @@ final class AggregateStorage {
                              + "parent_invocation_id) VALUES (?, ?, ?, ?)");
              PreparedStatement attempt = connection.prepareStatement(
                      "INSERT INTO attempt (tenant_id, process_instance_id, invocation_id, attempt_id, "
-                             + "ordinal, status, completion, park_cause) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")) {
+                             + "ordinal, status, completion, park_cause, withheld_through_delivery) "
+                             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
 
             int traversalPosition = 0;
             for (Traversal current : state.traversals().values()) {
@@ -203,6 +234,10 @@ final class AggregateStorage {
                 traversal.setInt(4, traversalPosition++);
                 traversal.setString(5, current.ingressNodeId());
                 traversal.setString(6, current.status().name());
+                // Stored by name, and NULL when unstated: absence is a value here, not a gap to be
+                // filled in on the way out. See migration 17.
+                traversal.setString(7, current.terminationReason() == null
+                        ? null : current.terminationReason().name());
                 traversal.executeUpdate();
 
                 int invocationPosition = 0;
@@ -241,6 +276,7 @@ final class AggregateStorage {
                         attempt.setString(6, held0.status().name());
                         attempt.setString(7, held0.completion() == null ? null : held0.completion().name());
                         attempt.setString(8, held0.parkCause());
+                        attempt.setInt(9, held0.withheldThroughDelivery());
                         attempt.executeUpdate();
                     }
                 }

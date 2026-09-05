@@ -22,13 +22,13 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Exactly the four decisional {@link ExecutionEventType}s reach the SEC-13 durable
+ * Exactly the five decisional {@link ExecutionEventType}s reach the SEC-13 durable
  * trail through {@link AuditTrailExecutionSink}, and every other type reaches whatever else is
  * subscribed on the same {@code ExecutionMonitor} unaffected — {@code AuditTrailExecutionSink} adds a
  * destination, it does not consume events other subscribers would otherwise have seen.
  *
  * <p>See {@code AuditTrailExecutionSink}'s own Javadoc for the full reasoning behind the split; this
- * class exists to make the "exactly four, no more, no fewer" claim mutation-provable rather than only
+ * class exists to make the "exactly five, no more, no fewer" claim mutation-provable rather than only
  * documented.</p>
  */
 class AuditTrailExecutionSinkTest {
@@ -45,12 +45,12 @@ class AuditTrailExecutionSinkTest {
 
     /**
      * Every {@link ExecutionEventType} is driven through the
-     * sink once; exactly four must reach the trail. A fifth reaching it, or one of the four being
+     * sink once; exactly five must reach the trail. A sixth reaching it, or one of the five being
      * silently dropped, must both be failures a maintainer adding an event type in the future would
      * see immediately.
      */
     @Test
-    void exactlyTheFourDecisionalTypesReachTheTrailAndNoOthers() {
+    void exactlyTheFiveDecisionalTypesReachTheTrailAndNoOthers() {
         try (var trail = trail()) {
             var sink = new AuditTrailExecutionSink(trail);
             for (ExecutionEventType type : ExecutionEventType.values()) {
@@ -58,12 +58,12 @@ class AuditTrailExecutionSinkTest {
             }
 
             List<AuditRecord> records = trail.read(TENANT, 0, 100);
-            assertEquals(4, records.size(),
-                    () -> "expected exactly the 4 decisional types, got " + records.size() + ": "
+            assertEquals(5, records.size(),
+                    () -> "expected exactly the 5 decisional types, got " + records.size() + ": "
                             + records.stream().map(r -> r.envelope().action()).toList());
             var actions = records.stream().map(r -> r.envelope().action()).collect(java.util.stream.Collectors.toSet());
             assertEquals(java.util.Set.of("execution.started", "execution.completed", "execution.failed",
-                    "execution.join_failed"), actions);
+                    "execution.cancelled", "execution.join_failed"), actions);
         }
     }
 
@@ -116,8 +116,8 @@ class AuditTrailExecutionSinkTest {
 
             assertEquals(ExecutionEventType.values().length, allEvents.size(),
                     "the independent subscriber must see every type, decisional or not");
-            assertEquals(4, trail.read(TENANT, 0, 100).size(),
-                    "the audit sink must still admit only the decisional four in the same run");
+            assertEquals(5, trail.read(TENANT, 0, 100).size(),
+                    "the audit sink must still admit only the decisional five in the same run");
         }
     }
 
@@ -160,6 +160,23 @@ class AuditTrailExecutionSinkTest {
             AuditRecord record = only(trail);
             assertEquals(AuditOutcome.FAILED, record.envelope().outcome());
             assertEquals("detail for EXECUTION_FAILED", record.envelope().reason());
+        }
+    }
+
+    /**
+     * A cancellation must not collapse into an ordinary failure record, which is exactly what a
+     * regression here would do silently: {@code DECISIONAL} would simply not contain
+     * {@code EXECUTION_CANCELLED} and the event would vanish from the trail with no exception raised.
+     */
+    @Test
+    void executionCancelledIsRecordedAsItsOwnActionRatherThanAsAFailure() {
+        try (var trail = trail()) {
+            new AuditTrailExecutionSink(trail).accept(eventOf(ExecutionEventType.EXECUTION_CANCELLED));
+
+            AuditRecord record = only(trail);
+            assertEquals("execution.cancelled", record.envelope().action());
+            assertEquals(AuditOutcome.ALLOWED, record.envelope().outcome(),
+                    "a cancellation reached its terminal state cleanly; it is not a platform failure");
         }
     }
 

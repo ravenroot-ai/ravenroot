@@ -13,12 +13,24 @@ import java.util.UUID;
  *
  * <p>The aggregate contains no repository, persistence or actor-framework dependency. Every update
  * returns a new value and revalidates identity uniqueness and causal-parent invariants.</p>
+ *
+ * <p><b>{@link #status()} is not the whole answer for an instance that ended.</b> An instance whose
+ * work was stopped on request is stored as {@link ProcessInstanceStatus#FAILED} and carries
+ * {@link ExecutionTerminationReason#CANCELLED}; read without the reason, that status reports an
+ * incident that did not occur. The pair is the answer, never the status alone — see
+ * {@link ExecutionTerminationReason} for why the status vocabulary was deliberately left
+ * unchanged.</p>
+ *
  * @param processInstanceId durable aggregate identity shared by its traversals
  * @param status aggregate lifecycle state
  * @param traversals immutable traversal map keyed by traversal ID
+ * @param terminationReason why a terminal {@code status} was reached when the status alone would
+ *                         misdescribe it, or {@code null} when nothing distinguishes this
+ *                         termination. Always {@code null} while the instance is not terminal.
  */
 public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus status,
-                              Map<UUID, Traversal> traversals) {
+                              Map<UUID, Traversal> traversals,
+                              ExecutionTerminationReason terminationReason) {
 /**
  * Copies the traversal map and rejects inconsistent map keys, duplicate child identities, and
  * causal-parent relationships that cannot belong to this process instance.
@@ -38,6 +50,24 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         validateIdentitiesAndCausality(processInstanceId, ordered);
         traversals = Collections.unmodifiableMap(ordered);
         validateCompletedState(status, traversals);
+        validateTerminationReason(status, terminationReason);
+    }
+
+/**
+ * Compatibility constructor for the shape that predates a recorded termination reason.
+ *
+ * <p>Reports an absent reason, which is the correct reading of every instance built without one:
+ * nothing distinguishes its termination. It is the shape a row written before the reason column
+ * existed reconstructs through, and it must reconstruct as "unstated" rather than as a value
+ * somebody inferred from the status.</p>
+ *
+ * @param processInstanceId durable aggregate identity shared by its traversals
+ * @param status aggregate lifecycle state
+ * @param traversals immutable traversal map keyed by traversal ID
+ */
+    public ProcessInstance(UUID processInstanceId, ProcessInstanceStatus status,
+                           Map<UUID, Traversal> traversals) {
+        this(processInstanceId, status, traversals, null);
     }
 
 /**
@@ -46,6 +76,21 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
  * @return updated process aggregate
  */
     public ProcessInstance transitionTo(ProcessInstanceStatus next) {
+        return transitionTo(next, null);
+    }
+
+/**
+ * Transitions the aggregate state, recording why it ended the way it did.
+ *
+ * <p>One call rather than two, for the reason {@link Traversal#transitionTo(TraversalStatus,
+ * ExecutionTerminationReason)} states: the status and the reason are one fact, and a separate
+ * annotating write would leave a committed window in which the record reports a fault.</p>
+ *
+ * @param next target aggregate lifecycle state
+ * @param reason why this termination is not what its status alone suggests, or {@code null}.
+ * @return updated process aggregate
+ */
+    public ProcessInstance transitionTo(ProcessInstanceStatus next, ExecutionTerminationReason reason) {
         if (!status.canTransitionTo(next)) {
             throw new IllegalStateException("Illegal process instance transition: " + status + " -> " + next);
         }
@@ -53,7 +98,7 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
             throw new IllegalStateException(
                     "A completed process instance cannot contain incomplete traversals");
         }
-        return new ProcessInstance(processInstanceId, next, traversals);
+        return new ProcessInstance(processInstanceId, next, traversals, reason);
     }
 
 /**
@@ -69,7 +114,7 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         }
         var updated = new LinkedHashMap<>(traversals);
         updated.put(traversal.traversalId(), traversal);
-        return new ProcessInstance(processInstanceId, status, updated);
+        return new ProcessInstance(processInstanceId, status, updated, terminationReason);
     }
 
 /**
@@ -79,9 +124,28 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
  * @return updated aggregate containing the transitioned traversal
  */
     public ProcessInstance transitionTraversal(UUID traversalId, TraversalStatus next) {
+        return transitionTraversal(traversalId, next, null);
+    }
+
+/**
+ * Transitions one contained traversal, recording why it ended the way it did.
+ *
+ * <p>The reason lands on the traversal and not on this aggregate. One instance can carry several
+ * traversals, and cancelling one of them says nothing about the others or about the instance, which
+ * stays live until its last traversal ends. The instance records its own reason through
+ * {@link #transitionTo(ProcessInstanceStatus, ExecutionTerminationReason)} when that moment
+ * arrives.</p>
+ *
+ * @param traversalId identity of the contained traversal
+ * @param next target traversal lifecycle state
+ * @param reason why this termination is not what its status alone suggests, or {@code null}.
+ * @return updated aggregate containing the transitioned traversal
+ */
+    public ProcessInstance transitionTraversal(UUID traversalId, TraversalStatus next,
+                                               ExecutionTerminationReason reason) {
         requireNonTerminal();
         Traversal traversal = traversal(traversalId);
-        return replaceTraversal(traversal.transitionTo(next));
+        return replaceTraversal(traversal.transitionTo(next, reason));
     }
 
 /**
@@ -153,6 +217,24 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         Traversal traversal = traversal(traversalId);
         NodeInvocation invocation = invocation(traversal, invocationId);
         return replaceTraversal(traversal.replaceInvocation(invocation.parkAttempt(attemptId, cause)));
+    }
+
+    /**
+     * Records that recovery withheld one attempt through {@code delivery}.
+     *
+     * @param traversalId the stable traversal id used to identify the requested resource.
+     * @param invocationId the stable invocation id used to identify the requested resource.
+     * @param attemptId the stable attempt id used to identify the requested resource.
+     * @param delivery the recovery delivery on which the attempt was withheld.
+     * @return a new process snapshot whose attempt carries the raised high-water mark.
+     */
+    public ProcessInstance recordRecoveryWithheld(UUID traversalId, UUID invocationId, UUID attemptId,
+                                                  int delivery) {
+        requireNonTerminal();
+        Traversal traversal = traversal(traversalId);
+        NodeInvocation invocation = invocation(traversal, invocationId);
+        return replaceTraversal(traversal.replaceInvocation(
+                invocation.recordRecoveryWithheld(attemptId, delivery)));
     }
 
 /**
@@ -243,12 +325,37 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
     private ProcessInstance replaceTraversal(Traversal traversal) {
         var updated = new LinkedHashMap<>(traversals);
         updated.put(traversal.traversalId(), traversal);
-        return new ProcessInstance(processInstanceId, status, updated);
+        return new ProcessInstance(processInstanceId, status, updated, terminationReason);
     }
 
     private void requireNonTerminal() {
         if (status.terminal()) {
             throw new IllegalStateException("Cannot transition child state while process instance is " + status);
+        }
+    }
+
+    /**
+     * Refuses a termination reason that contradicts the status it is meant to qualify.
+     *
+     * <p>The instance-level twin of {@code Traversal}'s check, and it runs for the same reason: this
+     * constructor is what a durable adapter rebuilds stored rows through, so a row claiming an
+     * instance was cancelled while still running, or cancelled and completed at once, is classified
+     * as corrupt instead of being folded into a legal-looking aggregate.</p>
+     */
+    private static void validateTerminationReason(ProcessInstanceStatus status,
+                                                  ExecutionTerminationReason terminationReason) {
+        if (terminationReason == null) {
+            return;
+        }
+        if (!status.terminal()) {
+            throw new IllegalArgumentException("A process instance that is " + status
+                    + " has not terminated and cannot carry the termination reason " + terminationReason);
+        }
+        if (terminationReason == ExecutionTerminationReason.CANCELLED
+                && status != ProcessInstanceStatus.FAILED) {
+            throw new IllegalArgumentException(
+                    "A cancelled process instance produces no result and is recorded as FAILED, not "
+                            + status);
         }
     }
 

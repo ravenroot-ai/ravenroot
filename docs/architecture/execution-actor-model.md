@@ -12,7 +12,8 @@ Each accepted execution owns traversal state while actor messaging isolates disp
 
 - A node actor contains one attempt and reports a classified result to its supervisor.
 - Pause lets the in-flight node finish and then closes the dispatch gate; resume reopens it.
-- Cancellation and completion race through named terminal outcomes so callers can distinguish the winner.
+- Cancellation and completion race through named terminal outcomes so callers can distinguish the winner. Cancellation does not preempt a node computation already in flight: it refuses the next dispatch and releases a held pause gate or retry backoff, so effects already issued before the cancellation was observed stand.
+- A cancelled traversal is recorded as `FAILED`, the same terminal status an ordinary fault produces, qualified by a distinct, nullable termination reason carried beside it rather than a third status value. A reader that inspects the status alone cannot tell the two apart.
 - Each live traversal owns one monotonic budget shared by branches and cycle re-entry. Fan-out reserves
   every child delivery atomically before the first child is dispatched. A retry reserves its new
   traversal step, non-root amplification, and exact payload-plus-attribute bytes before its durable
@@ -30,3 +31,4 @@ Actor isolation turns node attempts into supervised messages while the execution
 
 - [Exact contract](../reference/execution-events.md)
 - [Procedure or recovery](../user-guide/test-run-observe.md)
+- [Decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)

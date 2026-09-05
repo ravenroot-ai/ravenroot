@@ -1,5 +1,6 @@
 package ai.ravenroot.testkit.persistence;
 
+import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.NodeAttempt;
 import ai.ravenroot.api.application.NodeAttemptCompletion;
 import ai.ravenroot.api.application.NodeAttemptStatus;
@@ -2055,6 +2056,184 @@ public abstract class ExecutionStoreContract {
         assertNotEquals(
                 new ExecutionStoreFailure.LeaseLost(key, "worker-1").retryability(),
                 new ExecutionStoreFailure.LeaseHeldByAnother(key, "worker-1", EPOCH).retryability());
+    }
+
+    // ============================== cancellation as a distinct execution termination reason
+
+    /**
+     * The read every consumer of a terminal row actually needs: a cancellation and an ordinary
+     * failure share the exact same status on both aggregates, and a reopen -- a simulated process
+     * death -- must not blur the one field that tells them apart. {@link ExecutionTerminationReason}
+     * states why the design keeps the status unchanged rather than adding a member; this is the
+     * durability half of that claim, exercised identically against every adapter this suite runs
+     * against.
+     */
+    @Test
+    final void aCancelledInstanceSurvivesAReopenStillDistinguishableFromAnOrdinaryFailure() {
+        assumeCapability(StoreCapability.DURABLE);
+
+        ExecutionKey cancelledKey = newKey();
+        ExecutionKey failedKey = newKey();
+        UUID cancelledTraversal = UUID.randomUUID();
+        UUID failedTraversal = UUID.randomUUID();
+        cancelInstance(cancelledKey, cancelledTraversal);
+        failInstanceAndItsTraversal(failedKey, failedTraversal);
+
+        ExecutionStore reopened = reopen();
+        StoredProcessInstance cancelled = await(reopened.load(cancelledKey));
+        StoredProcessInstance failed = await(reopened.load(failedKey));
+
+        // Identical on status, which is the whole point of the design -- a reader who only knows
+        // statuses sees no difference between the two rows.
+        assertEquals(ProcessInstanceStatus.FAILED, cancelled.state().status());
+        assertEquals(ProcessInstanceStatus.FAILED, failed.state().status());
+        assertEquals(TraversalStatus.FAILED, cancelled.state().traversals().get(cancelledTraversal).status());
+        assertEquals(TraversalStatus.FAILED, failed.state().traversals().get(failedTraversal).status());
+
+        // Only the reason separates them, and it must survive the reopen on both aggregates.
+        assertEquals(ExecutionTerminationReason.CANCELLED, cancelled.state().terminationReason());
+        assertEquals(ExecutionTerminationReason.CANCELLED,
+                cancelled.state().traversals().get(cancelledTraversal).terminationReason());
+        assertNull(failed.state().terminationReason(),
+                "an ordinary failure must not acquire a reason across a reopen, or every failure "
+                        + "would read back looking cancelled");
+        assertNull(failed.state().traversals().get(failedTraversal).terminationReason());
+    }
+
+    /**
+     * A row written through the pre-existing single-argument transitions -- exactly what a writer
+     * that predates this reason still calls -- must read back with an absent reason, never a value
+     * inferred from the status. Absence means "nothing distinguishes this termination" and must
+     * never be confused with a positive claim of "not cancelled": the only property under test here
+     * is that this build writes and reads {@code null} through, both before and after a reopen.
+     */
+    @Test
+    final void aRowWrittenWithoutATerminationReasonReadsBackAsUnstatedAcrossAReopen() {
+        assumeCapability(StoreCapability.DURABLE);
+
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        failInstanceAndItsTraversal(key, traversalId);
+
+        StoredProcessInstance beforeReopen = await(store().load(key));
+        assertNull(beforeReopen.state().terminationReason());
+        assertNull(beforeReopen.state().traversals().get(traversalId).terminationReason());
+
+        StoredProcessInstance afterReopen = await(reopen().load(key));
+        assertNull(afterReopen.state().terminationReason(),
+                "absence must read back as unstated on every open, the same reading a row from "
+                        + "before this column existed gets");
+        assertNull(afterReopen.state().traversals().get(traversalId).terminationReason());
+        assertFalse(ExecutionTerminationReason.isCancellation(afterReopen.state().terminationReason()));
+    }
+
+    /**
+     * The aggregates refuse a reason on a status that has not terminated, and refuse
+     * {@code CANCELLED} specifically against {@code COMPLETED} -- a cancelled execution produces no
+     * result and is recorded as {@code FAILED}, never as a completion. {@link ExecutionTransition}
+     * folds a caller's batch through the aggregate's own canonical constructor, so this is the
+     * store-level proof that the refusal reaches the caller as {@link ExecutionStoreFailure.InvalidRequest}
+     * rather than being silently accepted, silently dropped, or misclassified along the way -- the
+     * aggregate-only version of this rule is pinned once, directly, by
+     * {@code ExecutionTerminationReasonContractTest} in {@code ravenroot-application-api}; this is
+     * the same rule observed through the port every adapter must honour.
+     */
+    @Test
+    final void theStoreRefusesATerminationReasonOnANonTerminalProcessTransition() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+
+        ExecutionStoreFailure onRunning = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING,
+                        ExecutionTerminationReason.CANCELLED))
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, onRunning,
+                "a status that has not terminated cannot carry a termination reason");
+
+        // The whole batch must be refused, not merely annotated away: still ACCEPTED, same revision.
+        StoredProcessInstance unchanged = await(store().load(key));
+        assertEquals(created.revision(), unchanged.revision());
+        assertEquals(ProcessInstanceStatus.ACCEPTED, unchanged.state().status());
+    }
+
+    @Test
+    final void theStoreRefusesATerminationReasonOnANonTerminalTraversalTransition() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .build()));
+
+        // RUNNING -> WAITING rather than a self-transition, so a rejection here is unambiguously
+        // about the reason and cannot be explained by an illegal same-state move instead.
+        ExecutionStoreFailure onWaiting = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.WAITING,
+                        ExecutionTerminationReason.CANCELLED))
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, onWaiting);
+
+        StoredProcessInstance unchanged = await(store().load(key));
+        assertEquals(running.revision(), unchanged.revision());
+        assertEquals(TraversalStatus.RUNNING, unchanged.state().traversals().get(traversalId).status());
+    }
+
+    @Test
+    final void theStoreRefusesACancelledReasonOnACompletedProcessTransition() {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        StoredProcessInstance traversalCompleted = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.COMPLETED))
+                .build()));
+
+        ExecutionStoreFailure onCompleted = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(traversalCompleted.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.COMPLETED,
+                        ExecutionTerminationReason.CANCELLED))
+                .build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, onCompleted,
+                "a cancelled execution produces no result and is recorded as FAILED, never COMPLETED");
+
+        StoredProcessInstance unchanged = await(store().load(key));
+        assertEquals(traversalCompleted.revision(), unchanged.revision());
+        assertEquals(ProcessInstanceStatus.RUNNING, unchanged.state().status());
+    }
+
+    /** Creates an instance and drives it, and its one traversal, straight to a cancelled FAILED. */
+    private StoredProcessInstance cancelInstance(ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.FAILED,
+                        ExecutionTerminationReason.CANCELLED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED,
+                        ExecutionTerminationReason.CANCELLED))
+                .build()));
+    }
+
+    /**
+     * Creates an instance and drives it, and its one traversal, to an ordinary {@code FAILED} --
+     * the exact shape {@link #cancelInstance} produces, minus the reason -- so a test can assert the
+     * two are equal on status and different only on {@code terminationReason}.
+     */
+    private StoredProcessInstance failInstanceAndItsTraversal(ExecutionKey key, UUID traversalId) {
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.FAILED))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.FAILED))
+                .build()));
     }
 
     // ================================================================== fixtures

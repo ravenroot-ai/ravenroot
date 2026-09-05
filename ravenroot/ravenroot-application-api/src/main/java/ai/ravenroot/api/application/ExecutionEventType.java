@@ -141,5 +141,68 @@ public enum ExecutionEventType {
     /** The execution reached its normal terminal result. */
     EXECUTION_COMPLETED,
     /** The execution reached a failed terminal result. */
-    EXECUTION_FAILED
+    EXECUTION_FAILED,
+
+    /**
+     * The execution was stopped on request and reached its terminal state without a result.
+     *
+     * <h4>It replaces {@link #EXECUTION_FAILED}, it does not accompany it</h4>
+     * <p>The same rule {@link #NODE_RETRY_SCHEDULED} follows one level down, and here it is what the
+     * type exists for. This stream is labelled by event type and by nothing else, so the event type
+     * <em>is</em> the failure counter: while a cancellation published {@code EXECUTION_FAILED}, every
+     * operator stop raised the failure rate, and a system whose users cancel more work looked like a
+     * system that was breaking more often. Publishing both would keep that defect intact under a new
+     * name.</p>
+     *
+     * <h4>The durable record still says {@code FAILED}, and that is deliberate</h4>
+     * <p>This event is the observability half of a decision whose durable half is a nullable
+     * {@code ExecutionTerminationReason} beside an unchanged status: a cancelled execution is stored
+     * as {@code FAILED} and qualified as {@code CANCELLED}, so that a reader which predates the
+     * change still reads a status it understands rather than a name it cannot parse. The event
+     * stream and the durable read therefore describe the same termination with different shapes, and
+     * a consumer correlating the two must expect a {@code FAILED} status under this event type. See
+     * {@link ExecutionTerminationReason}.</p>
+     *
+     * <p>It is a traversal-terminal event and obeys every rule {@link #EXECUTION_COMPLETED} and
+     * {@link #EXECUTION_FAILED} obey: exactly one of the three per traversal, never followed by
+     * {@link #EXECUTION_PAUSED}, and published after the traversal has stopped dispatching.</p>
+     */
+    EXECUTION_CANCELLED;
+
+    /**
+     * Whether this type ends a traversal -- exactly {@link #EXECUTION_COMPLETED},
+     * {@link #EXECUTION_FAILED} and {@link #EXECUTION_CANCELLED}, the three types a traversal can
+     * end with, never more than one per traversal and never followed by another event.
+     *
+     * <h4>Why this exists as a method on the enum rather than a set each caller keeps</h4>
+     * <p>Before this method existed, {@code ActiveExecutionRegistry.observe} and
+     * {@code TelemetryBridge.accept} each hardcoded their own list of "the terminal types I release
+     * a resource on" ({@code case EXECUTION_COMPLETED, EXECUTION_FAILED -> ...}), and when
+     * {@link #EXECUTION_CANCELLED} was added, both were forgotten independently: a cancelled
+     * execution's admission slot was never released, and its traversal span was never ended. A
+     * {@code switch} <em>statement</em> with a silent {@code default} does not fail to compile when a
+     * new enum constant falls through it -- it just no-ops, silently, exactly as both of those did.
+     * A {@code switch} <em>expression</em> with no {@code default} does not have that failure mode:
+     * it must cover every constant, so a constant added to this enum without also being classified
+     * here is a compile error in this one method, not a silent behavioral gap in every caller that
+     * copied the list.</p>
+     *
+     * <p>This is deliberately narrower than "every terminal-shaped concept in this enum": it answers
+     * only "does a traversal end here", which is the one fact both callers above actually need.
+     * {@link #JOIN_FAILED} ends a join, not a traversal (a later terminal event follows it); it is
+     * {@code false} here for that reason, not omitted by oversight.</p>
+     *
+     * @return whether a traversal ends with this event type, which is true for exactly
+     *         {@link #EXECUTION_COMPLETED}, {@link #EXECUTION_FAILED} and
+     *         {@link #EXECUTION_CANCELLED}.
+     */
+    public boolean isTraversalTerminal() {
+        return switch (this) {
+            case EXECUTION_COMPLETED, EXECUTION_FAILED, EXECUTION_CANCELLED -> true;
+            case EXECUTION_STARTED, NODE_STARTED, NODE_BYPASSED, NODE_DEFAULTED, NODE_COMPLETED,
+                    EDGE_TRAVERSED, NODE_FAILED, NODE_RETRY_SCHEDULED, JOIN_SATISFIED,
+                    JOIN_ITERATION_BACKLOG, JOIN_ARRIVAL_DISCARDED, JOIN_FAILED, EXECUTION_PAUSED,
+                    EXECUTION_RESUMED -> false;
+        };
+    }
 }

@@ -93,6 +93,11 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   // looking to find out what went wrong. Success is asserted only in `describeWithReason` below,
   // which knows the outcome.
   NODE_COMPLETED: 'Node completed.',
+  // Found by the structural check in this module's test, not by review: this arm had been missing
+  // since the type was introduced, so every routed edge rendered as generic activity. Same defect
+  // class as the cancellation entry below -- a positive allow-list degrades silently when the
+  // server's vocabulary grows.
+  EDGE_TRAVERSED: 'Edge was traversed.',
   NODE_FAILED: 'Node failed. Protected diagnostics may contain more detail.',
   // The no-classifier fallback, so it names neither the classification nor the wait. Both are on the
   // event for a reader entitled to them; `describeWithReason` below adds the classification when the
@@ -110,6 +115,19 @@ const DESCRIPTION_BY_TYPE = Object.freeze({
   EXECUTION_RESUMED: 'Execution was resumed and is running again.',
   EXECUTION_COMPLETED: 'Execution completed successfully.',
   EXECUTION_FAILED: 'Execution failed. Protected diagnostics may contain more detail.',
+  // No "failed", and no pointer to protected diagnostics either -- there are none to read. Matching
+  // `PublicExecutionDescription.forType`'s own choice: a cancelled execution stopped because
+  // somebody with the authority to stop it did, and copy that sent an operator looking for a fault
+  // would recreate, in words, the confusion this event type exists to remove. Without this entry a
+  // cancellation rendered as UNKNOWN_EXECUTION_DESCRIPTION -- generic activity, in the one view an
+  // operator uses to find out what happened to a run.
+  //
+  // Deliberately NO `describeWithReason` case above, and the omission mirrors the server exactly.
+  // The event does arrive carrying a conforming `publicReason` -- the deepest cause's class name --
+  // so a classifier branch looks like it belongs; the server's own classifier switch has no arm for
+  // this type and falls through to the copy here. Adding one on this side would put a Java type name
+  // into a sentence the server never composes.
+  EXECUTION_CANCELLED: 'Execution was cancelled before it produced a result.',
   // Durable-journal types. They reach this table only as the fallback for a peer that sent no
   // `description`; the server composes the same sentences from its own source-authored copy. They
   // live here rather than being left to UNKNOWN because a handler event that rendered as generic

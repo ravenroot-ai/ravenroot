@@ -258,7 +258,10 @@ public final class RemoteBackend implements CliBackend {
                 // carries it as well instead of opening the same gap.
                 MinimalJson.asArray(body.get("untakenEdges")).stream().map(MinimalJson::asString)
                         .sorted().toList(),
-                payload);
+                payload,
+                // Absent on an older server that predates this field, exactly like "paused" above --
+                // and honestly so: an execution such a server ever reported carries no reason either.
+                MinimalJson.asStringOrNull(body.get("terminationReason")));
     }
 
     /** Reads {@code GET /v1/executions/live}: the server resolves the tenant from the
@@ -303,7 +306,8 @@ public final class RemoteBackend implements CliBackend {
                         MinimalJson.asStringOrNull(item.get("workloadId")),
                         MinimalJson.asStringOrNull(item.get("correlationId")),
                         (int) MinimalJson.asLong(item.get("traversalCount")),
-                        MinimalJson.asString(item.get("createdAt")), MinimalJson.asString(item.get("updatedAt"))));
+                        MinimalJson.asString(item.get("createdAt")), MinimalJson.asString(item.get("updatedAt")),
+                        MinimalJson.asStringOrNull(item.get("terminationReason"))));
             }
             retainedFrom = MinimalJson.asString(body.get("retainedFrom"));
             Object nextCursor = body.get("nextCursor");
@@ -328,7 +332,8 @@ public final class RemoteBackend implements CliBackend {
                     MinimalJson.asString(item.get("ingressNodeId")), MinimalJson.asString(item.get("status")),
                     MinimalJson.asString(item.get("disposition")),
                     (int) MinimalJson.asLong(item.get("invocationCount")),
-                    (int) MinimalJson.asLong(item.get("parkedAttemptCount")));
+                    (int) MinimalJson.asLong(item.get("parkedAttemptCount")),
+                    MinimalJson.asStringOrNull(item.get("terminationReason")));
         }).toList();
         return new TraversalListing(traversals, MinimalJson.asString(body.get("retainedFrom")));
     }

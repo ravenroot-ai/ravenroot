@@ -32,8 +32,9 @@ Set the Human Task policy before startup through the documented server propertie
 variables. It covers graph defaults and ceilings, authorization and display metadata, the decision
 HTTP body, inbox pagination, structured-response parsing, and durable write retries. A graph can only
 narrow the configured response ceiling. The server pins resolved limits on registration, so a later
-policy change does not change an existing durable task after recovery. See [Configuration and
-deployment defaults](configuration.md#human-task-operational-policy) for every setting, default,
+policy change does not change an existing durable task after recovery: this includes its separately
+pinned raw-envelope decision-body cap, parser budgets, and write-retry budget. See [Configuration
+and deployment defaults](configuration.md#human-task-operational-policy) for every setting, default,
 range, precedence rule, and deployment mapping.
 
 Correlation and deduplication are deliberately fixed. The task and handler share a deterministic

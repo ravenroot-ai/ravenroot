@@ -103,9 +103,10 @@ the supplied value. The direct `ravenroot/scripts/server.sh` launcher inherits t
 Ravenroot ships no tracked environment-file template or environment generator.
 
 A graph may narrow a configured response ceiling but cannot widen the server policy. The resolved
-limits are pinned with a durable task, so changing a deployment policy cannot silently reinterpret a
-task created under an earlier policy. Human Task retention remains part of durable execution-store
-retention and cascade policy; there is no separate Human Task retention or outstanding-task quota.
+response limit, raw-envelope decision-body cap, parser budgets, and write-retry budget are pinned
+with a durable task, so changing a deployment policy cannot silently reinterpret a task created under
+an earlier policy. Human Task retention remains part of durable execution-store retention and cascade
+policy; there is no separate Human Task retention or outstanding-task quota.
 
 Response media-type identity, schema name/version, payload-envelope identity, deterministic task ID,
 and generation fencing are per-task wire or persistence contracts. They are deliberately not global

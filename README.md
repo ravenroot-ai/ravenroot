@@ -24,6 +24,11 @@ Design workflows visually, extend them with code or installable node packages, a
 GraphML definition through an embedded Java library or the standalone server, browser workspace,
 CLI, and HTTP API.
 
+![Ravenroot editor showing four workflows in a dark multi-document grid](docs/assets/readme/ravenroot-editor-workspace.png)
+
+*The Ravenroot editor keeps multiple GraphML workflows visible in one workspace, with shared
+authoring controls, node types, and an overview minimap.*
+
 ![Ravenroot self-evolution workflow overview](docs/assets/readme/ravenroot-self-evolution-overview.png)
 
 *A Ravenroot-rendered view of a self-improving software-delivery workflow, making decisions,

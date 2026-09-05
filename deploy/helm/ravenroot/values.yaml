@@ -22,6 +22,31 @@ auth:
 
 engine: pekko
 
+# Human Task operational policy. These values become environment variables in the pod and are read
+# once at startup. An explicit empty or whitespace-only string is also valid: the server resolves it
+# to the documented default, which is useful when an overlay intentionally removes an inherited value.
+humanTask:
+  defaultResponseBytes: 65536
+  maxResponseBytes: 262144
+  defaultEscalationSeconds: 0
+  maxEscalationSeconds: 2591999
+  defaultExpirySeconds: 604800
+  maxExpirySeconds: 2592000
+  maxTitleBytes: 256
+  maxDescriptionBytes: 4096
+  maxResponseSchemaBytes: 16384
+  maxAuthorizationTokens: 16
+  maxAuthorizationTokenBytes: 256
+  maxDecisionBodyBytes: 262144
+  defaultPageSize: 50
+  maxPageSize: 100
+  responseMaxDepth: 32
+  responseMaxCollectionSize: 1024
+  responseMaxValueCount: 4096
+  responseMaxTextLength: 16384
+  responseMaxKeyLength: 256
+  writeAttempts: 3
+
 # Program execution timeout. RAVENROOT_PROGRAM_TIMEOUT_MS
 # has no chart-level default at all before this: an operator who wires in their own SEC-11 sandbox
 # supervisor (RAVENROOT_GRAAL_SANDBOX_SUPERVISOR is deliberately absent from this chart -- see

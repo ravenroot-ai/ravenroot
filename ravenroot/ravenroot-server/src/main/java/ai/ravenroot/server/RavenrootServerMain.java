@@ -80,12 +80,16 @@ public final class RavenrootServerMain {
         var authentication = AuthenticationConfiguration.fromEnvironment(System.getenv(), port);
         var httpSecurity = HttpSecurityConfiguration.fromEnvironment(System.getenv(), port);
         var artifactLifecycle = ArtifactLifecycleConfiguration.fromEnvironment(System.getenv());
+        // Resolve the operator's graph-document budget once, before any durable store opens.
+        // Every downstream admission and recovery boundary receives this same typed value.
+        var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits
+                .fromEnvironment(System.getenv());
         // This lease is the offline-maintenance authority shared with backup/restore. It is
         // acquired before the audit trail is opened and retained until both stores are closed.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
                 .fromEnvironment(System.getenv());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
-                executionStoreConfiguration, java.time.Clock.systemUTC());
+                executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl());
         try (var startupGuard = executionStoreOwner.startupGuard()) {
         var engine = ExecutionEngines.create(engineId, "ravenroot-server");
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
@@ -233,7 +237,6 @@ public final class RavenrootServerMain {
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
-        var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(System.getenv());
         var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
@@ -425,7 +428,7 @@ public final class RavenrootServerMain {
                         readinessConfiguration.drainGracePeriod(),
                         new AuditTrailExecutionControlSink(auditTrail),
                         assistantComposition.service(),
-                        embedConfiguration, userCredentials);
+                        embedConfiguration, userCredentials, graphExecutionLimits.graphMl());
                 // No null check on approvalRecovery: both services are composed only when the
                 // execution store is, which is the same condition that composes the loop.
                 if (toolApprovals != null) {

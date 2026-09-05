@@ -12,6 +12,7 @@ The standalone server exposes JSON resources, GraphML inspection and submission,
 | `GET /v1/runtime` | Selected engine and runtime capabilities |
 | `GET /v1/node-types` | Effective node catalog |
 | `POST /v1/graphs/inspect` | Validate and inspect GraphML without executing it |
+| `GET /v1/configuration` | Read typed workspace configuration, including the graph-document byte budget |
 | `POST /v1/drain` | Stop admission and drain accepted work |
 
 ## Execution and events

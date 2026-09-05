@@ -19,8 +19,18 @@ class GraphExecutionLimitCompositionWiringTest {
             throws Exception {
         String source = Files.readString(MAIN);
 
-        assertTrue(source.contains("GraphExecutionLimits.fromEnvironment(System.getenv())"),
-                () -> MAIN + " must read operator graph limits");
+        assertEquals(1, source.split(
+                        "GraphExecutionLimits\\s*\\.fromEnvironment\\(System\\.getenv\\(\\)\\)", -1)
+                        .length - 1,
+                () -> MAIN + " must read operator graph limits exactly once");
+        int resolution = source.indexOf("var graphExecutionLimits");
+        int storeOpen = source.indexOf("ExecutionStoreBootstrap.openOwned(");
+        assertTrue(resolution >= 0 && resolution < storeOpen,
+                () -> MAIN + " must resolve graph limits before opening durable stores");
+        assertTrue(source.contains("java.time.Clock.systemUTC(), graphExecutionLimits.graphMl()"),
+                () -> MAIN + " must give the durable definition store the same graph byte limit");
+        assertTrue(source.contains("embedConfiguration, userCredentials, graphExecutionLimits.graphMl()"),
+                () -> MAIN + " must give HTTP admission and served configuration the same graph byte limit");
         assertEquals(2, source.split(
                         "recoveryConfiguration\\.leaseTtl\\(\\), graphExecutionLimits, agentBudgets,",
                         -1).length - 1,

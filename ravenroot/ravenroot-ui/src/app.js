@@ -689,6 +689,8 @@ let graphName    = 'untitled.graphml';
 let graphDisplayName = graphName;
 let runtimeClient = null;
 let runtimeDisconnect = null;
+let runtimeConfigurationRequest = null;
+let runtimeConfiguration = null;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_BATCH_LIMIT = 256;
@@ -1680,6 +1682,7 @@ window.ravenroot = {
   resetWorkspaceLayout,
   workspaceLayout: () => ({ ...workspaceLayout, plan: workspacePlan }),
   minimapSnapshot: () => minimapLastSnapshot ? JSON.parse(JSON.stringify(minimapLastSnapshot)) : null,
+  graphDocumentByteLimit: currentGraphDocumentByteLimit,
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
 };
@@ -2427,8 +2430,10 @@ function requestReplaceActiveDocument(graph, name, origin = document.activeEleme
 
 // The File command reads a file and hands its text here. Parsing is deliberately complete
 // before a dirty prompt or record mutation, so a malformed replacement is a true no-op.
-function replaceActiveDocumentFromText(text, name, origin = document.activeElement) {
-  const graph = parsePreparedGraph(text, name);
+function replaceActiveDocumentFromText(
+  text, name, origin = document.activeElement, maxBytes = currentGraphDocumentByteLimit(),
+) {
+  const graph = parsePreparedGraph(text, name, { maxBytes });
   return requestReplaceActiveDocument(graph, name, origin);
 }
 
@@ -9323,6 +9328,8 @@ function connectRuntime(atBoot = false) {
         if (runtimeDisconnect) runtimeDisconnect();
         runtimeDisconnect = null;
         runtimeClient = null;
+        runtimeConfigurationRequest = null;
+        runtimeConfiguration = null;
         return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
       }
       confirmedServiceOrigin = target.origin;
@@ -9350,6 +9357,15 @@ function connectRuntime(atBoot = false) {
   // unlike credentials, which has a transport entirely to itself.
   void deploymentsWindow?.setClient(runtimeClient);
   const connectedClient = runtimeClient;
+  runtimeConfiguration = null;
+  runtimeConfigurationRequest = connectedClient.configuration().then(configuration => {
+    const result = { client: connectedClient, configuration, error: null };
+    if (runtimeClient === connectedClient) runtimeConfiguration = result;
+    return result;
+  }).catch(error => {
+    if (runtimeClient === connectedClient) runtimeConfiguration = null;
+    return { client: connectedClient, configuration: null, error };
+  });
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
     atBoot ? 'Connecting to the service — the access token is kept in memory only'
       : 'Connecting with an in-memory bearer token');
@@ -9405,6 +9421,8 @@ function revokeRuntimeAccess() {
   runtimeDisconnect?.();
   runtimeDisconnect = null;
   runtimeClient = null;
+  runtimeConfigurationRequest = null;
+  runtimeConfiguration = null;
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
   // listing AND republishes `{loaded: false}`, so the node inspector's SECRET_REFERENCE control goes
@@ -10961,33 +10979,47 @@ function onFileInput(evt) {
   const f = evt.target.files[0];
   // Clearing the control keeps re-selecting the same file working after a cancelled confirm.
   evt.target.value = '';
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 }
 
 function onReplaceFileInput(event) {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
-  showLoading();
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      replaceActiveDocumentFromText(String(reader.result), file.name, document.getElementById('menu-file'));
-    } catch (error) {
-      alert('Error: ' + error.message);
-    } finally {
-      hideLoading();
-    }
-  };
-  reader.onerror = () => {
-    hideLoading();
-    alert('Error: ' + (reader.error?.message || 'The file could not be read'));
-  };
-  reader.readAsText(file);
+  void loadReplacementFile(file);
 }
 
-function parsePreparedGraph(text, name, { automatic = false } = {}) {
-  let graph = detectAndParse(text, name);
+function graphConfigurationUnavailable(cause = null) {
+  const detail = cause?.message ? `: ${cause.message}` : '';
+  return new Error(
+    `Graph document loading is unavailable until the connected service returns valid configuration${detail}`,
+  );
+}
+
+async function graphDocumentByteLimitForLoad() {
+  // A service-origin change replaces the request. Follow the newest request until the value and
+  // connected client describe the same runtime, then return one captured number to the load.
+  while (true) {
+    const request = runtimeConfigurationRequest;
+    if (!request) throw graphConfigurationUnavailable();
+    const result = await request;
+    if (request !== runtimeConfigurationRequest || result.client !== runtimeClient) continue;
+    if (result.error || !result.configuration) {
+      throw graphConfigurationUnavailable(result.error);
+    }
+    return result.configuration.graphDocumentMaxBytes;
+  }
+}
+
+function currentGraphDocumentByteLimit() {
+  if (!runtimeConfiguration || runtimeConfiguration.client !== runtimeClient) {
+    throw graphConfigurationUnavailable();
+  }
+  return runtimeConfiguration.configuration.graphDocumentMaxBytes;
+}
+
+function parsePreparedGraph(text, name, { automatic = false, maxBytes } = {}) {
+  let graph = detectAndParse(text, name, maxBytes);
   if (graph.format === 'graphify' && graph.nodes.length > GFY_MAX_WARN) {
     if (automatic) return sampleLargeGraph(graph, GFY_SAMPLE);
     const keep = GFY_SAMPLE;
@@ -11001,14 +11033,21 @@ function parsePreparedGraph(text, name, { automatic = false } = {}) {
   return graph;
 }
 
-function loadFileObj(file) {
-  loadLocalGraphInput(file, {
+async function loadFileObj(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
     createReader: () => new FileReader(),
     onStart: showLoading,
     parseAndRender: text => {
       // Parse and make the large-graph decision BEFORE allocating a record: failures leave the
       // workspace, active id and every existing history exactly as they were.
-      const graph = parsePreparedGraph(text, file.name);
+      const graph = parsePreparedGraph(text, file.name, { maxBytes });
       openDocument({ name: file.name, graph });
       clearActivity();
       addActivityMessage('editor', `Loaded ${file.name}`, 'completed');
@@ -11022,13 +11061,39 @@ function loadFileObj(file) {
   });
 }
 
+async function loadReplacementFile(file) {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    alert('Error: ' + error.message);
+    return false;
+  }
+  return loadLocalGraphInput(file, maxBytes, {
+    createReader: () => new FileReader(),
+    onStart: showLoading,
+    parseAndRender: text => replaceActiveDocumentFromText(
+      String(text), file.name, document.getElementById('menu-file'), maxBytes),
+    onRejected: error => alert('Error: ' + error.message),
+    onError: error => alert('Error: ' + error.message),
+    onComplete: hideLoading,
+  });
+}
+
 async function autoLoadUrl(url) {
   const name = url.split('/').pop();
-  await loadUrlGraphInput(url, {
+  let maxBytes;
+  try {
+    maxBytes = await graphDocumentByteLimitForLoad();
+  } catch (error) {
+    console.warn('Auto-load failed:', error.message);
+    return false;
+  }
+  return loadUrlGraphInput(url, maxBytes, {
     fetchImpl: fetch,
     onStart: showLoading,
     parseAndRender: text => {
-      const gd = parsePreparedGraph(text, name, { automatic: true });
+      const gd = parsePreparedGraph(text, name, { automatic: true, maxBytes });
       const active = workspace.active;
       active.name = name;
       active.displayName = allocateDocumentDisplayName(name);
@@ -11078,7 +11143,7 @@ wrap.addEventListener('drop', e => {
     return;
   }
   const f = e.dataTransfer.files[0];
-  if (f) loadFileObj(f);
+  if (f) void loadFileObj(f);
 });
 
 // ═══════════════════════════════════════════════════════════════

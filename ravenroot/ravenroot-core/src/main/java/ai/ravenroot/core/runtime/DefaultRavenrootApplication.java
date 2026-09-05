@@ -1962,7 +1962,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         if (closed.get()) {
             throw new IllegalStateException("Ravenroot application is closed");
         }
-        byte[] graphMlBytes = readFully(graphMl);
+        byte[] graphMlBytes = readGraphMlBytes(graphMl);
         // start() must run INSIDE this critical section, not after it. A freshly
         // registered deployment is COLD until start() flips it, and COLD does not count as active
         // (countsAsActive's own contract) -- so releasing the lock between registration and start()
@@ -2036,7 +2036,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(graphMl, "graphMl");
         var key = new LocalDeploymentKey(requireTenant(security.tenantId()), requireLocalDeploymentId(deploymentId));
-        byte[] graphBytes = readFully(graphMl);
+        byte[] graphBytes = readGraphMlBytes(graphMl);
         // Validated before anything is reserved: a graph naming a SOURCE the trusted catalog cannot
         // bind is refused here rather than at start, where the caller would already believe it owns a
         // working registration. A count of zero is not an error on this surface, which admits
@@ -2238,7 +2238,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         java.util.Objects.requireNonNull(security, "security");
         java.util.Objects.requireNonNull(graphMl, "graphMl");
         String normalizedId = requireSourceSessionId(sessionId);
-        byte[] graphBytes = readFully(graphMl);
+        byte[] graphBytes = readGraphMlBytes(graphMl);
         int sourceCount;
         try {
             sourceCount = inspectEffectiveSources(graphBytes);
@@ -2457,11 +2457,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 || state == DeploymentState.DEGRADED || state == DeploymentState.STOPPING;
     }
 
-    private static byte[] readFully(InputStream input) {
-        try {
-            return input.readAllBytes();
-        } catch (java.io.IOException error) {
-            throw new IllegalArgumentException("Cannot read GraphML for deployment activation", error);
+    private byte[] readGraphMlBytes(InputStream input) {
+        try (var document = GraphManager.readGraphMlDocument(input, graphExecutionLimits.graphMl())) {
+            return document.bytes();
         }
     }
 

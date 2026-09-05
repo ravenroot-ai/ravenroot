@@ -5,6 +5,7 @@ import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionManifestStore;
 import ai.ravenroot.api.persistence.GraphDefinitionStore;
+import ai.ravenroot.core.graph.GraphMlLimits;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
 import ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore;
@@ -34,8 +35,15 @@ public final class ExecutionStoreBootstrap {
      * every audit/store consumer.  The returned owner is the only lifecycle authority.
      */
     public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock) {
+        return openOwned(configuration, clock, GraphMlLimits.DEFAULTS);
+    }
+
+    /** Opens all durable stores with the graph-definition budget chosen by the composition root. */
+    public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
+                                   GraphMlLimits graphMlLimits) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(clock, "clock");
+        Objects.requireNonNull(graphMlLimits, "graphMlLimits");
         try {
             // Preserve the adapter's useful location classification before the maintenance API
             // deliberately reduces its own diagnostics to path-free lock failures.
@@ -56,7 +64,8 @@ public final class ExecutionStoreBootstrap {
                 GraphDefinitionStore definitions;
                 try {
                     definitions = new SqliteGraphDefinitionStore(configuration.location(), clock,
-                            ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE);
+                            ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE,
+                            graphMlLimits.maxBytes());
                 } catch (RuntimeException failed) {
                     store.close();
                     throw failed;

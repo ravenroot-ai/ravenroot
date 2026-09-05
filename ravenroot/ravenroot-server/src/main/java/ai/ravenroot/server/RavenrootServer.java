@@ -78,7 +78,7 @@ import java.util.Set;
 
 /** Lightweight JDK HTTP adapter. Business use cases remain in RavenrootApplication. */
 public final class RavenrootServer implements AutoCloseable {
-    private static final int MAX_GRAPH_BYTES = GraphMlLimits.DEFAULTS.maxBytes();
+    private static final int MAX_PROGRAM_BUILD_BYTES = 10 * 1024 * 1024;
     private static final int MAX_PROGRAM_BYTES = 1024 * 1024;
     /** The same ceiling {@code AssistantTurn.TURN_LIMITS} parses under, applied before parsing. */
     private static final int MAX_ASSISTANT_TURN_BYTES =
@@ -342,6 +342,10 @@ public final class RavenrootServer implements AutoCloseable {
      * being merely loosenable.
      */
     private final PayloadLimits payloadLimits = PayloadLimits.DEFAULTS;
+    /** One graph-document byte budget for raw and structured HTTP admission. */
+    private final int graphDocumentMaxBytes;
+    /** Typed representation returned to the connected authoring client. */
+    private final ServedConfiguration servedConfiguration;
     /** Populated by every {@link #apiContext} call; see {@link #registeredRoutes()}. */
     private final List<ai.ravenroot.server.spec.RouteDescriptor> registeredRoutes = new java.util.ArrayList<>();
     /**
@@ -393,6 +397,21 @@ public final class RavenrootServer implements AutoCloseable {
     public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
                            RequestAuthenticator authenticator) {
         this(application, address, uiDirectory, authenticator, true);
+    }
+
+    /** Embedded-host seam that keeps the safe defaults while supplying an explicit graph limit. */
+    public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
+                           RequestAuthenticator authenticator, GraphMlLimits graphMlLimits) {
+        this(application, address, uiDirectory, true, authenticator, defaultHttpSecurity(address.getPort()),
+                Clock.systemUTC(), new DefaultAuthorizationService(new StructuredAuthorizationLogger(System.out)),
+                defaultRateLimiter(), new StructuredArtifactLifecycleLogger(System.out),
+                ai.ravenroot.server.readiness.ReadinessGate.engineOnly(() -> application.status().state()),
+                ai.ravenroot.server.readiness.ReadinessConfiguration.defaults().httpStopDelay(),
+                new StructuredGraphMlRejectionLogger(System.out),
+                new StructuredPayloadRejectionLogger(System.out), event -> { },
+                ai.ravenroot.server.readiness.ReadinessConfiguration.defaults().drainGracePeriod(),
+                event -> { }, ai.ravenroot.server.assistant.AssistantService.fromEnvironment(Map.of()),
+                ai.ravenroot.server.embed.EmbedBrowserConfiguration.disabled(), null, graphMlLimits);
     }
 
     public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
@@ -672,6 +691,31 @@ public final class RavenrootServer implements AutoCloseable {
                     ai.ravenroot.server.assistant.AssistantService assistant,
                     ai.ravenroot.server.embed.EmbedBrowserConfiguration embedConfiguration,
                     ai.ravenroot.server.credential.UserCredentialStore credentials) {
+        this(application, address, uiDirectory, artifactDualControl, authenticator, httpSecurity, clock,
+                authorization, rateLimiter, artifactAudit, readinessGate, httpStopDelay, graphMlRejections,
+                payloadRejections, decisionalEvents, drainBound, controlAudit, assistant,
+                embedConfiguration, credentials, GraphMlLimits.DEFAULTS);
+    }
+
+    /**
+     * Explicit embedded-host seam for the operator-owned graph-document budget. The shipped
+     * composition root supplies the same instance to core and durable persistence.
+     */
+    public RavenrootServer(RavenrootApplication application, InetSocketAddress address, Path uiDirectory,
+                    boolean artifactDualControl, RequestAuthenticator authenticator,
+                    HttpSecurityConfiguration httpSecurity, Clock clock,
+                    AuthorizationService authorization, RateLimiter rateLimiter,
+                    ArtifactLifecycleAuditSink artifactAudit,
+                    ai.ravenroot.server.readiness.ReadinessGate readinessGate, Duration httpStopDelay,
+                    GraphMlRejectionAuditSink graphMlRejections, PayloadRejectionAuditSink payloadRejections,
+                    java.util.function.Consumer<ExecutionEvent> decisionalEvents, Duration drainBound,
+                    ai.ravenroot.api.application.ExecutionControlAuditSink controlAudit,
+                    ai.ravenroot.server.assistant.AssistantService assistant,
+                    ai.ravenroot.server.embed.EmbedBrowserConfiguration embedConfiguration,
+                    ai.ravenroot.server.credential.UserCredentialStore credentials,
+                    GraphMlLimits graphMlLimits) {
+        this.servedConfiguration = ServedConfiguration.from(graphMlLimits);
+        this.graphDocumentMaxBytes = servedConfiguration.graphDocumentMaxBytes();
         this.assistant = java.util.Objects.requireNonNull(assistant, "assistant");
         // Null is a real composition, not an oversight: a host that composes no credential
         // store gets no /v1/credentials context at all (see the registration below) and a permissive
@@ -727,6 +771,7 @@ public final class RavenrootServer implements AutoCloseable {
         // address-based limiting as /health because it is unauthenticated for the same reason and is
         // exactly as cheap an amplification target.
         server.createContext("/ready", publicContext(this::ready));
+        apiContext("/v1/configuration", this::configuration);
         apiContext("/v1/status", this::status);
         apiContext("/v1/runtime", this::runtime);
         apiContext("/v1/agent-authority", this::agentAuthorityControl);
@@ -1331,6 +1376,14 @@ public final class RavenrootServer implements AutoCloseable {
                 .collect(java.util.stream.Collectors.joining(",")) + "]}");
     }
 
+    private void configuration(HttpExchange exchange) throws IOException {
+        if (!method(exchange, "GET")) {
+            return;
+        }
+        exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+        json(exchange, 200, servedConfiguration.json());
+    }
+
     /**
      * {@code GET /v1/assistant}, under the assistant-availability contract: what this deployment says about its own
      * authoring assistant.
@@ -1866,9 +1919,9 @@ public final class RavenrootServer implements AutoCloseable {
             throws IOException, java.util.concurrent.ExecutionException, InterruptedException {
         byte[] body;
         try (var input = exchange.getRequestBody()) {
-            body = input.readNBytes(MAX_GRAPH_BYTES + 1);
+            body = input.readNBytes(MAX_PROGRAM_BUILD_BYTES + 1);
         }
-        if (body.length > MAX_GRAPH_BYTES) {
+        if (body.length > MAX_PROGRAM_BUILD_BYTES) {
             fail(exchange, ErrorCode.PROGRAM_SOURCE_TOO_LARGE);
             return;
         }
@@ -3679,7 +3732,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Reads a structured submission body, answering 413 itself when the document is over budget. */
     private StructuredSubmission readStructuredSubmission(HttpExchange exchange) throws IOException {
-        int budget = StructuredSubmission.envelopeLimits(payloadLimits, MAX_GRAPH_BYTES).maxEncodedBytes();
+        int budget = StructuredSubmission.envelopeLimits(payloadLimits, graphDocumentMaxBytes).maxEncodedBytes();
         byte[] body;
         try (var input = exchange.getRequestBody()) {
             body = input.readNBytes(budget + 1);
@@ -3688,12 +3741,12 @@ public final class RavenrootServer implements AutoCloseable {
             fail(exchange, ErrorCode.SUBMISSION_DOCUMENT_TOO_LARGE);
             return null;
         }
-        return StructuredSubmission.read(body, payloadLimits, MAX_GRAPH_BYTES);
+        return StructuredSubmission.read(body, payloadLimits, graphDocumentMaxBytes);
     }
 
-    private static byte[] readGraphMlRequest(HttpExchange exchange, java.io.InputStream input) throws IOException {
-        byte[] graph = input.readNBytes(MAX_GRAPH_BYTES + 1);
-        if (graph.length <= MAX_GRAPH_BYTES) {
+    private byte[] readGraphMlRequest(HttpExchange exchange, java.io.InputStream input) throws IOException {
+        byte[] graph = input.readNBytes(graphDocumentMaxBytes + 1);
+        if (graph.length <= graphDocumentMaxBytes) {
             return graph;
         }
         fail(exchange, ErrorCode.GRAPHML_DOCUMENT_TOO_LARGE);

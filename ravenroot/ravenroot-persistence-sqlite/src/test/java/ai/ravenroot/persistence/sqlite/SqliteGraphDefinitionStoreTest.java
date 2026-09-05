@@ -7,6 +7,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphDefinitionKey;
 import ai.ravenroot.api.persistence.GraphDefinitionReferences;
 import ai.ravenroot.api.persistence.GraphDefinitionStoreException;
+import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.api.persistence.GraphDefinitionStoreFailure;
 import ai.ravenroot.api.persistence.Retryability;
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,16 @@ class SqliteGraphDefinitionStoreTest {
 
     @TempDir
     Path directory;
+
+    @Test
+    void explicitBoundsCannotEscapeTheSharedSafetyCeiling() {
+        var location = SqliteStoreLocation.ofFile(directory.resolve("bounded.db"));
+        assertThrows(IllegalArgumentException.class, () -> new SqliteGraphDefinitionStore(
+                location, CLOCK, GraphDefinitionReferences.NONE, 0));
+        assertThrows(IllegalArgumentException.class, () -> new SqliteGraphDefinitionStore(
+                location, CLOCK, GraphDefinitionReferences.NONE,
+                GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES + 1));
+    }
 
     @Test
     void theSchemaCarriesDefinitionsAtTheCurrentVersion() throws SQLException {

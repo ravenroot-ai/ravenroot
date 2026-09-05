@@ -49,11 +49,9 @@ import java.util.function.Supplier;
  */
 public final class InMemoryGraphDefinitionStore implements GraphDefinitionStore {
 
-    /**
-     * Matches the ceiling GraphML ingest already enforces on a submitted document. A smaller bound
-     * here would accept a document at the edge and then fail to persist it.
-     */
-    public static final int DEFAULT_MAX_DEFINITION_BYTES = 10 * 1024 * 1024;
+    /** Safe default shared with GraphML ingest; composition may supply another value within the ceiling. */
+    public static final int DEFAULT_MAX_DEFINITION_BYTES =
+            GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES;
 
     private final Object monitor = new Object();
     private final Map<GraphDefinitionKey, Entry> definitions = new LinkedHashMap<>();
@@ -96,6 +94,9 @@ public final class InMemoryGraphDefinitionStore implements GraphDefinitionStore 
         this.references = Objects.requireNonNull(references, "references");
         if (maxDefinitionBytes < 1) {
             throw new IllegalArgumentException("maxDefinitionBytes must be positive");
+        }
+        if (maxDefinitionBytes > GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES) {
+            throw new IllegalArgumentException("maxDefinitionBytes exceeds the supported safety ceiling");
         }
         this.maxDefinitionBytes = maxDefinitionBytes;
     }

@@ -87,8 +87,9 @@ test.describe('Design arrangements', () => {
     }))).toEqual({ n0: { x: 100, y: 100 }, n9: { x: 245, y: 210 }, historyDepth: 0 });
     await openLayoutMenu(page);
     const labels = await page.locator('#application-menu .application-menu-item span:first-child').allTextContents();
-    expect(labels.slice(-6)).toEqual([
+    expect(labels.slice(-8)).toEqual([
       'Design', 'Monitoring', 'Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic', 'Keep positions',
+      'Arrange — Hierarchical (new)', 'Arrange — Flow (new)',
     ]);
     await page.screenshot({ path: '/tmp/ravenroot-648-arrange-menu.png', fullPage: true });
     await page.getByRole('menuitemradio', { name: 'Monitoring' }).click();

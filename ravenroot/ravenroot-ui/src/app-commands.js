@@ -49,8 +49,8 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     isChecked: context => context.hasDocument && context.renderMode === id,
     kind: 'radio',
   });
-  const arrangement = (id, order) => ({
-    id: `layout.arrange.${id}`, group: 'design-arrange', order: order + 200,
+  const arrangement = (id, order, group = 'design-arrange') => ({
+    id: `layout.arrange.${id}`, group, order: order + 200,
     placements: ['menu.layout', 'help'], execute: () => actions.arrange(id),
     isEnabled: context => active(context) && context.renderMode === 'design',
   });
@@ -177,6 +177,10 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     arrangement('flow', 20),
     arrangement('organic', 30),
     arrangement('keep', 40),
+    // The layered drawings are additive: a sibling group after the established arrangements, so
+    // the existing four keep their ids, order and contiguity, and the menu separates the two sets.
+    arrangement('hierarchical-new', 50, 'design-arrange-layered'),
+    arrangement('flow-new', 60, 'design-arrange-layered'),
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,

@@ -10,8 +10,20 @@ import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
+import ai.ravenroot.api.persistence.AgentAuthorityBinding;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityGrantRegistration;
+import ai.ravenroot.api.persistence.AgentAuthorityRootRegistration;
+import ai.ravenroot.api.persistence.AgentAuthorityState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
+import ai.ravenroot.api.persistence.AgentBudgetReservation;
+import ai.ravenroot.api.persistence.AgentBudgetVector;
+import ai.ravenroot.api.persistence.AgentGrantState;
+import ai.ravenroot.api.persistence.AgentReservationState;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionOrigin;
@@ -80,8 +92,10 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.CompletionStage;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -2309,6 +2323,401 @@ public abstract class ExecutionStoreContract {
                                        ToolApprovalRegistration registration) {
     }
 
+    // ==================================== SEC-16: agent authority and economic budgets
+
+    @Test
+    final void siblingReservationsCannotDoubleSpendTheProcessRoot() throws Exception {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(new AgentBudgetVector(
+                10, 10, 10, 10, 10, 1, 4, 10, 10), 2);
+        StoredProcessInstance snapshot = await(store().load(fixture.key()));
+        CountDownLatch ready = new CountDownLatch(2);
+        CountDownLatch start = new CountDownLatch(1);
+        var first = java.util.concurrent.CompletableFuture.supplyAsync(() -> racingHold(
+                fixture, fixture.grantIds().get(0), snapshot.revision(), ready, start, 1));
+        var second = java.util.concurrent.CompletableFuture.supplyAsync(() -> racingHold(
+                fixture, fixture.grantIds().get(1), snapshot.revision(), ready, start, 2));
+        assertTrue(ready.await(5, TimeUnit.SECONDS));
+        start.countDown();
+        List<Object> outcomes = List.of(first.get(5, TimeUnit.SECONDS), second.get(5, TimeUnit.SECONDS));
+        assertEquals(1, outcomes.stream().filter(StoredProcessInstance.class::isInstance).count());
+        assertEquals(1, outcomes.stream().filter(ExecutionStoreFailure.ConcurrencyConflict.class::isInstance).count());
+
+        UUID losingGrant = outcomes.get(0) instanceof StoredProcessInstance
+                ? fixture.grantIds().get(1) : fixture.grantIds().get(0);
+        ExecutionStoreFailure retry = failureOf(() -> hold(fixture, losingGrant, 3,
+                new AgentBudgetVector(0, 0, 0, 0, 0, 1, 0, 0, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, retry);
+        DurableAgentAuthorityBudget stored = budget(fixture.key());
+        assertEquals(1, stored.reserved().toolCalls());
+        assertEquals(1, stored.reservations().size());
+    }
+
+    @Test
+    final void reservationOperationKeysAreIdempotentButConflictingRetriesFailClosed() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
+        UUID grantId = fixture.grantIds().getFirst();
+        AgentBudgetReservation reservation = reservation(fixture, grantId, 1,
+                new AgentBudgetVector(1, 2, 3, 4, 5, 1, 0, 0, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Hold(reservation, 7, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Hold(reservation, 7, 0));
+        assertEquals(1, budget(fixture.key()).reservations().size());
+
+        AgentBudgetReservation conflict = new AgentBudgetReservation(UUID.randomUUID(), grantId,
+                reservation.operationKey(), new AgentBudgetVector(2, 2, 3, 4, 5, 1, 0, 0, 0),
+                AgentBudgetVector.ZERO, AgentReservationState.HELD);
+        ExecutionStoreFailure failure = failureOf(() -> applyBudget(fixture.key(),
+                new AgentBudgetOperation.Hold(conflict, 7, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure);
+        assertEquals(reservation, budget(fixture.key()).reservations().get(reservation.reservationId()));
+    }
+
+    @Test
+    final void combinedTokenCeilingIsAtomicAcrossDurableRetries() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1, largeBudget(), 10);
+        UUID grantId = fixture.grantIds().getFirst();
+        AgentBudgetReservation first = hold(fixture, grantId, 1,
+                new AgentBudgetVector(1, 4, 3, 1, 1, 0, 0, 0, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(first.reservationId(), 7, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Settle(first.reservationId(), first.requested()));
+
+        ExecutionStoreFailure excessiveRetry = failureOf(() -> hold(fixture, grantId, 2,
+                new AgentBudgetVector(1, 2, 2, 1, 1, 0, 0, 0, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, excessiveRetry,
+                "separate input/output headroom must not bypass the combined token ceiling");
+        hold(fixture, grantId, 3, new AgentBudgetVector(1, 2, 1, 1, 1, 0, 0, 0, 0));
+        assertEquals(3, budget(fixture.key()).reserved().inputTokens()
+                + budget(fixture.key()).reserved().outputTokens());
+    }
+
+    @Test
+    final void childAuthorityMustBeStrictlyAttenuatedAndEveryParentBoundsDiamondFanout() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetVector parentCeiling = new AgentBudgetVector(100, 100, 100, 100, 100, 100, 5, 1, 1);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 2, parentCeiling);
+        AgentAuthorityGrantRegistration left = budget(fixture.key()).grants()
+                .get(fixture.grantIds().get(0)).registration();
+        AgentAuthorityGrantRegistration right = budget(fixture.key()).grants()
+                .get(fixture.grantIds().get(1)).registration();
+
+        UUID invalidInvocation = addInvocation(fixture, Set.of(fixture.invocationIds().get(0)));
+        AgentAuthorityGrantRegistration unattenuated = new AgentAuthorityGrantRegistration(UUID.randomUUID(),
+                left.grantId(), Set.of(left.grantId()), 2, left.dataScopes(), left.authorityScopes(),
+                left.ceilings(), left.absoluteDeadline());
+        ExecutionStoreFailure expanded = failureOf(() -> registerGrant(fixture, unattenuated,
+                invalidInvocation, Set.of(fixture.invocationIds().get(0))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, expanded);
+
+        UUID unrelatedInvocation = addInvocation(fixture, Set.of(
+                fixture.invocationIds().get(0), fixture.invocationIds().get(1)));
+        AgentAuthorityGrantRegistration unrelatedParent = new AgentAuthorityGrantRegistration(UUID.randomUUID(),
+                left.grantId(), Set.of(left.grantId(), right.grantId()), 2,
+                Set.of(), Set.of("tool:a"), new AgentBudgetVector(90, 90, 90, 90, 90, 90, 2, 0, 0),
+                left.absoluteDeadline());
+        ExecutionStoreFailure unrelated = failureOf(() -> registerGrant(fixture, unrelatedParent,
+                unrelatedInvocation, Set.of(fixture.invocationIds().get(0))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, unrelated,
+                "every contributing grant must bind to a causal parent invocation");
+
+        UUID diamondInvocation = addInvocation(fixture, Set.of(
+                fixture.invocationIds().get(0), fixture.invocationIds().get(1)));
+        AgentBudgetVector diamondCeiling = new AgentBudgetVector(90, 90, 90, 90, 90, 90, 2, 0, 0);
+        AgentAuthorityGrantRegistration diamond = new AgentAuthorityGrantRegistration(UUID.randomUUID(),
+                left.grantId(), Set.of(left.grantId(), right.grantId()), 2,
+                Set.of(), Set.of("tool:a"), diamondCeiling, left.absoluteDeadline());
+        registerGrant(fixture, diamond, diamondInvocation,
+                Set.of(fixture.invocationIds().get(0), fixture.invocationIds().get(1)));
+        UUID excessInvocation = addInvocation(fixture, Set.of(fixture.invocationIds().get(0)));
+        AgentAuthorityGrantRegistration excess = new AgentAuthorityGrantRegistration(UUID.randomUUID(),
+                left.grantId(), Set.of(left.grantId()), 2, Set.of(), Set.of("tool:a"), diamondCeiling,
+                left.absoluteDeadline());
+        ExecutionStoreFailure bounded = failureOf(() -> registerGrant(fixture, excess,
+                excessInvocation, Set.of(fixture.invocationIds().get(0))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, bounded,
+                "each contributing parent must independently bound cumulative and active descendants");
+    }
+
+    @Test
+    final void cancellingNestedAndDiamondGrantsReleasesActiveSlotsExactlyOnce() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 2);
+        UUID leftId = fixture.grantIds().get(0);
+        UUID rightId = fixture.grantIds().get(1);
+        UUID childInvocation = addInvocation(fixture, Set.of(fixture.invocationIds().get(0)));
+        AgentAuthorityGrantRegistration child = childGrant(fixture, leftId, Set.of(leftId), 2,
+                new AgentBudgetVector(70, 70, 70, 70, 70, 70, 3, 3, 3));
+        registerGrant(fixture, child, childInvocation, Set.of(fixture.invocationIds().get(0)));
+        UUID diamondInvocation = addInvocation(fixture, Set.of(childInvocation, fixture.invocationIds().get(1)));
+        AgentAuthorityGrantRegistration diamond = childGrant(fixture, child.grantId(),
+                Set.of(child.grantId(), rightId), 3,
+                new AgentBudgetVector(60, 60, 60, 60, 60, 60, 3, 2, 2));
+        registerGrant(fixture, diamond, diamondInvocation, Set.of(childInvocation, fixture.invocationIds().get(1)));
+
+        DurableAgentAuthorityBudget before = budget(fixture.key());
+        long cumulative = before.spent().teamCumulative();
+        assertEquals(4, before.reserved().teamActive());
+        applyBudget(fixture.key(), new AgentBudgetOperation.CancelGrant(child.grantId()));
+        DurableAgentAuthorityBudget cancelled = budget(fixture.key());
+        assertEquals(cumulative, cancelled.spent().teamCumulative());
+        assertEquals(2, cancelled.reserved().teamActive());
+        assertEquals(AgentGrantState.CANCELLED, cancelled.grants().get(child.grantId()).state());
+        assertEquals(AgentGrantState.CANCELLED, cancelled.grants().get(diamond.grantId()).state());
+        assertEquals(0, cancelled.grants().get(leftId).reserved().teamActive());
+        assertEquals(0, cancelled.grants().get(rightId).reserved().teamActive());
+
+        applyBudget(fixture.key(), new AgentBudgetOperation.CancelGrant(child.grantId()));
+        DurableAgentAuthorityBudget repeated = budget(fixture.key());
+        assertEquals(cancelled.spent(), repeated.spent());
+        assertEquals(cancelled.reserved(), repeated.reserved());
+        applyBudget(fixture.key(), new AgentBudgetOperation.CancelRoot());
+        applyBudget(fixture.key(), new AgentBudgetOperation.CancelRoot());
+        assertEquals(0, budget(fixture.key()).reserved().teamActive());
+    }
+
+    @Test
+    final void cancellationReleasesHeldWorkButChargesDispatchedWorkConservatively() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
+        UUID grant = fixture.grantIds().getFirst();
+        AgentBudgetReservation held = hold(fixture, grant, 1,
+                new AgentBudgetVector(1, 10, 10, 10, 10, 1, 0, 0, 0));
+        AgentBudgetReservation dispatched = hold(fixture, grant, 2,
+                new AgentBudgetVector(2, 20, 20, 20, 20, 2, 0, 0, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(dispatched.reservationId(), 7, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.CancelGrant(grant));
+
+        DurableAgentAuthorityBudget cancelled = budget(fixture.key());
+        assertEquals(AgentReservationState.RELEASED,
+                cancelled.reservations().get(held.reservationId()).state());
+        assertEquals(AgentReservationState.INDETERMINATE,
+                cancelled.reservations().get(dispatched.reservationId()).state());
+        assertEquals(dispatched.requested().turns(), cancelled.spent().turns());
+        assertEquals(dispatched.requested().inputTokens(), cancelled.spent().inputTokens());
+        assertEquals(dispatched.requested().outputTokens(), cancelled.spent().outputTokens());
+        assertEquals(dispatched.requested().elapsedMillis(), cancelled.spent().elapsedMillis());
+        assertEquals(dispatched.requested().costMicros(), cancelled.spent().costMicros());
+        assertEquals(dispatched.requested().toolCalls(), cancelled.spent().toolCalls());
+        assertEquals(AgentBudgetVector.ZERO, cancelled.reserved());
+    }
+
+    @Test
+    final void exhaustingAGrantReleasesItsActiveSlotOnceWithoutRefundingCumulativeTeamUsage() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
+        UUID grantId = fixture.grantIds().getFirst();
+        DurableAgentAuthorityBudget before = budget(fixture.key());
+        applyBudget(fixture.key(), new AgentBudgetOperation.ExhaustGrant(grantId));
+        DurableAgentAuthorityBudget exhausted = budget(fixture.key());
+        assertEquals(AgentGrantState.EXHAUSTED, exhausted.grants().get(grantId).state());
+        assertEquals(before.spent().teamCumulative(), exhausted.spent().teamCumulative());
+        assertEquals(0, exhausted.reserved().teamActive());
+        applyBudget(fixture.key(), new AgentBudgetOperation.ExhaustGrant(grantId));
+        assertEquals(exhausted.spent(), budget(fixture.key()).spent());
+        assertEquals(exhausted.reserved(), budget(fixture.key()).reserved());
+    }
+
+    @Test
+    final void durableGlobalControlSurvivesReopenAndOldEpochPermitsNeverRevive() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        assumeCapability(StoreCapability.DURABLE);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 1);
+        AgentBudgetReservation held = hold(fixture, fixture.grantIds().getFirst(), 1,
+                new AgentBudgetVector(1, 2, 3, 4, 5, 1, 0, 0, 0));
+        DurableAgentAuthorityBudget before = budget(fixture.key());
+        reopen();
+        assertEquals(before, budget(fixture.key()));
+
+        assertEquals(0, await(store().loadAgentAuthorityControl()).epoch());
+        AgentAuthorityControl killedControl = await(store().transitionAgentAuthorityControl(
+                AgentAuthorityControlState.ACTIVE, 0, AgentAuthorityControlState.KILLED));
+        assertEquals(1, killedControl.epoch());
+        assertEquals(1, killedControl.teamActiveReleased());
+        DurableAgentAuthorityBudget killed = budget(fixture.key());
+        assertEquals(AgentAuthorityState.KILLED, killed.state());
+        assertEquals(1, killed.controlEpoch());
+        assertEquals(0, killed.reserved().teamActive());
+        ExecutionStoreFailure staleDispatch = failureOf(() -> applyBudget(fixture.key(),
+                new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, staleDispatch);
+
+        reopen();
+        assertEquals(AgentAuthorityControlState.KILLED,
+                await(store().loadAgentAuthorityControl()).state());
+        assertEquals(2, await(store().transitionAgentAuthorityControl(
+                AgentAuthorityControlState.KILLED, 1, AgentAuthorityControlState.ACTIVE)).epoch());
+        ExecutionStoreFailure oldEpoch = failureOf(() -> applyBudget(fixture.key(),
+                new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 2)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, oldEpoch);
+        assertEquals(AgentAuthorityState.KILLED, budget(fixture.key()).state(),
+                "reset must not reactivate roots revoked by the prior epoch");
+    }
+
+    @Test
+    final void providerUsageBreachRetainsObservedOverageAndRevokesAuthority() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        AgentBudgetFixture fixture = agentBudgetFixture(largeBudget(), 2);
+        long cumulative = budget(fixture.key()).spent().teamCumulative();
+        AgentBudgetReservation held = hold(fixture, fixture.grantIds().getFirst(), 1,
+                new AgentBudgetVector(1, 10, 10, 10, 20, 0, 0, 0, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(held.reservationId(), 7, 0));
+        AgentBudgetVector observed = new AgentBudgetVector(1, 11, 10, 10, 21, 0, 0, 0, 0);
+        applyBudget(fixture.key(), new AgentBudgetOperation.Breach(held.reservationId(), observed));
+
+        DurableAgentAuthorityBudget breached = budget(fixture.key());
+        assertEquals(AgentReservationState.BREACHED,
+                breached.reservations().get(held.reservationId()).state());
+        assertEquals(observed, breached.reservations().get(held.reservationId()).actual());
+        assertEquals(AgentAuthorityState.CANCELLED, breached.state());
+        assertEquals(AgentGrantState.EXHAUSTED,
+                breached.grants().get(fixture.grantIds().getFirst()).state());
+        assertEquals(AgentGrantState.CANCELLED,
+                breached.grants().get(fixture.grantIds().get(1)).state(),
+                "revoking the root must retire sibling authority too");
+        assertEquals(observed.turns(), breached.spent().turns());
+        assertEquals(observed.inputTokens(), breached.spent().inputTokens());
+        assertEquals(observed.outputTokens(), breached.spent().outputTokens());
+        assertEquals(observed.elapsedMillis(), breached.spent().elapsedMillis());
+        assertEquals(observed.costMicros(), breached.spent().costMicros());
+        assertEquals(cumulative, breached.spent().teamCumulative());
+        assertEquals(0, breached.reserved().teamActive(),
+                "a breached root cannot retain phantom active-team slots");
+        ExecutionStoreFailure refused = failureOf(() -> hold(fixture,
+                fixture.grantIds().getFirst(), 2,
+                new AgentBudgetVector(1, 1, 1, 1, 1, 0, 0, 0, 0)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+    }
+
+    private Object racingHold(AgentBudgetFixture fixture, UUID grantId, long revision,
+                              CountDownLatch ready, CountDownLatch start, long ordinal) {
+        ready.countDown();
+        try {
+            if (!start.await(5, TimeUnit.SECONDS)) throw new AssertionError("race did not start");
+            return await(store().apply(ExecutionBatch.to(fixture.key())
+                    .expecting(RevisionExpectation.exactly(revision))
+                    .applyAgentBudget(new AgentBudgetOperation.Hold(reservation(fixture, grantId, ordinal,
+                            new AgentBudgetVector(0, 0, 0, 0, 0, 1, 0, 0, 0)), 7, 0))
+                    .build()));
+        } catch (CompletionException failure) {
+            ExecutionStoreException storeFailure = ExecutionStoreException.unwrap(failure);
+            if (storeFailure == null) throw failure;
+            return storeFailure.failure();
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError(interrupted);
+        }
+    }
+
+    private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants) {
+        return agentBudgetFixture(maxima, topLevelGrants, maxima);
+    }
+
+    private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants,
+                                                  AgentBudgetVector grantCeiling) {
+        return agentBudgetFixture(maxima, topLevelGrants, grantCeiling,
+                Math.addExact(grantCeiling.inputTokens(), grantCeiling.outputTokens()));
+    }
+
+    private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants,
+                                                  AgentBudgetVector grantCeiling, long maximumTotalTokens) {
+        ExecutionKey key = newKey();
+        UUID traversalId = UUID.randomUUID();
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        var builder = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
+                .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root(key, 7, maxima), 0));
+        var grantIds = new java.util.ArrayList<UUID>();
+        var invocationIds = new java.util.ArrayList<UUID>();
+        for (int i = 0; i < topLevelGrants; i++) {
+            UUID grantId = UUID.randomUUID();
+            UUID invocationId = UUID.randomUUID();
+            grantIds.add(grantId);
+            invocationIds.add(invocationId);
+            builder.apply(new ExecutionTransition.InvocationAdded(traversalId,
+                    new NodeInvocation(invocationId, "agent-" + i, Set.of(), NodeInvocationStatus.SCHEDULED,
+                            List.of(), NodeCommand.PROCESS)));
+            AgentAuthorityGrantRegistration grant = new AgentAuthorityGrantRegistration(grantId, null, Set.of(),
+                    1, Set.of("tenant:read"), Set.of("tool:a", "tool:b"), grantCeiling,
+                    maximumTotalTokens, clock().instant().plus(Duration.ofHours(1)));
+            builder.applyAgentBudget(new AgentBudgetOperation.RegisterGrant(grant,
+                    new AgentAuthorityBinding(grantId, "agent-" + i, invocationId, Set.of()), 7, 0));
+        }
+        await(store().apply(builder.build()));
+        return new AgentBudgetFixture(key, traversalId, List.copyOf(grantIds), List.copyOf(invocationIds));
+    }
+
+    private UUID addInvocation(AgentBudgetFixture fixture, Set<UUID> parents) {
+        UUID invocationId = UUID.randomUUID();
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        await(store().apply(ExecutionBatch.to(fixture.key())
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .apply(new ExecutionTransition.InvocationAdded(fixture.traversalId(),
+                        new NodeInvocation(invocationId, "agent-child", parents, NodeInvocationStatus.SCHEDULED,
+                                List.of(), NodeCommand.PROCESS)))
+                .build()));
+        return invocationId;
+    }
+
+    private void registerGrant(AgentBudgetFixture fixture, AgentAuthorityGrantRegistration grant,
+                               UUID invocationId, Set<UUID> parentInvocations) {
+        StoredProcessInstance current = await(store().load(fixture.key()));
+        applyBudget(fixture.key(), current.revision(), new AgentBudgetOperation.RegisterGrant(grant,
+                new AgentAuthorityBinding(grant.grantId(), "agent-child", invocationId, parentInvocations), 7, 0));
+    }
+
+    private AgentAuthorityGrantRegistration childGrant(AgentBudgetFixture fixture, UUID primary,
+                                                        Set<UUID> parents, long depth,
+                                                        AgentBudgetVector ceilings) {
+        return new AgentAuthorityGrantRegistration(UUID.randomUUID(), primary, parents, depth,
+                Set.of(), Set.of("tool:a"), ceilings, clock().instant().plus(Duration.ofMinutes(30)));
+    }
+
+    private AgentBudgetReservation hold(AgentBudgetFixture fixture, UUID grantId, long ordinal,
+                                        AgentBudgetVector requested) {
+        AgentBudgetReservation reservation = reservation(fixture, grantId, ordinal, requested);
+        applyBudget(fixture.key(), new AgentBudgetOperation.Hold(reservation, 7, 0));
+        return reservation;
+    }
+
+    private AgentBudgetReservation reservation(AgentBudgetFixture fixture, UUID grantId, long ordinal,
+                                                AgentBudgetVector requested) {
+        return new AgentBudgetReservation(UUID.randomUUID(), grantId,
+                "op:" + fixture.key().processInstanceId() + ":" + ordinal,
+                requested, AgentBudgetVector.ZERO, AgentReservationState.HELD);
+    }
+
+    private void applyBudget(ExecutionKey key, AgentBudgetOperation operation) {
+        StoredProcessInstance current = await(store().load(key));
+        applyBudget(key, current.revision(), operation);
+    }
+
+    private void applyBudget(ExecutionKey key, long revision, AgentBudgetOperation operation) {
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(revision))
+                .applyAgentBudget(operation)
+                .build()));
+    }
+
+    private DurableAgentAuthorityBudget budget(ExecutionKey key) {
+        return await(store().loadAgentAuthorityBudget(key)).orElseThrow();
+    }
+
+    private AgentAuthorityRootRegistration root(ExecutionKey key, long bootEpoch, AgentBudgetVector maxima) {
+        return new AgentAuthorityRootRegistration("runtime-a", bootEpoch,
+                new SecurityContext("request", key.tenantId(), "operator", PrincipalType.WORKLOAD, "issuer"),
+                "policy-v1", "rates-v1", clock().instant().plus(Duration.ofHours(2)),
+                Set.of("tenant:read", "tenant:write"), Set.of("tool:a", "tool:b"), maxima, "USD");
+    }
+
+    private static AgentBudgetVector largeBudget() {
+        return new AgentBudgetVector(100, 100, 100, 100, 100, 100, 5, 10, 10);
+    }
+
+    private record AgentBudgetFixture(ExecutionKey key, UUID traversalId,
+                                      List<UUID> grantIds, List<UUID> invocationIds) { }
+
     // ============================================== durable operator holds on traversals
 
     /**
@@ -2730,7 +3139,8 @@ public abstract class ExecutionStoreContract {
                 template.responderRequirements(),
                 new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
                 template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
-                template.reentryMapping()));
+                template.reentryMapping(), template.continuationVersion(), template.continuation(),
+                template.continuationDigest()));
     }
 
     private HumanTaskRegistration humanTaskRegistration(ExecutionKey key, UUID taskId, UUID traversalId,
@@ -2745,7 +3155,8 @@ public abstract class ExecutionStoreContract {
                 new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
                 new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
                 clock().instant().plus(Duration.ofMinutes(5)),
-                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                2, new byte[] {1, 2, 3}, digest(new byte[] {1, 2, 3}));
     }
 
     private static HumanTaskRegistration copyHumanTask(HumanTaskRegistration source, UUID taskId,
@@ -2753,7 +3164,8 @@ public abstract class ExecutionStoreContract {
         return new HumanTaskRegistration(taskId, source.traversalId(), source.invocationId(),
                 source.attemptId(), source.nodeId(), correlationKey, deduplicationKey, source.metadata(),
                 source.responseSchema(), source.responderRequirements(), source.requester(),
-                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping());
+                source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping(),
+                source.continuationVersion(), source.continuation(), source.continuationDigest());
     }
 
     private void transitionHumanTask(HumanTaskFixture fixture, HumanTaskTransition transition) {

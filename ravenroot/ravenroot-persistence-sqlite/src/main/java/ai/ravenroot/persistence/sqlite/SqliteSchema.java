@@ -582,7 +582,7 @@ final class SqliteSchema {
                 "CREATE UNIQUE INDEX human_task_live_correlation ON human_task "
                         + "(tenant_id, correlation_key) WHERE status IN ('WAITING', 'ESCALATED')",
                 "CREATE INDEX human_task_inbox ON human_task (tenant_id, task_id)")),
-                // A hold is a child of its process instance and dies with it, like every other
+                 // A hold is a child of its process instance and dies with it, like every other
                 // durable decision record here. It carries its own continuation because a handler
                 // by contract carries none, and the continuation is the only reason a held
                 // traversal can be continued at all by a process that did not take the hold.
@@ -621,7 +621,82 @@ final class SqliteSchema {
                 "CREATE UNIQUE INDEX execution_pause_held_traversal ON execution_pause "
                         + "(tenant_id, traversal_id) WHERE status = 'HELD'",
                 "CREATE INDEX execution_pause_by_traversal ON execution_pause "
-                        + "(tenant_id, traversal_id)")));
+                        + "(tenant_id, traversal_id)")),
+                new SchemaMigration(11, "process-rooted agent authority budgets", List.of(
+                """
+                CREATE TABLE agent_authority_budget (
+                    tenant_id            TEXT NOT NULL,
+                    process_instance_id  TEXT NOT NULL,
+                    aggregate            BLOB NOT NULL,
+                    PRIMARY KEY (tenant_id, process_instance_id),
+                    FOREIGN KEY (tenant_id, process_instance_id)
+                        REFERENCES process_instance (tenant_id, process_instance_id) ON DELETE CASCADE
+                )
+                """)),
+                new SchemaMigration(12, "store-global agent authority control epoch", List.of(
+                """
+                CREATE TABLE agent_authority_control (
+                    singleton             INTEGER PRIMARY KEY CHECK(singleton = 1),
+                    state                 TEXT    NOT NULL CHECK(state IN ('ACTIVE', 'KILLED')),
+                    epoch                 INTEGER NOT NULL CHECK(epoch >= 0),
+                    changed_at_epoch_second INTEGER NOT NULL,
+                    changed_at_nano         INTEGER NOT NULL
+                )
+                """,
+                "INSERT INTO agent_authority_control "
+                        + "(singleton, state, epoch, changed_at_epoch_second, changed_at_nano) "
+                        + "VALUES (1, 'ACTIVE', 0, 0, 0)")),
+                 new SchemaMigration(13, "agent authority kill release aggregate", List.of(
+                 "ALTER TABLE agent_authority_control ADD COLUMN team_active_released "
+                         + "INTEGER NOT NULL DEFAULT 0 CHECK(team_active_released >= 0)")),
+                new SchemaMigration(14, "human-task graph continuation budget", List.of(
+                        "ALTER TABLE human_task ADD COLUMN continuation_version INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE human_task ADD COLUMN continuation BLOB NOT NULL DEFAULT X''",
+                        "ALTER TABLE human_task ADD COLUMN continuation_digest TEXT NOT NULL DEFAULT "
+                                + "'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'")),
+                // The resolved dependency set one execution was accepted against, in the same database
+                // as that execution and as the definition it pins. There is deliberately no foreign key
+                // to `process_instance`: the manifest is committed BEFORE the acceptance that
+                // references it, so the parent row does not exist yet and a constraint would make the
+                // required ordering inexpressible. The relationship is enforced at removal instead, by
+                // asking whether the instance exists inside the deleting transaction.
+                new SchemaMigration(15, "immutable resolved execution manifests", List.of(
+                        """
+                        CREATE TABLE execution_manifest (
+                            tenant_id           TEXT    NOT NULL,
+                            process_instance_id TEXT    NOT NULL,
+                            format_version      INTEGER NOT NULL,
+                            digest              TEXT    NOT NULL CHECK(length(digest) = 64),
+                            graph_content_id    TEXT    NOT NULL CHECK(length(graph_content_id) = 64),
+                            graph_id            TEXT    NOT NULL,
+                            version_id          TEXT    NOT NULL,
+                            graph_schema_version      INTEGER NOT NULL,
+                            definition_format_version INTEGER NOT NULL,
+                            execution_policy       TEXT NOT NULL,
+                            unknown_behavior_mode  TEXT NOT NULL,
+                            engine_digest          TEXT NOT NULL CHECK(length(engine_digest) = 64),
+                            store_digest           TEXT NOT NULL CHECK(length(store_digest) = 64),
+                            limits_digest          TEXT NOT NULL CHECK(length(limits_digest) = 64),
+                            program_runtime_digest TEXT NOT NULL CHECK(length(program_runtime_digest) = 64),
+                            pinned_at_epoch_second    INTEGER NOT NULL,
+                            pinned_at_nano            INTEGER NOT NULL,
+                            committed_at_epoch_second INTEGER NOT NULL,
+                            committed_at_nano         INTEGER NOT NULL,
+                            PRIMARY KEY (tenant_id, process_instance_id)
+                        )
+                        """,
+                        """
+                        CREATE TABLE execution_manifest_package (
+                            tenant_id           TEXT NOT NULL,
+                            process_instance_id TEXT NOT NULL,
+                            package_id          TEXT NOT NULL,
+                            identity_digest     TEXT NOT NULL CHECK(length(identity_digest) = 64),
+                            PRIMARY KEY (tenant_id, process_instance_id, package_id),
+                            FOREIGN KEY (tenant_id, process_instance_id)
+                                REFERENCES execution_manifest (tenant_id, process_instance_id)
+                                ON DELETE CASCADE
+                        )
+                        """)));
     }
 
     static int currentVersion() {

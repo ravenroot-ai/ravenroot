@@ -3,6 +3,7 @@ package ai.ravenroot.adapter.anthropic;
 import ai.ravenroot.api.ai.ModelProvider;
 import ai.ravenroot.api.ai.ModelRequest;
 import ai.ravenroot.api.ai.ModelResponse;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
@@ -210,20 +211,16 @@ public final class AnthropicModelProvider implements ModelProvider {
             // Everything before the socket fails eagerly, without occupying anything.
             return CompletableFuture.failedFuture(refused);
         }
-        // BoundedBodyHandlers, not BodyHandlers.ofString: the plain handler buffers whatever the
-        // provider sends before any budget of ours is consulted, so the budget could not refuse
-        // anything -- by the time it was read the allocation had happened. This one refuses a
-        // declared Content-Length over the ceiling before a body byte is read, and cancels the
-        // subscription mid-stream when the length was understated or absent.
-        //
-        // ofByteArray rather than ofString removes a decoding step without relaxing the bound: the
-        // ceiling is applied by the same subscriber either way, and what used to
-        // happen afterwards was decode-to-String here, re-encode-to-bytes never -- because PayloadJson
-        // then measured a String it could no longer measure in bytes. Bytes travel from the socket to
-        // the parser without a round trip, and the parser's own encoded-byte budget applies to them.
-        return client.sendAsync(httpRequest,
-                        BoundedBodyHandlers.ofByteArray(RESPONSE_LIMITS.maxEncodedBytes()))
-                .handle((response, failure) -> translate(response, failure, model));
+        // The shared handler refuses oversized declarations before reading, cancels an undeclared
+        // streaming breach, accepts JSON only, and permits at most one bounded gzip member. Wire,
+        // decoded, and parser-input ceilings remain separate even though this profile sets them to
+        // the same conservative value.
+        ExternalIoLimits limits = ExternalIoLimits.compressedHttp(
+                                Math.max(1, httpRequest.bodyPublisher().orElseThrow().contentLength()),
+                                RESPONSE_LIMITS.maxEncodedBytes(), RESPONSE_LIMITS.maxEncodedBytes(),
+                                projectedOutputLimit(), 100, timeout, Set.of("application/json"));
+        return client.sendAsync(httpRequest, BoundedBodyHandlers.withLimitsForSuccess(limits))
+                .handle((response, failure) -> translate(response, failure, model, limits));
     }
 
     // ---------------------------------------------------------------------------------------------
@@ -325,7 +322,8 @@ public final class AnthropicModelProvider implements ModelProvider {
     // Response
     // ---------------------------------------------------------------------------------------------
 
-    private ModelResponse translate(HttpResponse<byte[]> response, Throwable failure, String model) {
+    private ModelResponse translate(HttpResponse<byte[]> response, Throwable failure, String model,
+                                    ExternalIoLimits limits) {
         if (failure != null) {
             throw transportFailure(failure);
         }
@@ -352,7 +350,24 @@ public final class AnthropicModelProvider implements ModelProvider {
         }
         // The body of every branch above is read and dropped unexamined. It is remote text this
         // adapter cannot audit, and an error body may quote the request back -- including the key.
-        return readCompletion(response.body(), model);
+        return requireProjectedOutput(readCompletion(response.body(), model), limits);
+    }
+
+    private static long projectedOutputLimit() {
+        return Math.min(Integer.MAX_VALUE, (long) RESPONSE_LIMITS.maxEncodedBytes() + 64L * 1024);
+    }
+
+    private static ModelResponse requireProjectedOutput(ModelResponse response, ExternalIoLimits limits) {
+        try {
+            int ceiling = Math.toIntExact(limits.maximumOutputBytes());
+            int bytes = new PayloadLimits(ceiling, 32, 10_000, 50_000, ceiling, 4_096)
+                    .enforceAndMeasure(Map.of("payload", response.payload(), "providerId", response.providerId(),
+                            "model", response.model(), "metadata", response.metadata()));
+            limits.requireOutputBytes(bytes);
+            return response;
+        } catch (RuntimeException oversized) {
+            throw ModelInvocationException.of(ModelInvocationException.Reason.RESPONSE_UNREADABLE);
+        }
     }
 
     private static ModelInvocationException transportFailure(Throwable failure) {
@@ -360,7 +375,9 @@ public final class AnthropicModelProvider implements ModelProvider {
         if (cause == null) {
             cause = failure;
         }
-        if (cause instanceof BoundedBodyHandlers.ResponseTooLargeException) {
+        if (cause instanceof BoundedBodyHandlers.ResponseTooLargeException
+                || cause instanceof BoundedBodyHandlers.ResponseMediaTypeException
+                || cause instanceof BoundedBodyHandlers.ResponseEncodingException) {
             // Checked before IOException, which it extends. Not a transport failure: the socket did
             // not fail, so telling the operator the provider could not be reached would be false and
             // would advise a retry that reproduces the same response.

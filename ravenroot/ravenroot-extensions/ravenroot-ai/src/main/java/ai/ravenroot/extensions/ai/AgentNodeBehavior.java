@@ -6,6 +6,7 @@ import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
+import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
@@ -15,7 +16,11 @@ import ai.ravenroot.api.node.ToolCallContinuationResult;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.AgentResourceRequest;
+import ai.ravenroot.api.node.service.AgentResourceSession;
+import ai.ravenroot.api.node.service.AgentModelReservation;
 import ai.ravenroot.api.node.service.OutboundCall;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.node.service.ToolCallAuthorization;
@@ -85,6 +90,10 @@ import java.util.function.LongSupplier;
  * return one.</p>
  */
 public final class AgentNodeBehavior implements NodeBehavior {
+    private static final CancellationSignal NEVER_CANCELLED = new CancellationSignal() {
+        @Override public boolean cancelled() { return false; }
+        @Override public void onCancel(Runnable listener) { }
+    };
 
     /** The catalog name, preserved from the node formerly published by the core. */
     public static final String BEHAVIOR = "agent";
@@ -166,7 +175,8 @@ public final class AgentNodeBehavior implements NodeBehavior {
     @Override
     public Set<NodePackageCapability> requiredServices() {
         return Set.of(NodePackageCapability.OUTBOUND_HTTP,
-                NodePackageCapability.TOOL_AUTHORIZATION);
+                NodePackageCapability.TOOL_AUTHORIZATION,
+                NodePackageCapability.AGENT_RESOURCES);
     }
 
     @Override
@@ -206,7 +216,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
                                 + DEFAULT_MAX_TURNS + ", never exceeds " + MAX_TURNS_CEILING + ".", ""),
                 NodePropertyDescriptor.optional("maxTotalTokens", "Max tokens", NodePropertyType.INTEGER,
                         "Cumulative reported tokens across the whole run before it is refused. "
-                                + "Unbounded when absent.", ""),
+                                + "The operator's finite ceiling still applies when absent.", ""),
                 NodePropertyDescriptor.optional("timeoutMs", "Deadline", NodePropertyType.INTEGER,
                         "Deadline for the WHOLE run, not for one turn. May only tighten the "
                                 + "profile deadline.", ""),
@@ -308,7 +318,16 @@ public final class AgentNodeBehavior implements NodeBehavior {
             servers.add(server.get());
         }
         Settings settings = Settings.compile(configuration, resolved.get(), skills, List.copyOf(servers));
-        return message -> invoke(message, services, settings);
+        return new NodeAction() {
+            @Override public CompletionStage<NodeResult> handle(NodeMessage message) {
+                return invoke(message, services, settings, NEVER_CANCELLED);
+            }
+            @Override public CompletionStage<NodeResult> handle(
+                    NodeMessage message, CancellationSignal cancellation) {
+                return invoke(message, services, settings,
+                        Objects.requireNonNull(cancellation, "cancellation"));
+            }
+        };
     }
 
     @Override
@@ -456,7 +475,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
     }
 
     private CompletionStage<NodeResult> invoke(NodeMessage message, NodePackageServices services,
-                                               Settings settings) {
+                                               Settings settings, CancellationSignal cancellation) {
+        if (cancellation.cancelled()) {
+            return CompletableFuture.failedFuture(new AgentException(AgentException.Code.DEADLINE_EXCEEDED));
+        }
         // The key pairs the tenant with the profile, and the separator is a character neither can
         // contain: a profile name is masked to [A-Za-z0-9._-] before it is ever resolved.
         Admission.Lease lease = profileAdmission.tryAcquire(
@@ -471,22 +493,29 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // path is where a leak lives in every implementation that has one.
         var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
         leases.add(lease);
+        AgentResourceSession resources;
+        try {
+            resources = services.agentResources().admit(message, resourceRequest(settings));
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(sanitize(
+                    cleanupBeforeRun(leases, null, refused, false)));
+        }
         for (McpProfile server : settings.mcpServers()) {
             Admission.Lease held = mcpAdmission.tryAcquire(
                     message.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
-                leases.forEach(Admission.Lease::close);
-                return CompletableFuture.failedFuture(
-                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+                Throwable failure = cleanupBeforeRun(leases, resources,
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+                return CompletableFuture.failedFuture(failure);
             }
             leases.add(held);
         }
         Run run;
         try {
-            run = new Run(message, services, settings);
+            run = new Run(message, services, settings, resources);
         } catch (RuntimeException failure) {
-            leases.forEach(Admission.Lease::close);
-            return CompletableFuture.failedFuture(sanitize(failure));
+            return CompletableFuture.failedFuture(sanitize(
+                    cleanupBeforeRun(leases, resources, failure, false)));
         }
         var result = new CompletableFuture<NodeResult>();
         // ONE callback holding both actions, in this order, and not two callbacks written in this
@@ -503,37 +532,13 @@ public final class AgentNodeBehavior implements NodeBehavior {
         // The leases are held until the LAST turn finishes, not until the first returns -- and, with
         // MCP servers declared, until after discovery, which happens before the first turn. Every
         // lease is idempotent, so a run that fails between two turns releases here exactly once.
-        result.whenComplete((ignored, alsoIgnored) -> {
-            try {
-                run.abort();
-            } finally {
-                // The finally is the whole point, and it was learned the expensive way. Fusing the
-                // two actions into one callback bought the ordering and lost something the two
-                // separate registrations had for free: independence. OutboundCall.cancel() is a
-                // runtime implementation and its contract does not promise it will not throw -- this
-                // file guards seven other crossings into the runtime for exactly that reason -- and
-                // without this finally, one throw there skips the release entirely. That is not a
-                // lost nanosecond: Admission.Gate is reference-counted and only leaves the map at
-                // zero, so the (tenant, profile) key stays poisoned for the life of the process.
-                for (Admission.Lease held : leases) {
-                    // One at a time and not forEach, so that a lease refusing to close cannot take
-                    // the ones after it down with it. Admission.releaseReference raises on a broken
-                    // invariant, which is deliberate and stays -- what changes is that it costs one
-                    // lease instead of all of them.
-                    try {
-                        held.close();
-                    } catch (RuntimeException broken) {
-                        // Deliberately swallowed HERE and nowhere else in this class: this is the
-                        // terminal callback of a run that has already completed, so there is nothing
-                        // left to fail and no caller to tell. Rethrowing would only lose the
-                        // remaining leases.
-                        continue;
-                    }
-                }
-            }
+        CompletionStage<NodeResult> exposed = cleanupView(result, run, leases, resources, true);
+        cancellation.onCancel(() -> {
+            run.abort();
+            result.completeExceptionally(new AgentException(AgentException.Code.DEADLINE_EXCEEDED));
         });
-        run.start(result);
-        return cancellableView(result);
+        if (!result.isDone()) run.start(result);
+        return exposed;
     }
 
     private CompletionStage<ToolCallContinuationResult> resume(ToolCallContinuationInput input,
@@ -551,43 +556,62 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 supplied.traversalId(), supplied.invocationId(), supplied.attemptId(),
                 supplied.parentInvocationIds(), supplied.nodeId(), null, checkpoint.inboundAttributes(),
                 supplied.command());
+        AgentResourceSession resources;
+        try {
+            resources = services.agentResources().resume(input, resourceRequest(settings));
+        } catch (RuntimeException refused) {
+            return CompletableFuture.failedFuture(sanitize(refused));
+        }
         var leases = new ArrayList<Admission.Lease>(1 + settings.mcpServers().size());
         Admission.Lease profile = profileAdmission.tryAcquire(
                 restored.tenantId() + " " + settings.profile().name(), settings.profile().maxConcurrency());
         if (profile == null) {
-            return CompletableFuture.failedFuture(new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+            Throwable failure = cleanupBeforeRun(leases, resources,
+                    new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+            return CompletableFuture.failedFuture(failure);
         }
         leases.add(profile);
         for (McpProfile server : settings.mcpServers()) {
             Admission.Lease held = mcpAdmission.tryAcquire(
                     restored.tenantId() + " " + server.name(), server.maxConcurrency());
             if (held == null) {
-                leases.forEach(Admission.Lease::close);
-                return CompletableFuture.failedFuture(
-                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE));
+                Throwable failure = cleanupBeforeRun(leases, resources,
+                        new AgentException(AgentException.Code.CAPACITY_UNAVAILABLE), false);
+                return CompletableFuture.failedFuture(failure);
             }
             leases.add(held);
         }
         Run run;
         try {
-            run = new Run(restored, services, settings, checkpoint);
+            run = new Run(restored, services, settings, checkpoint, resources);
         } catch (RuntimeException invalid) {
-            leases.forEach(Admission.Lease::close);
-            return CompletableFuture.failedFuture(invalid);
+            return CompletableFuture.failedFuture(
+                    cleanupBeforeRun(leases, resources, invalid, false));
         }
         var result = new CompletableFuture<ToolCallContinuationResult>();
-        Runnable cleanup = () -> {
-            try { run.abort(); } finally { leases.forEach(Admission.Lease::close); }
-        };
+        var exposed = new CompletableFuture<ToolCallContinuationResult>();
         result.whenComplete((continued, failure) -> {
             if (failure != null) {
-                cleanup.run();
-            } else {
-                continued.nodeResult().whenComplete((ignored, continuationFailure) -> cleanup.run());
+                Throwable terminal = cleanup(run, leases, resources, failure, false);
+                exposed.completeExceptionally(terminal);
+                return;
             }
+            var cleanedNode = new CompletableFuture<NodeResult>();
+            continued.nodeResult().whenComplete((nodeResult, continuationFailure) -> {
+                Throwable terminal = cleanup(run, leases, resources, continuationFailure, false);
+                if (terminal != null) cleanedNode.completeExceptionally(terminal);
+                else cleanedNode.complete(nodeResult);
+            });
+            exposed.complete(new ToolCallContinuationResult(cleanedNode, continued.effectSucceeded()));
         });
         run.resume(input, checkpoint, result);
-        return result;
+        return exposed;
+    }
+
+    private static AgentResourceRequest resourceRequest(Settings settings) {
+        long perTurn = settings.tuning().maxTokens().orElse(0L);
+        return new AgentResourceRequest(settings.maxTurns(), settings.maxTotalTokens(), perTurn,
+                Duration.ofMillis(settings.deadlineMs()));
     }
 
     private static RestartCheckpoint validateContinuation(ToolCallContinuationInput input) {
@@ -705,29 +729,92 @@ public final class AgentNodeBehavior implements NodeBehavior {
      * this node's provenance marking must never allow. So the view is a future that forwards
      * cancellation inwards and takes its value only from the run.</p>
      */
-    private static CompletionStage<NodeResult> cancellableView(CompletableFuture<NodeResult> run) {
+    private static CompletionStage<NodeResult> cleanupView(CompletableFuture<NodeResult> result,
+                                                            Run run,
+                                                            List<Admission.Lease> leases,
+                                                            AgentResourceSession resources,
+                                                            boolean retryableFailure) {
         var exposed = new CompletableFuture<NodeResult>() {
             @Override
             public boolean cancel(boolean mayInterruptIfRunning) {
-                // This future first and the run second, so the return value does not depend on a
-                // subtlety of CompletableFuture. It was reported that the other order returns false
-                // on a cancellation that worked; MEASURED, it does not -- cancel() answers
-                // "cancelled || isCancelled()", and the exception the forwarding below propagates is
-                // itself a CancellationException, so the already-completed future still reports
-                // true. The order here is the one that stays correct without relying on that.
-                boolean cancelled = super.cancel(mayInterruptIfRunning);
-                run.cancel(mayInterruptIfRunning);
-                return cancelled;
+                boolean cancelled = result.cancel(mayInterruptIfRunning);
+                return cancelled || isCancelled();
             }
         };
-        run.whenComplete((value, failure) -> {
-            if (failure != null) {
-                exposed.completeExceptionally(failure);
-            } else {
-                exposed.complete(value);
-            }
+        result.whenComplete((value, failure) -> {
+            Throwable terminal = cleanup(run, leases, resources, failure, retryableFailure);
+            if (terminal != null) exposed.completeExceptionally(terminal);
+            else exposed.complete(value);
         });
         return exposed;
+    }
+
+    private static Throwable cleanup(Run run, List<Admission.Lease> leases,
+                                     AgentResourceSession resources, Throwable original,
+                                     boolean retryableFailure) {
+        Throwable failure = original;
+        try {
+            run.abort();
+        } catch (RuntimeException abortFailure) {
+            failure = appendFailure(failure, abortFailure);
+        }
+        try {
+            if (original == null) resources.complete();
+            else if (!run.suspended()) {
+                if (retryableFailure && !(rootCause(original) instanceof CancellationException)) {
+                    resources.failAttempt();
+                }
+                else resources.cancel();
+            }
+        } catch (RuntimeException resourceFailure) {
+            failure = appendFailure(failure, resourceFailure);
+        }
+        for (Admission.Lease held : leases) {
+            try {
+                held.close();
+            } catch (RuntimeException leaseFailure) {
+                failure = appendFailure(failure, leaseFailure);
+            }
+        }
+        return failure;
+    }
+
+    private static Throwable cleanupBeforeRun(List<Admission.Lease> leases,
+                                               AgentResourceSession resources,
+                                               Throwable original,
+                                               boolean retryableFailure) {
+        Throwable failure = original;
+        if (resources != null) {
+            try {
+                if (retryableFailure) resources.failAttempt();
+                else resources.cancel();
+            } catch (RuntimeException resourceFailure) {
+                failure = appendFailure(failure, resourceFailure);
+            }
+        }
+        for (Admission.Lease held : leases) {
+            try {
+                held.close();
+            } catch (RuntimeException leaseFailure) {
+                failure = appendFailure(failure, leaseFailure);
+            }
+        }
+        return failure;
+    }
+
+    private static Throwable appendFailure(Throwable primary, RuntimeException cleanupFailure) {
+        if (primary == null) return cleanupFailure;
+        if (primary != cleanupFailure) primary.addSuppressed(cleanupFailure);
+        return primary;
+    }
+
+    private static Throwable rootCause(Throwable failure) {
+        Throwable current = failure;
+        while ((current instanceof CompletionException || current instanceof ExecutionException)
+                && current.getCause() != null) {
+            current = current.getCause();
+        }
+        return current;
     }
 
     /**
@@ -768,6 +855,10 @@ public final class AgentNodeBehavior implements NodeBehavior {
          * caller had said stop and after the admission had been given back.</p>
          */
         private volatile OutboundCall<OutboundHttpResponse> inFlight;
+        private volatile AgentModelReservation inFlightBudget;
+        private volatile boolean modelDispatched;
+        /** Expected durable approval suspension is detach-only, never grant cancellation. */
+        private volatile boolean suspended;
         /** Set once the run is over, by any route. Read before every step the loop would take next. */
         private volatile boolean over;
         private final long deadlineNanos;
@@ -775,15 +866,20 @@ public final class AgentNodeBehavior implements NodeBehavior {
         private int toolCalls;
         private long tokens;
         private String finishReason = "";
+        private final AgentResourceSession resources;
+        private long effectiveMaximumOutputBytes;
 
-        Run(NodeMessage message, NodePackageServices services, Settings settings) {
+        Run(NodeMessage message, NodePackageServices services, Settings settings,
+            AgentResourceSession resources) {
             this.message = message;
             this.services = services;
             this.settings = settings;
+            this.resources = resources;
             this.loadSkill = new LoadSkillTool(settings.skills());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
                     + Duration.ofMillis(settings.deadlineMs()).toNanos();
+            this.effectiveMaximumOutputBytes = settings.profile().maxResponseBytes();
             // Rendered once, here, and inside the try of the caller: a template that cannot render is
             // a property defect and must refuse before any byte leaves.
             String instructions = render(settings.instructions());
@@ -816,10 +912,11 @@ public final class AgentNodeBehavior implements NodeBehavior {
         }
 
         Run(NodeMessage message, NodePackageServices services, Settings settings,
-            RestartCheckpoint checkpoint) {
+            RestartCheckpoint checkpoint, AgentResourceSession resources) {
             this.message = message;
             this.services = services;
             this.settings = settings;
+            this.resources = resources;
             this.loadSkill = new LoadSkillTool(settings.skills());
             this.tools = List.of(loadSkill);
             this.deadlineNanos = System.nanoTime()
@@ -830,6 +927,7 @@ public final class AgentNodeBehavior implements NodeBehavior {
             this.toolCalls = checkpoint.toolCalls();
             this.tokens = checkpoint.tokens();
             this.finishReason = checkpoint.finishReason();
+            this.effectiveMaximumOutputBytes = settings.profile().maxResponseBytes();
         }
 
         private String render(String template) {
@@ -993,14 +1091,62 @@ public final class AgentNodeBehavior implements NodeBehavior {
             }
             turns++;
             OutboundCall<OutboundHttpResponse> call;
+            final AgentModelReservation turnBudget;
             try {
-                byte[] body = AgentTurn.writeRequest(settings.model(), messages, tools, settings.tuning());
+                turnBudget = resources.reserveModelTurn(turns);
+            } catch (RuntimeException failure) {
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            inFlightBudget = turnBudget;
+            modelDispatched = false;
+            byte[] body;
+            long effectiveTimeout;
+            try {
+                long permittedOutput = turnBudget.maximumOutputTokens();
+                long permittedMillis = turnBudget.maximumDuration().toMillis();
+                if (permittedOutput <= 0 || permittedMillis <= 0) {
+                    throw new IllegalStateException("agent resource permit is empty");
+                }
+                Optional<Long> effectiveOutput = settings.tuning().maxTokens()
+                        .map(configured -> Math.min(configured, permittedOutput));
+                if (effectiveOutput.isEmpty() && permittedOutput < Long.MAX_VALUE) {
+                    effectiveOutput = Optional.of(permittedOutput);
+                }
+                var effectiveTuning = new OpenAiCompatibleChat.Tuning(effectiveOutput,
+                        settings.tuning().temperature(), settings.tuning().topP(), settings.tuning().seed());
+                body = AgentTurn.writeRequest(settings.model(), messages, tools, effectiveTuning);
+                effectiveTimeout = Math.min(remaining, permittedMillis);
+            } catch (RuntimeException failure) {
+                turnBudget.release();
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            if (over || result.isDone()) {
+                turnBudget.release();
+                return;
+            }
+            try {
+                turnBudget.dispatch();
+                modelDispatched = true;
+            } catch (RuntimeException failure) {
+                turnBudget.release();
+                result.completeExceptionally(sanitize(failure));
+                return;
+            }
+            try {
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(
                         settings.profile().endpoint(), "POST",
                         Map.of("content-type", List.of("application/json")), body,
-                        Duration.ofMillis(remaining),
-                        settings.profile().credentialBinding().orElse(null)));
+                        Duration.ofMillis(effectiveTimeout),
+                        settings.profile().credentialBinding().orElse(null), null,
+                        ExternalIoLimits.compressedHttp(Math.max(1, body.length),
+                                settings.profile().maxResponseBytes(), settings.profile().maxResponseBytes(),
+                                settings.profile().maxResponseBytes(), 100,
+                                Duration.ofMillis(effectiveTimeout), Set.of("application/json")),
+                        ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             } catch (RuntimeException failure) {
+                turnBudget.indeterminate();
                 result.completeExceptionally(sanitize(failure));
                 return;
             }
@@ -1017,24 +1163,30 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 }
                 try {
                     if (failure != null) {
+                        turnBudget.indeterminate();
                         result.completeExceptionally(sanitize(failure));
                     } else {
-                        advance(response, result);
+                        advance(response, result, turnBudget);
                     }
                 } catch (RuntimeException invalid) {
+                    turnBudget.indeterminate();
                     result.completeExceptionally(sanitize(invalid));
                 }
             });
         }
 
-        private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result) {
+        private void advance(OutboundHttpResponse response, CompletableFuture<NodeResult> result,
+                             AgentModelReservation turnBudget) {
             int status = response.statusCode();
             if (status < 200 || status >= 300) {
                 // The body is NOT read into the failure. An endpoint's error document is remote text
                 // and may quote the objective back; the status is the operator-actionable part.
                 throw new AgentException(AgentException.Code.ENDPOINT_REJECTED);
             }
+            effectiveMaximumOutputBytes = Math.min(effectiveMaximumOutputBytes,
+                    response.effectiveMaximumOutputBytes());
             AgentTurn.Turn turn = AgentTurn.read(response.body(), settings.profile().maxResponseBytes());
+            turnBudget.settle(turn.promptTokens(), turn.completionTokens());
             var modelOutput = new LinkedHashMap<String, Object>();
             modelOutput.put("answer", turn.answer());
             var requestedTools = new ArrayList<Map<String, Object>>(turn.toolCalls().size());
@@ -1107,7 +1259,15 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 try {
                     Throwable cause = unwrap(failure);
                     if (cause instanceof AgentApprovalSuspension suspension) {
+                        suspended = true;
+                        resources.suspend();
                         result.completeExceptionally(suspension.signal());
+                        return;
+                    }
+                    if (cause instanceof NodePackageServiceException service
+                            && service.reason() == NodePackageServiceException.Reason
+                                    .EFFECT_OUTCOME_INDETERMINATE) {
+                        result.completeExceptionally(service);
                         return;
                     }
                     // A failed stage is a tool that broke its own contract. It costs a turn and not a
@@ -1256,6 +1416,14 @@ public final class AgentNodeBehavior implements NodeBehavior {
             if (tokens > 0) {
                 attributes.put("agent.totalTokens", tokens);
             }
+            try {
+                int outputLimit = Math.toIntExact(effectiveMaximumOutputBytes);
+                new PayloadLimits(outputLimit, 32, 50_000, 100_000, outputLimit, 4_096)
+                        .enforceAndMeasure(Map.of("payload", turn.answer(),
+                                "attributes", Map.copyOf(attributes)));
+            } catch (RuntimeException oversized) {
+                throw new AgentException(AgentException.Code.RESPONSE_TOO_LARGE);
+            }
             return new NodeResult("continue", turn.answer(), Map.copyOf(attributes));
         }
 
@@ -1276,10 +1444,18 @@ public final class AgentNodeBehavior implements NodeBehavior {
          */
         void abort() {
             over = true;
+            AgentModelReservation budget = inFlightBudget;
+            if (budget != null) {
+                if (modelDispatched) budget.indeterminate(); else budget.release();
+            }
             OutboundCall<OutboundHttpResponse> current = inFlight;
             if (current != null) {
                 current.cancel();
             }
+        }
+
+        boolean suspended() {
+            return suspended;
         }
     }
 
@@ -1324,7 +1500,9 @@ public final class AgentNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE, RESPONSE_TOO_LARGE -> AgentException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> AgentException.Code.DEADLINE_EXCEEDED;
                 case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> AgentException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> AgentException.Code.TRANSPORT_UNAVAILABLE;
+                case BUDGET_EXHAUSTED -> AgentException.Code.TOKEN_BUDGET_EXHAUSTED;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        AgentException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return new AgentException(AgentException.Code.TRANSPORT_UNAVAILABLE);

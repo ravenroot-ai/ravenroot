@@ -142,7 +142,8 @@ events fail before release credentials are available.
 
 ### Publication boundary
 
-Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains:
+Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central boundary contains 32
+coordinates:
 
 - `ravenroot-parent`, `ravenroot-application-api`, `ravenroot-core`,
   `ravenroot-programming-graalvm`, `ravenroot-plugin-bundle`, `ravenroot-persistence-sqlite`,
@@ -150,16 +151,21 @@ Published Maven coordinates use group ID `ai.ravenroot`. The reviewed Central bo
   `ravenroot-distribution`;
 - the reusable `ravenroot-api-testkit`, `ravenroot-engine-testkit`, and
   `ravenroot-persistence-testkit` conformance artifacts;
-- the `ravenroot-extensions` parent and the `ravenroot-ai`, `ravenroot-amqp091`,
+- the `ravenroot-extensions` parent, the dependency-bearing `ravenroot-extensions-all` pack, and the
+  `ravenroot-ai`, `ravenroot-amqp091`, `ravenroot-discord`,
   `ravenroot-filesystem`, `ravenroot-git-workspace`, `ravenroot-github`, `ravenroot-jdbc`,
   `ravenroot-kafka`, `ravenroot-mail`,
   `ravenroot-object-storage`, `ravenroot-ocr`, `ravenroot-openapi-client`,
-  `ravenroot-openapi-server`, `ravenroot-spel`, `ravenroot-telegram`, and
+  `ravenroot-openapi-server`, `ravenroot-slack`, `ravenroot-spel`, `ravenroot-telegram`, and
   `ravenroot-websocket` extensions.
 
 The example node project, sandbox-supervisor conformance fixture, optional Akka build, development
 harness, sample application, and out-of-reactor adapter builds are not Central publications. The OCI
 image name is `ghcr.io/ravenroot-ai/ravenroot:<version>`. Prereleases never create or move `latest`.
+The pack is signed and reconciled like every other Central coordinate. The aggregate CycloneDX SBOM
+must contain its component and exact dependency relationships to all production first-party
+`NodePackage` extensions; the release workflow checks those relationships before it assembles the
+immutable Central bundle.
 
 ### Protected environment and signing identity
 

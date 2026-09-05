@@ -15,6 +15,26 @@ import java.util.UUID;
  * <p>Every authority-bearing component is structural and server supplied. Canonical arguments and
  * the continuation are bounded here before an adapter is asked to retain them; neither may be
  * projected into public audit payloads.</p>
+ *
+ * @param approvalId server-minted approval identifier
+ * @param traversalId traversal that requested the effect
+ * @param invocationId exact node invocation that requested the effect
+ * @param attemptId exact attempt within the invocation
+ * @param callId server-minted tool-call identifier
+ * @param nodeId requesting node identifier
+ * @param tool canonical tool name
+ * @param canonicalArguments bounded canonical argument bytes
+ * @param argumentsDigest SHA-256 binding for the canonical arguments
+ * @param requester trusted requester security context
+ * @param graphVersionPin immutable graph version used for continuation recovery
+ * @param policyVersion policy version evaluated for the request
+ * @param expiresAt absolute store-clock deadline for the approval lifecycle and effect-authority
+ *                  consumption; approval, denial, or consumption at or after it is time-ineligible
+ * @param approverRequirements required approver authorization
+ * @param requesterMayApprove whether separation of duties permits self-approval
+ * @param continuationVersion version of the opaque trusted continuation
+ * @param continuation bounded opaque continuation bytes
+ * @param continuationDigest SHA-256 binding for the continuation
  */
 public record ToolApprovalRegistration(
         UUID approvalId,
@@ -75,10 +95,23 @@ public record ToolApprovalRegistration(
         }
     }
 
+    /**
+     * Returns the bounded canonical arguments.
+     * @return a defensive copy of the canonical argument bytes
+     */
     @Override public byte[] canonicalArguments() { return canonicalArguments.clone(); }
+    /**
+     * Returns the opaque trusted continuation.
+     * @return a defensive copy of the opaque continuation bytes
+     */
     @Override public byte[] continuation() { return continuation.clone(); }
 
-    /** Whether another registration is an exact replay of this request. */
+    /**
+     * Tests whether another registration is an exact replay of this request.
+     *
+     * @param other registration to compare
+     * @return {@code true} when all authority-bearing fields are identical
+     */
     public boolean sameRequest(ToolApprovalRegistration other) {
         return other != null
                 && approvalId.equals(other.approvalId)
@@ -109,7 +142,12 @@ public record ToolApprovalRegistration(
         return copied;
     }
 
-    /** Returns the stable SHA-256 content binding used for arguments and continuations. */
+    /**
+     * Returns the stable SHA-256 content binding used for arguments and continuations.
+     *
+     * @param value bytes to hash
+     * @return lower-case {@code sha256:} digest
+     */
     public static String digest(byte[] value) {
         try {
             return "sha256:" + java.util.HexFormat.of().formatHex(

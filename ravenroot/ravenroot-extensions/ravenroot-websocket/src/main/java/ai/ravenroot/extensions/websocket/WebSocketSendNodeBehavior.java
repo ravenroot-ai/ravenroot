@@ -135,8 +135,10 @@ public final class WebSocketSendNodeBehavior implements NodeBehavior {
                 case REQUEST_TOO_LARGE -> WebSocketException.Code.REQUEST_TOO_LARGE;
                 case RESPONSE_TOO_LARGE -> WebSocketException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> WebSocketException.Code.DEADLINE_EXCEEDED;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> WebSocketException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> WebSocketException.Code.TRANSPORT_UNAVAILABLE;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED ->
+                        WebSocketException.Code.CAPACITY_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        WebSocketException.Code.TRANSPORT_UNAVAILABLE;
             };
             if (handedOff && (service.reason() == NodePackageServiceException.Reason.TRANSPORT_FAILED
                     || service.reason() == NodePackageServiceException.Reason.CANCELLED

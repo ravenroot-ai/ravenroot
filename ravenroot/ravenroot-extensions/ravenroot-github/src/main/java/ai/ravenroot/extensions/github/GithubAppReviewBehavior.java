@@ -296,7 +296,7 @@ public final class GithubAppReviewBehavior implements NodeBehavior {
         output.put("verdict", input.verdict); output.put("remoteId", reviewId == 0 ? "" : Long.toString(reviewId));
         output.put("generation", 0L); output.put("attempts", 0L); if (!reason.isEmpty()) output.put("reason", reason);
         if (retryAt > 0) output.put("retryAtEpochMs", retryAt);
-        return new NodeResult(outcome, Map.copyOf(output), Map.of());
+        return GithubValues.result(outcome, Map.copyOf(output), Map.of());
     }
     private static GithubException sanitize(RuntimeException failure) {
         return failure instanceof GithubException safe ? safe : new GithubException(GithubException.Code.INVALID_INPUT);

@@ -2,9 +2,12 @@ package ai.ravenroot.extensions.github;
 
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
+import ai.ravenroot.api.execution.NodeResult;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -13,6 +16,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import static org.junit.jupiter.api.Assertions.*;
 
 class GithubApiTest {
+    @TempDir Path directory;
+
     @Test void recognizesPrimaryAndSecondaryRateLimits() {
         assertTrue(response(403, Map.of("x-ratelimit-remaining", List.of("0"))).rateLimited());
         assertTrue(response(403, Map.of("retry-after", List.of("2"))).rateLimited());
@@ -68,6 +73,22 @@ class GithubApiTest {
                 () -> control.attach(cancellable(cancelled)));
         assertEquals(GithubException.Code.CAS_LOST, failure.code());
         assertTrue(cancelled.get());
+    }
+
+    @Test void managedOutputAuthoritySurvivesTheWireAdapterUntilFinalProjection() {
+        var http = new GithubTestSupport.HttpHarness();
+        http.replies.add(new OutboundHttpResponse(200, Map.of(), "{}".getBytes(StandardCharsets.UTF_8), 32));
+        GithubProfile profile = GithubTestSupport.configuration(directory.resolve("output.db"))
+                .profile(GithubTestSupport.TENANT, GithubTestSupport.PROFILE).orElseThrow();
+        GithubApi api = new GithubApi(http, GithubTestSupport.message(Map.of()), profile,
+                new GithubApi.CallControl(), () -> { });
+
+        api.get("/repos/example/service");
+        GithubException refused = assertThrows(GithubException.class,
+                () -> api.requireOutput(NodeResult.continueWith(Map.of(
+                        "version", "github.result.v1", "value", "expanded-output"))));
+
+        assertEquals(GithubException.Code.RESPONSE_INVALID, refused.code());
     }
 
     private static OutboundCall<OutboundHttpResponse> cancellable(AtomicBoolean cancelled) {

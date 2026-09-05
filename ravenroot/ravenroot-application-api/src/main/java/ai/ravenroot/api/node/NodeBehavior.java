@@ -98,6 +98,9 @@ public interface NodeBehavior {
      * <p>The fail-closed default keeps existing packages source and binary compatible. A package
      * that opts in owns the complete decoder for its checkpoint; core never interprets package
      * state and graph content cannot nominate a decoder.</p>
+     * @param configuration validated identity and property snapshot for one graph node
+     * @param services package-scoped operator grants
+     * @return optional trusted continuation action; empty refuses re-entry
      */
     default Optional<ToolCallContinuationAction> createToolCallContinuation(
             NodeConfiguration configuration, NodePackageServices services) {

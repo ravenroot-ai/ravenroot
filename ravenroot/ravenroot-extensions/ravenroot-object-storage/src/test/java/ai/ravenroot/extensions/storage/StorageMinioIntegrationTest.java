@@ -93,7 +93,8 @@ class StorageMinioIntegrationTest {
                 "OpenSSL is required to mint the ephemeral test-only TLS identity");
         ReservedNetworkPolicy previousPolicy = EgressAddressGuard.policy();
         boolean cleanupInterruptionExercised = false;
-        EgressAddressGuard.configure(ReservedNetworkPolicy.shippedDefault());
+        EgressAddressGuard.configure(
+                ReservedNetworkPolicy.fromCommaSeparatedExceptions("localhost:LOOPBACK"));
         try (MinioServer minio = MinioServer.start(directory.resolve("tls"))) {
             minio.initialize();
             StorageProfile profile = profile(minio.endpoint());
@@ -186,7 +187,8 @@ class StorageMinioIntegrationTest {
                 new NodeConfiguration("put", ObjectPutNodeBehavior.BEHAVIOR,
                         Map.of("storageProfile", "assets", "key", key)), services);
         Map<?, ?> result = (Map<?, ?>) action.handle(StorageTestSupport.message(TENANT,
-                Map.of("version", "object.put.v1", "text", value))).toCompletableFuture().join().payload();
+                Map.of("version", "object.put.v1", "text", value, "contentType", "text/plain")))
+                .toCompletableFuture().join().payload();
         return (String) result.get("versionId");
     }
 

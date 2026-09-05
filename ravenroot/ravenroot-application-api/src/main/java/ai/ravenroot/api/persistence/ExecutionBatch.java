@@ -30,6 +30,7 @@ public final class ExecutionBatch {
     private final List<HandlerTransition> handlerTransitions;
     private final List<ToolApprovalRegistration> toolApprovalsToRegister;
     private final List<ToolApprovalTransition> toolApprovalTransitions;
+    private final List<AgentBudgetOperation> agentBudgetOperations;
     private final List<HumanTaskRegistration> humanTasksToRegister;
     private final List<HumanTaskTransition> humanTaskTransitions;
     private final List<ExecutionPauseRegistration> executionPausesToRegister;
@@ -49,6 +50,7 @@ public final class ExecutionBatch {
         this.handlerTransitions = List.copyOf(builder.handlerTransitions);
         this.toolApprovalsToRegister = List.copyOf(builder.toolApprovalsToRegister);
         this.toolApprovalTransitions = List.copyOf(builder.toolApprovalTransitions);
+        this.agentBudgetOperations = List.copyOf(builder.agentBudgetOperations);
         this.humanTasksToRegister = List.copyOf(builder.humanTasksToRegister);
         this.humanTaskTransitions = List.copyOf(builder.humanTaskTransitions);
         this.executionPausesToRegister = List.copyOf(builder.executionPausesToRegister);
@@ -65,7 +67,8 @@ public final class ExecutionBatch {
                 && toolApprovalsToRegister.isEmpty()
                 && toolApprovalTransitions.isEmpty()
                 && humanTasksToRegister.isEmpty() && humanTaskTransitions.isEmpty()
-                && executionPausesToRegister.isEmpty() && executionPauseTransitions.isEmpty()) {
+                && executionPausesToRegister.isEmpty() && executionPauseTransitions.isEmpty()
+                && agentBudgetOperations.isEmpty()) {
             throw new IllegalArgumentException("an execution batch must contain at least one operation");
         }
     }
@@ -257,15 +260,27 @@ public final class ExecutionBatch {
         return handlerTransitions;
     }
 
-    /** Tool approvals registered atomically with this batch's execution changes. */
+    /**
+     * Tool approvals registered atomically with this batch's execution changes.
+     * @return immutable registrations in insertion order
+     */
     public List<ToolApprovalRegistration> toolApprovalsToRegister() {
         return toolApprovalsToRegister;
     }
 
-    /** Tool-approval lifecycle changes applied atomically with this batch. */
+    /**
+     * Tool-approval lifecycle changes applied atomically with this batch.
+     * @return immutable transitions in insertion order
+     */
     public List<ToolApprovalTransition> toolApprovalTransitions() {
         return toolApprovalTransitions;
     }
+
+    /**
+     * Agent authority and budget mutations applied atomically with this batch.
+     * @return immutable operations in insertion order
+     */
+    public List<AgentBudgetOperation> agentBudgetOperations() { return agentBudgetOperations; }
 
     /**
      * Human tasks registered atomically with this batch's execution changes.
@@ -320,6 +335,7 @@ public final class ExecutionBatch {
         private final List<HandlerTransition> handlerTransitions = new ArrayList<>();
         private final List<ToolApprovalRegistration> toolApprovalsToRegister = new ArrayList<>();
         private final List<ToolApprovalTransition> toolApprovalTransitions = new ArrayList<>();
+        private final List<AgentBudgetOperation> agentBudgetOperations = new ArrayList<>();
         private final List<ExecutionPauseRegistration> executionPausesToRegister = new ArrayList<>();
         private final List<ExecutionPauseTransition> executionPauseTransitions = new ArrayList<>();
         private final List<HumanTaskRegistration> humanTasksToRegister = new ArrayList<>();
@@ -458,17 +474,36 @@ public final class ExecutionBatch {
             return this;
         }
 
-        /** Registers one exact tool-approval request in this transaction. */
+        /**
+         * Registers one exact tool-approval request in this transaction.
+         * @param registration immutable approval request
+         * @return this builder
+         */
         public Builder registerToolApproval(ToolApprovalRegistration registration) {
             if (registration == null) throw new IllegalArgumentException("registration cannot be null");
             toolApprovalsToRegister.add(registration);
             return this;
         }
 
-        /** Applies one tool-approval lifecycle transition in this transaction. */
+        /**
+         * Applies one tool-approval lifecycle transition in this transaction.
+         * @param transition transition to apply
+         * @return this builder
+         */
         public Builder applyToolApproval(ToolApprovalTransition transition) {
             if (transition == null) throw new IllegalArgumentException("transition cannot be null");
             toolApprovalTransitions.add(transition);
+            return this;
+        }
+
+        /**
+         * Adds one ordered agent authority/budget mutation to this transaction.
+         * @param operation operation to apply
+         * @return this builder
+         */
+        public Builder applyAgentBudget(AgentBudgetOperation operation) {
+            if (operation == null) throw new IllegalArgumentException("operation cannot be null");
+            agentBudgetOperations.add(operation);
             return this;
         }
 

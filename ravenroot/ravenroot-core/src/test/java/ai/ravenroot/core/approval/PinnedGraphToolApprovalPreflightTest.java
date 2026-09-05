@@ -16,6 +16,8 @@ import ai.ravenroot.api.execution.EngineState;
 import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.execution.Mailbox;
 import ai.ravenroot.api.execution.NodeContext;
+import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeLifecycleState;
 import ai.ravenroot.api.execution.NodeRef;
 import ai.ravenroot.api.execution.NodeStatus;
@@ -59,6 +61,10 @@ import ai.ravenroot.core.recovery.RepeatabilityDeclarations;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
+import ai.ravenroot.core.runtime.ExecutionRecorder;
+import ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot;
+import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
+import ai.ravenroot.core.runtime.GraphExecutionLimits;
 import ai.ravenroot.core.runtime.NodePackages;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
@@ -129,6 +135,28 @@ class PinnedGraphToolApprovalPreflightTest {
               </graph>
             </graphml>
             """.getBytes(StandardCharsets.UTF_8);
+    private static final byte[] TOOL_RETRY_GRAPH = new String(GRAPH, StandardCharsets.UTF_8)
+            .replace("<graph id=\"g\"", "<key id=\"retry-max\" for=\"node\" "
+                    + "attr.name=\"retry.maxAttempts\" attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-initial\" for=\"node\" attr.name=\"retry.initialBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-multiplier\" for=\"node\" attr.name=\"retry.backoffMultiplier\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-ceiling\" for=\"node\" attr.name=\"retry.maxBackoff\" "
+                    + "attr.type=\"string\"/>\n"
+                    + "<key id=\"retry-on\" for=\"node\" attr.name=\"retry.retryOn\" "
+                    + "attr.type=\"string\"/>\n<graph id=\"g\"")
+            .replace("<node id=\"end\"><data key=\"kind\">END</data></node>", """
+                    <node id="retry"><data key="kind">BEHAVIOR</data><data key="behavior">retry</data>
+                      <data key="retry-max">2</data><data key="retry-initial">0</data>
+                      <data key="retry-multiplier">1.0</data><data key="retry-ceiling">0</data>
+                      <data key="retry-on">RetryableBlip</data>
+                    </node>
+                    <node id="end"><data key="kind">END</data></node>""")
+            .replace("<edge id=\"e2\" source=\"agent\" target=\"end\"/>",
+                    "<edge id=\"e2\" source=\"agent\" target=\"retry\"/>\n"
+                            + "<edge id=\"e3\" source=\"retry\" target=\"end\"/>")
+            .getBytes(StandardCharsets.UTF_8);
 
     @Test
     void absentPinnedDefinitionDefersWithoutConsumingOrAcknowledging(@TempDir Path directory) throws Exception {
@@ -237,6 +265,186 @@ class PinnedGraphToolApprovalPreflightTest {
         }
     }
 
+    /**
+     * The manifest's refusal, taken all the way through the real recovery loop rather than asserted
+     * against the service in isolation.
+     *
+     * <p>Both cases produce {@link RecoveryOutcome.Deferred}, and that is the fail-closed answer this
+     * path already defines: the claimed item is neither dispatched nor acknowledged, so it stays
+     * claimable and is not lost. What must never happen is {@code HandlerDispatched} — that would be
+     * the runtime resuming an execution it cannot reproduce.</p>
+     */
+    @Test
+    void recoveryRefusesAnExecutionWithNoManifestOnceManifestsAreComposed(@TempDir Path directory)
+            throws Exception {
+        assertRecoveryRefusesManifest(directory, false);
+    }
+
+    @Test
+    void recoveryRefusesAnExecutionWhoseNodePackagesNoLongerMatchThePin(@TempDir Path directory)
+            throws Exception {
+        assertRecoveryRefusesManifest(directory, true);
+    }
+
+    private void assertRecoveryRefusesManifest(Path directory, boolean pinADifferentPackageSet)
+            throws Exception {
+        var clock = new MutableClock(NOW);
+        var definitions = new InMemoryGraphDefinitionStore(clock);
+        String pin = storeGraph(definitions);
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        var decision = new AtomicReference<ToolCallContinuationInput.Decision>();
+        try (ExecutionStore store = new SqliteExecutionStore(
+                directory.resolve("manifest-refusal.db"), clock);
+             var engine = new InlineExecutionEngine();
+             var manifestStore =
+                     new ai.ravenroot.core.persistence.InMemoryExecutionManifestStore(clock)) {
+            createRunning(store, key, traversal, invocation, attempt, pin);
+            var approvals = new ToolApprovalService(store, clock);
+            approvals.request(key, request(approvalId, traversal, invocation, attempt, pin, 1), "create");
+            approvals.approve(approver(), key.processInstanceId(), approvalId);
+            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
+                    new DecisionProbePackage(decision, () -> { }, true));
+            var resolver = ai.ravenroot.core.manifest.ExecutionManifestResolver.from(engine,
+                    store.capabilities(), behaviors,
+                    ai.ravenroot.core.runtime.UnknownBehaviorPolicy.passThrough(),
+                    GraphExecutionLimits.DEFAULTS, null);
+            var manifests = new ai.ravenroot.core.manifest.ExecutionManifestService(
+                    manifestStore, resolver, clock);
+            if (pinADifferentPackageSet) {
+                // The execution was accepted with this package at 1.0.0; the runtime now resolves the
+                // probe package's own declared version, so exactly one dimension disagrees.
+                var accepted = resolver.manifestFor(key,
+                        new ai.ravenroot.api.persistence.GraphContentId(pin),
+                        ai.ravenroot.api.persistence.GraphDefinitionIdentity.forSubmission(
+                                new ai.ravenroot.api.persistence.GraphContentId(pin)),
+                        ai.ravenroot.api.application.ExecutionPolicy.STANDARD, NOW);
+                var rebuilt = new ai.ravenroot.api.persistence.ExecutionManifest(
+                        accepted.formatVersion(), accepted.key(), accepted.graphContentId(),
+                        accepted.graphIdentity(), accepted.runtime(),
+                        List.of(ai.ravenroot.api.persistence.PinnedNodePackage.of(
+                                resolver.nodePackages().get(0).packageId(), "0.0.1-before-the-upgrade",
+                                ai.ravenroot.api.node.NodeSdk.CONTRACT)),
+                        accepted.pinnedAt());
+                manifestStore.pin(rebuilt).toCompletableFuture().join();
+                assertEquals(1, resolver.nodePackages().size(),
+                        "the probe package is the one installed package, so the difference below is "
+                                + "unambiguous rather than one of several");
+            }
+            var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
+                    null, engine, behaviors, new ExecutionMonitor(),
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                    "worker", Duration.ofSeconds(30), GraphExecutionLimits.DEFAULTS, null, manifests);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, approvals,
+                            ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "unchanged", "policy-v1"), executor));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().noneMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    () -> "an execution this runtime cannot reproduce must not be dispatched: " + outcomes);
+            assertTrue(outcomes.stream().allMatch(RecoveryOutcome.Deferred.class::isInstance),
+                    outcomes::toString);
+            assertEquals(null, decision.get(),
+                    "the continuation never ran, so nothing observed a decision");
+            assertEquals(ToolApprovalStatus.APPROVED,
+                    store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "the durable decision is untouched: a refusal must not settle work it declined "
+                            + "to do, or the wait would be lost rather than deferred");
+        }
+    }
+
+    @Test
+    void freshSuspensionSurvivesSqliteRestartWithoutResettingTraversalBudget(
+            @TempDir Path directory) throws Exception {
+        var clock = new MutableClock(NOW);
+        var definitions = new InMemoryGraphDefinitionStore(clock);
+        String pin = storeGraph(definitions, TOOL_RETRY_GRAPH);
+        Path database = directory.resolve("budget-reentry.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID traversal = UUID.randomUUID();
+        UUID invocation = UUID.randomUUID();
+        UUID attempt = UUID.randomUUID();
+        UUID approvalId = UUID.randomUUID();
+        UUID callId = UUID.randomUUID();
+        var originalBudget = new GraphExecutionBudgetSnapshot(2, 1, 128, 1, 1);
+
+        try (ExecutionStore store = new SqliteExecutionStore(database, clock)) {
+            createRunning(store, key, traversal, invocation, attempt, pin);
+            var approvals = new ToolApprovalService(store, clock);
+            long revision = store.load(key).toCompletableFuture().join().revision();
+            var message = new NodeMessage(requesterIdentity(), key.processInstanceId(), traversal,
+                    invocation, attempt, Set.of(), "agent", null, Map.of(), NodeCommand.PROCESS);
+            try (var recorder = ExecutionRecorder.open(store, key, "live", Duration.ofSeconds(30), revision);
+                 var ignored = approvals.bindLive(key, recorder, ignoredMessage -> originalBudget)) {
+                ToolApprovalResult created = approvals.suspend(message, approvalId, callId,
+                        "filesystem.read", ARGUMENTS, ToolApprovalRegistration.digest(ARGUMENTS),
+                        new ToolApprovalSettings("policy-v1", Duration.ofMinutes(5),
+                                HandlerAuthorization.ofRoles(Role.APPROVER.name()), false),
+                        1, CHECKPOINT);
+                assertEquals(ToolApprovalResult.Code.CREATED, created.code());
+                assertEquals(GraphExecutionContinuationCheckpoint.VERSION,
+                        created.approval().request().continuationVersion());
+            }
+        }
+
+        var observed = new AtomicReference<ToolCallContinuationInput.Decision>();
+        var retryEntries = new AtomicInteger();
+        var events = new java.util.concurrent.CopyOnWriteArrayList<
+                ai.ravenroot.api.application.ExecutionEvent>();
+        try (ExecutionStore store = new SqliteExecutionStore(database, clock);
+             var engine = new InlineExecutionEngine()) {
+            var approvals = new ToolApprovalService(store, clock);
+            approvals.approve(approver(), key.processInstanceId(), approvalId);
+            BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
+                    new DecisionProbePackage(observed, () -> { }, true))
+                    .register("retry", ignored -> {
+                        retryEntries.incrementAndGet();
+                        return CompletableFuture.failedFuture(new RetryableBlip());
+                    });
+            GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+            var tight = new GraphExecutionLimits(defaults.graphMl(), defaults.payload(),
+                    defaults.maxFanOut(), defaults.maxResidentActors(),
+                    defaults.maxLiveActorsPerTraversal(), defaults.maxInFlightHopsPerTraversal(),
+                    defaults.maxQueuedAdmissionsPerNode(), 3,
+                    defaults.maxAmplifiedDeliveries(), defaults.maxCumulativePayloadBytes(),
+                    defaults.maxRecoveryDeliveriesPerAttempt());
+            var monitor = new ExecutionMonitor();
+            monitor.subscribe(events::add);
+            var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
+                    engine, behaviors, monitor,
+                    ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
+                    "restart-worker", Duration.ofSeconds(30), tight);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "restart-worker", 10,
+                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    new ToolApprovalHandlerDispatcher(store, approvals,
+                            ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
+                                    "unchanged", "policy-v1"), executor));
+
+            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
+
+            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                    outcomes::toString);
+            assertEquals(ToolCallContinuationInput.Decision.APPROVED, observed.get());
+            assertEquals(ToolApprovalStatus.SUCCEEDED,
+                    store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                            .orElseThrow().status(),
+                    "the approved call outcome is recorded before downstream routing is refused");
+            assertEquals(ProcessInstanceStatus.FAILED,
+                    store.load(key).toCompletableFuture().join().state().status(),
+                    "the retry must exceed the stored budget instead of resetting after restart");
+            assertEquals(1, retryEntries.get(), "the retry refusal must precede its second send");
+            assertEquals(0, events.stream().filter(event -> event.type()
+                    == ai.ravenroot.api.application.ExecutionEventType.NODE_RETRY_SCHEDULED).count());
+        }
+    }
+
     @Test
     void toolApprovalContinuationCanHandOffToHumanTaskAndAcknowledgeItsTrigger(
             @TempDir Path directory) throws Exception {
@@ -281,6 +489,13 @@ class PinnedGraphToolApprovalPreflightTest {
             assertEquals(1, humanTasks.size());
             assertEquals("review", humanTasks.getFirst().request().nodeId());
             assertEquals(HumanTaskStatus.WAITING, humanTasks.getFirst().status());
+            var nestedCheckpoint = GraphExecutionContinuationCheckpoint.read(
+                    humanTasks.getFirst().request().continuationVersion(),
+                    humanTasks.getFirst().request().continuation());
+            assertEquals(2, nestedCheckpoint.budget().traversalSteps(),
+                    "tool-to-human re-entry must carry the original step plus the routed successor");
+            assertEquals(1, nestedCheckpoint.budget().amplifiedDeliveries());
+            assertEquals(1, nestedCheckpoint.budget().inFlightHops());
             assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
                     .toCompletableFuture().join().isEmpty(),
                     "the old approval trigger must be acknowledged while the new task waits");
@@ -473,11 +688,14 @@ class PinnedGraphToolApprovalPreflightTest {
 
     private static ToolApprovalRegistration request(UUID approvalId, UUID traversal, UUID invocation,
                                                      UUID attempt, String pin, int checkpointVersion) {
+        byte[] storedCheckpoint = GraphExecutionContinuationCheckpoint.write(checkpointVersion, CHECKPOINT,
+                new ai.ravenroot.core.runtime.GraphExecutionBudgetSnapshot(1, 0, 0, 1, 1));
         return new ToolApprovalRegistration(approvalId, traversal, invocation, attempt, UUID.randomUUID(),
                 "agent", "filesystem.read", ARGUMENTS, ToolApprovalRegistration.digest(ARGUMENTS),
                 requesterIdentity(), new GraphVersionPin(pin), "policy-v1", NOW.plusSeconds(300),
-                HandlerAuthorization.ofRoles(Role.APPROVER.name()), false, checkpointVersion,
-                CHECKPOINT, ToolApprovalRegistration.digest(CHECKPOINT));
+                HandlerAuthorization.ofRoles(Role.APPROVER.name()), false,
+                GraphExecutionContinuationCheckpoint.VERSION, storedCheckpoint,
+                ToolApprovalRegistration.digest(storedCheckpoint));
     }
 
     private static void createRunning(ExecutionStore store, ExecutionKey key, UUID traversalId,
@@ -615,6 +833,12 @@ class PinnedGraphToolApprovalPreflightTest {
                                     NodeResult.continueWith(null)), true));
                 }
             });
+        }
+    }
+
+    private static final class RetryableBlip extends RuntimeException {
+        private RetryableBlip() {
+            super("retryable");
         }
     }
 

@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PUBLIC_ROOTS = (ROOT / "README.md", ROOT / "docs", ROOT / "adr")
 ADR_REQUIRED_SECTIONS = ("Context", "Decision", "Consequences")
 ADR_REQUIRED_FIELDS = ("Status", "Date")
+ADR_FILENAME = re.compile(r"^([0-9]{4})-.*\.md$")
 MARKDOWN_LINK = re.compile(r"(?<!!)\[[^]]*]\(([^)]+)\)")
 MERMAID_FENCE = re.compile(r"```mermaid\s*\n(.*?)```", re.DOTALL)
 
@@ -50,6 +51,18 @@ def local_link_errors(files: list[Path]) -> list[str]:
     return errors
 
 
+def adr_documents() -> list[Path]:
+    """Return the direct files that belong to the numbered ADR namespace."""
+    directory = ROOT / "adr"
+    if not directory.is_dir():
+        return []
+    return sorted(
+        document
+        for document in directory.iterdir()
+        if document.is_file() and ADR_FILENAME.fullmatch(document.name)
+    )
+
+
 def adr_errors() -> list[str]:
     errors: list[str] = []
     manifest = ROOT / "adr/CURATION-MANIFEST.md"
@@ -58,7 +71,15 @@ def adr_errors() -> list[str]:
         errors.append("adr/CURATION-MANIFEST.md is missing")
     if not index.is_file():
         errors.append("adr/README.md is missing")
-    for document in sorted((ROOT / "adr").glob("[0-9][0-9][0-9][0-9]-*.md")):
+    documents = adr_documents()
+    by_prefix: dict[str, list[Path]] = {}
+    for document in documents:
+        by_prefix.setdefault(document.name[:4], []).append(document)
+    for prefix, conflicts in sorted(by_prefix.items()):
+        if len(conflicts) > 1:
+            paths = ", ".join(document.relative_to(ROOT).as_posix() for document in conflicts)
+            errors.append(f"adr: duplicate ADR prefix {prefix}: {paths}")
+    for document in documents:
         text = document.read_text(encoding="utf-8")
         if not text.startswith("# "):
             errors.append(f"{document.relative_to(ROOT)}: ADR must start with a level-one title")

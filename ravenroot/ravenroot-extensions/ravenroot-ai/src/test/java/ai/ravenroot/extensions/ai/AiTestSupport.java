@@ -28,6 +28,146 @@ final class AiTestSupport {
     private AiTestSupport() {
     }
 
+    static ai.ravenroot.api.node.service.AgentResourceService unlimitedTestResources() {
+        return new ai.ravenroot.api.node.service.AgentResourceService() {
+            private final ai.ravenroot.api.node.service.AgentResourceSession session =
+                    new ai.ravenroot.api.node.service.AgentResourceSession() {
+                @Override public ai.ravenroot.api.node.service.AgentModelReservation reserveModelTurn(long ordinal) {
+                    return new ai.ravenroot.api.node.service.AgentModelReservation() {
+                        @Override public long maximumOutputTokens() { return Long.MAX_VALUE; }
+                        @Override public java.time.Duration maximumDuration() {
+                            return java.time.Duration.ofDays(3650);
+                        }
+                        @Override public void dispatch() { }
+                        @Override public void release() { }
+                        @Override public void settle(java.util.Optional<Long> inputTokens,
+                                                     java.util.Optional<Long> outputTokens) { }
+                        @Override public void indeterminate() { }
+                    };
+                }
+                @Override public ai.ravenroot.api.node.service.AgentResourceSession createChild(
+                        ai.ravenroot.api.node.service.AgentChildResourceRequest request) { return this; }
+                @Override public void complete() { }
+                @Override public void cancel() { }
+                @Override public void suspend() { }
+            };
+            @Override public ai.ravenroot.api.node.service.AgentResourceSession admit(
+                    ai.ravenroot.api.execution.NodeMessage message,
+                    ai.ravenroot.api.node.service.AgentResourceRequest request) { return session; }
+            @Override public ai.ravenroot.api.node.service.AgentResourceSession resume(
+                    ai.ravenroot.api.node.ToolCallContinuationInput continuation,
+                    ai.ravenroot.api.node.service.AgentResourceRequest request) { return session; }
+        };
+    }
+
+    static final class TrackingAgentResources implements ai.ravenroot.api.node.service.AgentResourceService {
+        final AtomicInteger admissions = new AtomicInteger();
+        final AtomicInteger completes = new AtomicInteger();
+        final AtomicInteger cancels = new AtomicInteger();
+        final AtomicInteger failedAttempts = new AtomicInteger();
+        final AtomicInteger suspends = new AtomicInteger();
+        final AtomicInteger modelDispatches = new AtomicInteger();
+        final AtomicInteger modelReleases = new AtomicInteger();
+        final AtomicInteger modelIndeterminate = new AtomicInteger();
+        private final long maximumOutputTokens;
+        private final java.time.Duration maximumDuration;
+        private volatile RuntimeException settlementFailure;
+        private volatile RuntimeException cancellationFailure;
+        private volatile java.util.concurrent.CountDownLatch completionEntered;
+        private volatile java.util.concurrent.CountDownLatch releaseCompletion;
+
+        TrackingAgentResources() {
+            this(Long.MAX_VALUE, java.time.Duration.ofDays(3650));
+        }
+
+        TrackingAgentResources(long maximumOutputTokens, java.time.Duration maximumDuration) {
+            this.maximumOutputTokens = maximumOutputTokens;
+            this.maximumDuration = maximumDuration;
+        }
+
+        TrackingAgentResources failingSettlement(RuntimeException failure) {
+            settlementFailure = failure;
+            return this;
+        }
+
+        TrackingAgentResources failingCancellation(RuntimeException failure) {
+            cancellationFailure = failure;
+            return this;
+        }
+
+        TrackingAgentResources blockingCompletion(java.util.concurrent.CountDownLatch entered,
+                                                   java.util.concurrent.CountDownLatch release) {
+            completionEntered = entered;
+            releaseCompletion = release;
+            return this;
+        }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceSession admit(
+                ai.ravenroot.api.execution.NodeMessage message,
+                ai.ravenroot.api.node.service.AgentResourceRequest request) {
+            admissions.incrementAndGet();
+            return session();
+        }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceSession resume(
+                ai.ravenroot.api.node.ToolCallContinuationInput continuation,
+                ai.ravenroot.api.node.service.AgentResourceRequest request) {
+            admissions.incrementAndGet();
+            return session();
+        }
+
+        private ai.ravenroot.api.node.service.AgentResourceSession session() {
+            return new ai.ravenroot.api.node.service.AgentResourceSession() {
+                @Override public ai.ravenroot.api.node.service.AgentModelReservation reserveModelTurn(long ordinal) {
+                    return new ai.ravenroot.api.node.service.AgentModelReservation() {
+                        private final java.util.concurrent.atomic.AtomicBoolean dispatched =
+                                new java.util.concurrent.atomic.AtomicBoolean();
+                        private final java.util.concurrent.atomic.AtomicBoolean terminal =
+                                new java.util.concurrent.atomic.AtomicBoolean();
+                        @Override public long maximumOutputTokens() { return maximumOutputTokens; }
+                        @Override public java.time.Duration maximumDuration() { return maximumDuration; }
+                        @Override public void dispatch() {
+                            if (dispatched.compareAndSet(false, true)) modelDispatches.incrementAndGet();
+                        }
+                        @Override public void release() {
+                            if (terminal.compareAndSet(false, true)) modelReleases.incrementAndGet();
+                        }
+                        @Override public void settle(java.util.Optional<Long> inputTokens,
+                                                     java.util.Optional<Long> outputTokens) {
+                            terminal.compareAndSet(false, true);
+                            if (settlementFailure != null) throw settlementFailure;
+                        }
+                        @Override public void indeterminate() {
+                            if (terminal.compareAndSet(false, true)) modelIndeterminate.incrementAndGet();
+                        }
+                    };
+                }
+                @Override public ai.ravenroot.api.node.service.AgentResourceSession createChild(
+                        ai.ravenroot.api.node.service.AgentChildResourceRequest request) { return session(); }
+                @Override public void complete() {
+                    completes.incrementAndGet();
+                    if (completionEntered != null) completionEntered.countDown();
+                    if (releaseCompletion != null) {
+                        try {
+                            if (!releaseCompletion.await(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                                throw new IllegalStateException("resource completion was not released");
+                            }
+                        } catch (InterruptedException interrupted) {
+                            Thread.currentThread().interrupt();
+                            throw new IllegalStateException("resource completion interrupted", interrupted);
+                        }
+                    }
+                }
+                @Override public void cancel() {
+                    cancels.incrementAndGet();
+                    if (cancellationFailure != null) throw cancellationFailure;
+                }
+                @Override public void failAttempt() { failedAttempts.incrementAndGet(); }
+                @Override public void suspend() { suspends.incrementAndGet(); }
+            };
+        }
+    }
+
     static NodeMessage message(Object payload) {
         return message("tenant-a", payload, Map.of());
     }
@@ -79,6 +219,7 @@ final class AiTestSupport {
         final AtomicReference<OutboundHttpRequest> request = new AtomicReference<>();
         final AtomicInteger calls = new AtomicInteger();
         volatile RuntimeException synchronousFailure;
+        volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
         volatile CompletableFuture<OutboundHttpResponse> response = CompletableFuture.completedFuture(
                 new OutboundHttpResponse(200, Map.of("content-type", java.util.List.of("application/json")),
                         ChatCompletionsDouble.completion("hello").getBytes(StandardCharsets.UTF_8)));
@@ -89,6 +230,10 @@ final class AiTestSupport {
         }
 
         @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+            return resources;
+        }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -138,10 +283,19 @@ final class AiTestSupport {
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final AtomicInteger next = new AtomicInteger();
         private volatile Step forever;
+        private volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
 
         /** Adds one 200 response carrying {@code json}. */
         ScriptedHttp then(String json) {
             script.add(new Step(response(200, json), null));
+            return this;
+        }
+
+        /** Adds one response carrying an explicit managed final-output authority. */
+        ScriptedHttp thenWithOutputLimit(String json, long maximumOutputBytes) {
+            script.add(new Step(new OutboundHttpResponse(200,
+                    Map.of("content-type", java.util.List.of("application/json")),
+                    json.getBytes(StandardCharsets.UTF_8), maximumOutputBytes), null));
             return this;
         }
 
@@ -166,6 +320,11 @@ final class AiTestSupport {
         /** Answers {@code json} for every call past the end of the script. */
         ScriptedHttp thenForever(String json) {
             forever = new Step(response(200, json), null);
+            return this;
+        }
+
+        ScriptedHttp resources(ai.ravenroot.api.node.service.AgentResourceService service) {
+            resources = java.util.Objects.requireNonNull(service);
             return this;
         }
 
@@ -195,6 +354,10 @@ final class AiTestSupport {
         }
 
         @Override public ToolCallAuthorizationService toolAuthorization() { return allowingTools(); }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+            return resources;
+        }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -266,6 +429,8 @@ final class AiTestSupport {
         private volatile boolean uncancellable;
         private volatile boolean cancellationThrows;
         private volatile ToolCallAuthorizationService toolAuthorization = allowingTools();
+        private volatile ai.ravenroot.api.node.service.AgentResourceService resources = unlimitedTestResources();
+        private volatile long mcpMaximumOutputBytes = Long.MAX_VALUE;
         private final java.util.List<CompletableFuture<OutboundHttpResponse>> stalled =
                 new java.util.concurrent.CopyOnWriteArrayList<>();
         private final java.util.List<Boolean> cancelled =
@@ -334,8 +499,18 @@ final class AiTestSupport {
             return this;
         }
 
+        RoutedHttp mcpOutputLimit(long maximumOutputBytes) {
+            mcpMaximumOutputBytes = maximumOutputBytes;
+            return this;
+        }
+
         RoutedHttp authorizing(ToolCallAuthorizationService authorization) {
             toolAuthorization = java.util.Objects.requireNonNull(authorization);
+            return this;
+        }
+
+        RoutedHttp resources(ai.ravenroot.api.node.service.AgentResourceService service) {
+            resources = java.util.Objects.requireNonNull(service);
             return this;
         }
 
@@ -373,6 +548,10 @@ final class AiTestSupport {
         }
 
         @Override public ToolCallAuthorizationService toolAuthorization() { return toolAuthorization; }
+
+        @Override public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+            return resources;
+        }
 
         @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
             return NodePackageServices.unavailable().credentials();
@@ -439,7 +618,7 @@ final class AiTestSupport {
                 responseHeaders.put("content-type", java.util.List.of(answer.contentType()));
                 responseHeaders.putAll(answer.headers());
                 return OutboundCall.completed(new OutboundHttpResponse(answer.status(),
-                        responseHeaders, answer.body()));
+                        responseHeaders, answer.body(), mcpMaximumOutputBytes));
             };
         }
     }

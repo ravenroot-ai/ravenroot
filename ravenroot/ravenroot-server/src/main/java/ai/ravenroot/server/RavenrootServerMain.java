@@ -158,11 +158,22 @@ public final class RavenrootServerMain {
         // never be allowed to replace the real diagnosis with an unrelated audit failure. See
         // ravenroot-plugin-bundle's DESIGN.md, "Where detail goes".
         var pluginActivationAuditSink = new AuditTrailPluginActivationSink(auditTrail);
+        var agentBudgetTelemetry = new ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry.Relay();
         ai.ravenroot.api.persistence.ExecutionStore approvalStore = executionStoreOwner.store();
+        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets = approvalStore != null
+                && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.AGENT_AUTHORITY_BUDGETS)
+                ? new ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService(
+                        approvalStore, java.time.Clock.systemUTC(),
+                        ai.ravenroot.server.agent.AgentAuthorityBudgetConfiguration
+                                .fromEnvironment(System.getenv()),
+                        agentBudgetTelemetry)
+                : null;
         ai.ravenroot.core.approval.ToolApprovalService toolApprovals = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.TOOL_APPROVALS)
                 ? new ai.ravenroot.core.approval.ToolApprovalService(
-                        approvalStore, java.time.Clock.systemUTC()) : null;
+                        approvalStore, java.time.Clock.systemUTC(), agentBudgets == null
+                                ? ai.ravenroot.core.approval.ToolApprovalBudgetHooks.none()
+                                : agentBudgets) : null;
         ai.ravenroot.core.humantask.HumanTaskService humanTasks = approvalStore != null
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.DURABLE)
                 && approvalStore.supports(ai.ravenroot.api.persistence.StoreCapability.HUMAN_TASKS)
@@ -174,7 +185,7 @@ public final class RavenrootServerMain {
         PluginActivationOrchestrator.Registration registration = registerNodePackagesOrRefuse(
                 environment, credentialResolver, pluginActivationAuditSink,
                 new ai.ravenroot.server.audit.AuditTrailToolCallSink(auditTrail),
-                toolApprovals, toolApprovalSettings, humanTasks);
+                toolApprovals, toolApprovalSettings, agentBudgets, humanTasks);
         PluginActivationOrchestrator.Registered registered = registration.registered();
         var behaviors = registered.registry();
         // Validate all enabled package declarations before either application deployment state or the
@@ -222,12 +233,19 @@ public final class RavenrootServerMain {
         // configuration channel, so the variable is read here and the decision travels inward as a
         // parameter. Pass-through remains the default for the reasons in UnknownBehaviorConfiguration.
         var unknownBehavior = UnknownBehaviorConfiguration.fromEnvironment(System.getenv());
+        var graphExecutionLimits = ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(System.getenv());
         var executionIdentities = ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids();
         var application = new DefaultRavenrootApplication(engine, monitor,
                 behaviors, environment.artifacts(), environment.programRuntime(),
                 executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
-                executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks);
+                executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore());
+        // Every recovery path verifies against the application's own resolver rather than one built
+        // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
+        // two composition sites was updated and the other was not, and the refusals that followed
+        // would look like corrupt manifests rather than like a composition mistake.
+        var executionManifests = application.executionManifests();
         final ai.ravenroot.server.approval.ToolApprovalRecoveryDriver approvalRecovery;
         if (toolApprovals == null && humanTasks == null) {
             approvalRecovery = null;
@@ -241,7 +259,8 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.approval.PinnedGraphToolApprovalContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl());
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
+                        executionManifests);
                 dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
                         executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor));
             }
@@ -250,7 +269,8 @@ public final class RavenrootServerMain {
                 var continuationExecutor = new ai.ravenroot.core.humantask.PinnedGraphHumanTaskContinuationExecutor(
                         executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
-                        recoveryConfiguration.leaseTtl());
+                        recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
+                        executionManifests);
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor));
             }
@@ -258,7 +278,8 @@ public final class RavenrootServerMain {
                     executionStore, recoveryConfiguration.tenantIds(), recoveryWorker,
                     recoveryConfiguration.batchLimit(), recoveryConfiguration.leaseTtl(),
                     ai.ravenroot.core.recovery.RepeatabilityDeclarations.NONE_DECLARED,
-                    new ai.ravenroot.core.recovery.CompositeRecoveryDispatcher(dispatchers));
+                    new ai.ravenroot.core.recovery.CompositeRecoveryDispatcher(dispatchers),
+                    graphExecutionLimits.maxRecoveryDeliveriesPerAttempt());
             approvalRecovery = new ai.ravenroot.server.approval.ToolApprovalRecoveryDriver(
                     recoveryService, recoveryConfiguration.interval());
         }
@@ -373,6 +394,12 @@ public final class RavenrootServerMain {
                 if (humanTasks != null) {
                     server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant);
                 }
+                if (agentBudgets != null) {
+                    server.installAgentAuthorityControl(agentBudgets);
+                }
+                if (executionManifests != null) {
+                    server.installExecutionManifests(executionManifests);
+                }
                 return new RavenrootServerStartup.Listener() {
                     @Override public void install(
                             ai.ravenroot.server.ingress.ManagedIngressRegistry ingress) {
@@ -405,7 +432,8 @@ public final class RavenrootServerMain {
         java.util.Optional<AutoCloseable> telemetry;
         try {
             telemetry = ai.ravenroot.observability.otel.TelemetrySupport.install(
-                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor);
+                    ai.ravenroot.observability.otel.TelemetryConfiguration.fromEnvironment(System.getenv()), monitor,
+                    agentBudgetTelemetry);
         } catch (RuntimeException | Error telemetryFailure) {
             startupHandle.close();
             userCredentials.close();
@@ -587,11 +615,12 @@ public final class RavenrootServerMain {
             ai.ravenroot.api.security.ToolCallAuditSink toolAuditSink,
             ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
             ai.ravenroot.core.approval.ToolApprovalSettings toolApprovalSettings,
+            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
             ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
         try {
             var services = EnvironmentNodePackageServiceGrants.fromEnvironment(System.getenv(),
                     new DeploymentGlobalTenantCredentials(credentials), environment.toolPolicy(),
-                    toolAuditSink, toolApprovals, toolApprovalSettings);
+                    toolAuditSink, toolApprovals, toolApprovalSettings, agentBudgets);
             return PluginActivationOrchestrator.registerWithInventory(
                     BehaviorRegistry.standard(environment,
                             ai.ravenroot.api.publication.PublicationPolicyResolver.none(),

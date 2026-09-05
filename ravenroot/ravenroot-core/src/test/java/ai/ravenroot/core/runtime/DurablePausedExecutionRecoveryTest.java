@@ -36,6 +36,8 @@ import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -281,6 +283,43 @@ final class DurablePausedExecutionRecoveryTest {
     }
 
     /**
+     * The hold path's verification hook, driven through the operator's own resume rather than through
+     * the service.
+     *
+     * <p>The contrast with the test above is the whole assertion: identical hold, identical restart,
+     * identical resume call, and the only difference is a restarted process that records manifests
+     * and has none for work accepted before it did. The resume must refuse with the typed failure
+     * rather than continue the traversal against dependencies nothing recorded, and the hold must
+     * still be held afterwards — a refused resume settles nothing.</p>
+     */
+    @Test
+    void resumeRefusesAnInheritedHoldWhoseManifestThisRuntimeDoesNotHave() throws Exception {
+        var stores = new DurableStores();
+        Held held = holdAndStop(stores);
+
+        try (var manifests = new ai.ravenroot.core.persistence.InMemoryExecutionManifestStore(
+                java.time.Clock.systemUTC());
+             Restarted restarted = stores.restartRecordingManifests(manifests)) {
+
+            var refused = assertThrows(
+                    ai.ravenroot.api.persistence.ExecutionManifestStoreException.class,
+                    () -> restarted.application().resumeTraversal(TENANT, held.traversalId()));
+            assertInstanceOf(ai.ravenroot.api.persistence.ExecutionManifestStoreFailure.NotFound.class,
+                    refused.failure(),
+                    "an execution accepted before this deployment recorded manifests has none, and "
+                            + "resuming it would mean resolving today's dependencies for yesterday's "
+                            + "acceptance");
+
+            assertEquals(List.of(), restarted.effects(),
+                    "the node the hold withheld did not run");
+            assertEquals(ExecutionPauseStatus.HELD,
+                    stores.pause(held.key(), stores.anyPauseId(held.key())).status(),
+                    "and the hold is still held: a refused resume settles nothing");
+            assertTrue(stores.heldPause(held.traversalId()).isPresent());
+        }
+    }
+
+    /**
      * <b>Criterion 4, cancel.</b> Cancelling a recovered hold settles it once, ends the traversal, and
      * runs nothing.
      *
@@ -488,14 +527,7 @@ final class DurablePausedExecutionRecoveryTest {
         }
     }
 
-    /**
-     * A payload the type model cannot represent takes the hold and writes nothing.
-     *
-     * <p>The alternative would be to write a lossy encoding, which produces the worst outcome this
-     * design has: a resume that continues silently with a different value than the hold withheld.
-     * The node returns a plain {@code Object}, which is what an in-process behaviour handing on an
-     * arbitrary Java value looks like.</p>
-     */
+    /** An unrepresentable node result fails before either durable or process-local routing. */
     @Test
     void aPayloadTheTypeModelCannotRepresentIsNotWrittenDown() throws Exception {
         var stores = new DurableStores();
@@ -508,19 +540,16 @@ final class DurablePausedExecutionRecoveryTest {
             running.pauseFromFirstNode(traversalId);
             submitter.start();
 
-            assertTrue(running.awaitPaused(BOUND), "the hold must be announced");
-            assertFalse(running.awaitTerminal(HELD_BOUND), "and the traversal must be holding");
+            assertTrue(running.awaitTerminal(BOUND),
+                    "the graph payload boundary must fail before routing the opaque value");
             assertEquals(List.of("first"), running.effects(),
                     "the withheld node must not have run: " + running.effects());
             assertTrue(stores.heldPause(traversalId).isEmpty(),
-                    "a payload that cannot be represented has no encoding, and a lossy one would "
-                            + "resume with a value the hold never withheld");
-
-            assertTrue(running.application().resumeTraversal(TENANT, traversalId));
-            assertTrue(running.awaitTerminal(BOUND));
+                    "an opaque result must never become durable continuation data");
+            assertFalse(running.application().resumeTraversal(TENANT, traversalId),
+                    "a failed traversal must not retain a process-local hold");
             submitter.join(BOUND.toMillis());
-            assertEquals(List.of("first", "second"), running.effects(),
-                    "and the released hop still carries the real value, losing nothing");
+            assertEquals(List.of("first"), running.effects());
         }
     }
 
@@ -782,6 +811,13 @@ final class DurablePausedExecutionRecoveryTest {
                     Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS);
         }
 
+        /** A restart that records manifests, and has none for work accepted before it did. */
+        private Restarted restartRecordingManifests(
+                ai.ravenroot.api.persistence.ExecutionManifestStore manifests) {
+            return new Restarted(forApplication(), definitions,
+                    Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS, manifests);
+        }
+
         private StoredProcessInstance load(ExecutionKey key) {
             return executions.load(key).toCompletableFuture().join();
         }
@@ -851,6 +887,12 @@ final class DurablePausedExecutionRecoveryTest {
 
         private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
                           List<String> effects, String graphMl) {
+            this(executions, definitions, effects, graphMl, null);
+        }
+
+        private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
+                          List<String> effects, String graphMl,
+                          ai.ravenroot.api.persistence.ExecutionManifestStore manifests) {
             this.effects = effects;
             this.graphMl = graphMl;
             var registry = new BehaviorRegistry()
@@ -864,7 +906,8 @@ final class DurablePausedExecutionRecoveryTest {
             this.application = new DefaultRavenrootApplication(engine, monitor, registry,
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), executions, 8,
-                    UnknownBehaviorPolicy.passThrough(), definitions);
+                    UnknownBehaviorPolicy.passThrough(), definitions, null, null,
+                    GraphExecutionLimits.DEFAULTS, null, manifests);
             this.self.set(application);
             this.subscription = monitor.subscribe(event -> {
                 if (event.type() == ExecutionEventType.EXECUTION_PAUSED) {

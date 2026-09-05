@@ -63,6 +63,7 @@ final class ChatCompletionsDouble implements AutoCloseable {
 
     private volatile int status = 200;
     private volatile String responseBody = completion("a perfectly ordinary answer");
+    private volatile String responseMediaType = "application/json";
     private volatile String location;
     private volatile long chunkedBytes = -1;
 
@@ -115,7 +116,7 @@ final class ChatCompletionsDouble implements AutoCloseable {
             return;
         }
         byte[] payload = responseBody.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().add("content-type", "application/json");
+        exchange.getResponseHeaders().add("content-type", responseMediaType);
         exchange.sendResponseHeaders(status, payload.length);
         exchange.getResponseBody().write(payload);
         bytesServed.addAndGet(payload.length);
@@ -123,8 +124,13 @@ final class ChatCompletionsDouble implements AutoCloseable {
     }
 
     ChatCompletionsDouble responds(int status, String body) {
+        return responds(status, body, "application/json");
+    }
+
+    ChatCompletionsDouble responds(int status, String body, String mediaType) {
         this.status = status;
         this.responseBody = body;
+        this.responseMediaType = mediaType;
         this.location = null;
         this.chunkedBytes = -1;
         return this;

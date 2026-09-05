@@ -33,6 +33,8 @@ const ENGLISH_MESSAGES = Object.freeze({
   'controls.nodeActionScale.help': 'Resize node action minibars',
   'commands.view.graphs.label': 'Graphs…',
   'commands.view.graphs.help': 'List open documents and switch between them',
+  'commands.view.closeAllDocuments.label': 'Close All Documents',
+  'commands.view.closeAllDocuments.help': 'Close every document that is currently open',
   'commands.view.panels.label': 'Panels…',
   'commands.view.leftPanels.label': 'Left Panels',
   'commands.view.rightInspector.label': 'Right Inspector',
@@ -113,6 +115,31 @@ const ENGLISH_MESSAGES = Object.freeze({
   'inspector.unsaved.discard': 'Discard',
   'inspector.unsaved.cancel': 'Cancel',
   'inspector.history.pending': 'Save or discard the current Inspector changes before using Undo or Redo.',
+  'closeAll.dirty.title': 'Save changes before closing all documents?',
+  'closeAll.dirty.description.one':
+    'One modified document has changes that have not been downloaded.',
+  'closeAll.dirty.description.many':
+    '{count} modified documents have changes that have not been downloaded.',
+  'closeAll.dirty.save': 'Save All and Continue',
+  'closeAll.dirty.discard': 'Discard All and Continue',
+  'closeAll.sessions.title': 'Close documents with active local sessions?',
+  'closeAll.sessions.description.one':
+    'One document has an active local source session. Keeping it running detaches this browser only.',
+  'closeAll.sessions.description.many':
+    '{count} documents have active local source sessions. Keeping them running detaches this browser only.',
+  'closeAll.sessions.item.one': '{name} — one inbound source node · scope LOCAL_PROCESS',
+  'closeAll.sessions.item.many': '{name} — {count} inbound source nodes · scope LOCAL_PROCESS',
+  'closeAll.sessions.keep': 'Keep Running and Close',
+  'closeAll.sessions.stop': 'Stop and Close All',
+  'closeAll.working.title': 'Closing documents…',
+  'closeAll.working.description': 'Ravenroot is completing the selected save and stop actions before closing documents.',
+  'closeAll.failure.title': 'Could not close all documents',
+  'closeAll.failure.description':
+    'The targeted documents remain open. Review the problem below, then retry or cancel.',
+  'closeAll.failure.save': 'One or more modified documents could not be prepared or downloaded.',
+  'closeAll.failure.stop': 'One or more local source sessions did not reach the stopped state.',
+  'closeAll.retry': 'Retry',
+  'closeAll.cancel': 'Cancel',
 });
 
 export const UI_TEXT_CATALOGS = Object.freeze({ en: ENGLISH_MESSAGES });

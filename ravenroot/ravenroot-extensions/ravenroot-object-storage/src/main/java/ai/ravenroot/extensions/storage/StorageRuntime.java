@@ -5,11 +5,13 @@ import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import ai.ravenroot.api.node.service.OutboundHttpSigning;
+import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -50,9 +52,10 @@ final class StorageRuntime {
         boolean put = settings.operation() == StorageProfile.Operation.PUT;
         return execute(message, cancellation, services, settings.profile(), actionGate,
                 new Request(settings.destination(), settings.operation().name(), headers, body,
-                        settings.timeoutMs(), settings.maxBytes(), 0,
+                        settings.timeoutMs(), settings.maxBytes(), projectedOutputLimit(settings.maxBytes()), 0,
                         put ? Semantics.MUTATION : Semantics.READ,
-                        response -> project(settings, body, response)));
+                        response -> project(settings, body, response,
+                                effectiveOutputLimit(projectedOutputLimit(settings.maxBytes()), response))));
     }
 
     CompletionStage<NodeResult> execute(NodeMessage message, CancellationSignal cancellation,
@@ -119,14 +122,15 @@ final class StorageRuntime {
     }
 
     record Request(URI destination, String method, Map<String, List<String>> headers, byte[] body,
-                   int timeoutMs, int maxResponseBytes, int retries, Semantics semantics,
+                   int timeoutMs, int maxResponseBytes, long maxOutputBytes, int retries, Semantics semantics,
                    ResponseProjector projector) {
         Request {
             java.util.Objects.requireNonNull(destination);
             java.util.Objects.requireNonNull(method);
             headers = Map.copyOf(headers);
             body = body.clone();
-            if (timeoutMs < 1 || maxResponseBytes < 0 || retries < 0 || retries > 3) {
+            if (timeoutMs < 1 || maxResponseBytes < 0 || maxOutputBytes < 1
+                    || maxOutputBytes > Integer.MAX_VALUE || retries < 0 || retries > 3) {
                 throw StorageException.of(StorageException.Code.CONFIGURATION);
             }
             java.util.Objects.requireNonNull(semantics);
@@ -166,7 +170,13 @@ final class StorageRuntime {
             try {
                 call = services.outboundHttp().execute(message, new OutboundHttpRequest(request.destination(),
                         request.method(), request.headers(), request.body(), Duration.ofNanos(remaining), null,
-                        new OutboundHttpSigning(profile.signingBindingId())));
+                        new OutboundHttpSigning(profile.signingBindingId()),
+                        new ExternalIoLimits(Math.max(1, request.body().length),
+                                Math.max(1, request.maxResponseBytes()),
+                                Math.max(1, request.maxResponseBytes()), request.maxOutputBytes(), 1,
+                                Duration.ofNanos(remaining), Duration.ofSeconds(2), responseMediaTypes(),
+                                Set.of("identity")),
+                        ai.ravenroot.api.node.service.OutboundHttpRepresentationPolicy.SUCCESS_ONLY));
             } catch (RuntimeException failure) {
                 failedLocked(number, failure);
                 return;
@@ -192,13 +202,24 @@ final class StorageRuntime {
                             retryLocked(number);
                             return;
                         }
-                        outcome.succeedLocked(request.projector().project(response));
+                        long outputLimit = effectiveOutputLimit(request.maxOutputBytes(), response);
+                        NodeResult projected = request.projector().project(response);
+                        requireProjectedResult(projected, outputLimit);
+                        outcome.succeedLocked(projected);
                     } catch (RuntimeException invalid) {
                         outcome.failLocked(invalid instanceof StorageException ? invalid
                                 : StorageException.of(StorageException.Code.RESPONSE_INVALID));
                     }
                 }
             });
+        }
+
+        private Set<String> responseMediaTypes() {
+            if (request.semantics() == Semantics.RETRYABLE_READ) {
+                return Set.of("application/xml", "text/xml");
+            }
+            if (request.semantics() == Semantics.READ) return profile.allowedContentTypes();
+            return Set.of();
         }
 
         private void failedLocked(int number, Throwable failure) {
@@ -237,7 +258,8 @@ final class StorageRuntime {
 
     int admissionEntries() { return admission.size(); }
 
-    private static NodeResult project(StorageSettings settings, byte[] submitted, OutboundHttpResponse response) {
+    static NodeResult project(StorageSettings settings, byte[] submitted, OutboundHttpResponse response,
+                              long maxOutputBytes) {
         int status = response.statusCode();
         if (status >= 300 && status < 400) throw StorageException.of(StorageException.Code.REDIRECT_REFUSED);
         if (status == 404) throw StorageException.of(StorageException.Code.NOT_FOUND);
@@ -255,18 +277,96 @@ final class StorageRuntime {
         if (get) {
             output.put("version", "object.get.result.v1");
             output.put("encoding", settings.encoding());
-            if (settings.encoding().equals("text")) output.put("text", strictText(responseBody));
-            else output.put("base64", Base64.getEncoder().encodeToString(responseBody));
             output.put("bytes", (long) responseBody.length);
             output.put("sha256", sha256(responseBody));
+            output.put("etag", etag);
+            if (versionId != null) output.put("versionId", versionId);
+            if (settings.encoding().equals("text")) {
+                String text = strictText(responseBody);
+                output.put("text", "");
+                requireProjectedOutput(projectedBytes(output, jsonStringContentBytes(text)), maxOutputBytes);
+                output.put("text", text);
+            } else {
+                output.put("base64", "");
+                requireProjectedOutput(projectedBytes(output, base64Length(responseBody.length)), maxOutputBytes);
+                output.put("base64", Base64.getEncoder().encodeToString(responseBody));
+            }
         } else {
             if (responseBody.length != 0) throw StorageException.of(StorageException.Code.RESPONSE_INVALID);
             output.put("version", "object.put.result.v1");
             output.put("bytes", (long) submitted.length);
+            output.put("etag", etag);
+            if (versionId != null) output.put("versionId", versionId);
         }
-        output.put("etag", etag);
-        if (versionId != null) output.put("versionId", versionId);
         return NodeResult.continueWith(Map.copyOf(output));
+    }
+
+    static long projectedOutputLimit(int maximumRawBytes) {
+        try {
+            return Math.min(64L * 1024 * 1024,
+                    Math.addExact(Math.multiplyExact((long) maximumRawBytes, 6L), 4_096L));
+        } catch (ArithmeticException overflow) {
+            return 64L * 1024 * 1024;
+        }
+    }
+
+    static long effectiveOutputLimit(long localMaximum, OutboundHttpResponse response) {
+        return Math.min(localMaximum, response.effectiveMaximumOutputBytes());
+    }
+
+    static void requireProjectedOutput(long projectedBytes, long maximumOutputBytes) {
+        if (projectedBytes < 0 || projectedBytes > maximumOutputBytes) {
+            throw StorageException.of(StorageException.Code.RESPONSE_TOO_LARGE);
+        }
+    }
+
+    static void requireProjectedResult(NodeResult result, long maximumOutputBytes) {
+        int ceiling = Math.toIntExact(maximumOutputBytes);
+        try {
+            new PayloadLimits(ceiling, 32, 1_000_000, 5_000_000, ceiling, 4_096)
+                    .enforceAndMeasure(result.payload());
+        } catch (RuntimeException oversized) {
+            throw StorageException.of(StorageException.Code.RESPONSE_TOO_LARGE);
+        }
+    }
+
+    static long projectedBytes(Map<String, Object> emptyValueShape, long valueContentBytes) {
+        int shell = PayloadLimits.DEFAULTS.enforceAndMeasure(emptyValueShape);
+        try {
+            return Math.addExact(shell, valueContentBytes);
+        } catch (ArithmeticException overflow) {
+            return Long.MAX_VALUE;
+        }
+    }
+
+    static long base64Length(int bytes) {
+        return ((long) bytes + 2L) / 3L * 4L;
+    }
+
+    private static long jsonStringContentBytes(String value) {
+        long bytes = 0;
+        for (int index = 0; index < value.length(); index++) {
+            char character = value.charAt(index);
+            if (character == '"' || character == '\\' || character == '\n' || character == '\r'
+                    || character == '\t' || character == '\b' || character == '\f') {
+                bytes += 2;
+            } else if (character < 0x20 || Character.isSurrogate(character)) {
+                if (Character.isHighSurrogate(character) && index + 1 < value.length()
+                        && Character.isLowSurrogate(value.charAt(index + 1))) {
+                    bytes += 4;
+                    index++;
+                } else {
+                    bytes += 6;
+                }
+            } else if (character < 0x80) {
+                bytes++;
+            } else if (character < 0x800) {
+                bytes += 2;
+            } else {
+                bytes += 3;
+            }
+        }
+        return bytes;
     }
 
     private static String singleHeader(Map<String, List<String>> headers, String wanted, boolean required) {
@@ -330,8 +430,10 @@ final class StorageRuntime {
                 case REQUEST_TOO_LARGE -> StorageException.Code.REQUEST_TOO_LARGE;
                 case RESPONSE_TOO_LARGE -> StorageException.Code.RESPONSE_TOO_LARGE;
                 case DEADLINE_EXCEEDED, CANCELLED -> StorageException.Code.DEADLINE_EXCEEDED;
-                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE -> StorageException.Code.CAPACITY_UNAVAILABLE;
-                case TRANSPORT_FAILED -> StorageException.Code.TRANSPORT_UNAVAILABLE;
+                case ADMISSION_REFUSED, SERVICE_UNAVAILABLE, BUDGET_EXHAUSTED ->
+                        StorageException.Code.CAPACITY_UNAVAILABLE;
+                case TRANSPORT_FAILED, EFFECT_OUTCOME_INDETERMINATE ->
+                        StorageException.Code.TRANSPORT_UNAVAILABLE;
             });
         }
         return StorageException.of(ambiguous ? StorageException.Code.AMBIGUOUS

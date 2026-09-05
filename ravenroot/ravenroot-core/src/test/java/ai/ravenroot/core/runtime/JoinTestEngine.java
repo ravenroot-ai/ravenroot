@@ -275,9 +275,22 @@ final class JoinTestEngine implements ExecutionEngine {
                     Thread.currentThread().interrupt();
                 }
             }
-            var entry = new Pending(task);
+            var entry = new Pending(delay, task);
             pending.add(entry);
             return entry;
+        }
+
+        /**
+         * The delays this scheduler has been asked for, oldest first, including cancelled and fired
+         * ones.
+         *
+         * <p>Recorded because the budget a deadline is armed with is otherwise invisible: a manual
+         * scheduler that only fires on demand makes "re-armed with what was left" and "re-armed with
+         * the full timeout" produce identical observable behaviour, and the defect this exists to
+         * catch is exactly a resume that resets the budget.</p>
+         */
+        List<Duration> requestedDelays() {
+            return pending.stream().map(entry -> entry.delay).toList();
         }
 
         /** Runs every task that is neither cancelled nor already fired. Returns how many ran. */
@@ -305,11 +318,13 @@ final class JoinTestEngine implements ExecutionEngine {
         }
 
         private final class Pending implements ScheduledTask {
+            private final Duration delay;
             private final Runnable task;
             private final AtomicBoolean done = new AtomicBoolean();
             private final AtomicBoolean cancelled = new AtomicBoolean();
 
-            private Pending(Runnable task) {
+            private Pending(Duration delay, Runnable task) {
+                this.delay = delay;
                 this.task = task;
             }
 

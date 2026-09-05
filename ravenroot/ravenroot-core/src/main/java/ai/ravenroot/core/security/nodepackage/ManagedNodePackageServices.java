@@ -3,6 +3,7 @@ package ai.ravenroot.core.security.nodepackage;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.node.service.CredentialLease;
+import ai.ravenroot.api.node.service.ExternalIoLimits;
 import ai.ravenroot.api.node.service.NodeCredentialService;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
@@ -120,6 +121,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private final ToolCallAuditSink toolAuditSink;
     private final ToolApprovalService toolApprovalService;
     private final ToolApprovalSettings toolApprovalSettings;
+    private final ai.ravenroot.api.node.service.AgentResourceService agentResources;
+    private final AgentAuthorityBudgetService agentAuthorityBudgets;
     private volatile HttpClient client;
     private final AdmissionController admission;
     private final NodePackageServices unavailable = NodePackageServices.unavailable();
@@ -135,6 +138,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         toolAuditSink = Objects.requireNonNull(builder.toolAuditSink, "toolAuditSink");
         toolApprovalService = builder.toolApprovalService;
         toolApprovalSettings = builder.toolApprovalSettings;
+        agentResources = builder.agentResources;
+        agentAuthorityBudgets = builder.agentAuthorityBudgets;
         admission = new AdmissionController(policy.maximumConcurrentOperations(),
                 policy.maximumConcurrentPerTenant());
     }
@@ -217,6 +222,15 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         return this::authorizeToolCall;
     }
 
+    @Override
+    public ai.ravenroot.api.node.service.AgentResourceService agentResources() {
+        if (!capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
+                || agentResources == null) {
+            return unavailable.agentResources();
+        }
+        return agentResources;
+    }
+
     /**
      * Parses, canonicalizes, decides and audits one model-requested call before its effect can run.
      * The package receives the canonical bytes, not the unchecked bytes the model emitted.
@@ -227,8 +241,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         String tool = safeToolName(rawTool);
         UUID callId = UUID.randomUUID();
         if ("invalid-tool".equals(tool)) {
-            recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
-                    "TOOL_INVALID");
+            auditAndChargeDenied(delivered, callId, tool, "", "TOOL_INVALID");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
                     delivered, tool, false);
         }
@@ -246,8 +259,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             arguments = object;
             canonical = PayloadJson.write(arguments).getBytes(StandardCharsets.UTF_8);
         } catch (RuntimeException invalid) {
-            recordTool(delivered, callId, tool, "", ToolCallAuditEvent.Disposition.DENIED,
-                    "ARGUMENTS_INVALID");
+            auditAndChargeDenied(delivered, callId, tool, "", "ARGUMENTS_INVALID");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, "", new byte[0],
                     delivered, tool, false);
         }
@@ -261,8 +273,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                     delivered.processInstanceId(), delivered.nodeId(), tool, policyArguments)),
                     "toolPolicy decision");
         } catch (RuntimeException policyFailure) {
-            recordTool(delivered, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED,
-                    "POLICY_UNAVAILABLE");
+            auditAndChargeDenied(delivered, callId, tool, digest, "POLICY_UNAVAILABLE");
             return new ManagedToolCall(callId, ToolCallAuthorization.Disposition.DENY, digest, canonical,
                     delivered, tool, false);
         }
@@ -282,9 +293,62 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             case DENY -> "POLICY_DENIED";
             case REQUIRE_APPROVAL -> "APPROVAL_REQUIRED";
         };
-        recordTool(delivered, callId, tool, digest, auditDisposition, reason);
+        AgentAuthorityBudgetService.ToolReservation reservation = null;
+        if (disposition == ToolCallAuthorization.Disposition.DENY) {
+            auditAndChargeDenied(delivered, callId, tool, digest, reason);
+        } else {
+            recordTool(delivered, callId, tool, digest, auditDisposition, reason);
+            if (disposition == ToolCallAuthorization.Disposition.ALLOW) {
+                try {
+                    reservation = reserveTool(delivered, callId);
+                } catch (RuntimeException accountingRefusal) {
+                    try {
+                        recordTool(delivered, callId, tool, digest,
+                                ToolCallAuditEvent.Disposition.FAILED, "BUDGET_REFUSED");
+                    } catch (RuntimeException auditFailure) {
+                        accountingRefusal.addSuppressed(auditFailure);
+                    }
+                    var terminal = new NodePackageServiceException(
+                            NodePackageServiceException.Reason.BUDGET_EXHAUSTED);
+                    terminal.addSuppressed(accountingRefusal);
+                    throw terminal;
+                }
+            }
+        }
         return new ManagedToolCall(callId, disposition, digest, canonical, delivered, tool,
-                disposition == ToolCallAuthorization.Disposition.ALLOW);
+                disposition == ToolCallAuthorization.Disposition.ALLOW, reservation);
+    }
+
+    private AgentAuthorityBudgetService.ToolReservation reserveTool(NodeMessage message, UUID callId) {
+        if (!capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
+                || agentAuthorityBudgets == null) return null;
+        return agentAuthorityBudgets.reserveDirectTool(message, callId);
+    }
+
+    private void chargeDeniedTool(NodeMessage message, UUID callId) {
+        if (capabilities.contains(NodePackageCapability.AGENT_RESOURCES)
+                && agentAuthorityBudgets != null) {
+            agentAuthorityBudgets.chargeDeniedTool(message, callId);
+        }
+    }
+
+    private void auditAndChargeDenied(NodeMessage message, UUID callId, String tool,
+                                      String digest, String reason) {
+        RuntimeException failure = null;
+        try {
+            recordTool(message, callId, tool, digest, ToolCallAuditEvent.Disposition.DENIED, reason);
+        } catch (RuntimeException auditFailure) {
+            failure = auditFailure;
+        }
+        try {
+            chargeDeniedTool(message, callId);
+        } catch (RuntimeException accountingFailure) {
+            if (failure == null) failure = accountingFailure;
+            else failure.addSuppressed(accountingFailure);
+        }
+        if (failure != null) {
+            throw new NodePackageServiceException(NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
+        }
     }
 
     private void recordTool(NodeMessage message, UUID callId, String tool, String digest,
@@ -329,12 +393,21 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private final NodeMessage message;
         private final String tool;
         private final boolean terminalExpected;
+        private final AgentAuthorityBudgetService.ToolReservation budgetReservation;
         private final AtomicBoolean completed = new AtomicBoolean();
         private final UUID approvalId = UUID.randomUUID();
 
         private ManagedToolCall(UUID callId, Disposition disposition, String argumentsDigest,
                                 byte[] canonicalArguments, NodeMessage message, String tool,
                                 boolean terminalExpected) {
+            this(callId, disposition, argumentsDigest, canonicalArguments, message, tool,
+                    terminalExpected, null);
+        }
+
+        private ManagedToolCall(UUID callId, Disposition disposition, String argumentsDigest,
+                                byte[] canonicalArguments, NodeMessage message, String tool,
+                                boolean terminalExpected,
+                                AgentAuthorityBudgetService.ToolReservation budgetReservation) {
             this.callId = callId;
             this.disposition = disposition;
             this.argumentsDigest = argumentsDigest;
@@ -342,6 +415,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             this.message = message;
             this.tool = tool;
             this.terminalExpected = terminalExpected;
+            this.budgetReservation = budgetReservation;
         }
 
         @Override public UUID callId() { return callId; }
@@ -373,10 +447,24 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         public void complete(Outcome outcome) {
             Objects.requireNonNull(outcome, "outcome");
             if (!terminalExpected || !completed.compareAndSet(false, true)) return;
-            recordTool(message, callId, tool, argumentsDigest,
-                    outcome == Outcome.SUCCEEDED ? ToolCallAuditEvent.Disposition.SUCCEEDED
-                            : ToolCallAuditEvent.Disposition.FAILED,
-                    outcome == Outcome.SUCCEEDED ? "EFFECT_SUCCEEDED" : "EFFECT_FAILED");
+            boolean failed = false;
+            try {
+                recordTool(message, callId, tool, argumentsDigest,
+                        outcome == Outcome.SUCCEEDED ? ToolCallAuditEvent.Disposition.SUCCEEDED
+                                : ToolCallAuditEvent.Disposition.FAILED,
+                        outcome == Outcome.SUCCEEDED ? "EFFECT_SUCCEEDED" : "EFFECT_FAILED");
+            } catch (RuntimeException auditFailure) {
+                failed = true;
+            }
+            try {
+                if (budgetReservation != null) budgetReservation.settle();
+            } catch (RuntimeException accountingFailure) {
+                failed = true;
+            }
+            if (failed) {
+                throw new NodePackageServiceException(
+                        NodePackageServiceException.Reason.EFFECT_OUTCOME_INDETERMINATE);
+            }
         }
     }
 
@@ -432,6 +520,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         Map<String, List<String>> headers;
         byte[] body = request.body();
         Duration deadline;
+        ExternalIoLimits limits;
         try {
             headers = validateHeaders(request.headers());
             if (request.credential().isPresent() && request.signing().isPresent()) {
@@ -441,10 +530,16 @@ public final class ManagedNodePackageServices implements NodePackageServices {
                 AwsSigV4Signer.requireTransportStableTarget(destination);
                 requireSigningGrant(signing, destination);
             });
-            if (body.length > policy.maximumRequestBytes()) {
+            ExternalIoLimits authority = new ExternalIoLimits(policy.maximumRequestBytes(),
+                    policy.maximumResponseBytes(), policy.maximumResponseBytes(),
+                    policy.maximumResponseBytes(), 100, policy.maximumDeadline(),
+                    Duration.ofSeconds(2), Set.of(), Set.of("identity", "gzip"));
+            limits = request.limits().intersect(authority);
+            if (body.length > limits.maximumRequestBytes()) {
                 return failed(NodePackageServiceException.Reason.REQUEST_TOO_LARGE);
             }
             deadline = policy.deadline(request.deadline());
+            if (limits.maximumDuration().compareTo(deadline) < 0) deadline = limits.maximumDuration();
         } catch (NodePackageServiceException refused) {
             return OutboundCall.failed(refused);
         } catch (IllegalArgumentException invalid) {
@@ -452,25 +547,26 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         }
         AdmissionController.Lease lease = admission.tryAcquire(tenant);
         if (lease == null) return failed(NodePackageServiceException.Reason.ADMISSION_REFUSED);
-        return submit(deadline, lease, () -> {
+        Duration effectiveDeadline = deadline;
+        return submit(effectiveDeadline, lease, () -> {
             requireResolvable(destination);
             Map<String, List<String>> outgoingHeaders = request.signing()
                     .map(signing -> signRequest(tenant, destination, method, headers, body, signing))
                     .orElse(headers);
-            HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(deadline);
+            HttpRequest.Builder builder = HttpRequest.newBuilder(destination).timeout(effectiveDeadline);
             outgoingHeaders.forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
             request.credential().ifPresent(binding -> injectCredential(builder, tenant, destination, binding));
             builder.method(method, body.length == 0
                     ? HttpRequest.BodyPublishers.noBody() : HttpRequest.BodyPublishers.ofByteArray(body));
             HttpResponse<byte[]> response;
             try {
-                response = client().send(builder.build(), BoundedBodyHandlers.ofByteArray(
-                        policy.maximumResponseBytes()));
+                response = client().send(builder.build(),
+                        BoundedBodyHandlers.withLimits(limits, request.representationPolicy()));
             } catch (Throwable failure) {
                 throw mapFailure(failure);
             }
             return new OutboundHttpResponse(response.statusCode(), allowedResponseHeaders(response),
-                    response.body());
+                    response.body(), limits.maximumOutputBytes());
         });
     }
 
@@ -754,6 +850,10 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         if (findCause(root, BoundedBodyHandlers.ResponseTooLargeException.class) != null) {
             return refusal(NodePackageServiceException.Reason.RESPONSE_TOO_LARGE);
         }
+        if (findCause(root, BoundedBodyHandlers.ResponseMediaTypeException.class) != null
+                || findCause(root, BoundedBodyHandlers.ResponseEncodingException.class) != null) {
+            return refusal(NodePackageServiceException.Reason.PROTOCOL_REFUSED);
+        }
         if (root instanceof HttpTimeoutException || root instanceof java.util.concurrent.TimeoutException) {
             return refusal(NodePackageServiceException.Reason.DEADLINE_EXCEEDED);
         }
@@ -845,6 +945,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         private ToolCallAuditSink toolAuditSink = ToolCallAuditSink.discarding();
         private ToolApprovalService toolApprovalService;
         private ToolApprovalSettings toolApprovalSettings;
+        private ai.ravenroot.api.node.service.AgentResourceService agentResources;
+        private AgentAuthorityBudgetService agentAuthorityBudgets;
 
         private Builder(String packageId, NodePackageEgressPolicy policy, TenantCredentialResolver credentials) {
             this.packageId = packageId;
@@ -868,6 +970,19 @@ public final class ManagedNodePackageServices implements NodePackageServices {
         public Builder durableToolApprovals(ToolApprovalService service, ToolApprovalSettings settings) {
             this.toolApprovalService = Objects.requireNonNull(service, "service");
             this.toolApprovalSettings = Objects.requireNonNull(settings, "settings");
+            return this;
+        }
+
+        /** Installs mandatory finite agent accounting for packages explicitly granted it. */
+        public Builder agentAuthorityBudgets(AgentAuthorityBudgetService service) {
+            this.agentAuthorityBudgets = Objects.requireNonNull(service, "service");
+            this.agentResources = service;
+            return this;
+        }
+
+        /** Installs an invocation mediator; primarily useful for constrained embedding adapters. */
+        public Builder agentResources(ai.ravenroot.api.node.service.AgentResourceService service) {
+            this.agentResources = Objects.requireNonNull(service, "service");
             return this;
         }
 

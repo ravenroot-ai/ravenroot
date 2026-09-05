@@ -221,6 +221,8 @@ jobs:
           python3 -m unittest scripts.tests.test_check_dependabot_routing
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
@@ -237,8 +239,8 @@ jobs:
       - name: Check whitespace
         run: git diff --check HEAD^
 
-  full-policy:
-    name: full-policy
+  full-docs-policy:
+    name: full-docs-policy
     needs: [release-classification]
     if: needs.release-classification.outputs.tier != 'fast'
     runs-on: ubuntu-24.04
@@ -275,6 +277,18 @@ jobs:
           --puppeteer-config scripts/mermaid-renderer/puppeteer-ci.json
       - name: Validate product release identity
         run: python3 scripts/check_product_version.py
+
+  full-python-contracts:
+    name: full-python-contracts
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier != 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Verify Python tooling contracts
         run: |
           python3 -m unittest scripts.tests.test_check_argline
@@ -282,10 +296,24 @@ jobs:
           python3 -m unittest scripts.tests.test_check_dependabot_routing
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
+          python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
           python3 scripts/check_release_configuration.py
+
+  full-shell-contracts:
+    name: full-shell-contracts
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier != 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Verify developer and platform shell contracts
         run: |
           ./scripts/tests/test_dev.sh
@@ -293,6 +321,19 @@ jobs:
           ./scripts/tests/test_service.sh
           ./scripts/tests/test_execution_store_platform.sh
           ./scripts/tests/test_execution_store_platform_regression.sh
+
+  full-source-policy:
+    name: full-source-policy
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier != 'fast'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          ref: ${{ inputs.merge_sha || github.sha }}
       - name: Validate source bytes and Maven argLine composition
         run: |
           python3 scripts/check_no_raw_control_bytes.py
@@ -302,12 +343,12 @@ jobs:
       - name: Check whitespace
         run: git diff --check HEAD^
 
-  full-ui:
-    name: full-ui
+  full-ui-audit:
+    name: full-ui-audit
     needs: [release-classification]
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -325,12 +366,87 @@ jobs:
       - name: Audit the complete UI dependency tree
         working-directory: ravenroot/ravenroot-ui
         run: npm audit --audit-level=moderate
+
+  full-ui-unit-tests:
+    name: full-ui-unit-tests
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ravenroot/ravenroot-ui
+        run: npm ci
       - name: Run the UI unit suite
         working-directory: ravenroot/ravenroot-ui
         run: npm test
+
+  full-ui-build:
+    name: full-ui-build
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ravenroot/ravenroot-ui
+        run: npm ci
       - name: Build the UI
         working-directory: ravenroot/ravenroot-ui
         run: npm run build
+      - name: Archive the verified UI
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ravenroot-ui
+          path: ravenroot/ravenroot-ui/dist
+          if-no-files-found: error
+          retention-days: 7
+
+  full-ui-e2e:
+    name: full-ui-e2e
+    needs: [release-classification, full-ui-build]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: ravenroot/ravenroot-ui/package-lock.json
+      - name: Install UI dependencies
+        working-directory: ravenroot/ravenroot-ui
+        run: npm ci
+      - name: Download the verified UI
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-ui
+          path: ravenroot/ravenroot-ui/dist
       - name: Cache Playwright Chromium
         id: playwright-cache
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
@@ -358,20 +474,13 @@ jobs:
             ravenroot/ravenroot-ui/test-results
           if-no-files-found: ignore
           retention-days: 7
-      - name: Archive the verified UI
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ravenroot-ui
-          path: ravenroot/ravenroot-ui/dist
-          if-no-files-found: error
-          retention-days: 7
 
-  backend-test:
-    name: full-backend
+  backend-build:
+    name: full-backend-build
     needs: [release-classification]
     if: needs.release-classification.outputs.tier == 'full'
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 60
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -390,9 +499,94 @@ jobs:
             ravenroot-adapter-openai-compatible/pom.xml
             ravenroot-dev-harness/pom.xml
             ravenroot-sample/pom.xml
-      - name: Run and locally install the complete backend unit and integration suite
+      - name: Build and locally install the backend without executing tests
         working-directory: ravenroot
-        run: mvn -B --no-transfer-progress clean install
+        run: mvn -B --no-transfer-progress -DskipTests clean install
+      - name: Stage the verified runtime artifact and local reactor repository
+        run: |
+          set -euo pipefail
+          version=$(python3 scripts/check_product_version.py --print-version)
+          mkdir -p ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target
+          cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
+            ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
+          mkdir -p ci-artifacts/backend/maven-repository/ai
+          for artifact in "$HOME/.m2/repository/ai/ravenroot"/*; do
+            [ -d "$artifact/$version" ] || continue
+            [ "$(basename "$artifact")" = ravenroot-distribution ] && continue
+            destination="ci-artifacts/backend/maven-repository/ai/ravenroot/$(basename "$artifact")"
+            mkdir -p "$destination"
+            cp -R "$artifact/$version" "$destination/$version"
+          done
+      - name: Archive the backend build outputs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ravenroot-backend-build
+          path: ci-artifacts/backend
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
+  full-backend-tests:
+    name: full-backend-tests
+    needs: [release-classification]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: |
+            ravenroot/pom.xml
+            ravenroot/**/pom.xml
+      - name: Run the complete backend unit and integration suite
+        working-directory: ravenroot
+        run: mvn -B --no-transfer-progress clean verify
+      - name: Verify the published extension pack from a clean staged consumer
+        run: ./scripts/verify-extension-pack-consumer.sh
+
+  backend-test:
+    name: full-support-modules
+    needs: [release-classification, backend-build]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: |
+            ravenroot-adapter-anthropic/pom.xml
+            ravenroot-adapter-openai-compatible/pom.xml
+            ravenroot-dev-harness/pom.xml
+            ravenroot-sample/pom.xml
+      - name: Download the backend build outputs
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-backend-build
+          path: ci-artifacts/backend
+      - name: Restore the locally built Ravenroot artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.m2/repository/ai"
+          mkdir -p "$HOME/.m2/repository/ai/ravenroot"
+          cp -R ci-artifacts/backend/maven-repository/ai/ravenroot/. \
+            "$HOME/.m2/repository/ai/ravenroot/"
       - name: Verify out-of-reactor adapters, harness, and sample
         run: |
           # The harness consumes the OpenAI-compatible adapter. Install both
@@ -409,28 +603,54 @@ jobs:
         env:
           RAVENROOT_ENGINE: pekko
         run: mvn -B --no-transfer-progress exec:java -Dexec.args="hello ravenroot"
+
+  full-plugin-boundary:
+    name: full-plugin-boundary
+    needs: [release-classification, backend-build]
+    if: needs.release-classification.outputs.tier == 'full'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Download the backend build outputs
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-backend-build
+          path: ci-artifacts/backend
+      - name: Restore the locally built Ravenroot artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$HOME/.m2/repository/ai"
+          mkdir -p "$HOME/.m2/repository/ai/ravenroot"
+          cp -R ci-artifacts/backend/maven-repository/ai/ravenroot/. \
+            "$HOME/.m2/repository/ai/ravenroot/"
       - name: Validate the plugin distribution boundary
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p ci-artifacts/backend/plugins
-          touch ci-artifacts/backend/plugins/.keep
+          mkdir -p ci-artifacts/plugins
+          touch ci-artifacts/plugins/.keep
           for extension_id in $PUBLISHED_PLUGINS; do
             ./plugin.sh build "$extension_id" --skip-tests
             bundle_dir=$(./plugin.sh bundle-dir "$extension_id")
-            ./plugin.sh install "$bundle_dir" --dir ci-artifacts/backend/plugins
+            ./plugin.sh install "$bundle_dir" --dir ci-artifacts/plugins
           done
-          ./plugin.sh check-published ci-artifacts/backend/plugins
-      - name: Stage the verified runtime artifact
-        run: |
-          mkdir -p ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target
-          cp ravenroot/ravenroot-distribution/target/ravenroot.jar \
-            ci-artifacts/backend/targets/ravenroot/ravenroot-distribution/target/ravenroot.jar
-      - name: Archive the verified runtime artifact
+          ./plugin.sh check-published ci-artifacts/plugins
+      - name: Archive the staged plugin set
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: ravenroot-backend
-          path: ci-artifacts/backend
+          name: ravenroot-plugins
+          path: ci-artifacts/plugins
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
@@ -454,7 +674,7 @@ jobs:
           cache: maven
       - name: Build the public SDK Javadoc archive with DocLint
         working-directory: ravenroot
-        # full-backend owns the complete test suite; this job owns Javadoc and DocLint.
+        # full-backend-tests owns the complete test suite; this job owns Javadoc and DocLint.
         run: mvn -B --no-transfer-progress -Papi-docs -DskipTests clean verify
       - name: Generate aggregate public API HTML
         working-directory: ravenroot
@@ -473,12 +693,12 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  full-runtime:
-    name: full-runtime
+  full-runtime-auth-smoke:
+    name: full-runtime-auth-smoke
     if: needs.release-classification.outputs.tier == 'full'
-    needs: [release-classification, full-ui, backend-test]
+    needs: [release-classification, backend-build]
     runs-on: ubuntu-24.04
-    timeout-minutes: 35
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -492,13 +712,8 @@ jobs:
       - name: Download verified backend
         uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
         with:
-          name: ravenroot-backend
+          name: ravenroot-backend-build
           path: ci-artifacts/backend
-      - name: Download verified UI
-        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
-        with:
-          name: ravenroot-ui
-          path: ci-artifacts/ui
       - name: Smoke-test fail-closed authentication
         shell: bash
         run: |
@@ -509,6 +724,28 @@ jobs:
             exit 1
           fi
           grep -q "RAVENROOT_AUTH_ISSUER is required" /tmp/no-auth.log
+
+  full-runtime-jar-smoke:
+    name: full-runtime-jar-smoke
+    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, backend-build]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Set up runtime Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Download verified backend
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-backend-build
+          path: ci-artifacts/backend
       - name: Smoke-test the runnable JAR
         shell: bash
         env:
@@ -526,6 +763,35 @@ jobs:
           done
           curl --fail --silent http://127.0.0.1:18080/health
           curl --fail --silent http://127.0.0.1:18080/v1/status >/dev/null
+
+  full-runtime-container-smoke:
+    name: full-runtime-container-smoke
+    if: needs.release-classification.outputs.tier == 'full'
+    needs: [release-classification, full-ui-build, backend-build, full-plugin-boundary]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.merge_sha || github.sha }}
+      - name: Download verified backend
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-backend-build
+          path: ci-artifacts/backend
+      - name: Remove build-only Maven artifacts from the OCI context
+        run: rm -rf ci-artifacts/backend/maven-repository
+      - name: Download verified UI
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-ui
+          path: ci-artifacts/ui
+      - name: Download the validated plugin set
+        uses: actions/download-artifact@fa0a91b85d4f404e444e00e005971372dc801d16 # v4.1.8
+        with:
+          name: ravenroot-plugins
+          path: ci-artifacts/backend/plugins
       - name: Build the OCI image without publishing it
         shell: bash
         run: |
@@ -559,46 +825,61 @@ jobs:
       - fast-product-build
       - fast-support-build
       - fast-tooling-contracts
-      - full-policy
-      - full-ui
+      - full-docs-policy
+      - full-python-contracts
+      - full-shell-contracts
+      - full-source-policy
+      - full-ui-audit
+      - full-ui-unit-tests
+      - full-ui-build
+      - full-ui-e2e
+      - backend-build
+      - full-backend-tests
       - backend-test
+      - full-plugin-boundary
       - full-api-documentation
-      - full-runtime
+      - full-runtime-auth-smoke
+      - full-runtime-jar-smoke
+      - full-runtime-container-smoke
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     env:
-      CLASSIFICATION_RESULT: ${{ needs.release-classification.result }}
       CI_TIER: ${{ needs.release-classification.outputs.tier }}
-      FAST_PRODUCT_RESULT: ${{ needs.fast-product-build.result }}
-      FAST_SUPPORT_RESULT: ${{ needs.fast-support-build.result }}
-      FAST_TOOLING_RESULT: ${{ needs.fast-tooling-contracts.result }}
-      FULL_POLICY_RESULT: ${{ needs.full-policy.result }}
-      FULL_UI_RESULT: ${{ needs.full-ui.result }}
-      FULL_BACKEND_RESULT: ${{ needs.backend-test.result }}
-      FULL_API_DOCS_RESULT: ${{ needs.full-api-documentation.result }}
-      FULL_RUNTIME_RESULT: ${{ needs.full-runtime.result }}
+      NEEDS_JSON: ${{ toJSON(needs) }}
     steps:
       - name: Require the correct event tier to pass
         shell: bash
         run: |
           set -euo pipefail
-          test "$CLASSIFICATION_RESULT" = success
+
+          require_result() {
+            job=$1
+            expected=$2
+            actual=$(jq --raw-output --arg job "$job" '.[$job].result' <<<"$NEEDS_JSON")
+            if [ "$actual" != "$expected" ]; then
+              echo "$job: expected $expected, got $actual" >&2
+              return 1
+            fi
+          }
+
+          fast_jobs="fast-product-build fast-support-build fast-tooling-contracts"
+          policy_jobs="full-docs-policy full-python-contracts full-shell-contracts full-source-policy"
+          product_jobs="full-ui-audit full-ui-unit-tests full-ui-build full-ui-e2e \
+            backend-build full-backend-tests backend-test full-plugin-boundary \
+            full-api-documentation full-runtime-auth-smoke full-runtime-jar-smoke \
+            full-runtime-container-smoke"
+
+          require_result release-classification success
           if [ "$CI_TIER" = fast ]; then
-            test "$FAST_PRODUCT_RESULT" = success
-            test "$FAST_SUPPORT_RESULT" = success
-            test "$FAST_TOOLING_RESULT" = success
+            for job in $fast_jobs; do require_result "$job" success; done
+            for job in $policy_jobs $product_jobs; do require_result "$job" skipped; done
           elif [ "$CI_TIER" = docs ]; then
-            test "$FULL_POLICY_RESULT" = success
-            test "$FULL_UI_RESULT" = skipped
-            test "$FULL_BACKEND_RESULT" = skipped
-            test "$FULL_API_DOCS_RESULT" = skipped
-            test "$FULL_RUNTIME_RESULT" = skipped
+            for job in $fast_jobs; do require_result "$job" skipped; done
+            for job in $policy_jobs; do require_result "$job" success; done
+            for job in $product_jobs; do require_result "$job" skipped; done
           elif [ "$CI_TIER" = full ]; then
-            test "$FULL_POLICY_RESULT" = success
-            test "$FULL_UI_RESULT" = success
-            test "$FULL_BACKEND_RESULT" = success
-            test "$FULL_API_DOCS_RESULT" = success
-            test "$FULL_RUNTIME_RESULT" = success
+            for job in $fast_jobs; do require_result "$job" skipped; done
+            for job in $policy_jobs $product_jobs; do require_result "$job" success; done
           else
             echo "Unknown CI tier: $CI_TIER" >&2
             exit 1

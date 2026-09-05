@@ -118,6 +118,26 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
     /**
      * Compatibility constructor preserving the shape before a termination reason was carried.
      * Reports an absent reason, correct for every producer that has not been taught to record one.
+     *
+     * @param key                 tenant-scoped identity of the instance
+     * @param status              authoritative stored lifecycle status
+     * @param disposition         recovery classification derived at read time; see
+     *                            {@link InventoryDisposition} for the precedence
+     * @param revision            the store revision this row was read at, strictly increasing per instance
+     * @param lifecycleGeneration count of authoritative status transitions applied to this instance
+     * @param graphVersionPin     the write-once definition this instance replays against
+     * @param deploymentId        hosting deployment, absent for a transient submission
+     * @param workloadId          owning workload, when the caller models one
+     * @param correlationId       caller correlation identity for the causing request
+     * @param ownerWorkerId       worker holding an unexpired lease, absent when none does
+     * @param fencingToken        the instance's current fencing token, which outlives every lease
+     * @param leaseExpiresAt      expiry of the live lease on the store's clock, absent when none is live
+     * @param traversalCount      number of traversals contained by this instance
+     * @param createdAt           when the instance was first written; immutable, and the primary
+     *                            pagination axis
+     * @param updatedAt           when it was last written; diagnostic only, never an ordering primitive
+     * @param retainedUntil       when a terminal row becomes eligible for purge; absent while the
+     *                            instance is non-terminal, because retention has not started
      */
     public ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus status,
                                  InventoryDisposition disposition, long revision,
@@ -140,7 +160,14 @@ public record ProcessInventoryEntry(ExecutionKey key, ProcessInstanceStatus stat
         return new ExecutionOrigin(deploymentId, workloadId, correlationId);
     }
 
-    /** Whether this row's terminal status is reported because it was stopped on request. */
+    /**
+     * Whether this row's terminal status is reported because it was stopped on request.
+     *
+     * @return whether this instance's termination is recorded as a cancellation. A cancelled
+     *         instance reports {@link #status()} {@code == FAILED}, so a caller that branches on the
+     *         status alone reads every deliberate stop as a fault; this is the read that separates
+     *         them.
+     */
     public boolean cancelled() {
         return ExecutionTerminationReason.isCancellation(terminationReason);
     }

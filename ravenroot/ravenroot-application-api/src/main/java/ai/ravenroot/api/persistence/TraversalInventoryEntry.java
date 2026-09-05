@@ -58,7 +58,20 @@ public record TraversalInventoryEntry(ExecutionKey key, UUID traversalId, int po
         terminationReason = status.terminal() ? terminationReason : null;
     }
 
-    /** Compatibility constructor preserving the shape before a termination reason was carried. */
+    /**
+     * Compatibility constructor preserving the shape before a termination reason was carried.
+     * Reports an absent reason, correct for every producer that has not been taught to record one.
+     *
+     * @param key                the containing instance's tenant-scoped identity
+     * @param traversalId        identity of this traversal, distinct from the instance's
+     * @param position           insertion order within the instance, from zero
+     * @param ingressNodeId      the node this traversal entered at
+     * @param status             authoritative stored traversal status
+     * @param disposition        recovery classification derived at read time; see
+     *                           {@link InventoryDisposition}
+     * @param invocationCount    number of node invocations recorded under this traversal
+     * @param parkedAttemptCount number of attempts in this traversal awaiting a human decision
+     */
     public TraversalInventoryEntry(ExecutionKey key, UUID traversalId, int position, String ingressNodeId,
                                    TraversalStatus status, InventoryDisposition disposition,
                                    int invocationCount, int parkedAttemptCount) {
@@ -66,7 +79,14 @@ public record TraversalInventoryEntry(ExecutionKey key, UUID traversalId, int po
                 parkedAttemptCount, null);
     }
 
-    /** Whether this row's terminal status is reported because it was stopped on request. */
+    /**
+     * Whether this row's terminal status is reported because it was stopped on request.
+     *
+     * @return whether this traversal's termination is recorded as a cancellation. A cancelled
+     *         traversal reports {@link #status()} {@code == FAILED}, so a caller that branches on the
+     *         status alone reads every deliberate stop as a fault; this is the read that separates
+     *         them.
+     */
     public boolean cancelled() {
         return ExecutionTerminationReason.isCancellation(terminationReason);
     }

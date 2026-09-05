@@ -174,7 +174,7 @@ public enum ExecutionEventType {
      * {@link #EXECUTION_FAILED} and {@link #EXECUTION_CANCELLED}, the three types a traversal can
      * end with, never more than one per traversal and never followed by another event.
      *
-     * <h2>Why this exists as a method on the enum rather than a set each caller keeps</h2>
+     * <h4>Why this exists as a method on the enum rather than a set each caller keeps</h4>
      * <p>Before this method existed, {@code ActiveExecutionRegistry.observe} and
      * {@code TelemetryBridge.accept} each hardcoded their own list of "the terminal types I release
      * a resource on" ({@code case EXECUTION_COMPLETED, EXECUTION_FAILED -> ...}), and when
@@ -191,6 +191,10 @@ public enum ExecutionEventType {
      * only "does a traversal end here", which is the one fact both callers above actually need.
      * {@link #JOIN_FAILED} ends a join, not a traversal (a later terminal event follows it); it is
      * {@code false} here for that reason, not omitted by oversight.</p>
+     *
+     * @return whether a traversal ends with this event type, which is true for exactly
+     *         {@link #EXECUTION_COMPLETED}, {@link #EXECUTION_FAILED} and
+     *         {@link #EXECUTION_CANCELLED}.
      */
     public boolean isTraversalTerminal() {
         return switch (this) {

@@ -79,7 +79,7 @@ public sealed interface ExecutionLookup {
      * even when its payload is gone, and it is the difference between "your run finished, ask
      * earlier next time" and "we have never heard of you".</p>
      *
-     * <h4>And the termination reason, for the same reason the status is here</h4>
+     * <h2>And the termination reason, for the same reason the status is here</h2>
      * <p>{@code status} alone past the retention horizon says a cancelled execution failed, which is
      * worse than saying nothing: a caller reading an aged-out result would learn that its deliberate
      * stop was an incident, and would learn it from the one answer it has no way to check against a

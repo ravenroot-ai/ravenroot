@@ -2,6 +2,7 @@ package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.application.ExecutionEventType;
 import ai.ravenroot.api.application.ExecutionIdentitySource;
+import ai.ravenroot.api.application.ExecutionLookup;
 import ai.ravenroot.api.application.LiveExecution;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.core.persistence.InMemoryExecutionStore;
@@ -22,6 +23,7 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -143,6 +145,15 @@ class CancelInStartupWindowTest {
                 assertTrue(terminal.await(BOUND.toSeconds(), TimeUnit.SECONDS),
                         "the traversal must reach a terminal execution event; effects so far: "
                                 + effects.get());
+
+                // A cancellation this early must still read back as one: a caller reading the
+                // recorded outcome after the fact, and not merely watching the boolean this call
+                // returned, must not see an incident that never happened.
+                var found = assertInstanceOf(ExecutionLookup.Found.class,
+                        application.executionResult(TestIdentities.TENANT_A.tenantId(), traversalId));
+                assertTrue(found.outcome().cancelled(),
+                        "a cancellation accepted before the traversal was even registered must still "
+                                + "be recorded as a cancellation, not fold into an unqualified failure");
             }
 
             assertTrue(cancelled,

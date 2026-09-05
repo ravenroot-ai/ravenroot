@@ -155,7 +155,14 @@ class TraversalRuntimeNatureTest {
             await(() -> runner.liveTraversalInstanceCount() == 1);
             assertTrue(runner.cancelTraversal(traversalId));
             blocked.complete(NodeResult.continueWith("cancelled"));
-            execution.handle((ignored, error) -> error).get(5, TimeUnit.SECONDS);
+            Throwable error = execution.handle((ignored, thrown) -> thrown).get(5, TimeUnit.SECONDS);
+            // Cancelling genuinely mid-node -- the node is blocked, not merely not-yet-entered -- must
+            // still classify as a cancellation, exactly as it must before start (CancelInStartupWindowTest)
+            // and during a backoff (OrchestrationRetryTest): a completed-but-blocked node overtaken by a
+            // cancel is the case most likely to be misread as "the node simply failed".
+            assertTrue(ExecutionTermination.isCancellation(error),
+                    "a traversal cancelled while a node was actively running must be classified as a "
+                            + "cancellation, not an ordinary failure: " + error);
             assertEquals(0, runner.liveTraversalInstanceCount());
             assertEquals(0, engine.liveNodeCount());
         }
@@ -213,8 +220,16 @@ class TraversalRuntimeNatureTest {
         try (var manager = GraphManager.from(linearGraph(Map.of(NodeRuntimeNatureProperty.NAME, "TRAVERSAL")));
              var runner = runner(manager, engine, registry(descriptor(NodeRuntimeNature.TRAVERSAL, 8), handler))) {
             var result = runner.execute(TestIdentities.TENANT_A, "payload").toCompletableFuture();
-            if (failed) result.handle((ignored, error) -> error).get(5, TimeUnit.SECONDS);
-            else result.get(5, TimeUnit.SECONDS);
+            if (failed) {
+                Throwable error = result.handle((ignored, thrown) -> thrown).get(5, TimeUnit.SECONDS);
+                // The neighbouring cancellation-during-cleanup case above must be distinguishable from
+                // this ordinary node failure, and this is the negative half of that comparison: a node
+                // that genuinely broke must never be classified as a cancellation.
+                assertFalse(ExecutionTermination.isCancellation(error),
+                        "an ordinary node failure must not be misclassified as a cancellation: " + error);
+            } else {
+                result.get(5, TimeUnit.SECONDS);
+            }
             assertEquals(0, runner.liveTraversalInstanceCount());
             assertEquals(0, engine.liveNodeCount());
         }

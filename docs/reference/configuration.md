@@ -99,7 +99,8 @@ Docker Compose forwards this environment family, and the Helm chart exposes the 
 `humanTask`; a blank Helm string deliberately selects the server default. Helm validates the listed
 individual technical ranges, while the server validates the relational constraints before it opens a
 listener. A malformed, overflowed, or inconsistent non-blank value refuses startup without echoing
-the supplied value.
+the supplied value. The direct `ravenroot/scripts/server.sh` launcher inherits the same environment;
+Ravenroot ships no tracked environment-file template or environment generator.
 
 A graph may narrow a configured response ceiling but cannot widen the server policy. The resolved
 limits are pinned with a durable task, so changing a deployment policy cannot silently reinterpret a

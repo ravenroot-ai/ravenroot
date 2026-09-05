@@ -155,6 +155,24 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
         return replaceTraversal(traversal.replaceInvocation(invocation.parkAttempt(attemptId, cause)));
     }
 
+    /**
+     * Records that recovery withheld one attempt through {@code delivery}.
+     *
+     * @param traversalId the stable traversal id used to identify the requested resource.
+     * @param invocationId the stable invocation id used to identify the requested resource.
+     * @param attemptId the stable attempt id used to identify the requested resource.
+     * @param delivery the recovery delivery on which the attempt was withheld.
+     * @return a new process snapshot whose attempt carries the raised high-water mark.
+     */
+    public ProcessInstance recordRecoveryWithheld(UUID traversalId, UUID invocationId, UUID attemptId,
+                                                  int delivery) {
+        requireNonTerminal();
+        Traversal traversal = traversal(traversalId);
+        NodeInvocation invocation = invocation(traversal, invocationId);
+        return replaceTraversal(traversal.replaceInvocation(
+                invocation.recordRecoveryWithheld(attemptId, delivery)));
+    }
+
 /**
  * Closes a parked attempt as verified-done by a human.
  * @param traversalId the stable traversal id used to identify the requested resource.

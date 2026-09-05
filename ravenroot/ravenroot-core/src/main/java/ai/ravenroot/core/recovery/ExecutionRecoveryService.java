@@ -129,7 +129,23 @@ public final class ExecutionRecoveryService {
         return List.copyOf(outcomes);
     }
 
-    /** Drives only timers a trusted dispatcher explicitly recognises, then acknowledges their fence. */
+    /**
+     * Drives only timers a trusted dispatcher explicitly recognises, then acknowledges their fence.
+     *
+     * <h2>Why the rebuild gate is deliberately not applied here</h2>
+     * <p>A due timer closes a durable wait; it does not rebuild anything. The two dispatchers that
+     * own timers settle an approval or a human task by committing store transitions under this
+     * claim's own fencing token — no graph is loaded, no runner is built, no authored behaviour runs
+     * — so refusing a timer because the execution's pinned document or manifest does not resolve
+     * here withholds a wait for a rebuild that this path never performs. It would leave a task that
+     * can never expire and an approval that can never lapse, with no bound and nothing to park,
+     * because a timer has no attempt to hold a decision against.</p>
+     *
+     * <p>What the expiry produces <em>is</em> gated: settling the wait commits a re-entry traversal
+     * and makes a {@link PendingWork.HandlerTrigger} claimable, and that item rebuilds a runner and
+     * is admitted or withheld like any other. So the gate still stands exactly where a rebuild
+     * happens, and the wait ahead of it is allowed to end.</p>
+     */
     private RecoveryOutcome dispatchTimer(PendingWork.TimerDue timer) {
         if (!dispatcher.canDispatch(timer)) {
             return new RecoveryOutcome.Deferred(timer.key(), timer.workItemId(),
@@ -210,8 +226,69 @@ public final class ExecutionRecoveryService {
         return List.copyOf(interrupted);
     }
 
+    /**
+     * The bounded form of {@link #discoverInterrupted()}, which stops once {@code limit} instances
+     * have been found rather than paging a tenant to its end.
+     *
+     * <p>Exists because a caller that blocks on the answer must be able to bound how long it blocks.
+     * {@link #discoverInterrupted()} pages until the cursor runs out, which is right for an operator
+     * asking "what is stuck" and wrong for a startup gate holding readiness closed: a deployment
+     * inheriting a very large interrupted cohort would refuse traffic for the whole scan, turning a
+     * safety check into the outage it exists to prevent. The instances beyond the limit are not
+     * lost — they are still claimed and decided by the ordinary sweep, which is what acts on them in
+     * any case. Only the report is truncated, and the caller is told that it was.</p>
+     *
+     * @param limit greatest number of interrupted instances to return; must be positive.
+     * @return interrupted instances across the configured tenants, at most {@code limit} of them.
+     */
+    public List<ProcessInventoryEntry> discoverInterrupted(int limit) {
+        if (limit < 1) throw new IllegalArgumentException("limit must be positive");
+        var interrupted = new ArrayList<ProcessInventoryEntry>();
+        for (String tenantId : tenantIds) {
+            // The limit reaches the pager itself rather than trimming its result. Collecting a
+            // tenant's whole cohort and cutting it afterwards would leave the scan exactly as long as
+            // it was -- the same page round trips, the same rows resident -- and the caller blocking
+            // on this is holding readiness closed, which is the one thing the bound exists to stop.
+            // A tenant that fills the limit therefore ends the scan mid-page, and later tenants are
+            // not visited at all.
+            pageInterrupted(tenantId, limit - interrupted.size(), interrupted);
+            if (interrupted.size() >= limit) {
+                break;
+            }
+        }
+        return List.copyOf(interrupted);
+    }
+
+    /** Pages one tenant only until {@code remaining} interrupted instances have been collected. */
+    private void pageInterrupted(String tenantId, int remaining, List<ProcessInventoryEntry> into) {
+        var query = ProcessInventoryQuery.outstanding(Math.min(batchLimit, Math.max(1, remaining)));
+        while (true) {
+            var page = await(store.listProcessInstances(tenantId, query));
+            for (ProcessInventoryEntry entry : page.items()) {
+                if (entry.disposition() == InventoryDisposition.INTERRUPTED) {
+                    into.add(entry);
+                    if (--remaining <= 0) {
+                        return;
+                    }
+                }
+            }
+            if (page.nextCursor().isEmpty()) {
+                return;
+            }
+            query = query.after(page.nextCursor().get());
+        }
+    }
+
     private RecoveryOutcome recover(PendingWork item) {
         if (item instanceof PendingWork.HandlerTrigger trigger) {
+            // A trigger rebuilds a runner, so it is gated. It carries no attempt, so there is nothing
+            // to park and nothing to bound: a handler this deployment cannot rebuild stays waiting,
+            // exactly as it did before any of this existed, and the startup report is what surfaces it.
+            RecoveryAdmission admission = admissionOf(trigger);
+            if (!admission.proceeds()) {
+                return new RecoveryOutcome.Deferred(trigger.key(), trigger.workItemId(),
+                        "recovery is withheld for this execution: " + admission.detail());
+            }
             return dispatchHandler(trigger);
         }
         if (!(item instanceof PendingWork.AttemptDispatch attemptItem)) {
@@ -233,9 +310,13 @@ public final class ExecutionRecoveryService {
         if (attempt == null) {
             return acknowledgeStale(attemptItem, "attempt is gone");
         }
+        // Asked after the aggregate is in hand rather than before it, so the admission and the
+        // decision that follows read one instance rather than two. A stale claim is settled above
+        // without asking at all, which is what it was already doing.
+        RecoveryAdmission admission = admissionOf(attemptItem);
         return switch (attempt.status()) {
-            case SCHEDULED -> dispatchNeverStarted(attemptItem, stored);
-            case RUNNING -> resolveAmbiguity(attemptItem, stored);
+            case SCHEDULED -> dispatchNeverStarted(attemptItem, stored, admission);
+            case RUNNING -> resolveAmbiguity(attemptItem, stored, attempt, admission);
             // Unreachable through a conforming adapter, which excludes these from the claim query.
             // Handled anyway: a claim that raced a concurrent transition must be acknowledged rather
             // than re-decided, and a PARKED attempt must never be re-decided by a machine at all.
@@ -271,7 +352,18 @@ public final class ExecutionRecoveryService {
      * never happened, and would park work that provably never started.</p>
      */
     private RecoveryOutcome dispatchNeverStarted(PendingWork.AttemptDispatch item,
-                                                 StoredProcessInstance stored) {
+                                                 StoredProcessInstance stored,
+                                                 RecoveryAdmission admission) {
+        if (!admission.proceeds()) {
+            // Withheld without a bound, and deliberately never parked, however long the refusal
+            // lasts. The aggregate refuses SCHEDULED -> PARKED outright, and that refusal encodes the
+            // reason: parking asks a human to adjudicate an effect, and this attempt provably never
+            // produced one. Recording a park here would put a question in front of an operator whose
+            // honest answer is already known. Nothing is at risk while it waits — no effect is in
+            // flight, the attempt is untouched, and a corrected deployment dispatches it normally.
+            return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
+                    "recovery is withheld for this execution: " + admission.detail());
+        }
         if (!dispatcher.canDispatch(item)) {
             return new RecoveryOutcome.Deferred(item.key(), item.workItemId(), "no dispatcher available");
         }
@@ -292,12 +384,49 @@ public final class ExecutionRecoveryService {
      * again. Everything else — declared not repeatable, declared nothing, a value the reader could
      * not recognise, a type that never declared the property — parks.</p>
      */
-    private RecoveryOutcome resolveAmbiguity(PendingWork.AttemptDispatch item, StoredProcessInstance stored) {
+    private RecoveryOutcome resolveAmbiguity(PendingWork.AttemptDispatch item, StoredProcessInstance stored,
+                                             NodeAttempt attempt, RecoveryAdmission admission) {
+        if (admission.repairableByWaiting()) {
+            // Withheld without consuming a delivery, and the store's counter is what makes that a
+            // claim rather than a hope. It counts claims, not decisions, so a delivery on which
+            // nothing was dispatched still increments it; left alone, an outage would spend the whole
+            // budget and the limit below would fire the moment the outage ended, parking en masse
+            // work whose only fault was being in flight at the wrong moment. The mark below is
+            // subtracted at evaluation, and it is durable because the outage and the recovery
+            // routinely straddle a restart.
+            recordWithheld(item, stored);
+            return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
+                    "recovery is withheld until this execution can be classified: " + admission.detail());
+        }
         String nodeId = nodeIdOf(stored.state(), item);
-        AttemptRepeatability declaration = declarationOf(nodeId);
-        if (item.deliveryAttempt() > maxRecoveryDeliveriesPerAttempt) {
-            String cause = "recovery delivery limit exceeded on delivery " + item.deliveryAttempt();
+        // Read only when the execution was admitted. A withheld one has no readable declaration by
+        // construction — the document behind it is the thing that did not resolve — so asking would
+        // spend a second aggregate read and a second manifest verification to be told UNDECLARED.
+        AttemptRepeatability declaration = admission.proceeds()
+                ? declarationOf(item.key(), nodeId) : AttemptRepeatability.UNDECLARED;
+        // Deliveries that reached a decision, not claims. See NodeAttempt.decidedDeliveries.
+        int decided = attempt.decidedDeliveries(item.deliveryAttempt());
+        if (decided > maxRecoveryDeliveriesPerAttempt) {
+            // The bound that ends a deterministic refusal. An execution this deployment will never
+            // rebuild strands an effect that already happened and whose outcome nobody knows, and
+            // withholding that forever is worse than the park it replaced: the park at least puts the
+            // decision in front of a human. The cause names the deployment fault rather than
+            // reporting the attempt as though its author had declared nothing, so the operator reads
+            // why the machine gave up instead of being asked to adjudicate a silence.
+            //
+            // The bound is maxRecoveryDeliveriesPerAttempt rather than a second knob: it is already
+            // the operator's control over how long recovery keeps re-delivering one attempt before
+            // calling a human, and a deterministic refusal is that same wait arriving by a different
+            // route. A separate setting would be a second thing to tune for one behaviour.
+            String cause = admission.proceeds()
+                    ? "recovery delivery limit exceeded on decided delivery " + decided
+                    : "recovery delivery limit exceeded on decided delivery " + decided
+                            + "; this deployment cannot rebuild the execution: " + admission.detail();
             return park(item, stored, declaration, cause);
+        }
+        if (!admission.proceeds()) {
+            return new RecoveryOutcome.Deferred(item.key(), item.workItemId(),
+                    "recovery is withheld for this execution: " + admission.detail());
         }
         if (declaration.authorisesReDispatch()) {
             if (!dispatcher.canDispatch(item)) {
@@ -314,6 +443,29 @@ public final class ExecutionRecoveryService {
                 + "; node '" + nodeId + "' is " + declaration.name().toLowerCase(java.util.Locale.ROOT)
                 .replace('_', ' ');
         return park(item, stored, declaration, cause);
+    }
+
+    /**
+     * Raises the attempt's withheld high-water mark to this delivery, under the claim's own fence.
+     *
+     * <p>Best effort by design. The mark is an optimisation of the delivery limit, not a safety
+     * property: failing to write it costs exactly one delivery of budget, which is the behaviour that
+     * existed before the mark did, whereas letting the failure escape would abort the sweep and leave
+     * every item behind this one undecided. The write is fenced and revision-checked like every other
+     * write here, so a stale owner cannot raise a mark after takeover, and re-writing a value the
+     * attempt already carries is a no-op rather than a conflict.</p>
+     */
+    private void recordWithheld(PendingWork.AttemptDispatch item, StoredProcessInstance stored) {
+        try {
+            await(store.apply(ExecutionBatch.to(item.key())
+                    .expecting(RevisionExpectation.exactly(stored.revision()))
+                    .fencedBy(item.fencingToken())
+                    .apply(new ExecutionTransition.RecoveryWithheld(item.traversalId(),
+                            item.invocationId(), item.attemptId(), item.deliveryAttempt()))
+                    .build()));
+        } catch (RuntimeException notRecorded) {
+            // See above: one delivery of budget, and the sweep continues.
+        }
     }
 
     private RecoveryOutcome park(PendingWork.AttemptDispatch item, StoredProcessInstance stored,
@@ -333,16 +485,38 @@ public final class ExecutionRecoveryService {
     }
 
     /**
+     * The dispatcher's own answer about whether this execution may be acted on here.
+     *
+     * <p>A dispatcher that cannot answer has not admitted anything, and the failure is reported as
+     * retryable rather than deterministic: an exception from an admission check is a fault in the
+     * check, not evidence about the deployment, and treating it as deterministic would spend the
+     * delivery budget and park work on the strength of a bug.</p>
+     */
+    private RecoveryAdmission admissionOf(PendingWork item) {
+        try {
+            RecoveryAdmission admission = dispatcher.admits(item);
+            return admission == null ? RecoveryAdmission.admitted() : admission;
+        } catch (RuntimeException unreadable) {
+            return RecoveryAdmission.retryable("the admission check could not be completed");
+        }
+    }
+
+    /**
      * Reads the declaration and converts any failure of the source into
      * {@link AttemptRepeatability#UNDECLARED}.
      *
      * <p>A source that throws has not declared anything. Letting the exception escape would abort the
      * sweep and leave the ambiguous attempt neither dispatched nor parked — which is the one outcome
      * worse than either, because nothing records that a decision was owed.</p>
+     *
+     * <p>The instance is passed as well as the node, because after a restart the node id alone does
+     * not identify a declaration: the same id in two graphs is two different authors' assertions.
+     * A source that resolves the document an execution was pinned to needs the instance to find it;
+     * a source that is already a snapshot of one graph ignores it through the interface default.</p>
      */
-    private AttemptRepeatability declarationOf(String nodeId) {
+    private AttemptRepeatability declarationOf(ExecutionKey key, String nodeId) {
         try {
-            AttemptRepeatability declared = declarations.declaredFor(nodeId);
+            AttemptRepeatability declared = declarations.declaredFor(key, nodeId);
             return declared == null ? AttemptRepeatability.UNDECLARED : declared;
         } catch (RuntimeException unreadable) {
             return AttemptRepeatability.UNDECLARED;

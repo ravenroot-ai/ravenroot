@@ -43,13 +43,21 @@ public enum ResultPayloadState {
     RETAINED,
 
     /**
-     * A payload was produced and none of it is stored, because its projection exceeded the byte cap
-     * the adapter publishes.
+     * A payload was produced and none of it is stored, because it exceeded a budget an operator
+     * configures.
      *
-     * <p>{@link ExecutionResultPayload#bytes()} still reports the size that was refused, so an
-     * operator deciding whether to raise the cap can see by how much. Storing a prefix instead was
-     * rejected: a prefix of an encoded document is not a document, and a reader handed one would
-     * have to guess whether it was truncated data or corrupt data.</p>
+     * <p>Usually the byte cap the adapter publishes, measured against the encoded projection. It is
+     * also the state for a payload the runtime's own payload boundary refused for a size, depth,
+     * element-count, value-count or length budget before any projection of it existed — see
+     * {@link ExecutionResultPayload#refused}. Both are the same fact to whoever reads the record and
+     * call for the same action: <em>a limit stopped this, and a limit can be raised</em>.</p>
+     *
+     * <p>{@link ExecutionResultPayload#bytes()} reports the size that was refused whenever the
+     * refusal happened after encoding, so an operator deciding whether to raise the cap can see by
+     * how much; it is zero when the value was refused before it was ever encoded, and this state
+     * rather than that size is what says a payload existed. Storing a prefix instead was rejected: a
+     * prefix of an encoded document is not a document, and a reader handed one would have to guess
+     * whether it was truncated data or corrupt data.</p>
      */
     WITHHELD,
 
@@ -57,10 +65,11 @@ public enum ResultPayloadState {
      * A payload was produced and none of it is stored, because it does not project onto the closed
      * payload model at all.
      *
-     * <p>Distinct from {@link #WITHHELD} because the two call for opposite actions: a size refusal is
-     * a limit to raise, and this is a node returning a value no remote adapter could ever persist.
-     * Reporting it as an absent payload would make the second silently look like a run that produced
-     * nothing.</p>
+     * <p>Distinct from {@link #WITHHELD} because the two call for opposite actions: that one is a
+     * limit to raise, and this is a value no remote adapter could ever persist and no configuration
+     * change would admit — a node returning a type outside the model, or a malformed, ambiguous or
+     * unsupported encoding the payload boundary rejected outright. Reporting it as an absent payload
+     * would make it silently look like a run that produced nothing.</p>
      */
     UNCONVERTIBLE,
 

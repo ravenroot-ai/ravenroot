@@ -145,6 +145,46 @@ public record DurableExecutionResult(ExecutionKey key, UUID traversalId,
     }
 
     /**
+     * The same record, for a producer that has already decided what became of the payload.
+     *
+     * <p>{@link #of(ExecutionKey, UUID, GraphVersionPin, ProcessInstanceStatus,
+     * ExecutionTerminationReason, Instant, Instant, Object, ExecutionResultNodes, Throwable, int)}
+     * takes the execution's output and projects it, which is the right shape whenever an output
+     * exists to project. It is the wrong shape for a traversal that terminated <em>on</em> its
+     * payload: there is no value left to hand over, and passing {@code null} there would record
+     * {@link ResultPayloadState#NONE} — the positive claim that the run produced nothing. The caller
+     * that holds the rejection builds the payload state with
+     * {@link ExecutionResultPayload#refused(ai.ravenroot.api.payload.PayloadException.Reason)} and
+     * passes it here.</p>
+     *
+     * <p>The failure is treated exactly as the projecting factory treats it: only its type is kept,
+     * never its message, for the reason stated there.</p>
+     *
+     * @param key             tenant-scoped identity of the containing process instance.
+     * @param traversalId     the caller-facing execution id.
+     * @param graphVersionPin the immutable definition the execution ran against.
+     * @param status          the terminal status reached.
+     * @param reason          why it was reached, or {@code null}.
+     * @param startedAt       when the traversal began.
+     * @param endedAt         when it terminated.
+     * @param payload         what became of the execution's output, already decided.
+     * @param nodes           the traversal detail, or {@code null} for none.
+     * @param failure         the terminal failure, or {@code null}; only its type is retained.
+     * @return the durable record, with {@link #retainedUntil()} left for the store to assign.
+     */
+    public static DurableExecutionResult of(ExecutionKey key, UUID traversalId,
+                                            GraphVersionPin graphVersionPin,
+                                            ProcessInstanceStatus status,
+                                            ExecutionTerminationReason reason, Instant startedAt,
+                                            Instant endedAt, ExecutionResultPayload payload,
+                                            ExecutionResultNodes nodes, Throwable failure) {
+        return new DurableExecutionResult(key, traversalId, graphVersionPin, status, reason, startedAt,
+                endedAt, null, Objects.requireNonNull(payload, "payload"),
+                failure == null ? null : failure.getClass().getName(),
+                nodes == null ? ExecutionResultNodes.empty() : nodes);
+    }
+
+    /**
      * The projection rule on its own, so an adapter or a test can exercise the payload boundary
      * without building a whole record.
      *

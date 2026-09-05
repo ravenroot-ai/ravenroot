@@ -51,6 +51,12 @@ import java.util.UUID;
  * the order would put a disk read in front of every poll of a running execution for no gain, since a
  * running execution has no durable result yet.</p>
  *
+ * <p><strong>A tombstone is a miss, not an answer.</strong> Only a retained full result short-circuits
+ * the store; the two bounds below evict results from this process long before any retention horizon
+ * elapses, so a tombstone means "this process no longer holds it" and never "nobody holds it any
+ * more". {@link #lookup} states what that costs when the tombstone is wrongly treated as the latter,
+ * and what is answered when the store has nothing either.</p>
+ *
  * <p>With no durable record composed, every path below behaves exactly as it did before one existed:
  * the fallback is reached only after an in-memory miss, and it is skipped entirely. That degradation
  * is a deployment choice — a result readable before a restart reads as
@@ -263,17 +269,44 @@ public final class ExecutionResultRegistry {
      * The four-way answer defined by {@link ExecutionLookup}; never null, never an empty body.
      *
      * <p>In-memory first, durable second, and the durable read happens outside this object's monitor
-     * so a slow store cannot stall every other execution in the process. Only an
-     * {@link ExecutionLookup.Unknown} falls through: a process-local {@code Found} is fresher than
-     * anything on disk, and a process-local {@code Expired} tombstone already answers for a result
-     * this process itself evicted.</p>
+     * so a slow store cannot stall every other execution in the process. Only a process-local
+     * {@link ExecutionLookup.Found} is returned without consulting the store: it is the freshest
+     * answer that exists for a traversal this process ran, and nothing on disk can improve on it.
+     * Both absences — {@link ExecutionLookup.Unknown} and {@link ExecutionLookup.Expired} — fall
+     * through.</p>
+     *
+     * <h2>An eviction is not an expiry, and a tombstone must not claim it is</h2>
+     * <p>{@code Expired} used to be returned outright, on the reasoning that a tombstone this process
+     * wrote already answers for a result this process evicted. That reasoning conflated two facts
+     * that were the same one before a durable record existed and are not the same one now: a
+     * tombstone records that <em>this process dropped the result from a bounded cache</em>, which
+     * {@link #put} does by ordinary eviction as soon as {@link #DEFAULT_MAX_RESULTS} further
+     * executions complete, while {@code Expired} claims that <em>the result is past its retention
+     * horizon</em>, which only the store's own clock can establish. Returning the first as the second
+     * made the instance that ran an execution answer "no longer retained" for a result the store was
+     * still holding well inside its window, while every sibling instance sharing that store answered
+     * with the full payload for the same id — the identical identifier giving two different answers
+     * depending on nothing but which instance was asked, which is the disagreement this whole
+     * composition exists to remove.</p>
+     *
+     * <p>So where a durable record exists it is the only thing that may pronounce a result expired,
+     * and the tombstone yields to it: {@link #project} derives {@code Expired} from the record's own
+     * retention state, and derives {@code Found} or {@code Redacted} when the record is still
+     * offered. <b>When the store has no record either, the tombstone is kept and returned
+     * unchanged</b> — it still carries a true and useful fact, that this execution ran and reached
+     * this terminal status for this reason, and discarding it in favour of the store's silence would
+     * downgrade a known terminal execution to {@link ExecutionLookup.Unknown}: an execution that
+     * never happened. That is the case a result purged from the store, or an execution recorded
+     * before a result-capable store was composed, lands in.</p>
      *
      * @param key the tenant-scoped execution to read.
      * @return what is known about that execution, which is never an unqualified absence.
      */
     public ExecutionLookup lookup(Key key) {
         ExecutionLookup local = lookupLocal(key);
-        if (durable == null || !(local instanceof ExecutionLookup.Unknown)) {
+        boolean deferrable = local instanceof ExecutionLookup.Unknown
+                || local instanceof ExecutionLookup.Expired;
+        if (durable == null || !deferrable) {
             return local;
         }
         return durable.load(key.tenantId(), key.executionId())

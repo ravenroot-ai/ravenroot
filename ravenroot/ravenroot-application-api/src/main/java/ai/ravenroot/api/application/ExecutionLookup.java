@@ -40,9 +40,15 @@ import java.util.UUID;
  *   <li>{@link Redacted} when the execution produced a payload that was not retained: it exceeded
  *       the store's cap, or it did not project onto the closed payload model at all. The terminal
  *       status and its termination reason are reported in full;</li>
- *   <li>{@link Expired} once the retention window has elapsed — from the durable record while it
- *       survives, and from the process-local tombstone when the full cached result has been evicted.
- *       The terminal status and its termination reason are still reported, the payload is not;</li>
+ *   <li>{@link Expired} once the retention window has elapsed, reported from the durable record,
+ *       which owns that judgement because only the store's clock can make it. The terminal status
+ *       and its termination reason are still reported, the payload is not. <b>Evicting a result from
+ *       the process-local cache is not an expiry and never produces this answer while a durable
+ *       record exists</b>: the cache is bounded by a count of executions, not by time, so an
+ *       instance that has since run a few hundred more traversals still reads a durably held result
+ *       as {@link Found}, exactly as an instance that never ran it does. The process-local record of
+ *       a terminal execution answers {@code Expired} on its own only where no durable record backs
+ *       it — where none was ever written, or where a purge has since removed it;</li>
  *   <li>{@link Unknown} once the durable record has been purged and even the tombstone is gone, when
  *       no durable store is composed and the process has restarted, or when the execution belongs to
  *       another tenant.</li>

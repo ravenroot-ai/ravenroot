@@ -15,9 +15,9 @@ import java.util.concurrent.CompletionStage;
 
 /**
  * Purges one tenant's expired execution results and leaves an audit record naming what happened --
- * the retention requirement wave 1 left open: {@link ExecutionStore#purgeExpiredExecutionResults}
- * deletes rows, and nothing about that deletion was written down anywhere a security reviewer could
- * later find.
+ * the half of retention that deleting alone does not satisfy: {@link
+ * ExecutionStore#purgeExpiredExecutionResults} deletes rows, and nothing about that deletion was
+ * written down anywhere a security reviewer could later find.
  *
  * <h2>Why this composes two ports rather than living inside either one</h2>
  * <p>{@link ExecutionStore} is deliberately audit-agnostic -- {@link AuditTrail}'s own class Javadoc

@@ -181,6 +181,107 @@ class ExecutionResultRegistryDurableTest {
         }
     }
 
+    /**
+     * The instance that ran an execution must not be the one instance that cannot read its result.
+     *
+     * <p>Every other assertion in this class starts from an empty registry, which is why none of them
+     * could see this: the fall-through was reached only from {@code Unknown}, and a registry that
+     * <em>has</em> run the execution does not answer {@code Unknown} once its entry ages out — it
+     * answers {@code Expired}, from a tombstone {@code put} writes by ordinary count-based eviction
+     * as soon as {@code maxResults} further executions complete. Nothing about that eviction says
+     * anything about the store's retention window, so the recording instance was rendering
+     * {@code 410 EXECUTION_RESULT_EXPIRED} for a result every sibling instance was still serving in
+     * full.</p>
+     *
+     * <p>Asserted as an equality between the two reads rather than as two separate shape checks,
+     * because the property is not "the recording instance answers something reasonable" — it is that
+     * <b>which instance is asked must not be observable at all</b>.</p>
+     */
+    @Test
+    void aDurablyHeldResultEvictedFromTheInstanceThatRanItStillReadsAsItDoesEverywhereElse() {
+        var clock = new MutableClock(START);
+        try (var store = store(clock)) {
+            UUID traversalId = UUID.randomUUID();
+            ExecutionKey key = createInstance(store, traversalId);
+            var registryKey = new ExecutionResultRegistry.Key(TENANT, traversalId);
+
+            // One result retained in memory, so a single further completion evicts this one. The real
+            // default is 256; the bound is what matters, not its size, and driving a count-based
+            // horizon exactly is the reason it is a count.
+            var recorded = new ExecutionResultRegistry(1, 8192, DurableExecutionResults.of(store));
+            recorded.started(registryKey, key.processInstanceId());
+            recorded.completed(registryKey, new GraphExecutionResult(key.processInstanceId(), traversalId,
+                    Map.of("answer", 42L), java.util.Set.of("start", "finish"), java.util.Set.of()));
+            store.recordExecutionResult(completed(key, traversalId, Map.of("answer", 42L),
+                    store.maxExecutionResultPayloadBytes())).toCompletableFuture().join();
+
+            UUID laterTraversalId = UUID.randomUUID();
+            var laterKey = new ExecutionResultRegistry.Key(TENANT, laterTraversalId);
+            recorded.started(laterKey, UUID.randomUUID());
+            recorded.completed(laterKey, new GraphExecutionResult(UUID.randomUUID(), laterTraversalId,
+                    "later", java.util.Set.of("start"), java.util.Set.of()));
+            assertEquals(1, recorded.retainedResults());
+            assertEquals(1, recorded.retainedTombstones(),
+                    "the first result must genuinely have been evicted, or this proves nothing");
+
+            // A second instance sharing only the store: no cache entry, no tombstone, nothing but the
+            // durable record. This is the answer the recording instance has to agree with.
+            var sibling = new ExecutionResultRegistry(256, 8192, DurableExecutionResults.of(store));
+            ExecutionLookup fromSibling = sibling.lookup(registryKey);
+            ExecutionLookup fromRecorder = recorded.lookup(registryKey);
+
+            var found = assertInstanceOf(ExecutionLookup.Found.class, fromRecorder,
+                    "an eviction from a bounded cache is not a retention expiry, and the instance "
+                            + "that ran the execution must not report one as the other");
+            assertEquals(Map.of("answer", 42L), found.outcome().payload());
+            assertEquals(fromSibling, fromRecorder,
+                    "the same id must read identically from the instance that ran it and from one "
+                            + "that never did; which instance is asked must not be observable");
+        }
+    }
+
+    /**
+     * And when nothing durable backs the tombstone, the tombstone is still the truth.
+     *
+     * <p>The complement of the test above, and the reason the fall-through returns the local answer
+     * rather than the store's silence: a purge removes the durable record while the process that ran
+     * the execution still remembers that it ran and how it ended. Dropping the tombstone there would
+     * turn a known terminal execution into {@code Unknown} — an execution that never happened —
+     * which is a strictly worse answer than the one it replaced.</p>
+     */
+    @Test
+    void aTombstoneWithNoDurableRecordLeftBehindItStillReportsHowTheExecutionEnded() {
+        var clock = new MutableClock(START);
+        try (var store = store(clock)) {
+            UUID traversalId = UUID.randomUUID();
+            ExecutionKey key = createInstance(store, traversalId);
+            var registryKey = new ExecutionResultRegistry.Key(TENANT, traversalId);
+
+            var recorded = new ExecutionResultRegistry(1, 8192, DurableExecutionResults.of(store));
+            recorded.started(registryKey, key.processInstanceId());
+            recorded.cancelled(registryKey, key.processInstanceId());
+
+            UUID laterTraversalId = UUID.randomUUID();
+            var laterKey = new ExecutionResultRegistry.Key(TENANT, laterTraversalId);
+            recorded.started(laterKey, UUID.randomUUID());
+            recorded.completed(laterKey, new GraphExecutionResult(UUID.randomUUID(), laterTraversalId,
+                    "later", java.util.Set.of("start"), java.util.Set.of()));
+            assertEquals(1, recorded.retainedTombstones());
+
+            // Nothing was ever recorded durably for this traversal, which is also what a purged
+            // record looks like from here.
+            assertTrue(store.loadExecutionResult(TENANT, traversalId).toCompletableFuture().join()
+                    .isEmpty());
+
+            var expired = assertInstanceOf(ExecutionLookup.Expired.class, recorded.lookup(registryKey),
+                    "a store with nothing to say must not erase what this process still knows");
+            assertEquals(ProcessInstanceStatus.FAILED, expired.status());
+            assertTrue(expired.cancelled(),
+                    "and the tombstone's termination reason has to survive with its status, or a "
+                            + "deliberate stop reads as an incident");
+        }
+    }
+
     @Test
     void withNoDurableRecordComposedTheRegistryBehavesExactlyAsItAlwaysHas() {
         var registry = new ExecutionResultRegistry(256, 8192, null);

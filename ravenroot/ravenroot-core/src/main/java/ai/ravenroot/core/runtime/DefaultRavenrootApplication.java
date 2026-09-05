@@ -1436,6 +1436,22 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * model, bounded by the cap the composed adapter publishes, and reports what became of it rather
      * than handing back an absence that could mean four different things.</p>
      *
+     * <h2>A traversal that terminated on its payload has no output to project</h2>
+     * <p>There is one terminal shape with no {@code Object} to hand over: the run failed
+     * <em>because</em> a payload was rejected, so the engine surfaced a
+     * {@link ai.ravenroot.api.payload.PayloadException} and produced no result. Projecting the
+     * {@code null} that path arrives with would record
+     * {@link ai.ravenroot.api.persistence.ResultPayloadState#NONE}, whose own documentation forbids
+     * exactly that use — it is the positive statement "there was nothing to
+     * keep", and a rejected payload is something that existed and was refused. A reader could not
+     * tell the two apart afterwards: both would answer {@code 200 Found}, terminal status, no
+     * payload, indistinguishable from a run that legitimately produced nothing, while the process
+     * that ran it kept answering with the typed rejection until its cache entry aged out. So the
+     * rejection is classified into a durable payload state through
+     * {@link ai.ravenroot.api.persistence.ExecutionResultPayload#refused}, and a cold read of that
+     * record answers {@link ai.ravenroot.api.application.ExecutionLookup.Redacted} naming which
+     * refusal applies.</p>
+     *
      * <h2>A refusal is logged, never propagated, and the execution is never retroactively failed</h2>
      * <p>This runs inside {@code startGraphMl}'s {@code execution.whenComplete(...)} action, whose
      * returned stage nothing in this codebase observes -- a {@link CompletionStage}'s own contract says
@@ -1492,12 +1508,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 : ai.ravenroot.api.persistence.ExecutionResultNodes.of(result.visitedNodes(),
                         result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
                         result.untakenEdges());
+        var key = new ExecutionKey(security.tenantId(), processInstanceId);
+        var pin = new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion);
+        var endedAt = Instant.now();
+        // A traversal that terminated on a payload rejection has no output object left to project,
+        // and projecting the null it is called with would record NONE -- the positive claim that the
+        // run produced nothing, which is the one thing that state must never say about a payload that
+        // existed and was refused. The refusal itself is what is known, so it is what is recorded.
+        var refused = failure instanceof ai.ravenroot.api.payload.PayloadException rejected
+                ? ai.ravenroot.api.persistence.ExecutionResultPayload.refused(rejected.reason())
+                : null;
         try {
-            executionResults.recordDurably(ai.ravenroot.api.persistence.DurableExecutionResult.of(
-                    new ExecutionKey(security.tenantId(), processInstanceId), traversalId,
-                    new ai.ravenroot.api.persistence.GraphVersionPin(graphVersion), status, reason,
-                    startedAt, Instant.now(), payload, nodes, failure,
-                    durableResults.maxPayloadBytes()));
+            executionResults.recordDurably(refused == null
+                    ? ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId, pin,
+                            status, reason, startedAt, endedAt, payload, nodes, failure,
+                            durableResults.maxPayloadBytes())
+                    : ai.ravenroot.api.persistence.DurableExecutionResult.of(key, traversalId, pin,
+                            status, reason, startedAt, endedAt, refused, nodes, failure));
         } catch (ExecutionStoreException notRecorded) {
             boolean conflict = notRecorded.failure()
                     instanceof ai.ravenroot.api.persistence.ExecutionStoreFailure.ExecutionResultNotRecordable;

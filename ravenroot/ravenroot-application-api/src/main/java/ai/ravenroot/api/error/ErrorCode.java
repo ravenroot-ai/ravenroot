@@ -55,7 +55,7 @@ public enum ErrorCode {
     /**
      * The counterpart that keeps {@link #EXECUTION_RESULT_EXPIRED} honest in the other direction: the
      * execution provably ran and its terminal status is still known, but its payload was never
-     * retained in the first place -- refused because its encoding exceeded the store's byte cap, or
+     * retained in the first place -- refused because it exceeded a configured payload budget, or
      * because the value does not project onto the closed payload model at all. Distinct from
      * {@link #EXECUTION_RESULT_EXPIRED} on purpose: one names a record that aged out under a
      * retention policy working as configured, the other names a record whose payload was refused at

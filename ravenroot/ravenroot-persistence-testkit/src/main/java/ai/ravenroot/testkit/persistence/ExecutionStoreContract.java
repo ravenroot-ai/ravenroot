@@ -5224,9 +5224,9 @@ public abstract class ExecutionStoreContract {
         assertEquals(deadline, await(store().inventoryRetainedFrom(DEFAULT_TENANT)));
     }
 
-    // ============================================== PERS-0X: durable execution results (issue #104)
+    // ================================================ Durable execution results
     //
-    // The six-scenario matrix issue #104 names: restart recovery and multi-instance reads (proved
+    // The six scenarios a store has to answer for: restart recovery and multi-instance reads (proved
     // together below, and the class javadoc for #reopen() says why that is not a shortcut), duplicate
     // terminal events (a no-op re-delivery and a conflicting one are different failure modes and get
     // different tests), cancellation persistence (compared against an ordinary failure, never against
@@ -5520,7 +5520,7 @@ public abstract class ExecutionStoreContract {
         assertTrue(await(store().loadExecutionResult(DEFAULT_TENANT, traversalId)).isEmpty());
     }
 
-    // ---- payload-refusal ordering (wave 1's flagged WITHHELD reachability) ----
+    // ---- payload-refusal ordering (when WITHHELD is reachable at all) ----
 
     /**
      * {@code RuntimeActivityData}'s own projection bounds an output to 16 KiB and reports it

@@ -380,8 +380,9 @@ public abstract class ExecutionEngineContract {
     }
 
     /**
-     * Issue #104's central claim, exercised through the engine's own contract rather than through a
-     * hand-built {@code DurableExecutionResult} or a fresh {@code ExecutionResultRegistry}: a
+     * The central claim about durable execution results, exercised through the engine's own contract
+     * rather than through a hand-built {@code DurableExecutionResult} or a fresh
+     * {@code ExecutionResultRegistry}: a
      * terminal outcome reached by a real traversal, on a real engine, must be durably readable by an
      * application instance that never ran it and holds no process-local cache entry for it at all --
      * exactly what a second instance sharing the store looks like, and exactly what a restart looks

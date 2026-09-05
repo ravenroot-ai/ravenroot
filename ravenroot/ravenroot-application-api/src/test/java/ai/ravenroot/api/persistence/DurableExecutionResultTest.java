@@ -163,6 +163,52 @@ class DurableExecutionResultTest {
                 ResultPayloadState.WITHHELD, true, false, 7, "application/json", null));
     }
 
+    /**
+     * Every published rejection reason is classified, and none of them is {@code NONE}.
+     *
+     * <p>Written over {@code values()} rather than over a hand-listed subset so that a reason added
+     * to the closed vocabulary fails here as well as at the compiler, and asserted against the
+     * recommended HTTP status as an independent witness: the rule is "would raising a configured
+     * budget have let this payload through", and a budget refusal is exactly what the transport
+     * already publishes as 413. Two ways of drawing the same line have to agree, and if they ever
+     * stop agreeing one of them is wrong.</p>
+     */
+    @Test
+    void everyPayloadRejectionIsRecordedAsARefusalRatherThanAsAnExecutionThatProducedNothing() {
+        for (ai.ravenroot.api.payload.PayloadException.Reason reason
+                : ai.ravenroot.api.payload.PayloadException.Reason.values()) {
+            ExecutionResultPayload refused = ExecutionResultPayload.refused(reason);
+            assertNotEquals(ResultPayloadState.NONE, refused.state(),
+                    reason + " describes a payload that existed and was refused, and NONE is the "
+                            + "positive claim that the execution produced nothing");
+            assertFalse(refused.available(), reason + " keeps no bytes");
+            assertNull(refused.retained());
+            assertEquals(reason.recommendedStatus() == 413 ? ResultPayloadState.WITHHELD
+                            : ResultPayloadState.UNCONVERTIBLE, refused.state(),
+                    reason + " is a budget an operator can raise exactly when the transport reports "
+                            + "it as 413, and the durable state must draw the same line");
+        }
+    }
+
+    /**
+     * A refusal raised before anything was encoded carries no size, and that is not the same fact as
+     * {@code NONE}.
+     */
+    @Test
+    void aRefusalRaisedBeforeEncodingCarriesNoMetadataAndStillSaysAPayloadExisted() {
+        ExecutionResultPayload withheld =
+                ExecutionResultPayload.refused(ai.ravenroot.api.payload.PayloadException.Reason.TOO_LARGE);
+        assertEquals(ResultPayloadState.WITHHELD, withheld.state());
+        assertEquals(0, withheld.bytes(), "no projection of the refused value was ever produced");
+        assertNull(withheld.contentType());
+        assertNotEquals(ExecutionResultPayload.none(), withheld,
+                "the state, not the absent metadata, is what separates a refused payload from a run "
+                        + "that produced nothing");
+        assertEquals(withheld, withheld.expired(),
+                "a payload that was never stored cannot age out of storage");
+        assertThrows(NullPointerException.class, () -> ExecutionResultPayload.refused(null));
+    }
+
     @Test
     void anExpiredReadDropsTheBytesAndKeepsTheMetadataThatSaysWhatWasLost() {
         DurableExecutionResult stored =

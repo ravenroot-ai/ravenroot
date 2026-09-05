@@ -7171,6 +7171,13 @@ function renderEdgeForm(model, creating) {
     if (event.target.matches('[name="target"], [name="outcome"], [name="failureRoute"]')) {
       form.dataset.preserveImplicitFailureDeclaration = 'false';
     }
+    if (event.target.matches('[name="outcome"]')
+        && graphData.nodeMap?.[String(form.elements.target.value || '')]?.kind === 'ERROR') {
+      // The checkbox is hidden for an Error target, but an imported explicit declaration can leave
+      // it checked. Naming an outcome removes that declaration; clear its hidden control state too,
+      // so moving the edge to an ordinary target cannot revive the route the author just replaced.
+      form.elements.failureRoute.checked = false;
+    }
   };
   form.addEventListener('input', forgetOriginalFailureDeclaration);
   form.addEventListener('change', forgetOriginalFailureDeclaration);

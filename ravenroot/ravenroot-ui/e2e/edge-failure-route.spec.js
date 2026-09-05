@@ -245,6 +245,24 @@ test('overriding an Error target with an outcome drops the declaration instead o
 
     await expect.poll(() => edgeState(page, 'error'))
       .toMatchObject({ outcome: 'reviewed', declared: undefined, failureRouteKind: '' });
+
+    // The imported declaration also occupied a hidden checked checkbox. Removing its property must
+    // retire that control intent, or retargeting later would revive the failure route and overwrite
+    // the explicit outcome the author just entered.
+    await page.locator('#edge-editor select[name="target"]').selectOption('end');
+    await expect(page.locator('#edge-editor [data-failure-route-control]')).toBeVisible();
+    await expect(page.locator('#edge-editor input[name="failureRoute"]')).not.toBeChecked();
+    await expect(page.locator('#edge-editor input[name="outcome"]')).toHaveValue('reviewed');
+    await expect(page.locator('#edge-kind-state')).toHaveAttribute('data-edge-kind', 'outcome');
+    await expect.poll(() => page.evaluate(() => {
+      const edge = window.cy.getElementById('e3');
+      return {
+        target: edge.data('target'),
+        outcome: edge.data('outcome'),
+        kind: edge.data('failureRouteKind'),
+        declared: edge.data('properties')['failure.route'],
+      };
+    })).toEqual({ target: 'end', outcome: 'reviewed', kind: '', declared: undefined });
     const xml = await exportedGraphMl(page);
     expect(xml).not.toMatch(/<data key="[^"]*failure[^"]*">/);
   });

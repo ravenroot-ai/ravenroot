@@ -789,7 +789,8 @@ class RavenrootServerTest {
                             URI.create("http://localhost:" + server.port() + "/v1/configuration")).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(200, configuration.statusCode());
-            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length + "}",
+            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length
+                            + ",\"workspace\":{\"tenantId\":\"local\"}}",
                     configuration.body());
             assertEquals("private, no-store", configuration.headers().firstValue("Cache-Control").orElseThrow());
 
@@ -826,6 +827,95 @@ class RavenrootServerTest {
                     .POST(HttpRequest.BodyPublishers.ofString(structuredOversized, StandardCharsets.UTF_8)).build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(413, structuredRejected.statusCode(), structuredRejected.body());
+        }
+    }
+
+    @Test
+    void projectsOnlyTheAuthenticatedTenantsWorkspaceScopeIntoConfiguration() throws Exception {
+        RequestAuthenticator authenticator = headers -> {
+            String bearer = headers.getFirst("Authorization");
+            if ("Bearer tenant-a".equals(bearer)) return tenantPrincipal("tenant-a");
+            if ("Bearer tenant-b".equals(bearer)) return tenantPrincipal("tenant-b\"\n");
+            throw new ai.ravenroot.server.security.AuthenticationException("unknown test credential");
+        };
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-configuration-tenant-test");
+             var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null,
+                     authenticator)) {
+            server.start();
+            HttpClient client = HttpClient.newHttpClient();
+            URI configuration = URI.create("http://localhost:" + server.port() + "/v1/configuration");
+
+            HttpResponse<String> tenantA = client.send(HttpRequest.newBuilder(configuration)
+                            .header("Authorization", "Bearer tenant-a")
+                            .header("X-Tenant-Id", "tenant-b")
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> tenantB = client.send(HttpRequest.newBuilder(configuration)
+                            .header("Authorization", "Bearer tenant-b")
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> anonymous = client.send(HttpRequest.newBuilder(configuration)
+                            .header("X-Tenant-Id", "tenant-a")
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, tenantA.statusCode(), tenantA.body());
+            assertTrue(tenantA.body().contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"), tenantA.body());
+            assertFalse(tenantA.body().contains("tenant-b"), tenantA.body());
+            assertEquals(200, tenantB.statusCode(), tenantB.body());
+            assertTrue(tenantB.body().contains("\"tenantId\":\"tenant-b\\\"\\n\""), tenantB.body());
+            assertEquals(401, anonymous.statusCode(), anonymous.body());
+            assertFalse(anonymous.body().contains("tenant-a"), anonymous.body());
+            assertFalse(anonymous.body().contains("tenant-b"), anonymous.body());
+        }
+    }
+
+    @Test
+    void keepsConcurrentRequestsToOneRouteBoundToTheirOwnPrincipal() throws Exception {
+        var barrier = new java.util.concurrent.CyclicBarrier(2);
+        RequestAuthenticator authenticator = headers -> tenantPrincipal(
+                "Bearer tenant-a".equals(headers.getFirst("Authorization")) ? "tenant-a" : "tenant-b");
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-principal-isolation-test");
+             var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null,
+                     authenticator)) {
+            var method = RavenrootServer.class.getDeclaredMethod("protectedRequest",
+                    com.sun.net.httpserver.HttpHandler.class);
+            method.setAccessible(true);
+            var configurationMethod = RavenrootServer.class.getDeclaredMethod("configuration",
+                    com.sun.net.httpserver.HttpExchange.class);
+            configurationMethod.setAccessible(true);
+            com.sun.net.httpserver.HttpHandler probe = exchange -> {
+                try {
+                    barrier.await(5, TimeUnit.SECONDS);
+                    configurationMethod.invoke(server, exchange);
+                } catch (Exception failure) {
+                    throw new IOException(failure);
+                }
+            };
+            var protectedProbe = (com.sun.net.httpserver.HttpHandler) method.invoke(server, probe);
+            var cleaned = new java.util.concurrent.atomic.AtomicInteger();
+            var observedCleanup = new java.util.concurrent.CountDownLatch(2);
+            com.sun.net.httpserver.HttpHandler observingProbe = exchange -> {
+                try {
+                    protectedProbe.handle(exchange);
+                } finally {
+                    if (AuthenticatedPrincipalAttribute.find(exchange).isEmpty()) cleaned.incrementAndGet();
+                    observedCleanup.countDown();
+                }
+            };
+            var field = RavenrootServer.class.getDeclaredField("server");
+            field.setAccessible(true);
+            ((com.sun.net.httpserver.HttpServer) field.get(server)).createContext("/principal-probe", observingProbe);
+            server.start();
+            URI uri = URI.create("http://localhost:" + server.port() + "/principal-probe");
+            HttpClient client = HttpClient.newHttpClient();
+            var a = client.sendAsync(HttpRequest.newBuilder(uri).header("Authorization", "Bearer tenant-a")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            var b = client.sendAsync(HttpRequest.newBuilder(uri).header("Authorization", "Bearer tenant-b")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertTrue(a.get(10, TimeUnit.SECONDS).body()
+                    .contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"));
+            assertTrue(b.get(10, TimeUnit.SECONDS).body()
+                    .contains("\"workspace\":{\"tenantId\":\"tenant-b\"}"));
+            assertTrue(observedCleanup.await(5, TimeUnit.SECONDS));
+            assertEquals(2, cleaned.get());
         }
     }
 
@@ -1391,6 +1481,16 @@ class RavenrootServerTest {
                         .map(ai.ravenroot.api.security.AuthorizationAction::requiredScope)
                         .collect(java.util.stream.Collectors.toUnmodifiableSet()),
                 expiresAt);
+    }
+
+    private static AuthenticatedPrincipal tenantPrincipal(String tenantId) {
+        return new AuthenticatedPrincipal("browser-user", AuthenticatedPrincipal.Type.USER,
+                "https://issuer.example", tenantId,
+                Set.of(ai.ravenroot.api.security.Role.PLATFORM_ADMIN),
+                java.util.Arrays.stream(ai.ravenroot.api.security.AuthorizationAction.values())
+                        .filter(ai.ravenroot.api.security.AuthorizationAction::available)
+                        .map(ai.ravenroot.api.security.AuthorizationAction::requiredScope)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
     }
 
     /**

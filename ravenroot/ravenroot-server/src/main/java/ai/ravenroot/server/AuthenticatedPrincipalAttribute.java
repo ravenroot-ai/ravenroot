@@ -3,21 +3,38 @@ package ai.ravenroot.server;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import com.sun.net.httpserver.HttpExchange;
 
-/** Stable request attribute for later authorization/audit layers without coupling the core to HTTP. */
+/**
+ * Per-exchange authenticated-principal registry for later authorization and audit layers without
+ * coupling the core to HTTP. Call {@link #install(HttpExchange, AuthenticatedPrincipal)} once at
+ * the authentication boundary and {@link #clear(HttpExchange)} when that request finishes; callers
+ * obtain it only through {@link #require(HttpExchange)} or {@link #find(HttpExchange)}. The JDK
+ * exchange attribute map belongs to an {@code HttpContext}, so it is deliberately not used here.
+ */
 public final class AuthenticatedPrincipalAttribute {
     public static final String NAME = AuthenticatedPrincipal.class.getName();
     private static final java.util.Map<HttpExchange, String> REQUEST_IDS =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
+    private static final java.util.Map<HttpExchange, AuthenticatedPrincipal> PRINCIPALS =
             java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     private AuthenticatedPrincipalAttribute() {
     }
 
     public static AuthenticatedPrincipal require(HttpExchange exchange) {
-        Object value = exchange.getAttribute(NAME);
-        if (value instanceof AuthenticatedPrincipal principal) {
-            return principal;
-        }
-        throw new IllegalStateException("Authenticated principal is unavailable");
+        return find(exchange).orElseThrow(() -> new IllegalStateException("Authenticated principal is unavailable"));
+    }
+
+    public static void install(HttpExchange exchange, AuthenticatedPrincipal principal) {
+        PRINCIPALS.put(java.util.Objects.requireNonNull(exchange, "exchange"),
+                java.util.Objects.requireNonNull(principal, "principal"));
+    }
+
+    public static java.util.Optional<AuthenticatedPrincipal> find(HttpExchange exchange) {
+        return java.util.Optional.ofNullable(PRINCIPALS.get(java.util.Objects.requireNonNull(exchange, "exchange")));
+    }
+
+    public static void clear(HttpExchange exchange) {
+        PRINCIPALS.remove(java.util.Objects.requireNonNull(exchange, "exchange"));
     }
 
     /**

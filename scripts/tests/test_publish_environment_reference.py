@@ -10,6 +10,13 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertIn("RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS", names)
         self.assertIn("RAVENROOT_JDBC_PROFILE_", names)
         self.assertIn("RAVENROOT_HUMAN_TASK_", names)
+        for name in (
+            "RAVENROOT_MATRIX_CONFIG",
+            "RAVENROOT_MATTERMOST_CONFIG",
+            "RAVENROOT_TEAMS_CONFIG",
+        ):
+            self.assertIn(name, names)
+            self.assertEqual("bundle", group(name))
         self.assertEqual("assistant", group("RAVENROOT_ASSISTANT_PROVIDER"))
         self.assertEqual("bundle", group("RAVENROOT_JDBC_PROFILE_"))
         self.assertEqual("human-task", group("RAVENROOT_HUMAN_TASK_"))
@@ -28,6 +35,25 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertIn("/opt/ravenroot/plugins", boundary("RAVENROOT_PLUGINS_INSTALL_DIR"))
         self.assertIn("defaults to `1`", boundary("RAVENROOT_REPLICAS"))
         self.assertIn("comma-separated exact IP literals", boundary("RAVENROOT_TRUSTED_PROXY_ADDRESSES"))
+
+    def test_chat_bundle_configuration_boundaries_match_activation_lifecycle(self):
+        matrix = boundary("RAVENROOT_MATRIX_CONFIG")
+        self.assertIn("canonical padded Base64 of strict JSON", matrix)
+        self.assertIn("bounded `store` settings", matrix)
+        self.assertIn("first Matrix send execution or Matrix sync source instantiation", matrix)
+        self.assertIn("successfully resolved value is cached", matrix)
+
+        for name, package in (
+            ("RAVENROOT_MATTERMOST_CONFIG", "Mattermost"),
+            ("RAVENROOT_TEAMS_CONFIG", "Teams"),
+        ):
+            value = boundary(name)
+            self.assertIn("canonical padded Base64 of strict JSON", value)
+            self.assertIn("ingress `authority`", value)
+            self.assertIn("request `projection`", value)
+            self.assertIn("nonempty tenant/profile map", value)
+            self.assertIn(f"ignored when the {package} package is not selected", value)
+            self.assertIn("unset or malformed configuration refuses server startup", value)
 
 
 if __name__ == "__main__":

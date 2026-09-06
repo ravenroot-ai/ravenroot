@@ -82,14 +82,20 @@ selected event fields. Mutable `unsigned` data such as homeserver-local `age` is
 binding. Run one active application replica for a deployment unless the surrounding deployment
 system provides single-owner fencing.
 
-For a source with no cursor, `initialSyncMode: "skip"` deliberately checkpoints the first snapshot
-without delivering it. `deliver-bounded` delivers the first page and may start from an operator
-provided `initialSince`. Any allowed-room timeline marked `limited`, or any page over
-`maxEventsPerSync`, fails closed and leaves the cursor unchanged. Recover by obtaining an earlier
-valid `since` token and creating an explicitly fresh deployment/node cursor namespace with that
-reviewed `initialSince`, or by deliberately creating a fresh source namespace in `skip` mode after
-accepting the history loss. Changing `initialSince` does not override an existing persisted cursor.
-Ravenroot never silently advances past a detected gap.
+For a source with no cursor, `initialSyncMode: "skip"` deliberately checkpoints the first structurally
+valid snapshot without delivering it, including when that snapshot is marked `limited` or exceeds the
+event-delivery cap. `deliver-bounded` delivers the first page and may start from an operator-provided
+`initialSince`. In `deliver-bounded` mode, and on every page after an initial `skip` checkpoint, an
+allowed-room timeline marked `limited` or a page over `maxEventsPerSync` fails closed and leaves the
+cursor unchanged. Recover by obtaining an earlier valid `since` token and creating an explicitly
+fresh deployment/node cursor namespace with that reviewed `initialSince`, or by deliberately creating
+a fresh source namespace in `skip` mode after accepting the history loss. Changing `initialSince`
+does not override an existing persisted cursor. Ravenroot never silently advances past a detected gap
+unless the operator chose the explicit initial-snapshot discard.
+
+For every present allowed-room timeline, `events` must be an array and an optional `limited` member
+must be a JSON boolean. A malformed timeline is rejected before any event offer or cursor checkpoint,
+including during the initial `skip` snapshot.
 
 The SQLite file stores scoped cursor values, structural event IDs, canonical event digests, and
 timestamps; it stores no access token and no message body. Capacity, lock deadlines, cancellation,

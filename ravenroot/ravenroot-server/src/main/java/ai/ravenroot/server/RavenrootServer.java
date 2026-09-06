@@ -953,9 +953,7 @@ public final class RavenrootServer implements AutoCloseable {
      */
     private void refuse(HttpExchange exchange, RateLimitDecision decision, String clientAddress,
                         boolean forwarded) throws IOException {
-        AuthenticatedPrincipal principal =
-                exchange.getAttribute(AuthenticatedPrincipalAttribute.NAME) instanceof AuthenticatedPrincipal known
-                        ? known : null;
+        AuthenticatedPrincipal principal = AuthenticatedPrincipalAttribute.find(exchange).orElse(null);
         rateLimiter.audit().record(new RateLimitAuditEvent(clock.instant(),
                 AuthenticatedPrincipalAttribute.requestId(exchange), clientAddress, forwarded,
                 principal == null ? RateLimitAuditEvent.UNKNOWN : principal.tenantId(),
@@ -1330,7 +1328,7 @@ public final class RavenrootServer implements AutoCloseable {
         return exchange -> {
             try {
                 var principal = authenticator.authenticate(exchange.getRequestHeaders());
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME, principal);
+                AuthenticatedPrincipalAttribute.install(exchange, principal);
             } catch (AuthenticationException denied) {
                 exchange.getResponseHeaders().set("WWW-Authenticate", "Bearer");
                 fail(exchange, ErrorCode.AUTHENTICATION_REQUIRED);
@@ -1339,16 +1337,18 @@ public final class RavenrootServer implements AutoCloseable {
             // Tenant first, then principal within it. The tenant budget is what stops one tenant
             // starving the others; the principal budget is what stops one user draining its own tenant.
             // Either alone leaves a starvation path open, so both are charged.
-            var principal = AuthenticatedPrincipalAttribute.require(exchange);
-            var identityBudget = rateLimiter.checkIdentity(principal.tenantId(), principal.subject());
-            if (!identityBudget.isAllowed()) {
-                refuse(exchange, identityBudget);
-                return;
-            }
             try {
+                var principal = AuthenticatedPrincipalAttribute.require(exchange);
+                var identityBudget = rateLimiter.checkIdentity(principal.tenantId(), principal.subject());
+                if (!identityBudget.isAllowed()) {
+                    refuse(exchange, identityBudget);
+                    return;
+                }
                 handler.handle(exchange);
             } catch (ai.ravenroot.api.security.AuthorizationDeniedException denied) {
                 fail(exchange, ErrorCode.ACCESS_DENIED);
+            } finally {
+                AuthenticatedPrincipalAttribute.clear(exchange);
             }
         };
     }

@@ -868,6 +868,45 @@ class RavenrootServerTest {
     }
 
     @Test
+    void keepsConcurrentRequestsToOneRouteBoundToTheirOwnPrincipal() throws Exception {
+        var barrier = new java.util.concurrent.CyclicBarrier(2);
+        RequestAuthenticator authenticator = headers -> tenantPrincipal(
+                "Bearer tenant-a".equals(headers.getFirst("Authorization")) ? "tenant-a" : "tenant-b");
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-principal-isolation-test");
+             var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null,
+                     authenticator)) {
+            var method = RavenrootServer.class.getDeclaredMethod("protectedRequest",
+                    com.sun.net.httpserver.HttpHandler.class);
+            method.setAccessible(true);
+            com.sun.net.httpserver.HttpHandler probe = exchange -> {
+                try {
+                    barrier.await(5, TimeUnit.SECONDS);
+                    byte[] body = AuthenticatedPrincipalAttribute.require(exchange).tenantId()
+                            .getBytes(StandardCharsets.UTF_8);
+                    exchange.sendResponseHeaders(200, body.length);
+                    exchange.getResponseBody().write(body);
+                    exchange.close();
+                } catch (Exception failure) {
+                    throw new IOException(failure);
+                }
+            };
+            var protectedProbe = (com.sun.net.httpserver.HttpHandler) method.invoke(server, probe);
+            var field = RavenrootServer.class.getDeclaredField("server");
+            field.setAccessible(true);
+            ((com.sun.net.httpserver.HttpServer) field.get(server)).createContext("/principal-probe", protectedProbe);
+            server.start();
+            URI uri = URI.create("http://localhost:" + server.port() + "/principal-probe");
+            HttpClient client = HttpClient.newHttpClient();
+            var a = client.sendAsync(HttpRequest.newBuilder(uri).header("Authorization", "Bearer tenant-a")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            var b = client.sendAsync(HttpRequest.newBuilder(uri).header("Authorization", "Bearer tenant-b")
+                    .GET().build(), HttpResponse.BodyHandlers.ofString());
+            assertEquals("tenant-a", a.get(10, TimeUnit.SECONDS).body());
+            assertEquals("tenant-b", b.get(10, TimeUnit.SECONDS).body());
+        }
+    }
+
+    @Test
     void exposesTheExplicitDevelopmentArtifactLifecycleWithoutReturningSource() throws Exception {
         var runtime = new ProgramRuntime() {
             @Override

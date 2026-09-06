@@ -52,6 +52,7 @@ let attentionMode;
 let requests;
 let capabilityResponse;
 let catalogResponse;
+let executionContext;
 
 function task(id, generation, status = 'WAITING') {
   return { taskId: id, generation, status, graphVersion: 'graph-v1', deploymentId: null,
@@ -82,10 +83,17 @@ function startService() {
     if (url.pathname === '/v1/node-types') return json(response, 200, catalogResponse, headers);
     if (url.pathname === '/v1/events') { response.writeHead(204, headers).end(); return; }
     if (url.pathname === '/v1/executions') return json(response, 200, { executionId: 'traversal-v1',
-      processInstanceId: 'process-v1', graphVersion: 'graph-v1', executionPolicy: 'durable' }, headers);
+      ...executionContext, executionPolicy: 'durable' }, headers);
     if (url.pathname === '/v1/human-tasks/attention') {
-      if (attentionMode === 'network') { request.socket.destroy(); return; }
-      let live = tasks.filter(entry => ['WAITING', 'ESCALATED'].includes(entry.status));
+      const requestedGraph = url.searchParams.get('graphVersion');
+      if (attentionMode === 'network'
+          || (attentionMode === 'offline-graph-b' && requestedGraph === 'graph-b')) {
+        request.socket.destroy(); return;
+      }
+      let live = attentionMode === 'empty-graph-b' && requestedGraph === 'graph-b' ? []
+        : tasks.filter(entry => ['WAITING', 'ESCALATED'].includes(entry.status)).map(entry => ({ ...entry,
+          graphVersion: requestedGraph || entry.graphVersion,
+          processInstanceId: url.searchParams.get('processInstanceId') || entry.processInstanceId }));
       const nodeId = url.searchParams.get('nodeId');
       if (nodeId) live = live.filter(entry => entry.nodeId === nodeId);
       const exactTask = url.searchParams.get('taskId');
@@ -129,6 +137,10 @@ async function connectAndCreate(page) {
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#service-url').press('Tab');
   await page.locator('#btn-new').click();
+  await addHumanTaskNode(page);
+}
+
+async function addHumanTaskNode(page) {
   await page.locator('#btn-modify').click();
   await page.locator('#node-catalog [data-catalog-add="human-task"]').click();
   await page.locator('#node-editor input[name="id"]').fill('human-confirmation');
@@ -145,11 +157,11 @@ async function connectAndCreate(page) {
   });
 }
 
-async function runAndSelect(page) {
+async function runAndSelect(page, graphVersion = executionContext.graphVersion) {
   page.once('dialog', dialog => dialog.accept());
   await page.locator('#btn-run').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().execution.graphVersion))
-    .toBe('graph-v1');
+    .toBe(graphVersion);
   await page.evaluate(() => {
     window.ravenroot.activeDocument().cy.getElementById('human-confirmation').emit('tap');
   });
@@ -162,6 +174,7 @@ test.beforeEach(async () => {
   requests = [];
   capabilityResponse = { ...CAPABILITY };
   catalogResponse = [HUMAN_TASK];
+  executionContext = { processInstanceId: 'process-v1', graphVersion: 'graph-v1' };
   await startService();
 });
 test.afterEach(async () => new Promise(resolve => {
@@ -195,6 +208,18 @@ test('a catalog that cannot admit new confirmations omits authoring while runtim
   await page.locator('#btn-modify').click();
   await page.locator('#node-catalog [data-catalog-add="human-task"]').click();
   await expect(page.locator('[data-catalog-property^="confirmation"]')).toHaveCount(0);
+});
+
+test('ambiguous active labels are rejected before the decision form is rendered', async ({ page }) => {
+  tasks[0] = task('task-1', 1, 'ESCALATED');
+  tasks[0].presentation = { ...tasks[0].presentation, resolveLabel: 'Ｐｒｏｃｅｅｄ',
+    denyLabel: '  proceed  ' };
+  tasks = [tasks[0]];
+  await connectAndCreate(page);
+  await runAndSelect(page);
+  await expect(page.locator('.human-task-status')).toContainText('could not be refreshed');
+  await expect(page.locator('[data-human-task-id]')).toHaveCount(0);
+  await expect(page.locator('[data-human-task-action]')).toHaveCount(0);
 });
 
 test('two tasks page independently and explicit decisions remove the final non-colour halo', async ({ page }) => {
@@ -286,6 +311,42 @@ test('attention survives Design and Monitoring renderer changes with a pulsing n
   await expect.poll(() => page.evaluate(() => ({ renderer: window.ravenroot.activeDocument().renderer.kind,
     label: window.ravenroot.activeDocument().cy.getElementById('human-confirmation').renderedStyle('label'),
   }))).toEqual({ renderer: 'cytoscape', label: 'Human task\n⚑ 2 · ▲ 1' });
+});
+
+test('a failed switch to a document sharing the node id clears the previous halo and rows', async ({ page }) => {
+  executionContext = { processInstanceId: 'process-a', graphVersion: 'graph-a' };
+  await connectAndCreate(page);
+  await runAndSelect(page);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy
+    .getElementById('human-confirmation').data('humanTaskPending'))).toBe(2);
+  const documentA = await page.evaluate(() => window.ravenroot.activeDocument().id);
+
+  await page.locator('#btn-new').click();
+  await addHumanTaskNode(page);
+  executionContext = { processInstanceId: 'process-b', graphVersion: 'graph-b' };
+  attentionMode = 'empty-graph-b';
+  await runAndSelect(page);
+  const documentB = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy
+    .getElementById('human-confirmation').data('humanTaskPending'))).toBe(0);
+
+  attentionMode = 'normal';
+  await page.locator('#document-switcher').click();
+  await page.locator(`[data-document-activate="${documentA}"]`).click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().cy
+    .getElementById('human-confirmation').data('humanTaskPending'))).toBe(2);
+
+  attentionMode = 'offline-graph-b';
+  await page.locator('#document-switcher').click();
+  await page.locator(`[data-document-activate="${documentB}"]`).click();
+  await expect.poll(() => requests.filter(value => value.includes('graphVersion=graph-b')).length)
+    .toBeGreaterThan(0);
+  await expect.poll(() => page.evaluate(() => {
+    const node = window.ravenroot.activeDocument().cy.getElementById('human-confirmation');
+    return { pending: node.data('humanTaskPending'), label: node.renderedStyle('label'),
+      pulsing: node.hasClass('human-task-pulse') };
+  })).toEqual({ pending: 0, label: 'Human task', pulsing: false });
+  await expect(page.locator('[data-human-task-id]')).toHaveCount(0);
 });
 
 test('stale generation and ambiguous network loss reconcile without an automatic duplicate decision', async ({ page }) => {

@@ -90,4 +90,42 @@ describe('Human Task attention controller', () => {
       hasPrevious: false });
     expect(calls.at(-1)).toMatchObject({ nodeId: 'human-confirmation', cursor: undefined });
   });
+
+  it('clears context A before offline B and rejects a late A response', async () => {
+    let mode = 'ready';
+    const lateAResolvers = [];
+    const client = { humanTaskAttention: vi.fn(async filters => {
+      if (mode === 'offline') throw new Error('B is offline');
+      if (mode === 'late') return new Promise(resolve => lateAResolvers.push(() =>
+        resolve(filters.nodeId ? page : aggregate)));
+      return filters.nodeId ? page : aggregate;
+    }) };
+    const changes = [];
+    const controller = createHumanTaskController({ onChange: state => changes.push(state),
+      setTimer: () => 1, clearTimer: () => {} });
+    const documentA = { execution: { graphVersion: 'graph-a', processInstanceId: 'process-a' },
+      humanTasks: {} };
+    await controller.configure(client, capability, documentA);
+    await controller.selectNode('human-confirmation');
+    expect(controller.state().nodeCounts.size).toBe(1);
+    expect(controller.state().page.items).toEqual(page.items);
+
+    mode = 'late';
+    const lateA = controller.refresh();
+    const beforeB = changes.length;
+    documentA.execution = { graphVersion: 'graph-b', processInstanceId: 'process-b' };
+    mode = 'offline';
+    const offlineB = controller.configure(client, capability, documentA);
+    const loadingB = changes.slice(beforeB).find(change => change.kind === 'loading');
+    expect(loadingB.nodeCounts.size).toBe(0);
+    expect(loadingB.page.items).toEqual([]);
+    await offlineB;
+    expect(controller.state()).toMatchObject({ kind: 'error', page: { kind: 'error', items: [] } });
+    expect(controller.state().nodeCounts.size).toBe(0);
+
+    lateAResolvers.forEach(resolve => resolve());
+    await lateA;
+    expect(controller.state().kind).toBe('error');
+    expect(controller.state().nodeCounts.size).toBe(0);
+  });
 });

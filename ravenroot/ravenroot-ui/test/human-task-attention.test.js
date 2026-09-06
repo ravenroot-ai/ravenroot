@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  humanTaskActionLabelKey,
   humanTaskServiceOrigin,
   humanTaskContext,
   nextHumanTaskBackoff,
@@ -91,6 +92,26 @@ describe('Human Task capability and attention projection', () => {
       counts: { pending: 1, escalated: 0 }, nodeCounts: [{ nodeId: 'review', pending: 0, escalated: 0 }] },
     capability, { graphVersion: 'graph-v1', deploymentId: 'deployment-1' }))
       .toThrow(/do not match aggregate/);
+  });
+
+  it('rejects duplicate normalized labels only among active actions', () => {
+    const capability = validateHumanTaskCapability(CAPABILITY);
+    const attention = (presentation, overrides = {}) => ({ schemaVersion: 1,
+      items: [row({ presentation, ...overrides })],
+      nextCursor: null, counts: { pending: 1, escalated: 0 }, nodeCounts: [] });
+    const base = row().presentation;
+    for (const [resolveLabel, denyLabel] of [['Release', ' release '], ['Release', 'RELEASE'],
+      ['Release', 'Ｒｅｌｅａｓｅ'], ['Re  lease', 'Re\u00a0\u00a0lease']]) {
+      expect(() => validateHumanTaskAttention(attention({ ...base, resolveLabel, denyLabel }),
+        capability)).toThrow(/ambiguous/);
+    }
+    expect(() => validateHumanTaskAttention(attention({ ...base, actions: ['RESOLVE'],
+      resolveLabel: 'Release', denyLabel: ' release ', cancelLabel: '' },
+    { availableActions: ['RESOLVE'] }), capability)).not.toThrow();
+    expect(humanTaskActionLabelKey(' Ｒｅ\u00a0\u00a0ＬＥＡＳＥ ')).toBe('re lease');
+    expect(humanTaskActionLabelKey('\ufeffRelease\ufeff')).toBe('\ufeffrelease\ufeff');
+    expect(() => validateHumanTaskAttention(attention({ ...base, resolveLabel: 'Release',
+      denyLabel: '\ufeffRelease' }), capability)).not.toThrow();
   });
 
   it('keeps attention context on authoritative runtime pins and out of graph content', () => {

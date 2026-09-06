@@ -43,6 +43,13 @@ export function utf8Length(value) {
   return new TextEncoder().encode(String(value ?? '')).length;
 }
 
+export function humanTaskActionLabelKey(value) {
+  return String(value).normalize('NFKC')
+    .replace(/[\p{White_Space}\p{Zs}]+/gu, ' ')
+    .replace(/^ +| +$/g, '')
+    .toLowerCase();
+}
+
 export function validateHumanTaskCapability(value) {
   const capability = object(value, 'Human Task capability is missing');
   const versions = capability.confirmationPresentationVersions;
@@ -102,11 +109,15 @@ export function validateHumanTaskPresentation(value, capability, pinnedLimits) {
   const labels = Object.freeze({ RESOLVE: displayText(presentation.resolveLabel, 'resolve label'),
     DENY: displayText(presentation.denyLabel, 'deny label'),
     CANCEL: displayText(presentation.cancelLabel, 'cancel label') });
+  const activeLabelKeys = new Set();
   for (const action of actions) {
     if (!labels[action].trim()) throw new Error(`Human Task ${action.toLowerCase()} label is missing`);
     if (utf8Length(labels[action]) > pinnedLimits.actionLabelMaxUtf8Bytes) {
       throw new Error('Human Task action label exceeds its pinned maximum');
     }
+    const key = humanTaskActionLabelKey(labels[action]);
+    if (activeLabelKeys.has(key)) throw new Error('Human Task active action labels are ambiguous');
+    activeLabelKeys.add(key);
   }
   return Object.freeze({ version, prompt, commentRequirement: presentation.commentRequirement,
     actions: Object.freeze(actions), labels });

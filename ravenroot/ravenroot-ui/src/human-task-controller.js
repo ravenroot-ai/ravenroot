@@ -9,6 +9,19 @@ function initialState() {
     nextCursor: null, hasPrevious: false, pageNumber: 1 } };
 }
 
+function queryContextKey(value) {
+  if (!value) return null;
+  return value.deploymentId != null
+    ? JSON.stringify(['deployment', value.graphVersion, value.deploymentId])
+    : JSON.stringify(['process', value.graphVersion, value.processInstanceId]);
+}
+
+function emptyProjection(selectedNodeId, { kind = 'loading', message = '' } = {}) {
+  return { kind, message, nodeCounts: new Map(), selectedNodeId,
+    page: { kind, message, items: [], counts: EMPTY_COUNTS, nextCursor: null,
+      hasPrevious: false, pageNumber: 1 } };
+}
+
 export function createHumanTaskController({ onChange = () => {}, setTimer = setTimeout,
   clearTimer = clearTimeout } = {}) {
   let client = null;
@@ -21,6 +34,7 @@ export function createHumanTaskController({ onChange = () => {}, setTimer = setT
   let controller = null;
   let generation = 0;
   let backoff = 0;
+  let configuredContextKey = null;
 
   const publish = () => onChange(state);
   const context = () => humanTaskContext(documentRecord);
@@ -119,9 +133,21 @@ export function createHumanTaskController({ onChange = () => {}, setTimer = setT
 
   return {
     configure(nextClient, nextCapability, nextDocument) {
-      const changed = client !== nextClient || capability !== nextCapability || documentRecord !== nextDocument;
+      const nextContextKey = queryContextKey(humanTaskContext(nextDocument));
+      const changed = client !== nextClient || capability !== nextCapability || documentRecord !== nextDocument
+        || configuredContextKey !== nextContextKey;
       client = nextClient; capability = nextCapability; documentRecord = nextDocument;
-      if (changed) { pageCursors = [null]; pageIndex = 0; backoff = 0; }
+      configuredContextKey = nextContextKey;
+      if (changed) {
+        stopTimer(); stopFlight(); generation += 1;
+        pageCursors = [null]; pageIndex = 0; backoff = 0;
+        const available = Boolean(client && capability && nextContextKey);
+        const message = available ? '' : client && !capability
+          ? 'This runtime does not expose embedded Human Task presentation.'
+          : 'Run or select an authoritative deployment context to see Human Tasks.';
+        state = emptyProjection(state.selectedNodeId, { kind: available ? 'loading' : 'unavailable', message });
+        publish();
+      }
       return refresh();
     },
     selectNode, nextPage, previousPage, refresh,

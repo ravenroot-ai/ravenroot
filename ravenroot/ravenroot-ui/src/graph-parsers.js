@@ -748,11 +748,10 @@ export function parseGraphML(xmlText) {
       // Save -> export -> reimport -> Create then produced a DIFFERENT sha256 from the one the
       // document names, with a 201 and a green pipeline -- the same failure mode as the asynchronous
       // starter overwrite, appearing one step later during the round trip.
-      // Named canonical fields (`description`, `classname`, `outcome`, `behavior`, `kind`, ...)
-      // are unaffected: they resolve through `dataVal`/`dataValByName` above, an independent DOM
-      // read with its own `.trim()`, never through this map. This trim only ever touched the
-      // generic UNKNOWN-property bag (`additionalProperties`, and now `source`/`language`), so
-      // removing it does not touch anything with its own defined whitespace handling.
+      // Every scalar <data> is represented here, including named canonical fields such as
+      // `description`, `classname`, `outcome`, `behavior`, and `kind`. The dedicated model fields
+      // below independently read those values with `dataVal`/`dataValByName` and normalize them;
+      // keeping this generic map raw preserves the authored value without changing that precedence.
       properties[name] = child.textContent;
       propertyTypes[name] = definition.type || 'string';
     }

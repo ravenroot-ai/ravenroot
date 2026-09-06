@@ -209,15 +209,19 @@ and release notes. The divergence between the three lifecycle vocabularies is cl
 
 ## Consequences
 
-- **This is an accepted contract, and nothing implements it.** No coordinator, adapter, HTTP route,
-  or CLI verb produces or consumes a `LifecycleCommand` or a `DeploymentCommandOutcome`, and the
-  deployment lifecycle a running Ravenroot has is still the process-local one. The rule ADR 0023 and
-  ADR 0030 state for themselves applies here unchanged: acceptance is not an implementation claim.
-- **D9's `DeploymentLifecycleTarget` is decided and not yet declared as a type.** An SPI with no
-  implementor and no caller is an interface whose shape is fixed by nothing, and the change that
-  introduces it is the one that has a coordinator to hold it and a runtime to satisfy it. What this
-  record fixes now is the constraint that governs its shape when it lands: it may not reach
-  `engine.drain()` or `engine.close()`, and `GraphDeployment` is not the place to put it.
+- **The contract is implemented in this change; only the external surface is not.**
+  `DeploymentCoordinator` and `DeploymentReconciler` (`ai.ravenroot.core.deployment`) issue and resume
+  `LifecycleCommand`s and produce `DeploymentCommandOutcome`s against `DeploymentLifecycleTarget`,
+  which `DefaultRavenrootApplication.localDeploymentTargets()` publishes for this process's hosted
+  deployments, and `SqliteDeploymentRegistry` backs the registry durably. No HTTP route, CLI verb, or
+  UI surface produces or consumes either type — that surface is issue 109's, still open — so
+  `POST /v1/deployments/{id}/stop` and `DELETE /v1/deployments/{id}` keep exactly their present
+  behaviour, nothing yet connects an incoming request to the coordinator, and the admission fencing
+  this record wires stays dormant until something outside this change drives the port.
+- **D9's `DeploymentLifecycleTarget` is declared, implemented, and wired to a runtime in this
+  change.** `DefaultGraphDeployment` implements it alongside `GraphDeployment`, and the constraint
+  this record fixed on its shape holds: no method on it reaches `engine.drain()` or `engine.close()`,
+  and `GraphDeployment` was not widened to carry it.
 - **`DeploymentRegistry.Limits` gains a required component and is a source-breaking change for an
   out-of-tree adapter that constructs it.** `maxClockSkew` has no default, deliberately: a caller
   deciding when to stop working before it can be fenced needs the authority's real allowance, and a

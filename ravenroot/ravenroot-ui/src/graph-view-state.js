@@ -18,7 +18,7 @@ export const RENDER_MODES = Object.freeze(new Set([DESIGN_RENDER_MODE, MONITORIN
 export const DESIGN_LAYOUT_MODES = Object.freeze(new Set([
   'preset', 'dagre', 'cose', 'elk', 'hierarchical',
   'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto',
-  'hierarchical-new', 'flow-new',
+  'hierarchical-new', 'layered-down',
 ]));
 
 // Render mode is the product contract. Algorithm names remain internal implementation details and

@@ -49,7 +49,7 @@ describe('Cytoscape layout lifecycle', () => {
     expect([...DESIGN_LAYOUT_MODES]).toEqual([
       'preset', 'dagre', 'cose', 'elk', 'hierarchical',
       'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto',
-      'hierarchical-new', 'flow-new',
+      'hierarchical-new', 'layered-down',
     ]);
     for (const layoutMode of DESIGN_LAYOUT_MODES) {
       expect(documentPresentationState({

@@ -66,6 +66,13 @@ const routeGeometry = page => page.evaluate(() => Object.fromEntries(window.cy.e
   targetEndpoint: edge.style('target-endpoint'),
 }])));
 
+const labelPlacements = page => page.evaluate(() => [...new Set(window.cy.nodes().map(node => [
+  node.style('text-halign'), node.style('text-valign'),
+  node.style('text-margin-x'), node.style('text-margin-y'),
+].join('/')))].sort());
+
+const TOP_DOWN_LABEL_PLACEMENT = ['right/center/10px/0px'];
+
 const presentation = page => page.evaluate(() => {
   const owner = window.ravenroot.activeDocument();
   return {
@@ -177,7 +184,7 @@ test('edge autosave retains Hierarchical geometry while refreshing outcome appea
 
 for (const [label, expectedLayout] of [
   ['Arrange — Hierarchical', 'hierarchical'],
-  ['Arrange — Flow (new)', 'flow-new'],
+  ['Arrange — Layered (top-down)', 'layered-down'],
 ]) {
   test(`endpoint autosave reroutes inside retained ${expectedLayout} arrangement`, async ({ page }) => {
     await arrange(page, label);
@@ -195,12 +202,15 @@ for (const [label, expectedLayout] of [
     expect(await rendererWasRetained(page)).toBe(true);
     expect(await presentation(page)).toEqual(before);
     expect((await routeGeometry(page))['edge-5']).not.toEqual(edgeBefore);
+    if (expectedLayout === 'layered-down') {
+      expect(await labelPlacements(page)).toEqual(TOP_DOWN_LABEL_PLACEMENT);
+    }
   });
 }
 
 for (const label of [
   'Arrange — Flow', 'Arrange — Organic',
-  'Arrange — Hierarchical (new)', 'Arrange — Flow (new)',
+  'Arrange — Hierarchical (new)', 'Arrange — Layered (top-down)',
 ]) {
   test(`node autosave retains ${label.replace('Arrange — ', '')}`, async ({ page }) => {
     await arrange(page, label);
@@ -220,6 +230,9 @@ for (const label of [
     expect(await rendererWasRetained(page)).toBe(true);
     expect(await presentation(page)).toEqual(before);
     expect(await routeGeometry(page)).toEqual(routesBefore);
+    if (label === 'Arrange — Layered (top-down)') {
+      expect(await labelPlacements(page)).toEqual(TOP_DOWN_LABEL_PLACEMENT);
+    }
   });
 }
 
@@ -252,7 +265,7 @@ test('document activation retains hierarchical and layered routes after independ
 
   const second = await page.evaluate(() => window.ravenroot.openDocument({ name: 'second.graphml' }));
   await replaceGraph(page, 'second.graphml');
-  await arrange(page, 'Arrange — Flow (new)');
+  await arrange(page, 'Arrange — Layered (top-down)');
   const secondPositions = await positions(page);
 
   // Establish both view snapshots after the split exists. Adding a pane legitimately resizes and
@@ -273,6 +286,7 @@ test('document activation retains hierarchical and layered routes after independ
   const secondPresentation = await presentation(page);
   const secondRoutes = await routeGeometry(page);
   expect(secondPresentation.selection).toEqual(['n4']);
+  expect(await labelPlacements(page)).toEqual(TOP_DOWN_LABEL_PLACEMENT);
 
   await page.evaluate(id => window.ravenroot.activateDocument(id), first);
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutMode))
@@ -287,13 +301,14 @@ test('document activation retains hierarchical and layered routes after independ
   expect(await routeGeometry(page)).toEqual(firstRoutes);
 
   await page.evaluate(id => window.ravenroot.activateDocument(id), second);
-  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutMode)).toBe('flow-new');
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutMode)).toBe('layered-down');
   const { selection: _secondSelection, cursor: _secondCursor, ...secondDurable } = secondPresentation;
   const secondRestored = await presentation(page);
   const { selection: secondSelection, cursor: _restoredSecondCursor, ...secondRestoredDurable } = secondRestored;
   expect(secondRestoredDurable).toEqual({ ...secondDurable, positions: secondPositions });
   expect(secondSelection).toEqual([]);
   expect(await routeGeometry(page)).toEqual(secondRoutes);
+  expect(await labelPlacements(page)).toEqual(TOP_DOWN_LABEL_PLACEMENT);
   expect(await page.evaluate(() => window.ravenroot.activeDocument().graph.nodeMap.n4.description))
     .toBe('Second document autosave');
 });
@@ -303,7 +318,7 @@ test('a pending autosave commits before a layered arrangement publishes its fina
   await selectOnly(page, 'n5');
   await page.locator('#node-editor textarea[name="description"]').fill('Committed before layered layout');
 
-  await arrange(page, 'Arrange — Flow (new)');
+  await arrange(page, 'Arrange — Layered (top-down)');
 
   await expect.poll(() => page.evaluate(() => ({
     description: window.ravenroot.activeDocument().graph.nodeMap.n5.description,
@@ -312,6 +327,7 @@ test('a pending autosave commits before a layered arrangement publishes its fina
     busy: window.ravenroot.activeDocument().layoutBusy,
   }))).toEqual({
     description: 'Committed before layered layout', renderMode: 'design',
-    layoutMode: 'flow-new', busy: false,
+    layoutMode: 'layered-down', busy: false,
   });
+  expect(await labelPlacements(page)).toEqual(TOP_DOWN_LABEL_PLACEMENT);
 });

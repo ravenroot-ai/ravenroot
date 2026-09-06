@@ -79,6 +79,19 @@ public final class HumanTaskConfirmationWorkbenchProcess {
     static final String FIRST_INGRESS_KEY = "human-task-e2e-1";
     static final String SECOND_INGRESS_KEY = "human-task-e2e-2";
 
+    // The RECOVERY child is deliberately terminated after its route-triggered sweep. Keep the
+    // abandoned fixture claim short so VERIFY proves lease fencing/reclaim without spending the
+    // whole test at the production-sized lease boundary.
+    static final Duration FIXTURE_WORK_CLAIM_LEASE = Duration.ofSeconds(5);
+    // VERIFY permits the abandoned lease to elapse once, then three further lease periods for the
+    // 100 ms driver tick, SQLite commit, and pinned graph continuation. The budget stays coupled
+    // to the fencing interval under test instead of masking a stale claim with a generic timeout.
+    static final Duration VERIFY_COMPLETION_TIMEOUT = FIXTURE_WORK_CLAIM_LEASE.multipliedBy(4);
+    // A child can spend the normal task/bootstrap budget before it starts lease-aware VERIFY work.
+    // The parent consumes this value so its readiness deadline cannot race the child’s derived
+    // recovery budget.
+    static final Duration VERIFY_READY_TIMEOUT = Duration.ofSeconds(30).plus(VERIFY_COMPLETION_TIMEOUT);
+
     private HumanTaskConfirmationWorkbenchProcess() {
     }
 
@@ -118,9 +131,9 @@ public final class HumanTaskConfirmationWorkbenchProcess {
             String workerId = "human-task-confirmation-" + arguments.phase().wireName();
             var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
                     engine, behaviors, monitor, ExecutionIdentitySource.randomUuids(), workerId,
-                    Duration.ofSeconds(30));
+                    FIXTURE_WORK_CLAIM_LEASE);
             var recovery = new ExecutionRecoveryService(store, List.of(TENANT), workerId, 100,
-                    Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
+                    FIXTURE_WORK_CLAIM_LEASE, RepeatabilityDeclarations.NONE_DECLARED,
                     new HumanTaskHandlerDispatcher(store, tasks, continuation));
             try (var driver = new ExecutionRecoveryDriver(recovery, Duration.ofMillis(100));
                  var application = new DefaultRavenrootApplication(engine, monitor, behaviors,
@@ -241,7 +254,7 @@ public final class HumanTaskConfirmationWorkbenchProcess {
 
     private static void awaitCompletedProcesses(SqliteExecutionStore store, HumanTaskService tasks)
             throws InterruptedException {
-        long deadline = System.nanoTime() + Duration.ofSeconds(30).toNanos();
+        long deadline = System.nanoTime() + VERIFY_COMPLETION_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
             var items = tasks.inbox(fixtureRequester(), HumanTaskQuery.everything(10)).items();
             boolean complete = items.size() == 2 && items.stream().allMatch(task -> store
@@ -251,7 +264,8 @@ public final class HumanTaskConfirmationWorkbenchProcess {
             if (complete) return;
             Thread.sleep(25);
         }
-        throw new IllegalStateException("verify child did not complete both durable continuations");
+        throw new IllegalStateException("verify child did not complete both durable continuations within "
+                + VERIFY_COMPLETION_TIMEOUT + " after the fixture claim lease " + FIXTURE_WORK_CLAIM_LEASE);
     }
 
     private static String graphVersion(HumanTaskService tasks) {

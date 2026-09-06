@@ -97,7 +97,8 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
                     "Reviewed once through the central form."), comments,
                     "comments remain durable metadata rather than execution payload");
             assertTrue(store.claimPendingWork(TENANT, "human-task-confirmation-parent-probe", 100,
-                    Duration.ofSeconds(30)).toCompletableFuture().join().isEmpty(),
+                    HumanTaskConfirmationWorkbenchProcess.FIXTURE_WORK_CLAIM_LEASE)
+                    .toCompletableFuture().join().isEmpty(),
                     "third child left no replayable continuation");
         }
     }
@@ -321,7 +322,10 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
         }
 
         private Ready awaitReady(Phase expected) throws Exception {
-            long deadline = System.nanoTime() + Duration.ofSeconds(45).toNanos();
+            Duration timeout = expected == Phase.VERIFY
+                    ? HumanTaskConfirmationWorkbenchProcess.VERIFY_READY_TIMEOUT
+                    : Duration.ofSeconds(45);
+            long deadline = System.nanoTime() + timeout.toNanos();
             while (System.nanoTime() < deadline) {
                 String line = lines.poll(250, TimeUnit.MILLISECONDS);
                 if (line != null && line.startsWith(expected.marker + " ")) {

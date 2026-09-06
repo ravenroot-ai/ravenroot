@@ -228,6 +228,34 @@ class DeploymentCoordinatorTest {
     }
 
     /**
+     * The same collision seen by a <em>different</em> owner, which is the shape a second replica
+     * actually produces: taking the lease is itself a mutation, so the record the compare-and-set
+     * sees is a revision ahead of the one the command was decided against. The answer must still be
+     * the collision and not an ordinary race.
+     */
+    @Test
+    void aKeyReusedByAnotherOwnerCollidesRatherThanBeingReadAsARace() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "cross-owner-collision");
+        DeploymentId id = fixture.idOf(target);
+        fixture.coordinator("owner-a").submit(TENANT, id, new LifecycleCommand.Start("s", 1,
+                DeploymentRegistry.UpdateStrategy.STOP_FIRST), GenerationExpectation.any());
+        fixture.coordinator("owner-a").submit(TENANT, id, new LifecycleCommand.Cancel("shared", "first"),
+                GenerationExpectation.any());
+        long revisionBefore = fixture.record(TENANT, id).revision();
+
+        fixture.clock.advance(CoordinatorFixture.LEASE_TTL.plusSeconds(1));
+        DeploymentCommandOutcome collided = fixture.coordinator("owner-b").submit(TENANT, id,
+                new LifecycleCommand.Cancel("shared", "a different decision"), GenerationExpectation.any());
+
+        assertEquals(new DeploymentCommandOutcome.IdempotencyConflict("shared"), collided);
+        assertTrue(fixture.record(TENANT, id).revision() > revisionBefore,
+                "the takeover really did move the revision, which is what makes this the interesting case");
+        assertEquals("owner-b", fixture.record(TENANT, id).lease().owner());
+        assertEquals(2, fixture.record(TENANT, id).generation(), "and no lifecycle move was recorded");
+    }
+
+    /**
      * A decision made against a generation the lifecycle has since left is reported stale, with both
      * numbers, rather than being applied over the newer decision.
      */

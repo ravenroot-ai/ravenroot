@@ -183,12 +183,11 @@ public final class DeploymentCoordinator {
 
             try {
                 return decide(tenantId, deploymentId, record, command, expectedGeneration);
-            } catch (DeploymentRegistry.RegistryException conflict) {
-                if (!(conflict.reason() instanceof DeploymentRegistry.FailureReason.Conflict)) throw conflict;
-                Optional<DeploymentCommandOutcome> classified =
-                        classifyConflict(tenantId, deploymentId, record, command, expectedGeneration);
+            } catch (Contended contended) {
+                Optional<DeploymentCommandOutcome> classified = classifyConflict(tenantId, deploymentId,
+                        contended.presented, command, expectedGeneration);
                 if (classified.isPresent()) return classified.get();
-                if (attempt >= MAXIMUM_RACE_RETRIES) throw conflict;
+                if (attempt >= MAXIMUM_RACE_RETRIES) throw contended.refusal;
             }
         }
     }
@@ -325,8 +324,18 @@ public final class DeploymentCoordinator {
         long from = record.generation();
 
         Desired next = desiredFor(record, command);
-        Record intent = await(registry.command(next, mutation(record, command, expected,
-                RevisionExpectation.exactly(record.revision()))));
+        Record intent;
+        try {
+            intent = await(registry.command(next, mutation(record, command, expected,
+                    RevisionExpectation.exactly(record.revision()))));
+        } catch (DeploymentRegistry.RegistryException refused) {
+            if (!(refused.reason() instanceof DeploymentRegistry.FailureReason.Conflict)) throw refused;
+            // Carried out with the record that was actually presented, which is not the one the loop
+            // read: taking the lease above is itself a mutation, so the revision the compare-and-set
+            // saw may already be one ahead of the read. Classifying against the read would call a
+            // reused idempotency key an ordinary race and retry it.
+            throw new Contended(record, refused);
+        }
 
         // A ledger replay returns the historical record and moves nothing; an accepted decision
         // advances the generation by exactly one. The generation is the discriminator rather than the
@@ -374,10 +383,10 @@ public final class DeploymentCoordinator {
      *         worth retrying against a fresh read.
      */
     private Optional<DeploymentCommandOutcome> classifyConflict(String tenantId, DeploymentId deploymentId,
-                                                                Record before, LifecycleCommand command,
+                                                                Record presented, LifecycleCommand command,
                                                                 GenerationExpectation expected) {
         Record after = read(tenantId, deploymentId);
-        if (after.revision() == before.revision()) {
+        if (after.revision() == presented.revision()) {
             // Nothing was written between the read and the refusal, so the compare-and-set was
             // satisfied and the generation was checked before the call. Inside `command` the only
             // remaining source of Conflict is the ledger declining a key already used for a different
@@ -476,6 +485,24 @@ public final class DeploymentCoordinator {
     private Record read(String tenantId, DeploymentId deploymentId) {
         return await(registry.get(tenantId, deploymentId)).orElseThrow(() ->
                 new DeploymentRegistry.RegistryException(new DeploymentRegistry.FailureReason.NotFound()));
+    }
+
+    /**
+     * A compare-and-set refusal, carrying the record it was decided against.
+     *
+     * <p>Internal to this class and never seen by a caller: it exists only so the refusal and the
+     * record that was actually presented travel together, because the deduction that turns
+     * {@code Conflict} back into an answer is wrong if it is made against a different record.</p>
+     */
+    private static final class Contended extends RuntimeException {
+        private final transient Record presented;
+        private final transient DeploymentRegistry.RegistryException refusal;
+
+        private Contended(Record presented, DeploymentRegistry.RegistryException refusal) {
+            super(refusal.getMessage(), refusal, false, false);
+            this.presented = presented;
+            this.refusal = refusal;
+        }
     }
 
     private static Duration positive(Duration value, String name) {

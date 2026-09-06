@@ -45,6 +45,20 @@ source `char[]` and `SecretValue` are cleared immediately after that String is f
 connection attempt; only the unavoidable String remains for the bounded retry sequence and it is never stored or logged.
 All transport failures are converted to safe typed errors with no protocol/server cause chain exposed to execution monitoring. Tenant and profile identifiers are bounded safe tokens. Inspector legacy endpoint, TLS, authentication, sender and limit fields are migration-only: authority fields exact-match the profile and numeric fields can only tighten it. The optional Inspector `maxConcurrency` integer accepts 1–16; when blank it uses the operator profile ceiling, and when set it can only tighten that ceiling. Admission is fail-fast and acquired before virtual-thread submission: the extension has a global cap of 32, an exact tenant cap of 16, an exact tenant/profile cap from the operator profile (1–16), and a per-NodeAction, per-tenant graph-tightened cap. These quotas reserve headroom so one tenant cannot occupy every global slot; they are capacity limits, not a fairness or scheduling guarantee.
 
+## Exact node properties
+
+| Node | Required strings | Optional properties and defaults |
+|---|---|---|
+| `mail.send` | `mailProfile` | legacy exact-match strings `host`, `securityMode`, `authUsername`, `defaultFrom`; integer `port`; Boolean `tlsVerify=true`; secret reference `credentialRef`; tightening integers `connectTimeoutMs`, `readTimeoutMs`, `writeTimeoutMs`, `retries`, `maxRecipients`, `maxHeaders`, `maxHeaderChars`, `maxBodyChars`, `maxAttachments`, `maxAttachmentBytes`, `maxTotalAttachmentBytes`, `maxEncodedAttachmentBytes`, `maxConcurrency` |
+| `mail.imap.query` | `profile` | string `folder=INBOX`; integer `limit=50`; `contentMode=preview` (`preview`, `full`); integer `maxConcurrency`; `recovery.repeatable` has no default |
+| `mail.imap.consume` | `profile` | string `folder`; integers `pollIntervalMs`, `batchSize`, `retryBackoffMs`, `maxRetryBackoffMs`, `poisonAttempts`; `maxInFlight=1`; `contentMode=metadata` (`metadata`, `preview`); conditional integer `previewChars`; comma-separated string `allowedHeaders`; `checkpointPolicy=require-durable` |
+| `mail.imap.move` | `profile`, `destinationFolder` | string `sourceFolder=INBOX`; integer `maxConcurrency`; `recovery.repeatable` has no default |
+| `mail.imap.delete` | `profile` | string `sourceFolder=INBOX`; `deleteMode=TRASH` (`TRASH`, `HARD_DELETE`); conditional `hardDeleteAcknowledgement`; integer `maxConcurrency`; `recovery.repeatable` has no default |
+
+Blank tightening integers inherit the operator profile. `previewChars` applies only when consume uses
+`contentMode=preview`; `hardDeleteAcknowledgement` applies only to `HARD_DELETE`. SMTP cannot expose an
+honest repeatability choice after DATA handoff and therefore has no recovery-repeatability property.
+
 ## One-shot IMAP queries
 
 The package also contributes `mail.imap.query`. It opens one read-only IMAP session per invocation and always closes the folder and store; it never listens, polls, uses IDLE, or changes flags. GraphML stores only an opaque tenant-scoped `profile` and tightening defaults. The resolver reads `RAVENROOT_IMAP_PROFILE_<TENANT_HEX>_<PROFILE_HEX>` as `host;port;IMAPS|STARTTLS;username;credentialRef;folders;connectMs;readMs;concurrency;results;previewChars`. All eleven fields are mandatory; unlike the SMTP format nothing has been appended to it, so ten fields, or twelve, are simply wrong rather than a compatibility shape. `folders` is a comma-separated set; the other ten are single values. `securityMode` is matched **case-sensitively** against `IMAPS` and `STARTTLS` — `imaps` is rejected, which is *not* how the SMTP format behaves. `username` and `credentialRef` must **both** be non-blank; the SMTP format's "both blank means unauthenticated" shape has no IMAP equivalent, because a read-only query always authenticates.

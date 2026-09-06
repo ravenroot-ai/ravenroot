@@ -122,14 +122,15 @@ operational responsibilities and recovery paths.*
 
 - **Workflow authors:** [workspace and graph authoring](docs/user-guide/workspace-authoring.md),
   [payloads, outcomes, and routing](docs/user-guide/payload-routing.md), and
-  [node catalog, payloads, and limits](docs/reference/nodes-payload-limits.md)
+  [core and optional node reference](docs/reference/coverage-inventory.md)
 - **Extension authors:** [nodes, plugins, and runtime adapters](docs/integrator-guide/extensions-adapters.md)
-  and [model, agent, and program integration](docs/integrator-guide/ai-programs.md)
+  and [first-party bundle reference](docs/reference/bundles/index.md)
 - **Application developers:** [application, HTTP, SSE, and CLI integration](docs/integrator-guide/application-http.md),
   [HTTP API and CLI](docs/reference/api-cli.md), and [GraphML profile](docs/reference/graphml.md)
 - **Operators:** [deployment and startup](docs/operator-guide/deployment-startup.md),
-  [credentials, connectors, and egress](docs/operator-guide/credentials-egress.md), and
-  [threat model, identity, and authorization](docs/security/trust-identity.md)
+  [plugin bundle lifecycle](docs/operator-guide/plugin-bundles.md),
+  [authoring assistant](docs/operator-guide/authoring-assistant.md), and
+  [command-line tools](docs/reference/command-line-tools.md)
 - **Architects and reviewers:** [product boundaries](docs/architecture/product-boundaries.md),
   [architecture and concepts](docs/architecture/index.md), and
   [architecture decision records](adr/README.md)

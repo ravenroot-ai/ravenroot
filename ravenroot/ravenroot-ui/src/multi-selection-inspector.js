@@ -153,6 +153,20 @@ export function propertyStateLabel(property) {
 export function validateMultiPropertyValue(property, rawValue) {
   const value = String(rawValue ?? '');
   if (value === '') return '';
+  const bytes = text => new TextEncoder().encode(text).length;
+  if (property.maximumUtf8Bytes > 0 && bytes(value) > property.maximumUtf8Bytes) {
+    return `${property.displayName || property.name} exceeds ${property.maximumUtf8Bytes} UTF-8 bytes`;
+  }
+  if (property.maximumItems > 0 || property.maximumItemUtf8Bytes > 0) {
+    const items = value.split(',');
+    if (property.maximumItems > 0 && items.length > property.maximumItems) {
+      return `${property.displayName || property.name} contains more than ${property.maximumItems} items`;
+    }
+    if (property.maximumItemUtf8Bytes > 0
+        && items.some(item => bytes(item.trim()) > property.maximumItemUtf8Bytes)) {
+      return `${property.displayName || property.name} contains an item above ${property.maximumItemUtf8Bytes} UTF-8 bytes`;
+    }
+  }
   if (property.allowedValues?.length && !property.allowedValues.includes(value)) {
     return `${property.displayName || property.name} must be one of its catalog choices`;
   }
@@ -164,14 +178,26 @@ export function validateMultiPropertyValue(property, rawValue) {
       if (!/^[+-]?\d+$/.test(value)) return `${property.displayName || property.name} must be an integer`;
       try {
         const parsed = BigInt(value);
-        return parsed >= -9223372036854775808n && parsed <= 9223372036854775807n
-          ? '' : `${property.displayName || property.name} must fit a 64-bit integer`;
+        if (parsed < -9223372036854775808n || parsed > 9223372036854775807n) {
+          return `${property.displayName || property.name} must fit a 64-bit integer`;
+        }
+        if (property.minimumValue != null && property.minimumValue !== ''
+            && parsed < BigInt(property.minimumValue)) {
+          return `${property.displayName || property.name} must be at least ${property.minimumValue}`;
+        }
+        if (property.maximumValue != null && property.maximumValue !== ''
+            && parsed > BigInt(property.maximumValue)) {
+          return `${property.displayName || property.name} must be at most ${property.maximumValue}`;
+        }
+        return '';
       } catch {
         return `${property.displayName || property.name} must be an integer`;
       }
     case 'DECIMAL':
-      return /^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)
-        ? '' : `${property.displayName || property.name} must be a decimal number`;
+      if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/.test(value)) {
+        return `${property.displayName || property.name} must be a decimal number`;
+      }
+      return '';
     case 'URI': {
       return javaUriSyntaxIsAbsolute(value)
         ? '' : `${property.displayName || property.name} must be an absolute URI`;

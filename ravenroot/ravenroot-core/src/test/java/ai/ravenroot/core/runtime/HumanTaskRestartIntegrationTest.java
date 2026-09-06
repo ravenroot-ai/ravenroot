@@ -15,6 +15,7 @@ import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.payload.PayloadEnvelope;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.CanonicalGraphMl;
 import ai.ravenroot.api.persistence.DurableHumanTask;
@@ -26,6 +27,7 @@ import ai.ravenroot.api.persistence.GraphDefinitionIdentity;
 import ai.ravenroot.api.persistence.GraphDefinitionReferences;
 import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
@@ -141,6 +143,14 @@ class HumanTaskRestartIntegrationTest {
                       <data key="retry-multiplier">1.0</data><data key="retry-ceiling">0</data>
                       <data key="retry-on">RetryableBlip</data>
                     </node>""")
+            .getBytes(StandardCharsets.UTF_8);
+    private static final byte[] LARGE_RESPONSE_GRAPH = new String(GRAPH, StandardCharsets.UTF_8)
+            .replace("<key id=\"edge-outcome\"", "<key id=\"max-response\" for=\"node\" "
+                    + "attr.name=\"maxResponseBytes\" attr.type=\"string\"/>\n"
+                    + "<key id=\"edge-outcome\"")
+            .replace("<data key=\"responseSchemaVersion\">1</data>",
+                    "<data key=\"responseSchemaVersion\">1</data>\n"
+                            + "<data key=\"max-response\">1500000</data>")
             .getBytes(StandardCharsets.UTF_8);
     private static final byte[] CHAINED_GRAPH = """
             <?xml version="1.0" encoding="UTF-8"?>
@@ -536,6 +546,100 @@ class HumanTaskRestartIntegrationTest {
         }
     }
 
+    @Test
+    void largePinnedResponseResumesTheGraphAndPersistsTheNextTraversalExactlyOnce(
+            @TempDir Path directory) throws Exception {
+        Path database = directory.resolve("human-task-large-response-restart.db");
+        var key = new ExecutionKey(TENANT, UUID.randomUUID());
+        UUID originalTraversal = UUID.randomUUID();
+        HumanTaskPolicy policyA = humanTaskPolicy(1_500_000, 1_700_000, 1_200_000, 5);
+        HumanTaskPolicy stricter = humanTaskPolicy(500_000, 600_000, 100_000, 1);
+        HumanTaskPolicy looser = humanTaskPolicy(3_000_000, 3_200_000, 2_000_000, 9);
+        GraphExecutionLimits graphLimits = limitsWithPayload(4 * 1024 * 1024, 2_000_000);
+
+        try (var store = new SqliteExecutionStore(database, CLOCK, policyA);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            CanonicalGraphMl canonical = CanonicalGraphMl.of(LARGE_RESPONSE_GRAPH);
+            var storedDefinition = definitions.put(TENANT,
+                    GraphDefinitionIdentity.forSubmission(canonical.contentId()), canonical)
+                    .toCompletableFuture().join();
+            String pin = storedDefinition.key().contentId().value();
+            long revision = createRunning(store, key, originalTraversal, pin);
+            var tasks = new HumanTaskService(store, CLOCK, policyA);
+            BehaviorRegistry behaviors = standard(tasks, policyA);
+            try (var manager = GraphManager.readGraphMl(new ByteArrayInputStream(LARGE_RESPONSE_GRAPH));
+                 var runner = new GraphRunner(manager, snapshot(storedDefinition.identity(), manager),
+                         engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                         GraphRunner.DEFAULT_SHUTDOWN_BOUND, graphLimits);
+                 var recorder = ExecutionRecorder.open(store, key, "large-before", TTL, revision);
+                 var binding = tasks.bindLive(key, recorder, runner::continuationBudget)) {
+                ExecutionException suspended = assertThrows(ExecutionException.class,
+                        () -> runner.execute(requesterIdentity(), key.processInstanceId(), originalTraversal,
+                                null, pin, null, null, recorder).toCompletableFuture()
+                                .get(10, TimeUnit.SECONDS));
+                assertInstanceOf(DurableHumanTaskSuspension.class, suspended.getCause());
+            }
+        }
+
+        String largeText = "x".repeat(1_100_000);
+        OpaquePayload largeResponse = OpaquePayload.of(PayloadEnvelope.of("release.decision", "1",
+                        PayloadValue.map(Map.of("decision", PayloadValue.of(largeText))))
+                .toJson().getBytes(StandardCharsets.UTF_8),
+                "application/vnd.ravenroot.payload+json");
+        assertTrue(largeResponse.size() > 1_048_576);
+        UUID taskId;
+        try (var store = new SqliteExecutionStore(database, CLOCK, stricter)) {
+            var tasks = new HumanTaskService(store, CLOCK, stricter);
+            DurableHumanTask task = onlyTask(tasks);
+            taskId = task.request().taskId();
+            assertEquals(HumanTaskStatus.RESOLVED,
+                    tasks.resolve(approver(), taskId, task.generation(), largeResponse).task().status());
+        }
+
+        var captures = new AtomicInteger();
+        var observed = new AtomicReference<Object>();
+        try (var store = new SqliteExecutionStore(database, CLOCK, looser);
+             var definitions = new SqliteGraphDefinitionStore(database, CLOCK,
+                     GraphDefinitionReferences.NONE);
+             var engine = new SameThreadExecutionEngine()) {
+            var tasks = new HumanTaskService(store, CLOCK, looser);
+            BehaviorRegistry behaviors = standard(tasks, looser).register("capture", message -> {
+                captures.incrementAndGet();
+                observed.set(message.payload());
+                return CompletableFuture.completedFuture(NodeResult.continueWith(message.payload()));
+            });
+            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                    null, engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                    "large-after", TTL, graphLimits);
+            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "large-after",
+                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+
+            assertEquals(1, dispatched(recovery.sweepOnce()));
+            assertEquals(1, captures.get());
+            Map<?, ?> resumed = assertInstanceOf(Map.class, observed.get());
+            Map<?, ?> response = assertInstanceOf(Map.class, resumed.get("response"));
+            assertEquals(largeText, response.get("decision"));
+            assertEquals(ProcessInstanceStatus.COMPLETED,
+                    store.load(key).toCompletableFuture().join().state().status());
+            assertEquals(2, store.load(key).toCompletableFuture().join().state().traversals().size(),
+                    "the original wait and exactly one durable re-entry traversal must remain");
+            assertEquals(1, tasks.inbox(requester(), HumanTaskQuery.everything(10)).items().size());
+            assertTrue(recovery.sweepOnce().isEmpty());
+            assertEquals(1, captures.get());
+        }
+
+        try (var store = new SqliteExecutionStore(database, CLOCK, looser)) {
+            assertTrue(store.claimPendingWork(TENANT, "large-final", 10, TTL)
+                    .toCompletableFuture().join().isEmpty());
+            assertEquals(HumanTaskStatus.RESOLVED,
+                    store.loadHumanTask(TENANT, taskId).toCompletableFuture().join()
+                            .orElseThrow().status());
+        }
+    }
+
     /**
      * The same restart, against a runtime that records manifests and has none for this execution.
      *
@@ -918,9 +1022,13 @@ class HumanTaskRestartIntegrationTest {
     }
 
     private static BehaviorRegistry standard(HumanTaskService tasks) {
+        return standard(tasks, HumanTaskPolicy.DEFAULTS);
+    }
+
+    private static BehaviorRegistry standard(HumanTaskService tasks, HumanTaskPolicy policy) {
         return BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults(),
                 ai.ravenroot.api.publication.PublicationPolicyResolver.none(),
-                ai.ravenroot.api.publication.PublicationAuditSink.noop(), tasks);
+                ai.ravenroot.api.publication.PublicationAuditSink.noop(), tasks, policy);
     }
 
     private static GraphVersionSnapshot snapshot(GraphDefinitionIdentity identity, GraphManager manager) {
@@ -935,6 +1043,33 @@ class HumanTaskRestartIntegrationTest {
                 defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(), maximum,
                 defaults.maxAmplifiedDeliveries(), defaults.maxCumulativePayloadBytes(),
                 defaults.maxRecoveryDeliveriesPerAttempt());
+    }
+
+    private static GraphExecutionLimits limitsWithPayload(int maxEncodedBytes, int maxTextLength) {
+        GraphExecutionLimits defaults = GraphExecutionLimits.DEFAULTS;
+        PayloadLimits payload = defaults.payload();
+        return new GraphExecutionLimits(defaults.graphMl(), new PayloadLimits(maxEncodedBytes,
+                payload.maxDepth(), payload.maxCollectionSize(), payload.maxValueCount(),
+                maxTextLength, payload.maxKeyLength()), defaults.maxFanOut(),
+                defaults.maxResidentActors(), defaults.maxLiveActorsPerTraversal(),
+                defaults.maxInFlightHopsPerTraversal(), defaults.maxQueuedAdmissionsPerNode(),
+                defaults.maxTraversalSteps(), defaults.maxAmplifiedDeliveries(),
+                defaults.maxCumulativePayloadBytes(), defaults.maxRecoveryDeliveriesPerAttempt());
+    }
+
+    private static HumanTaskPolicy humanTaskPolicy(int maxResponse, int decisionBody,
+                                                   int maxTextLength, int writeAttempts) {
+        HumanTaskPolicy defaults = HumanTaskPolicy.DEFAULTS;
+        return new HumanTaskPolicy(Math.min(defaults.defaultResponseBytes(), maxResponse), maxResponse,
+                defaults.defaultEscalationSeconds(), defaults.maxEscalationSeconds(),
+                defaults.defaultExpirySeconds(), defaults.maxExpirySeconds(),
+                defaults.maxTitleUtf8Bytes(), defaults.maxDescriptionUtf8Bytes(),
+                defaults.maxResponseSchemaUtf8Bytes(), defaults.maxAuthorizationTokens(),
+                defaults.maxAuthorizationTokenUtf8Bytes(), decisionBody,
+                defaults.inboxDefaultPageSize(), defaults.inboxMaxPageSize(),
+                defaults.responseMaxDepth(), defaults.responseMaxCollectionSize(),
+                defaults.responseMaxValueCount(), maxTextLength, defaults.responseMaxKeyLength(),
+                writeAttempts);
     }
 
     private static long createRunning(SqliteExecutionStore store, ExecutionKey key, UUID traversalId,

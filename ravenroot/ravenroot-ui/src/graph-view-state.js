@@ -15,6 +15,11 @@ export const DESIGN_RENDER_MODE = 'design';
 export const MONITORING_RENDER_MODE = 'monitoring';
 export const DEFAULT_RENDER_MODE = DESIGN_RENDER_MODE;
 export const RENDER_MODES = Object.freeze(new Set([DESIGN_RENDER_MODE, MONITORING_RENDER_MODE]));
+export const DESIGN_LAYOUT_MODES = Object.freeze(new Set([
+  'preset', 'dagre', 'cose', 'elk', 'hierarchical',
+  'n8n', 'n8n2', 'n8n3', 'n8n4', 'cyto',
+  'hierarchical-new', 'layered-down',
+]));
 
 // Render mode is the product contract. Algorithm names remain internal implementation details and
 // every historical finite layout/style value converges on Design; the old separate renderer value
@@ -49,6 +54,16 @@ export function layoutFromLegacyMode(layoutMode) {
 }
 
 export function documentPresentationState(document_) {
+  const explicitDesign = document_?.renderMode === DESIGN_RENDER_MODE
+    && Object.hasOwn(document_, 'layoutMode') && DESIGN_LAYOUT_MODES.has(document_.layoutMode)
+    && Object.hasOwn(document_, 'visualStyle') && VISUAL_STYLES.has(document_.visualStyle);
+  if (explicitDesign) {
+    return {
+      renderMode: DESIGN_RENDER_MODE,
+      layoutMode: document_.layoutMode,
+      visualStyle: document_.visualStyle,
+    };
+  }
   const storedMode = document_ && Object.hasOwn(document_, 'renderMode')
     ? document_.renderMode : document_?.layoutMode;
   return renderModePresentation(storedMode);

@@ -14,6 +14,11 @@ request, response, deadline and concurrency ceilings. The OpenAPI document is st
 YAML, 3.1, external references, server overrides, callbacks, links, vendor extensions, generated
 classes, query/cookie authentication, OAuth acquisition and multiple credentials are refused.
 
+Omitting or leaving an optional graph ceiling blank inherits the selected profile value. A malformed,
+non-positive, or above-profile value is refused during node construction and is never clamped. The
+profile must declare request and response byte ceilings in `1..16777216`, a timeout in `1..300000`
+milliseconds, and concurrency in `1..256`; there is no universal graph-level numeric default.
+
 The managed service independently enforces the operator egress policy, DNS/reserved-address checks,
 TLS, no redirects, credential placement, byte limits and its own admission bound. Secret values never
 enter this module. The one binding is resolved and injected by the managed service for the call.

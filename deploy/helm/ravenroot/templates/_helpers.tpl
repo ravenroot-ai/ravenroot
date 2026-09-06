@@ -23,6 +23,15 @@ app.kubernetes.io/name: {{ include "ravenroot.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
+{{/* Preserve integer policy values as base-10 strings; Helm may parse large YAML integers as floats. */}}
+{{- define "ravenroot.humanTaskValue" -}}
+{{- if kindIs "string" . -}}
+{{ . | quote }}
+{{- else -}}
+{{ int . | quote }}
+{{- end -}}
+{{- end }}
+
 {{- define "ravenroot.image" -}}
 {{- if .Values.image.digest -}}
 {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}

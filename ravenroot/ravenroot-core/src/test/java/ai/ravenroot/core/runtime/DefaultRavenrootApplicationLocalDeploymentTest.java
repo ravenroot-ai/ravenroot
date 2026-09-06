@@ -54,6 +54,39 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class DefaultRavenrootApplicationLocalDeploymentTest {
     private static final SecurityContext TENANT_A = identity("tenant-a");
     private static final SecurityContext TENANT_B = identity("tenant-b");
+    private static final String HUMAN_TASK_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="title" for="node" attr.name="title" attr.type="string"/>
+              <graph id="human-task-preflight" edgedefault="directed">
+                <node id="error"><data key="kind">ERROR</data></node>
+                <node id="start"><data key="kind">START</data></node>
+                <node id="review"><data key="kind">BEHAVIOR</data>
+                  <data key="behavior">human-task</data><data key="title">Review</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <edge id="start-review" source="start" target="review"/>
+                <edge id="review-end" source="review" target="end"/>
+              </graph>
+            </graphml>
+            """;
+
+    @Test
+    void missingDurableHumanTaskCapabilityRefusesLocalAdmissionBeforeRegistration() {
+        var engine = new SameThreadExecutionEngine();
+        var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                BehaviorRegistry.standard(), new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
+                ExecutionIdentitySource.randomUuids(), null, 8);
+        try {
+            assertThrows(IllegalStateException.class, () -> application.registerLocalDeployment(
+                    TENANT_A, "human-task-unavailable", graph(HUMAN_TASK_GRAPH)));
+            assertTrue(application.localDeployments(TENANT_A.tenantId()).isEmpty(),
+                    "capability refusal must happen before deployment registration has a side effect");
+        } finally {
+            application.close();
+        }
+    }
 
     /**
      * A deployment differs from a traversal in this respect: a graph with no
@@ -71,9 +104,14 @@ class DefaultRavenrootApplicationLocalDeploymentTest {
             assertEquals(LocalDeploymentState.REGISTERED, registered.state(),
                     "registration reserves an identity; it must not start anything");
             assertEquals(0, registered.sourceCount());
+            assertTrue(registered.graphVersion().isPresent(),
+                    "deployment status must carry its authoritative graph version");
             assertEquals("LOCAL_PROCESS", LocalDeploymentStatus.SCOPE);
 
             assertEquals(LocalDeploymentState.READY, command(application.startLocalDeployment(TENANT_A, "batch-1")));
+            assertEquals(registered.graphVersion(),
+                    application.localDeployment("tenant-a", "batch-1").orElseThrow().graphVersion(),
+                    "lifecycle changes must retain the immutable graph pin");
             assertEquals(LocalDeploymentState.READY, command(application.startLocalDeployment(TENANT_A, "batch-1")),
                     "a repeated start is idempotent, not a second activation");
 

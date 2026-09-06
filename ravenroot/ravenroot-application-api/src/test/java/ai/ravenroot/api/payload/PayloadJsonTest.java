@@ -130,6 +130,24 @@ class PayloadJsonTest {
                         .reason());
     }
 
+    @Test
+    void textAndKeyLengthsCountUtf16CodeUnitsIncludingSupplementaryPairs() {
+        var textTwoCodeUnits = new PayloadLimits(4_096, 4, 3, 20, 2, 4);
+        var keyTwoCodeUnits = new PayloadLimits(4_096, 4, 3, 20, 4, 2);
+        String supplementary = "\uD83D\uDE00";
+
+        assertEquals(PayloadValue.of(supplementary),
+                read("\"" + supplementary + "\"", textTwoCodeUnits));
+        assertEquals(PayloadValue.map(Map.of(supplementary, PayloadValue.of(1L))),
+                read("{\"" + supplementary + "\":1}", keyTwoCodeUnits));
+        assertEquals(PayloadException.Reason.TEXT_TOO_LONG,
+                assertThrows(PayloadException.class,
+                        () -> read("\"" + supplementary.repeat(2) + "\"", textTwoCodeUnits)).reason());
+        assertEquals(PayloadException.Reason.KEY_TOO_LONG,
+                assertThrows(PayloadException.class,
+                        () -> read("{\"" + supplementary.repeat(2) + "\":1}", keyTwoCodeUnits)).reason());
+    }
+
     /**
      * The exact measured shape: a document built entirely from values that individually
      * satisfy every per-element {@link PayloadLimits#DEFAULTS} budget, yet whose canonical encoding

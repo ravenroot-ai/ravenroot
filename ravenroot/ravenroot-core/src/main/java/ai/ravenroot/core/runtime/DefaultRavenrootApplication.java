@@ -2193,13 +2193,23 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * identity, it does not consume the shutdown budget the deployment-admission contract's cap is about.</p>
      */
     private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes) {
+        return registerDeployment(id, graphMlBytes, id.value());
+    }
+
+    /**
+     * Registers an engine-private deployment while giving its hosted executions the deployment id
+     * exposed by the lifecycle API. Tenant remains a separate durable partition key.
+     */
+    private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes,
+                                               String executionContextDeploymentId) {
         return deployments.computeIfAbsent(id, key -> {
             var created = new DefaultGraphDeployment(key, engine, behaviors, monitor, identitySource, graphMlBytes,
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executionStore,
                     DefaultGraphDeployment.DEFAULT_INBOX_RETENTION, workerId, executionLeaseTtl,
                     ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
                             DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
-                    graphDefinitionStore, graphExecutionLimits, agentBudgets, executionManifests());
+                    graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
+                    executionManifests(), executionContextDeploymentId);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });
@@ -2308,8 +2318,9 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     deployments.remove(record.engineId());
                 }
             }
-            return java.util.Optional.of(LocalDeploymentStatus.of(
-                    key.deploymentId(), LocalDeploymentState.STOPPED, record.sourceCount()));
+            return java.util.Optional.of(LocalDeploymentStatus.withGraph(
+                    key.deploymentId(), LocalDeploymentState.STOPPED,
+                    record.sourceCount(), record.graphHash()));
         });
     }
 
@@ -2369,7 +2380,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // could always start another, and a per-record cap would have started answering 429 there.
             // A published route's limits are not something to tighten as a side effect.
             var created = new LocalDeploymentRecord(graphHash, engineId, sourceCount);
-            registerDeployment(engineId, graphBytes);
+            registerDeployment(engineId, graphBytes, key.deploymentId());
             localDeployments.put(key, created);
             return new Registration(created, true);
         }
@@ -2378,7 +2389,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     private LocalDeploymentStatus localDeploymentStatus(String deploymentId, LocalDeploymentRecord record) {
         GraphDeployment deployment = deployments.get(record.engineId());
         if (deployment == null) {
-            return LocalDeploymentStatus.of(deploymentId, LocalDeploymentState.STOPPED, record.sourceCount());
+            return LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.STOPPED,
+                    record.sourceCount(), record.graphHash());
         }
         // The diagnostics are fixed strings chosen here, not the engine's own DeploymentStatus.cause().
         // That cause is sanitized for an operator log, and the degraded one originates in an inbound
@@ -2386,20 +2398,21 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // response to carry adapter-authored text is a decision for whoever needs it, not a side
         // effect of adding the route.
         return switch (deployment.status().state()) {
-            case COLD -> LocalDeploymentStatus.of(
-                    deploymentId, LocalDeploymentState.REGISTERED, record.sourceCount());
-            case STARTING -> LocalDeploymentStatus.of(
-                    deploymentId, LocalDeploymentState.STARTING, record.sourceCount());
-            case READY -> LocalDeploymentStatus.of(
-                    deploymentId, LocalDeploymentState.READY, record.sourceCount());
-            case DEGRADED -> LocalDeploymentStatus.of(deploymentId, LocalDeploymentState.DEGRADED,
-                    record.sourceCount(), "one or more inbound sources reported degraded health");
-            case FAILED -> LocalDeploymentStatus.of(deploymentId, LocalDeploymentState.FAILED,
-                    record.sourceCount(), "deployment startup failed in this process");
-            case STOPPING -> LocalDeploymentStatus.of(
-                    deploymentId, LocalDeploymentState.STOPPING, record.sourceCount());
-            case STOPPED -> LocalDeploymentStatus.of(
-                    deploymentId, LocalDeploymentState.STOPPED, record.sourceCount());
+            case COLD -> LocalDeploymentStatus.withGraph(
+                    deploymentId, LocalDeploymentState.REGISTERED, record.sourceCount(), record.graphHash());
+            case STARTING -> LocalDeploymentStatus.withGraph(
+                    deploymentId, LocalDeploymentState.STARTING, record.sourceCount(), record.graphHash());
+            case READY -> LocalDeploymentStatus.withGraph(
+                    deploymentId, LocalDeploymentState.READY, record.sourceCount(), record.graphHash());
+            case DEGRADED -> LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.DEGRADED,
+                    record.sourceCount(), record.graphHash(),
+                    "one or more inbound sources reported degraded health");
+            case FAILED -> LocalDeploymentStatus.withGraph(deploymentId, LocalDeploymentState.FAILED,
+                    record.sourceCount(), record.graphHash(), "deployment startup failed in this process");
+            case STOPPING -> LocalDeploymentStatus.withGraph(
+                    deploymentId, LocalDeploymentState.STOPPING, record.sourceCount(), record.graphHash());
+            case STOPPED -> LocalDeploymentStatus.withGraph(
+                    deploymentId, LocalDeploymentState.STOPPED, record.sourceCount(), record.graphHash());
         };
     }
 
@@ -2511,6 +2524,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                 graphExecutionLimits.graphMl())) {
             var definition = manager.definition();
             new BehaviorPropertySchema(behaviors).validate(definition);
+            new BehaviorCapabilityPreflight(behaviors).validate(definition);
             new NodeRuntimeNatureValidator(behaviors).validate(definition);
             int count = 0;
             for (var node : definition.nodes()) {

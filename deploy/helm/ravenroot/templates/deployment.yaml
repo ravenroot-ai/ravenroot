@@ -47,6 +47,60 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: {{ .Values.engine | quote }}
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultResponseBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxResponseBytes }}
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultEscalationSeconds }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxEscalationSeconds }}
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultExpirySeconds }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxExpirySeconds }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxTitleBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxDescriptionBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxResponseSchemaBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxAuthorizationTokens }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxAuthorizationTokenBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxDecisionBodyBytes }}
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultPageSize }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxPageSize }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.responseMaxDepth }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.responseMaxCollectionSize }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.responseMaxValueCount }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.responseMaxTextLength }}
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.responseMaxKeyLength }}
+            - name: RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.writeAttempts }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxConfirmationPromptBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxConfirmationActionLabelBytes }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxDecisionCommentBytes }}
+            - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.attentionPollMillis }}
+            - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.attentionPollBackoffMaxMillis }}
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultAttentionPageSize }}
+            - name: RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE
+              value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxAttentionPageSize }}
             # The default execution store is SQLite/WAL. It shares this one-pod RWO volume with the
             # durable audit trail and must never be placed on the read-only root filesystem or /tmp.
             - name: RAVENROOT_AUDIT_DIR

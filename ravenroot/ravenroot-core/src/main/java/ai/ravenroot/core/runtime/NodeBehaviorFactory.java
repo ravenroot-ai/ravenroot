@@ -10,6 +10,14 @@ import java.util.Optional;
 public interface NodeBehaviorFactory {
     NodeTypeDescriptor descriptor();
 
+    /**
+     * Validates cross-property configuration and required runtime capabilities before traversal.
+     * @param node exact graph node being admitted
+     */
+    default void validate(GraphNode node) {
+        // Most behaviors are fully described by the generic property schema.
+    }
+
     NodeHandler create(GraphNode node);
 
     /** Fail-closed opt-in for trusted, package-owned durable checkpoint decoding. */

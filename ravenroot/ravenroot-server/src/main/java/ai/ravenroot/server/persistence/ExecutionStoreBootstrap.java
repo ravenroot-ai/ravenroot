@@ -41,9 +41,18 @@ public final class ExecutionStoreBootstrap {
     /** Opens all durable stores with the graph-definition budget chosen by the composition root. */
     public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
                                    GraphMlLimits graphMlLimits) {
+        return openOwned(configuration, clock, graphMlLimits,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    /** Opens all durable stores with the Human Task policy chosen by the composition root. */
+    public static Opened openOwned(ExecutionStoreConfiguration configuration, Clock clock,
+                                   GraphMlLimits graphMlLimits,
+                                   ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         Objects.requireNonNull(configuration, "configuration");
         Objects.requireNonNull(clock, "clock");
         Objects.requireNonNull(graphMlLimits, "graphMlLimits");
+        Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         try {
             // Preserve the adapter's useful location classification before the maintenance API
             // deliberately reduces its own diagnostics to path-free lock failures.
@@ -54,7 +63,8 @@ public final class ExecutionStoreBootstrap {
                 if (!configuration.enabled()) {
                     return new Opened(null, null, null, () -> { }, maintenanceLock::close);
                 }
-                var store = new SqliteExecutionStore(configuration.location(), clock);
+                var store = new SqliteExecutionStore(configuration.location(), clock,
+                        ai.ravenroot.persistence.sqlite.SqliteStoreConfig.defaults(), humanTaskPolicy);
                 // Same database file as the executions that pin these definitions, which is what puts
                 // both into one backup snapshot and lets retention decide reachability from the
                 // execution rows in the transaction that removes a definition. The store's own

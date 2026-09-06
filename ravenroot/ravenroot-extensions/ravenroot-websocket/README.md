@@ -12,3 +12,53 @@ Receive emits `websocket.receive.event.v1`, is process-local and non-replayable,
 The managed runtime supplies automatic Pong and validates the profile-requested message and fragment ceilings. The fragment ceiling counts buffers delivered by the JDK listener, not necessarily wire frames.
 
 The managed runtime resolves the credential once per connection generation. It never appears in GraphML, results, ingress events, readiness/degraded reasons or package diagnostics; only the authorized remote peer receives it. Those reasons are fixed low-cardinality codes, and the package emits no additional metrics or telemetry containing tenant, deployment, profile, header, body, frame or credential values.
+
+## Exact profile and node fields
+
+Set `RAVENROOT_WEBSOCKET_PROFILE_<PROFILE_UTF8_HEX>` to strict canonical Base64 of JSON containing
+exactly these fields. Every field is required; use empty arrays, maps, or null credential members
+when applicable rather than omitting a member.
+
+```json
+{
+  "destination": "wss://socket.example.test/events",
+  "headers": {},
+  "subprotocols": [],
+  "credentialBindingId": null,
+  "credentialReference": null,
+  "maximumMessageBytes": 65536,
+  "maximumFragments": 32,
+  "timeoutMs": 10000,
+  "reconnectBackoffMs": 1000,
+  "maxConcurrency": 4,
+  "maxBufferedEvents": 128
+}
+```
+
+The profile name is 1–64 ASCII letters, digits, dots, underscores, or hyphens and begins with an
+alphanumeric. The destination must use `wss`. Message bytes are 1–16 MiB, fragments 1–1024,
+timeouts and reconnect backoff 1–300,000 ms, concurrency 1–256, and buffered events 1–65,536.
+
+Both nodes require `websocketProfile`. Optional integer `maxMessageBytes`, `maxFragments`, and
+`timeoutMs` values have no independent default and may only tighten the profile. `websocket.send`
+accepts `websocket.send.v1` text or Base64 input and returns
+`{"version":"websocket.send.result.v1","outcome":"written","encoding":"text"}` on `continue`.
+It performs one write and never retries. `websocket.receive` is an inbound source and has no input,
+normal correlated output, reply, acknowledgement, or replay field; each accepted frame starts a new
+traversal with `websocket.receive.event.v1`.
+
+```xml
+<node id="send">
+  <data key="kind">BEHAVIOR</data>
+  <data key="behavior">websocket.send</data>
+  <data key="websocketProfile">events</data>
+</node>
+```
+
+Run the node with payload
+`{"version":"websocket.send.v1","encoding":"text","data":"hello"}` after installing the
+profile and `outbound-websocket` package service grant. Test bypasses the write. Stable failures are
+`WEBSOCKET_CONFIGURATION`, `WEBSOCKET_INVALID_INPUT`, `WEBSOCKET_CAPACITY_UNAVAILABLE`,
+`WEBSOCKET_DESTINATION_REFUSED`, `WEBSOCKET_CREDENTIAL_UNAVAILABLE`, `WEBSOCKET_TLS_REFUSED`,
+`WEBSOCKET_REQUEST_TOO_LARGE`, `WEBSOCKET_RESPONSE_TOO_LARGE`, `WEBSOCKET_DEADLINE_EXCEEDED`,
+`WEBSOCKET_TRANSPORT_UNAVAILABLE`, and `WEBSOCKET_AMBIGUOUS`.

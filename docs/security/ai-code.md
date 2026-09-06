@@ -15,7 +15,7 @@ Models, agents, and program artifacts increase capability only through explicitl
   server-call correlation for tool refusals and effects. Do not retain prompt, argument, result,
   endpoint, or credential values in those records.
 - Keep artifact source in governed artifact storage, require validation and approval, and execute only an active identity.
-- Enforce the sandbox supervisor, 5,000 ms default timeout, 64 MiB default heap, and dual control enabled by default.
+- Enforce the sandbox supervisor, 5,000 ms default timeout, and 64 MiB default heap. Enable dual control explicitly with `RAVENROOT_ARTIFACT_DUAL_CONTROL=true` where policy requires a second approver.
 
 ## Residual responsibility
 

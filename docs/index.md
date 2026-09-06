@@ -12,6 +12,7 @@ Ravenroot is a graph-governed platform for designing, executing, and operating b
 - [Security guide](security/index.md) — Apply trust boundaries and controls for identity, untrusted graphs, secrets, code, AI, and embeds.
 - [Developer guide](developer-guide/index.md) — Build, test, extend, and document Ravenroot while preserving its public contracts.
 - [Reference](reference/index.md) — Look up exact GraphML, node, execution, API, configuration, embed, extension, and limit contracts.
+- [Operational coverage inventory](reference/coverage-inventory.md) — Check the documented baseline and reach every core node, optional bundle, command, configuration group, API, procedure, and validation source.
 - [Troubleshooting and runbooks](troubleshooting/index.md) — Move from observable symptoms through bounded diagnosis and action to an explicit verification.
 - [Governance and releases](governance/index.md) — Understand compatibility, support, disclosure, licensing, and documentation commitments.
 

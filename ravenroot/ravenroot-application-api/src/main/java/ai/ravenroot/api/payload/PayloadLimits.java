@@ -28,6 +28,14 @@ public record PayloadLimits(
         int maxTextLength,
         int maxKeyLength) {
 
+    /** Technical ceilings shared by typed policies that specialize structured payload handling. */
+    public static final int HARD_MAX_ENCODED_BYTES = 64 * 1024 * 1024;
+    public static final int HARD_MAX_DEPTH = 256;
+    public static final int HARD_MAX_COLLECTION_SIZE = 1_000_000;
+    public static final int HARD_MAX_VALUE_COUNT = 5_000_000;
+    public static final int HARD_MAX_TEXT_LENGTH = 64 * 1024 * 1024;
+    public static final int HARD_MAX_KEY_LENGTH = 4_096;
+
     /**
      * The budgets in force when a caller does not supply its own.
      *
@@ -55,8 +63,10 @@ public record PayloadLimits(
         // The text ceiling is above the 10 MiB GraphML budget on purpose: a transport envelope that
         // carries a submitted document as one member is configured through this same type, and a
         // ceiling below the document budget would make that arrangement inexpressible rather than safe.
-        if (maxEncodedBytes > 64 * 1024 * 1024 || maxDepth > 256 || maxCollectionSize > 1_000_000
-                || maxValueCount > 5_000_000 || maxTextLength > 64 * 1024 * 1024 || maxKeyLength > 4_096) {
+        if (maxEncodedBytes > HARD_MAX_ENCODED_BYTES || maxDepth > HARD_MAX_DEPTH
+                || maxCollectionSize > HARD_MAX_COLLECTION_SIZE
+                || maxValueCount > HARD_MAX_VALUE_COUNT || maxTextLength > HARD_MAX_TEXT_LENGTH
+                || maxKeyLength > HARD_MAX_KEY_LENGTH) {
             throw new IllegalArgumentException("payload limits exceed the supported safety ceiling");
         }
     }

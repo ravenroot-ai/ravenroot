@@ -9,6 +9,10 @@ Add behavior through narrow packages whose capabilities are discoverable and who
 3. Return classified failures instead of throwing transport- or vendor-specific details across the boundary.
 4. Install into an isolated deployment, inspect `/v1/runtime` and `/v1/node-types`, then exercise the package through Test and a bounded Run.
 
+For deployable bundles, follow the complete [bundle lifecycle](../operator-guide/plugin-bundles.md).
+Every maintained first-party package and node is reachable through the generated
+[bundle reference](../reference/bundles/); the module README remains its canonical source.
+
 ## Authority boundary
 
 An extension advertises behavior; it never self-grants egress, credentials, tools, deployment, or artifact approval. Operators retain installation and configuration authority.

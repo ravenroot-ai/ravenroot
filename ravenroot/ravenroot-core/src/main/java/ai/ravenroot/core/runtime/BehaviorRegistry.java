@@ -70,8 +70,19 @@ public final class BehaviorRegistry {
                                             PublicationPolicyResolver publicationPolicies,
                                             PublicationAuditSink publicationAudit,
                                             ai.ravenroot.core.humantask.HumanTaskService humanTasks) {
+        return standard(environment, publicationPolicies, publicationAudit, humanTasks,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    /** Builds the core catalog with the exact Human Task policy used by the running server. */
+    public static BehaviorRegistry standard(BehaviorEnvironment environment,
+                                            PublicationPolicyResolver publicationPolicies,
+                                            PublicationAuditSink publicationAudit,
+                                            ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                            ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         var registry = new BehaviorRegistry();
-        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit, humanTasks)
+        StandardBehaviorFactories.all(environment, publicationPolicies, publicationAudit,
+                        humanTasks, humanTaskPolicy)
                 .forEach(factory -> registry.registerFactory(factory, NodeCatalogSource.core()));
         return registry;
     }
@@ -233,6 +244,13 @@ public final class BehaviorRegistry {
         if (node == null || node.behavior() == null) return Optional.empty();
         var factory = factories.get(node.behavior());
         return factory == null ? Optional.empty() : Optional.of(factory.create(node));
+    }
+
+    /** Runs the registered factory's side-effect-free admission check for one configured node. */
+    public void validate(GraphNode node) {
+        if (node == null || node.behavior() == null) return;
+        var factory = factories.get(node.behavior());
+        if (factory != null) factory.validate(node);
     }
 
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */

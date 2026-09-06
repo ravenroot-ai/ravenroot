@@ -42,6 +42,24 @@ def write_adr(directory: Path, name: str) -> None:
 
 
 class CheckPublicDocsTest(unittest.TestCase):
+    def test_rendered_html_link_is_backed_by_a_markdown_source(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            docs = root / "docs"
+            docs.mkdir()
+            source = docs / "source.md"
+            target = docs / "target.md"
+            source.write_text("[Target](target.html#details)\n", encoding="utf-8")
+            target.write_text("# Target\n\n## Details\n", encoding="utf-8")
+
+            with mock.patch.object(CHECK, "ROOT", root):
+                self.assertEqual([], CHECK.local_link_errors([source]))
+                target.unlink()
+                self.assertEqual(
+                    ["docs/source.md: broken local link: target.html#details"],
+                    CHECK.local_link_errors([source]),
+                )
+
     def test_adr_prefixes_are_unique_without_rejecting_non_numbered_or_nested_documents(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

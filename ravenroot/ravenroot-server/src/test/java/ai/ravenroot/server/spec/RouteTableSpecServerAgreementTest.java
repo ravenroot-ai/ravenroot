@@ -67,6 +67,15 @@ class RouteTableSpecServerAgreementTest {
         assertTrue(humanDecision.contains("\"required\": true"), humanDecision);
         assertTrue(humanDecision.contains("#/components/schemas/PayloadEnvelope"), humanDecision);
         assertTrue(humanDecision.contains("#/components/schemas/HumanTaskDecisionResult"), humanDecision);
+        String attention = pathEntry(generatedNow, "/v1/human-tasks/attention");
+        assertTrue(attention.contains("\"name\": \"graphVersion\""), attention);
+        assertTrue(attention.contains("\"name\": \"taskId\""), attention);
+        assertTrue(attention.contains("#/components/schemas/HumanTaskAttentionPage"), attention);
+        String confirmation = pathEntry(generatedNow,
+                "/v1/human-tasks/{taskId}/confirmation/{action}");
+        assertTrue(confirmation.contains("#/components/schemas/HumanTaskConfirmationRequest"), confirmation);
+        assertTrue(confirmation.contains("#/components/schemas/HumanTaskConfirmationResult"), confirmation);
+        assertTrue(generatedNow.contains("\"enum\": [\"APPLIED\", \"ALREADY_APPLIED\"]"), generatedNow);
         String onDisk = checkedInSpec();
         assertEquals(generatedNow, onDisk, () -> "the checked-in OpenAPI fixture is stale -- regenerate it with "
                 + "SpecGeneratorMain (see its own Javadoc) after changing RouteTable");

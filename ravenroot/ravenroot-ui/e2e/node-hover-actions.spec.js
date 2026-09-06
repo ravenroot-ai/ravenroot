@@ -121,6 +121,7 @@ test('duplicate is one canonical history step and overlay/context menu share the
   const duplicate = page.getByRole('button', { name: 'Duplicate Do something' });
   await expect(duplicate).toBeVisible();
   const before = await graphState(page);
+  const livePosition = await page.evaluate(() => window.cy.getElementById('dosomething').position());
   const sourcePosition = await page.evaluate(() => {
     const source = window.ravenroot.activeDocument().graph.nodeMap.dosomething;
     return { x: source.ox, y: source.oy };
@@ -136,11 +137,15 @@ test('duplicate is one canonical history step and overlay/context menu share the
     .toEqual({ x: sourcePosition.x + 32, y: sourcePosition.y + 32 });
   await page.locator('#btn-undo').click();
   await expect.poll(() => graphState(page)).toEqual(before);
+  expect(await page.evaluate(() => window.cy.getElementById('dosomething').position()))
+    .toEqual(livePosition);
   await page.locator('#btn-redo').click();
   await expect.poll(() => graphState(page)).toMatchObject({
     nodes: ['dosomething', 'dosomething-copy-1', 'end', 'error', 'start'],
     edges: before.edges,
   });
+  expect(await page.evaluate(() => window.cy.getElementById('dosomething').position()))
+    .toEqual(livePosition);
 
   await page.evaluate(() => { window.cy.$(':selected').unselect(); });
   await page.mouse.click(worker.x, worker.y, { button: 'right' });

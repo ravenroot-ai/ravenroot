@@ -516,7 +516,39 @@ public interface ExecutionStore extends AutoCloseable {
      * @return positive implementation limit.
      */
     default int maxHumanTaskPageSize() {
-        return 100;
+        return HumanTaskPolicy.DEFAULTS.inboxMaxPageSize();
+    }
+
+    /**
+     * Largest embedded-confirmation attention page this adapter materializes.
+     *
+     * @return positive implementation limit.
+     */
+    default int maxHumanTaskAttentionPageSize() {
+        return HumanTaskPolicy.DEFAULTS.confirmation().attentionMaxPageSize();
+    }
+
+    /**
+     * Largest complete per-node attention-count projection this adapter materializes.
+     *
+     * @return positive implementation limit.
+     */
+    default int maxHumanTaskAttentionNodeCounts() {
+        return HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_NODE_COUNTS;
+    }
+
+    /**
+     * Stable adapter capacity for a durable Human Task response.
+     *
+     * <p>This is separate from {@link #maxPayloadBytes()} because a Human Task pins its response
+     * contract when it is registered. An adapter may keep a smaller general execution-payload
+     * budget, but this capacity must cover both newly accepted policy values and every older pinned
+     * task it can reopen.</p>
+     *
+     * @return positive encoded-response byte capacity.
+     */
+    default int maxHumanTaskResponsePayloadBytes() {
+        return maxPayloadBytes();
     }
 
     /**
@@ -539,6 +571,42 @@ public interface ExecutionStore extends AutoCloseable {
      */
     default CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
         return humanTasksUnsupported();
+    }
+
+    /**
+     * Lists authorized actionable embedded Human Tasks in one exact durable runtime context.
+     *
+     * <p>Implementations must apply tenant isolation, context filters and current caller authority
+     * before counts, paging or projection. A cursor is an immutable ordering boundary and must not
+     * be resolved by looking up the task that originally produced it.</p>
+     *
+     * @param tenantId authenticated tenant boundary.
+     * @param query exact bounded context query.
+     * @param authorization current caller authority used before projection.
+     * @return stage yielding one safe authorized page and authoritative counts.
+     */
+    default CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return humanTaskConfirmationsUnsupported();
+    }
+
+    /**
+     * Finds one currently actionable embedded Human Task from its durable identity and generation.
+     *
+     * <p>The adapter must apply tenant and current-action authorization before constructing the safe
+     * projection. Absent, terminal, stale-generation and unauthorized rows all return empty so this
+     * recovery path cannot be used as a task-existence oracle.</p>
+     *
+     * @param tenantId authenticated tenant scope.
+     * @param locator exact task and generation retained by the client.
+     * @param authorization authenticated actor, roles and scopes.
+     * @return an authorized safe row, or empty without disclosing why it is unavailable.
+     */
+    default CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return humanTaskConfirmationsUnsupported();
     }
 
     // ---------------------------------------------------------------- durable execution pauses
@@ -608,6 +676,15 @@ public interface ExecutionStore extends AutoCloseable {
         var refused = new java.util.concurrent.CompletableFuture<T>();
         refused.completeExceptionally(new ExecutionStoreException(
                 new ExecutionStoreFailure.CapabilityNotSupported(StoreCapability.HUMAN_TASKS)));
+        return refused;
+    }
+
+    /** Additive fail-closed default for adapters without the complete confirmation contract. */
+    private static <T> CompletionStage<T> humanTaskConfirmationsUnsupported() {
+        var refused = new java.util.concurrent.CompletableFuture<T>();
+        refused.completeExceptionally(new ExecutionStoreException(
+                new ExecutionStoreFailure.CapabilityNotSupported(
+                        StoreCapability.HUMAN_TASK_CONFIRMATIONS)));
         return refused;
     }
 

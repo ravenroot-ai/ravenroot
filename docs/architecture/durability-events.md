@@ -27,5 +27,5 @@ Recovery reconstructs accepted work from durable authority; live delivery accele
 - [Procedure or recovery](../troubleshooting/events-persistence.md)
 - [Durable process inventory](process-inventory.md)
 - [Durable execution results](execution-results.md)
-- [Decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)
-- [Decision record](../../adr/0037-durable-execution-results.md)
+- [Decision record](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0035-cancellation-as-a-distinct-termination-reason.md)
+- [Decision record](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0037-durable-execution-results.md)

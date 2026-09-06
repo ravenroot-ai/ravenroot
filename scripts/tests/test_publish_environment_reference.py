@@ -1,6 +1,13 @@
 import unittest
 
-from scripts.publish_environment_reference import boundary, group, render, undocumented_variables, variables
+from scripts.publish_environment_reference import (
+    INTERACTION_WEBSOCKET_VARIABLES,
+    boundary,
+    group,
+    render,
+    undocumented_variables,
+    variables,
+)
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
@@ -20,6 +27,27 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertEqual("assistant", group("RAVENROOT_ASSISTANT_PROVIDER"))
         self.assertEqual("bundle", group("RAVENROOT_JDBC_PROFILE_"))
         self.assertEqual("human-task", group("RAVENROOT_HUMAN_TASK_"))
+
+    def test_interaction_listener_and_outbound_profile_have_distinct_references(self):
+        names = variables()
+        listener_names = {
+            name
+            for name, paths in names.items()
+            if any(path.name == "InteractionWebSocketConfiguration.java" for path in paths)
+        }
+        self.assertEqual(INTERACTION_WEBSOCKET_VARIABLES, listener_names)
+        for name in INTERACTION_WEBSOCKET_VARIABLES:
+            self.assertEqual("interaction-websocket", group(name))
+        self.assertEqual("bundle", group("RAVENROOT_WEBSOCKET_PROFILE_"))
+
+        published = render()
+        listener_section = published.split("## Interaction WebSocket", 1)[1].split("## ", 1)[0]
+        bundle_section = published.split("## Bundle profile", 1)[1].split("## ", 1)[0]
+        self.assertIn("interactions-websocket.md#configuration", listener_section)
+        self.assertIn("`RAVENROOT_WEBSOCKET_ENABLED`", listener_section)
+        self.assertNotIn("`RAVENROOT_WEBSOCKET_PROFILE_`", listener_section)
+        self.assertIn("`RAVENROOT_WEBSOCKET_PROFILE_`", bundle_section)
+        self.assertNotIn("`RAVENROOT_WEBSOCKET_ENABLED`", bundle_section)
 
     def test_render_names_every_production_literal(self):
         published = render()

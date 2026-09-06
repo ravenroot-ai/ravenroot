@@ -611,6 +611,8 @@ public final class InteractionWebSocketServer implements AutoCloseable {
                         replayOffset = event.journalOffset();
                     }
                 }
+            } catch (SecurityException denied) {
+                close(1008, "authorization lost");
             } finally {
                 replayRunning.set(false);
             }

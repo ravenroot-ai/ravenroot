@@ -213,6 +213,34 @@ Detailed contract: [Identity and HTTP boundary](configuration.md#identity-and-br
 | `RAVENROOT_TRUSTED_TLS_TERMINATOR` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_UI_CONNECT_ORIGINS` | See the linked contract for exact type, default, and applicability. |
 
+## Interaction WebSocket
+
+Detailed contract: [Interaction WebSocket](interactions-websocket.md#configuration).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_WEBSOCKET_ABSOLUTE_LIFETIME_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_ACKNOWLEDGEMENT_DEADLINE_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_AUTHENTICATION_DEADLINE_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_BACKEND_OPERATIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_BIND` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_ENABLED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_IDLE_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_MAX_CONNECTIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_MAX_FRAGMENTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_MAX_MESSAGE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_MAX_OUTGOING_FRAME_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION_PER_ADDRESS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_PENDING_COMMANDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_PORT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_QUEUED_INCOMING_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_FRAMES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_REPLAY_POLL_MILLIS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_UNACKNOWLEDGED_EVENTS` | See the linked contract for exact type, default, and applicability. |
+
 ## Observability
 
 Detailed contract: [Observability](configuration.md#observability).

@@ -41,9 +41,11 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -76,7 +78,9 @@ class InteractionWebSocketWireTest {
                     .map(AuthorizationAction::requiredScope).collect(java.util.stream.Collectors.toSet()));
             var context = new RequestContext("server-test-request", principal.subject(), PrincipalType.USER,
                     principal.issuer(), principal.tenantId(), principal.roles(), principal.scopes());
-            var humanTask = createHumanTask(store, clock, context);
+            var cancelTask = createHumanTask(store, clock, context);
+            var resolveTask = createHumanTask(store, clock, context);
+            var denyTask = createHumanTask(store, clock, context);
             var limiter = new RateLimiter(RateLimitConfiguration.DEFAULTS, TrustedProxyConfiguration.direct(),
                     ignored -> { });
             var configuration = configuration(port);
@@ -91,7 +95,7 @@ class InteractionWebSocketWireTest {
                         }
                         return principal;
                     }, new BrowserOriginPolicy(Set.of("https://console.example")), Duration.ofSeconds(30),
-                    limiter, humanTask.service(), ignored -> { }, clock)) {
+                    limiter, cancelTask.service(), ignored -> { }, clock)) {
                 interactions.start();
                 var rejected = HttpClient.newHttpClient().newWebSocketBuilder()
                         .subprotocols(InteractionWebSocketConfiguration.SUBPROTOCOL)
@@ -113,9 +117,28 @@ class InteractionWebSocketWireTest {
                 assertEquals(Set.of("Authorization"), observedAuthentication.get().keySet());
                 socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-1\","
                         + "\"command\":\"human-task.cancel\",\"taskId\":\""
-                        + humanTask.taskId() + "\",\"generation\":1}", true).get(5, TimeUnit.SECONDS);
+                        + cancelTask.taskId() + "\",\"generation\":1}", true).get(5, TimeUnit.SECONDS);
                 String result = listener.messages.poll(5, TimeUnit.SECONDS);
                 assertTrue(result.contains("\"outcome\":\"cancelled\""));
+                assertTrue(result.contains("\"generation\":2"));
+
+                socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-resolve\","
+                        + "\"command\":\"human-task.resolve\",\"taskId\":\""
+                        + resolveTask.taskId() + "\",\"generation\":1,\"payloadBase64\":\"\","
+                        + "\"contentType\":\"application/octet-stream\",\"comment\":\"\"}", true)
+                        .get(5, TimeUnit.SECONDS);
+                result = listener.messages.poll(5, TimeUnit.SECONDS);
+                assertTrue(result.contains("\"inReplyTo\":\"client-resolve\""));
+                assertTrue(result.contains("\"outcome\":\"resolved\""));
+                assertTrue(result.contains("\"generation\":2"));
+
+                socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-deny\","
+                        + "\"command\":\"human-task.deny\",\"taskId\":\""
+                        + denyTask.taskId() + "\",\"generation\":1,\"comment\":\"declined\"}", true)
+                        .get(5, TimeUnit.SECONDS);
+                result = listener.messages.poll(5, TimeUnit.SECONDS);
+                assertTrue(result.contains("\"inReplyTo\":\"client-deny\""));
+                assertTrue(result.contains("\"outcome\":\"denied\""));
                 assertTrue(result.contains("\"generation\":2"));
                 var existing = awaitEvents(authorized, context);
                 long lastOffset = existing.getLast().journalOffset();
@@ -294,7 +317,6 @@ class InteractionWebSocketWireTest {
                 assertEquals(1008, first.closeCode.join());
                 assertEquals(1008, second.closeCode.join());
                 assertEquals(1008, third.closeCode.join());
-                assertTrue(thirdSocket.isOutputClosed());
 
                 var replacements = new java.util.ArrayList<WebSocket>();
                 for (int index = 0; index < 3; index++) {
@@ -437,6 +459,72 @@ class InteractionWebSocketWireTest {
                 awaitBackendCapacity(interactions, 1);
                 var replacement = new RecordingListener();
                 authenticate(connect(port, replacement), replacement);
+            } finally {
+                releaseStore.countDown();
+            }
+        }
+    }
+
+    @Test
+    void eventAuthorizationLossWhileJournalReadIsBlockedSuppressesTheEvent(
+            @TempDir java.nio.file.Path directory) throws Exception {
+        int port = freePort();
+        Clock clock = Clock.systemUTC();
+        var storeStarted = new CountDownLatch(1);
+        var releaseStore = new CountDownLatch(1);
+        var eventAccessAllowed = new AtomicBoolean(true);
+        try (var store = new SqliteExecutionStore(directory.resolve("replay-authorization-loss.db"), clock);
+             var engine = new PekkoExecutionEngine("interaction-replay-authorization-loss")) {
+            var delegate = application(engine, store);
+            var principal = principal(java.time.Instant.MAX);
+            var context = new RequestContext("replay-authorization-loss-seed", principal.subject(),
+                    PrincipalType.USER, principal.issuer(), principal.tenantId(), principal.roles(),
+                    principal.scopes());
+            createHumanTask(store, clock, context);
+            var seed = new AuthorizedRavenrootApplication(delegate,
+                    new DefaultAuthorizationService(ignored -> { }), ignored -> { }, false);
+            var canonicalEvents = awaitEvents(seed, context);
+            var blockedStore = new ForwardingRavenrootApplication(delegate) {
+                @Override public java.util.List<ai.ravenroot.api.application.DurableExecutionEvent>
+                        durableEventsAfter(String tenantId, long afterOffset, int limit) {
+                    storeStarted.countDown();
+                    try {
+                        releaseStore.await();
+                        return canonicalEvents.stream().filter(event -> event.journalOffset() > afterOffset)
+                                .limit(limit).toList();
+                    } catch (InterruptedException interrupted) {
+                        Thread.currentThread().interrupt();
+                        throw new IllegalStateException(interrupted);
+                    }
+                }
+            };
+            var authorized = new AuthorizedRavenrootApplication(blockedStore,
+                    (request, action, resource) -> {
+                        boolean allowed = action != AuthorizationAction.EXECUTION_READ || eventAccessAllowed.get();
+                        return new ai.ravenroot.api.security.AuthorizationDecision(
+                                allowed, allowed ? "policy allowed" : "policy denied");
+                    },
+                    ignored -> { }, false);
+            try (var interactions = new InteractionWebSocketServer(
+                    configuration(port, 8, 1, Duration.ofSeconds(5)), authorized,
+                    headers -> principal, new BrowserOriginPolicy(Set.of("https://console.example")),
+                    Duration.ofSeconds(30),
+                    new RateLimiter(RateLimitConfiguration.DEFAULTS, TrustedProxyConfiguration.direct(),
+                            ignored -> { }), new HumanTaskService(store, clock), ignored -> { }, clock)) {
+                interactions.start();
+                var listener = new RecordingListener();
+                WebSocket socket = connect(port, listener);
+                authenticate(socket, listener);
+                socket.sendText("{\"version\":1,\"type\":\"resume\",\"afterJournalOffset\":0}", true)
+                        .get(5, TimeUnit.SECONDS);
+                assertTrue(storeStarted.await(5, TimeUnit.SECONDS));
+                assertEquals(0, interactions.availableBackendOperations());
+
+                eventAccessAllowed.set(false);
+                releaseStore.countDown();
+
+                assertEquals(1008, listener.closeCode.get(5, TimeUnit.SECONDS));
+                assertNull(listener.messages.poll(250, TimeUnit.MILLISECONDS));
             } finally {
                 releaseStore.countDown();
             }

@@ -33,6 +33,31 @@ public record InteractionWebSocketConfiguration(
 
     public static final String PATH = "/v1/interactions";
     public static final String SUBPROTOCOL = "ravenroot.interactions.v1";
+    private static final Map<String, String> ENVIRONMENT_NAMES = Map.ofEntries(
+            Map.entry("enabled", "RAVENROOT_WEBSOCKET_ENABLED"),
+            Map.entry("bind", "RAVENROOT_WEBSOCKET_BIND"),
+            Map.entry("port", "RAVENROOT_WEBSOCKET_PORT"),
+            Map.entry("max-connections", "RAVENROOT_WEBSOCKET_MAX_CONNECTIONS"),
+            Map.entry("pending-authentication", "RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION"),
+            Map.entry("pending-authentication-per-address",
+                    "RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION_PER_ADDRESS"),
+            Map.entry("backend-operations", "RAVENROOT_WEBSOCKET_BACKEND_OPERATIONS"),
+            Map.entry("authentication-deadline-seconds",
+                    "RAVENROOT_WEBSOCKET_AUTHENTICATION_DEADLINE_SECONDS"),
+            Map.entry("max-message-bytes", "RAVENROOT_WEBSOCKET_MAX_MESSAGE_BYTES"),
+            Map.entry("max-fragments", "RAVENROOT_WEBSOCKET_MAX_FRAGMENTS"),
+            Map.entry("pending-commands", "RAVENROOT_WEBSOCKET_PENDING_COMMANDS"),
+            Map.entry("queued-incoming-bytes", "RAVENROOT_WEBSOCKET_QUEUED_INCOMING_BYTES"),
+            Map.entry("max-outgoing-frame-bytes", "RAVENROOT_WEBSOCKET_MAX_OUTGOING_FRAME_BYTES"),
+            Map.entry("queued-outgoing-frames", "RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_FRAMES"),
+            Map.entry("queued-outgoing-bytes", "RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_BYTES"),
+            Map.entry("unacknowledged-events", "RAVENROOT_WEBSOCKET_UNACKNOWLEDGED_EVENTS"),
+            Map.entry("replay-poll-millis", "RAVENROOT_WEBSOCKET_REPLAY_POLL_MILLIS"),
+            Map.entry("acknowledgement-deadline-seconds",
+                    "RAVENROOT_WEBSOCKET_ACKNOWLEDGEMENT_DEADLINE_SECONDS"),
+            Map.entry("idle-timeout-seconds", "RAVENROOT_WEBSOCKET_IDLE_TIMEOUT_SECONDS"),
+            Map.entry("absolute-lifetime-seconds", "RAVENROOT_WEBSOCKET_ABSOLUTE_LIFETIME_SECONDS"),
+            Map.entry("shutdown-timeout-seconds", "RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS"));
 
     public InteractionWebSocketConfiguration {
         Objects.requireNonNull(bindAddress, "bindAddress");
@@ -114,8 +139,9 @@ public record InteractionWebSocketConfiguration(
                                 String name, String fallback) {
         String property = properties.getProperty("ravenroot.websocket." + name);
         if (property != null && !property.isBlank()) return property.trim();
-        String env = environment.get("RAVENROOT_WEBSOCKET_" + name.toUpperCase(java.util.Locale.ROOT)
-                .replace('-', '_'));
+        String environmentName = ENVIRONMENT_NAMES.get(name);
+        if (environmentName == null) throw new IllegalArgumentException("Unknown WebSocket setting: " + name);
+        String env = environment.get(environmentName);
         return env == null || env.isBlank() ? fallback : env.trim();
     }
 

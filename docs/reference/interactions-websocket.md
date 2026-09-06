@@ -158,29 +158,29 @@ Set a JVM property `ravenroot.websocket.<suffix>` or the corresponding environme
 so a nonblank environment value is then used; the default applies only when both are absent or blank.
 Invalid nonblank values refuse startup without echoing their contents.
 
-| Suffix | Default | Bound |
-|---|---:|---|
-| `enabled` | `false` | strict Boolean; enabled refuses authentication mode `disabled` |
-| `bind` | `127.0.0.1` | canonical IP literal or `localhost` |
-| `port` | `8081` | 1–65,535 |
-| `max-connections` | `256` | 1–100,000 network connections |
-| `pending-authentication` | `32` | 1–`max-connections` globally |
-| `pending-authentication-per-address` | `4` | 1–global pending limit |
-| `backend-operations` | `128` | 1–100,000 concurrent authentication, authorization, command, and journal operations |
-| `authentication-deadline-seconds` | `5` | 1–60 |
-| `max-message-bytes` | `524288` | 1,024–16,777,216 aggregate UTF-8 bytes |
-| `max-fragments` | `16` | 1–1,024 per message |
-| `pending-commands` | `32` | 1–1,024 per connection |
-| `queued-incoming-bytes` | `1048576` | message limit–67,108,864 per connection |
-| `max-outgoing-frame-bytes` | `65536` | 1,024–message limit; inbound frames share this ceiling and larger outbound messages are deliberately fragmented |
-| `queued-outgoing-frames` | `64` | 1–4,096 per connection |
-| `queued-outgoing-bytes` | `1048576` | frame limit–67,108,864 per connection |
-| `unacknowledged-events` | `64` | 1–4,096 per connection |
-| `replay-poll-millis` | `100` | 50–60,000 |
-| `acknowledgement-deadline-seconds` | `30` | 1–300 |
-| `idle-timeout-seconds` | `60` | 1–3,600 |
-| `absolute-lifetime-seconds` | `3600` | 1–86,400 |
-| `shutdown-timeout-seconds` | `5` | 1–60 |
+| Property suffix | Environment variable | Default | Bound |
+|---|---|---:|---|
+| `enabled` | `RAVENROOT_WEBSOCKET_ENABLED` | `false` | strict Boolean; enabled refuses authentication mode `disabled` |
+| `bind` | `RAVENROOT_WEBSOCKET_BIND` | `127.0.0.1` | canonical IP literal or `localhost` |
+| `port` | `RAVENROOT_WEBSOCKET_PORT` | `8081` | 1–65,535 |
+| `max-connections` | `RAVENROOT_WEBSOCKET_MAX_CONNECTIONS` | `256` | 1–100,000 network connections |
+| `pending-authentication` | `RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION` | `32` | 1–`max-connections` globally |
+| `pending-authentication-per-address` | `RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION_PER_ADDRESS` | `4` | 1–global pending limit |
+| `backend-operations` | `RAVENROOT_WEBSOCKET_BACKEND_OPERATIONS` | `128` | 1–100,000 concurrent authentication, authorization, command, and journal operations |
+| `authentication-deadline-seconds` | `RAVENROOT_WEBSOCKET_AUTHENTICATION_DEADLINE_SECONDS` | `5` | 1–60 |
+| `max-message-bytes` | `RAVENROOT_WEBSOCKET_MAX_MESSAGE_BYTES` | `524288` | 1,024–16,777,216 aggregate UTF-8 bytes |
+| `max-fragments` | `RAVENROOT_WEBSOCKET_MAX_FRAGMENTS` | `16` | 1–1,024 per message |
+| `pending-commands` | `RAVENROOT_WEBSOCKET_PENDING_COMMANDS` | `32` | 1–1,024 per connection |
+| `queued-incoming-bytes` | `RAVENROOT_WEBSOCKET_QUEUED_INCOMING_BYTES` | `1048576` | message limit–67,108,864 per connection |
+| `max-outgoing-frame-bytes` | `RAVENROOT_WEBSOCKET_MAX_OUTGOING_FRAME_BYTES` | `65536` | 1,024–message limit; inbound frames share this ceiling and larger outbound messages are deliberately fragmented |
+| `queued-outgoing-frames` | `RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_FRAMES` | `64` | 1–4,096 per connection |
+| `queued-outgoing-bytes` | `RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_BYTES` | `1048576` | frame limit–67,108,864 per connection |
+| `unacknowledged-events` | `RAVENROOT_WEBSOCKET_UNACKNOWLEDGED_EVENTS` | `64` | 1–4,096 per connection |
+| `replay-poll-millis` | `RAVENROOT_WEBSOCKET_REPLAY_POLL_MILLIS` | `100` | 50–60,000 |
+| `acknowledgement-deadline-seconds` | `RAVENROOT_WEBSOCKET_ACKNOWLEDGEMENT_DEADLINE_SECONDS` | `30` | 1–300 |
+| `idle-timeout-seconds` | `RAVENROOT_WEBSOCKET_IDLE_TIMEOUT_SECONDS` | `60` | 1–3,600 |
+| `absolute-lifetime-seconds` | `RAVENROOT_WEBSOCKET_ABSOLUTE_LIFETIME_SECONDS` | `3600` | 1–86,400 |
+| `shutdown-timeout-seconds` | `RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS` | `5` | 1–60 |
 
 Inbound messages, fragments, pending authentication, backend operations, commands, connections, active identity streams,
 unacknowledged events, and outgoing queues are bounded. Binary data, malformed JSON, incorrect state,

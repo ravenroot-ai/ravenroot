@@ -31,6 +31,7 @@ GROUPS = {
     "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits"),
     "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy"),
     "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls"),
+    "interaction-websocket": Group("Interaction WebSocket", "interactions-websocket.md#configuration"),
     "observability": Group("Observability", "configuration.md#observability"),
     "persistence": Group("Persistence and recovery", "../operator-guide/persistence-lifecycle.md"),
     "plugin": Group("Package activation", "../operator-guide/plugin-bundles.md"),
@@ -85,6 +86,30 @@ BUNDLE_PREFIXES = (
     "RAVENROOT_SLACK_", "RAVENROOT_TEAMS_", "RAVENROOT_TELEGRAM_", "RAVENROOT_WEBSOCKET_",
 )
 
+INTERACTION_WEBSOCKET_VARIABLES = frozenset({
+    "RAVENROOT_WEBSOCKET_ENABLED",
+    "RAVENROOT_WEBSOCKET_BIND",
+    "RAVENROOT_WEBSOCKET_PORT",
+    "RAVENROOT_WEBSOCKET_MAX_CONNECTIONS",
+    "RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION",
+    "RAVENROOT_WEBSOCKET_PENDING_AUTHENTICATION_PER_ADDRESS",
+    "RAVENROOT_WEBSOCKET_BACKEND_OPERATIONS",
+    "RAVENROOT_WEBSOCKET_AUTHENTICATION_DEADLINE_SECONDS",
+    "RAVENROOT_WEBSOCKET_MAX_MESSAGE_BYTES",
+    "RAVENROOT_WEBSOCKET_MAX_FRAGMENTS",
+    "RAVENROOT_WEBSOCKET_PENDING_COMMANDS",
+    "RAVENROOT_WEBSOCKET_QUEUED_INCOMING_BYTES",
+    "RAVENROOT_WEBSOCKET_MAX_OUTGOING_FRAME_BYTES",
+    "RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_FRAMES",
+    "RAVENROOT_WEBSOCKET_QUEUED_OUTGOING_BYTES",
+    "RAVENROOT_WEBSOCKET_UNACKNOWLEDGED_EVENTS",
+    "RAVENROOT_WEBSOCKET_REPLAY_POLL_MILLIS",
+    "RAVENROOT_WEBSOCKET_ACKNOWLEDGEMENT_DEADLINE_SECONDS",
+    "RAVENROOT_WEBSOCKET_IDLE_TIMEOUT_SECONDS",
+    "RAVENROOT_WEBSOCKET_ABSOLUTE_LIFETIME_SECONDS",
+    "RAVENROOT_WEBSOCKET_SHUTDOWN_TIMEOUT_SECONDS",
+})
+
 
 def variables() -> dict[str, tuple[Path, ...]]:
     found: dict[str, set[Path]] = {}
@@ -109,6 +134,8 @@ def undocumented_variables() -> list[str]:
 def group(name: str) -> str:
     if name.startswith("RAVENROOT_ASSISTANT_"):
         return "assistant"
+    if name in INTERACTION_WEBSOCKET_VARIABLES:
+        return "interaction-websocket"
     if name.startswith(BUNDLE_PREFIXES):
         return "bundle"
     if name.startswith("RAVENROOT_AGENT_"):

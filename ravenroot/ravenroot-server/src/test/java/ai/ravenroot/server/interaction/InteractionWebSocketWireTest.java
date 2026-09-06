@@ -632,6 +632,7 @@ class InteractionWebSocketWireTest {
             }
             webSocket.request(1);
             return CompletableFuture.completedFuture(null);
+        }
         @Override public java.util.concurrent.CompletionStage<?> onClose(WebSocket socket, int statusCode,
                                                                          String reason) {
             closeCode.complete(statusCode);

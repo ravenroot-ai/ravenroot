@@ -12,7 +12,7 @@ class PublishBundleReferenceTest(unittest.TestCase):
         )
         self.assertEqual(
             "https://github.com/ravenroot-ai/ravenroot/blob/"
-            "4aea699ae39b99c8866858ccec0d6531aeb020ea/"
+            "f58cd7c7d98cd370c89199829d5436c6a7e8eb8b/"
             "ravenroot/ravenroot-extensions/ravenroot-ai/DEPENDENCIES.md",
             _published_link(bundle, "DEPENDENCIES.md"),
         )
@@ -31,6 +31,10 @@ class PublishBundleReferenceTest(unittest.TestCase):
         self.assertIn("`ai.ravenroot.extensions.websocket`", published)
         self.assertIn("`websocket.send`, `websocket.receive`", published)
         self.assertIn("# WebSocket extension", published)
+
+    def test_render_protects_ravenroot_templates_from_liquid(self):
+        bundle = Bundle("ai", "ai.ravenroot.extensions.ai", ("llm-prompt", "agent"))
+        self.assertIn("{% raw %}{{payload}}{% endraw %}", render(bundle))
 
 
 if __name__ == "__main__":

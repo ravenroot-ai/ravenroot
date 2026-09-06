@@ -105,6 +105,8 @@
       url: /reference/nodes-payload-limits.html
     - title: Core node reference
       url: /reference/core-nodes.html
+    - title: Node descriptor contracts
+      url: /reference/node-contracts.html
     - title: Operational coverage inventory
       url: /reference/coverage-inventory.html
     - title: Durable human tasks

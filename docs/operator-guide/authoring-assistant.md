@@ -45,9 +45,9 @@ actually exposes.
 
    ```sh
    export RAVENROOT_ASSISTANT_PROVIDER=openai-compatible
-   export RAVENROOT_ASSISTANT_ENDPOINT=http://127.0.0.1:11434/v1/chat/completions
+   export RAVENROOT_ASSISTANT_ENDPOINT=http://localhost:11434/v1/chat/completions
    export RAVENROOT_ASSISTANT_MODEL=local-model
-   export RAVENROOT_ASSISTANT_ALLOWED_HOSTS=127.0.0.1
+   export RAVENROOT_ASSISTANT_ALLOWED_HOSTS=localhost
    export RAVENROOT_ASSISTANT_ALLOWED_PORTS=11434
    export RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP=true
    ```
@@ -61,9 +61,32 @@ actually exposes.
    proves configuration and policy admission; the message proves provider reachability and protocol
    compatibility.
 
-When Ravenroot runs in a container, `127.0.0.1` names that container. Use an operator-controlled
-container-network address or `host.docker.internal` where the platform supports it, then allowlist
-that exact host and port. Do not broaden the allowlist to make discovery succeed.
+Use the `localhost` name exactly. Numeric loopback literals such as `127.0.0.1` pass the assistant's
+plaintext-local check but are refused by the shared egress policy; the shipped reserved-address
+exception is name-scoped as `localhost:LOOPBACK`.
+
+When Ravenroot runs in a container, `localhost` names that container. On a platform that provides
+`host.docker.internal`, use the maintained [Compose override](../examples/assistant/compose.override.yaml):
+
+```sh
+export RAVENROOT_COMPOSE_OVERRIDE_FILE=$PWD/docs/examples/assistant/compose.override.yaml
+export RAVENROOT_ASSISTANT_PROVIDER=openai-compatible
+export RAVENROOT_ASSISTANT_ENDPOINT=http://host.docker.internal:11434/v1/chat/completions
+export RAVENROOT_ASSISTANT_MODEL=local-model
+export RAVENROOT_ASSISTANT_ALLOWED_HOSTS=host.docker.internal
+export RAVENROOT_ASSISTANT_ALLOWED_PORTS=11434
+export RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP=true
+export RAVENROOT_EGRESS_RESERVED_EXCEPTIONS=host.docker.internal:PRIVATE
+docker compose -f compose.yaml -f "$RAVENROOT_COMPOSE_OVERRIDE_FILE" config --quiet
+./service.sh restart -si
+```
+
+The explicit `PRIVATE` exception is required when that name resolves to a private container-network
+address; it grants only that name and network class. Use `LOOPBACK` for a container-local provider,
+and the matching reviewed class for another private service name. The explicit override variable keeps
+this example separate from any existing `.ravenroot-local/compose.override.yaml`; `restart -si`
+force-recreates the container with the validated environment while reusing its existing image. Keep
+`RAVENROOT_ASSISTANT_API_KEY` unset for this plaintext path.
 
 ## Anthropic with an operator key
 

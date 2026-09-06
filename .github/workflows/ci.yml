@@ -44,7 +44,7 @@ jobs:
   docs-site:
     name: docs-site
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -52,13 +52,29 @@ jobs:
           ref: ${{ inputs.merge_sha || github.sha }}
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Set up Java for the runtime-backed node documentation gate
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+      - name: Compare node documentation and examples with compiled descriptors
+        working-directory: ravenroot
+        run: >-
+          mvn -B --no-transfer-progress
+          -pl ravenroot-extensions/ravenroot-extensions-all -am
+          -Dtest=PublishedNodeContractTest
+          -Dsurefire.failIfNoSpecifiedTests=false test
       - name: Verify maintained operational documentation contracts
         run: |
           python3 -m unittest scripts.tests.test_publish_bundle_reference -v
           python3 -m unittest scripts.tests.test_publish_environment_reference -v
+          python3 -m unittest scripts.tests.test_publish_node_contract_reference -v
+          python3 -m unittest scripts.tests.test_documented_compose_overrides -v
           python3 -m unittest scripts.tests.test_check_operational_docs -v
           python3 scripts/publish_bundle_reference.py --check
           python3 scripts/publish_environment_reference.py --check
+          python3 scripts/publish_node_contract_reference.py --check
           python3 scripts/check_operational_docs.py
       - name: Build the GitHub Pages documentation
         uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1

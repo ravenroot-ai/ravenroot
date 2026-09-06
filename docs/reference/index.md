@@ -7,6 +7,7 @@ Look up exact GraphML, node, execution, API, configuration, embed, extension, an
 - [GraphML profile](graphml.md) — Find accepted XML structure, keys, kinds, preservation rules, and refusal conditions.
 - [Node catalog, payloads, and limits](nodes-payload-limits.md) — Look up default and optional behaviors, properties, defaults, value domains, and payload budgets.
 - [Core node reference](core-nodes.md) — Use every default node with exact properties, payloads, outcomes, side effects, retry/cancellation applicability, and examples.
+- [Node descriptor contracts](node-contracts.md) — Inspect every compiled field, condition, descriptor limit, declared outcome, and complete GraphML example for all 53 supported nodes.
 - [First-party bundle reference](bundles/index.md) — Reach every optional first-party package and node through its canonical, generated publication view.
 - [Operational coverage inventory](coverage-inventory.md) — Map the documented baseline, scripts, nodes, bundles, configuration, APIs, procedures, and validation evidence.
 - [Production environment-variable inventory](environment-variables.md) — Reach every production Java environment name or dynamic family and its semantic contract.

@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 `ai.ravenroot.extensions.openapi.client` contributes `openapi.call`. It is an opt-in Node SDK `/2`
@@ -25,6 +25,11 @@ fixed/request/response header allowlists, at most one managed credential binding
 request, response, deadline and concurrency ceilings. The OpenAPI document is strict JSON 3.0.3;
 YAML, 3.1, external references, server overrides, callbacks, links, vendor extensions, generated
 classes, query/cookie authentication, OAuth acquisition and multiple credentials are refused.
+
+Omitting or leaving an optional graph ceiling blank inherits the selected profile value. A malformed,
+non-positive, or above-profile value is refused during node construction and is never clamped. The
+profile must declare request and response byte ceilings in `1..16777216`, a timeout in `1..300000`
+milliseconds, and concurrency in `1..256`; there is no universal graph-level numeric default.
 
 The managed service independently enforces the operator egress policy, DNS/reserved-address checks,
 TLS, no redirects, credential placement, byte limits and its own admission bound. Secret values never

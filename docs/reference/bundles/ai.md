@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 The optional package identity is `ai.ravenroot.extensions.ai`.
@@ -47,7 +47,7 @@ browser authoring assistant uses a separate server configuration described in th
 | `LlmPromptNodeBehavior` | the node type: descriptor (declaring the capability `ai`), refusals, admission, the call |
 | `OpenAiCompatibleChat` | **the embedded adapter**: the chat-completions request and response document |
 | `LlmProfile` / `LlmProfileResolver` / `EnvironmentLlmProfileResolver` | the operator-owned endpoint, model and credential binding |
-| `PromptTemplate` | `{{payload}}` rendering, carried over from the departed core node |
+| `PromptTemplate` | `{% raw %}{{payload}}{% endraw %}` rendering, carried over from the departed core node |
 | `LlmPromptException` | the closed failure vocabulary; no payload, prompt, response body or credential ever travels in it |
 | `AgentNodeBehavior` | the `agent` node type: descriptor (declaring `ai` **and** `agentic`), the loop, the three budgets, admission held across turns |
 | `AgentTurn` | **the agent's own wire document**: immutable operator policy in the system role, untrusted graph content in user roles, tool declarations, and the reader that can tell an answer from a tool call |
@@ -127,7 +127,7 @@ call.
 <node id="prompt">
   <data key="kind">BEHAVIOR</data><data key="behavior">llm-prompt</data>
   <data key="provider">local</data>
-  <data key="prompt">Reply briefly to {{payload}}</data>
+  <data key="prompt">Reply briefly to {% raw %}{{payload}}{% endraw %}</data>
 </node>
 ```
 
@@ -144,7 +144,7 @@ authorized immediately before effect and tool errors return to the model as boun
   <data key="kind">BEHAVIOR</data><data key="behavior">agent</data>
   <data key="provider">local</data>
   <data key="instructions">Work only with the supplied payload.</data>
-  <data key="objective">Summarize {{payload}}</data>
+  <data key="objective">Summarize {% raw %}{{payload}}{% endraw %}</data>
   <data key="maxTurns">4</data>
 </node>
 ```

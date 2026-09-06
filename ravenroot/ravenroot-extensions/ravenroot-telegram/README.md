@@ -70,6 +70,10 @@ properties, URLs, logs, exceptions, or documentation. Create and revoke tokens w
 ```
 
 The optional properties are tightening-only: a value above the operator profile ceiling is rejected.
+An omitted or blank optional property inherits the corresponding profile ceiling. A malformed value,
+a value below its minimum, or a value above the profile is refused rather than clamped.
+`maxMediaBytes` applies only to `telegram.send`; `maxButtons` applies to `telegram.send` and
+`telegram.edit.message`, and is absent from callback and delete.
 
 ## Input contract
 

@@ -1,7 +1,7 @@
 # Operational documentation coverage inventory
 
 This inventory was reviewed against the `dev` development snapshot at commit
-`4aea699ae39b99c8866858ccec0d6531aeb020ea`. It describes contracts present in that snapshot. The
+`f58cd7c7d98cd370c89199829d5436c6a7e8eb8b`. It describes contracts present in that snapshot. The
 released `0.1.0-alpha.1` notes remain the authority for that release; a development entry below must
 not be read as a claim that an older release contains it.
 
@@ -14,8 +14,9 @@ An operator can build optional bundles explicitly and include them in an operato
 ## Core catalog
 
 `StandardBehaviorFactories.all()` is the maintained composition source; descriptor constructors are
-the field source. The [core node reference](core-nodes.md) supplies properties, payloads, outcomes,
-failure behavior, applicability, and executable examples. `GET /v1/node-types` is the evidence for
+the field source. The [descriptor contract](node-contracts.md) supplies every catalog field and a
+complete parser-checked graph per node; the [core node reference](core-nodes.md) supplies payloads,
+behavior-only limits, outcomes, effects, and execution prerequisites. `GET /v1/node-types` is the evidence for
 the effective running deployment.
 
 | Node | Contract and procedure | Validation evidence |
@@ -40,8 +41,10 @@ They are optional AI-bundle nodes in this baseline and are now inventoried below
 The extension-pack POM and every production `NodePackage` define membership. Module READMEs are the
 canonical authoring source; generated site pages are checked byte-for-byte against those sources and
 must name every package and node in the publication manifest. The
-[bundle node examples](bundle-node-examples.md) add a minimal GraphML selector and expected execution
-result for every descriptor without duplicating the field contracts.
+[bundle node examples](bundle-node-examples.md) link a complete admission-ready GraphML file and
+expected execution result for every descriptor without duplicating the field contracts. The
+[descriptor contract](node-contracts.md) publishes every property type, requirement, default,
+allowed value, condition, descriptor limit, and declared outcome from compiled code.
 
 | Build ID | Manifest package ID | Node types | Published contract |
 |---|---|---|---|
@@ -67,8 +70,8 @@ All 17 are source-supported packages, optional at runtime, and absent from the d
 The deployable-bundle path requires explicit installation plus manifest-ID activation; an embedding
 application can instead include extension jars and explicitly name their package classes through the
 separate classpath mechanism. The [bundle lifecycle](../operator-guide/plugin-bundles.md) is the
-procedure and `publish_bundle_reference.py --check`, its complete example-selector check,
-extension-pack tests, bundle validator
+procedure and `publish_bundle_reference.py --check`, `publish_node_contract_reference.py --check`,
+the compiled `PublishedNodeContractTest`, extension-pack tests, bundle validator
 tests, plugin script tests, and running `node-types` output are the validation chain. AI is excluded
 from every batch; JDBC joins a batch only with verified driver/digest pairs.
 
@@ -136,5 +139,6 @@ unclassified new name and prevents silent inventory omissions.
 | Final site publication | A local render or merge to `dev` is not publication. The published version and `https://docs.ravenroot.ai/` URLs can be verified only after the normal owner-authorized documentation promotion. |
 
 Run `python3 scripts/publish_bundle_reference.py --check`,
+`python3 scripts/publish_node_contract_reference.py --check`,
 `python3 scripts/check_operational_docs.py`, `python3 scripts/check_public_docs.py`, the documentation
 site build/check, and the referenced shell tests when changing an inventoried surface.

@@ -79,6 +79,12 @@ silently broadening one profile to satisfy another. Graph properties are only `a
 optional comma-separated operation subset, and optional lower ceilings; no graph value can supply a
 specification, route, scope, principal type or target.
 
+An omitted optional graph limit inherits its ceiling. An authored blank value, malformed number,
+non-positive number, or value above that ceiling is refused rather than clamped. Request bytes,
+idempotency bytes, deadline, and concurrency inherit the selected profile. The
+`openapi.request-reply.maxResponseBytes` property is the exception: it inherits the package
+authority's response ceiling because an OpenAPI server profile has no response-byte field.
+
 The OpenAPI document is strict JSON 3.0.3. YAML, 3.1, server overrides, external references, vendor
 extensions, callbacks, links, generated classes and document-defined security are outside v1 and fail
 source start atomically. Supported request validation covers literal and templated paths, scalar

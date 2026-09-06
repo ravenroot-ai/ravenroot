@@ -7,6 +7,7 @@ from scripts.check_docs_site import (
     document_url,
     navigation_urls,
     output_path,
+    unprotected_template_literals,
 )
 
 
@@ -61,6 +62,18 @@ class CheckDocsSiteTest(unittest.TestCase):
         self.assertTrue(page.has_main_content)
         self.assertTrue(page.has_mobile_navigation)
         self.assertTrue(page.has_skip_link)
+
+    def test_liquid_guard_detects_a_mutated_unprotected_ravenroot_template(self):
+        self.assertEqual(["{{payload}}"], unprotected_template_literals("`{{payload}}`"))
+        self.assertEqual(
+            [],
+            unprotected_template_literals("`{% raw %}{{payload}}{% endraw %}`"),
+        )
+
+    def test_generated_page_collects_exact_rendered_code_literals(self):
+        page = GeneratedPage()
+        page.feed("<pre><code>Hello, {{payload}} and {{attributes.name}}</code></pre>")
+        self.assertEqual("Hello, {{payload}} and {{attributes.name}}", "".join(page.code_text))
 
 
 if __name__ == "__main__":

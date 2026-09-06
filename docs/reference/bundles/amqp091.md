@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 The optional package identity is `ai.ravenroot.extensions.amqp091`.

@@ -1,0 +1,326 @@
+behavior	property	type	required	default	allowed	adapterBinding	visibleWhen	requiredWhen	minimum	maximum	maximumUtf8Bytes	maximumItems	maximumItemUtf8Bytes	descriptorOutcomes
+agent	provider	STRING	true			true					0	0	0	continue
+agent	instructions	TEXT	true			false					0	0	0	continue
+agent	objective	TEXT	true			false					0	0	0	continue
+agent	model	STRING	false			false					0	0	0	continue
+agent	mcpServers	STRING	false			false					0	0	0	continue
+agent	maxTurns	INTEGER	false			false					0	0	0	continue
+agent	maxTotalTokens	INTEGER	false			false					0	0	0	continue
+agent	timeoutMs	INTEGER	false			false					0	0	0	continue
+agent	maxTokens	INTEGER	false			false					0	0	0	continue
+agent	temperature	STRING	false			false					0	0	0	continue
+agent	topP	STRING	false			false					0	0	0	continue
+agent	seed	INTEGER	false			false					0	0	0	continue
+agent	skills.1.name	STRING	false			false					0	0	0	continue
+agent	skills.1.description	STRING	false			false					0	0	0	continue
+agent	skills.1.instructions	TEXT	false			false					0	0	0	continue
+agent	skills.2.name	STRING	false			false	skills.1.name:PRESENT:				0	0	0	continue
+agent	skills.2.description	STRING	false			false	skills.1.name:PRESENT:				0	0	0	continue
+agent	skills.2.instructions	TEXT	false			false	skills.1.name:PRESENT:				0	0	0	continue
+agent	skills.3.name	STRING	false			false	skills.2.name:PRESENT:				0	0	0	continue
+agent	skills.3.description	STRING	false			false	skills.2.name:PRESENT:				0	0	0	continue
+agent	skills.3.instructions	TEXT	false			false	skills.2.name:PRESENT:				0	0	0	continue
+agent	skills.4.name	STRING	false			false	skills.3.name:PRESENT:				0	0	0	continue
+agent	skills.4.description	STRING	false			false	skills.3.name:PRESENT:				0	0	0	continue
+agent	skills.4.instructions	TEXT	false			false	skills.3.name:PRESENT:				0	0	0	continue
+agent	skills.5.name	STRING	false			false	skills.4.name:PRESENT:				0	0	0	continue
+agent	skills.5.description	STRING	false			false	skills.4.name:PRESENT:				0	0	0	continue
+agent	skills.5.instructions	TEXT	false			false	skills.4.name:PRESENT:				0	0	0	continue
+agent	skills.6.name	STRING	false			false	skills.5.name:PRESENT:				0	0	0	continue
+agent	skills.6.description	STRING	false			false	skills.5.name:PRESENT:				0	0	0	continue
+agent	skills.6.instructions	TEXT	false			false	skills.5.name:PRESENT:				0	0	0	continue
+agent	skills.7.name	STRING	false			false	skills.6.name:PRESENT:				0	0	0	continue
+agent	skills.7.description	STRING	false			false	skills.6.name:PRESENT:				0	0	0	continue
+agent	skills.7.instructions	TEXT	false			false	skills.6.name:PRESENT:				0	0	0	continue
+agent	skills.8.name	STRING	false			false	skills.7.name:PRESENT:				0	0	0	continue
+agent	skills.8.description	STRING	false			false	skills.7.name:PRESENT:				0	0	0	continue
+agent	skills.8.instructions	TEXT	false			false	skills.7.name:PRESENT:				0	0	0	continue
+amqp.consume	brokerProfile	STRING	true			false					0	0	0	—
+amqp.consume	queue	STRING	false			false					0	0	0	—
+amqp.consume	prefetch	INTEGER	false			false					0	0	0	—
+amqp.consume	maxInFlight	INTEGER	false			false					0	0	0	—
+amqp.consume	retryBackoffMs	INTEGER	false			false					0	0	0	—
+amqp.consume	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
+amqp.consume	drainTimeoutMs	INTEGER	false			false					0	0	0	—
+amqp.consume	poisonAttempts	INTEGER	false			false					0	0	0	—
+amqp.consume	poisonPolicy	STRING	false	profile	profile,dead-letter	false					0	0	0	—
+amqp.consume	deadLetterMode	STRING	false		broker-dlx	false	poisonPolicy:EQUALS:dead-letter	poisonPolicy:EQUALS:dead-letter			0	0	0	—
+amqp.consume	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
+amqp.publish	brokerProfile	STRING	true			false					0	0	0	—
+amqp.publish	exchange	STRING	false			false					0	0	0	—
+amqp.publish	routingKey	STRING	false			false					0	0	0	—
+amqp.publish	mandatory	BOOLEAN	false	true		false					0	0	0	—
+amqp.publish	contentType	STRING	false			false					0	0	0	—
+amqp.publish	contentEncoding	STRING	false			false					0	0	0	—
+amqp.publish	persistent	BOOLEAN	false	false		false					0	0	0	—
+amqp.publish	priority	INTEGER	false			false					0	0	0	—
+amqp.publish	expirationMs	INTEGER	false			false					0	0	0	—
+amqp.publish	messageId	STRING	false			false					0	0	0	—
+amqp.publish	correlationId	STRING	false			false					0	0	0	—
+amqp.publish	replyTo	STRING	false			false					0	0	0	—
+amqp.publish	type	STRING	false			false					0	0	0	—
+amqp.publish	appId	STRING	false			false					0	0	0	—
+amqp.publish	headers	TEXT	false			false					0	0	0	—
+amqp.publish	confirmTimeoutMs	INTEGER	false			false					0	0	0	—
+amqp.publish	maxConcurrency	INTEGER	false			false					0	0	0	—
+amqp.publish	retries	INTEGER	false			false					0	0	0	—
+amqp.publish	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+boundary-guard	policyId	STRING	true			false					0	0	0	continue,violation
+boundary-guard	policyVersion	STRING	true			false					0	0	0	continue,violation
+boundary-guard	policyDigest	STRING	true			false					0	0	0	continue,violation
+cel-decision	expression	CEL_EXPRESSION	true			false					0	0	0	$trueOutcome,$falseOutcome
+cel-decision	trueOutcome	STRING	false	true		false					0	0	0	$trueOutcome,$falseOutcome
+cel-decision	falseOutcome	STRING	false	false		false					0	0	0	$trueOutcome,$falseOutcome
+cel-transform	expression	CEL_EXPRESSION	true			false					0	0	0	continue
+delay	durationMs	INTEGER	false	1000		false					0	0	0	continue
+discord.interactions	discordProfile	STRING	true			false					0	0	0	—
+discord.send	discordProfile	STRING	true			false					0	0	0	—
+discord.send	channelId	STRING	false			false					0	0	0	—
+discord.send	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+discord.send	maxContentChars	INTEGER	false			false					0	0	0	—
+discord.send	maxAttachmentBytes	INTEGER	false			false					0	0	0	—
+discord.send	maxAttachments	INTEGER	false			false					0	0	0	—
+discord.send	maxConcurrency	INTEGER	false			false					0	0	0	—
+discord.send	retries	INTEGER	false			false					0	0	0	—
+filesystem.read	filesystemProfile	STRING	true			false					0	0	0	—
+filesystem.read	path	STRING	true			false					0	0	0	—
+filesystem.read	encoding	STRING	false	utf-8	utf-8,base64	false					0	0	0	—
+filesystem.read	maxBytes	INTEGER	false			false					0	0	0	—
+filesystem.read	deadlineMs	INTEGER	false			false					0	0	0	—
+filesystem.write	filesystemProfile	STRING	true			false					0	0	0	—
+filesystem.write	path	STRING	true			false					0	0	0	—
+filesystem.write	encoding	STRING	false	utf-8	utf-8,base64	false					0	0	0	—
+filesystem.write	mode	STRING	false	create-new	create-new,replace	false					0	0	0	—
+filesystem.write	maxBytes	INTEGER	false			false					0	0	0	—
+filesystem.write	deadlineMs	INTEGER	false			false					0	0	0	—
+filesystem.write	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+git-workspace	workspaceProfile	STRING	true			false					0	0	0	continue,conflict,unmerged
+github-app-review	githubProfile	STRING	true			false					0	0	0	—
+github-app-review	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+github-events-source	githubProfile	STRING	true			false					0	0	0	—
+github-workflow-watch	githubProfile	STRING	true			false					0	0	0	—
+github-workflow-watch	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+http-request	url	URI	true			false					0	0	0	$successOutcome,$failureOutcome
+http-request	method	STRING	false	GET	GET,POST,PUT,PATCH,DELETE	false					0	0	0	$successOutcome,$failureOutcome
+http-request	body	TEXT	false			false					0	0	0	$successOutcome,$failureOutcome
+http-request	timeoutMs	INTEGER	false	10000		false					0	0	0	$successOutcome,$failureOutcome
+http-request	credentialRef	SECRET_REFERENCE	false			false					0	0	0	$successOutcome,$failureOutcome
+http-request	credentialHeader	STRING	false	Authorization		false					0	0	0	$successOutcome,$failureOutcome
+http-request	credentialScheme	STRING	false	Bearer		false					0	0	0	$successOutcome,$failureOutcome
+http-request	successOutcome	STRING	false	continue		false					0	0	0	$successOutcome,$failureOutcome
+http-request	failureOutcome	STRING	false	error		false					0	0	0	$successOutcome,$failureOutcome
+http-request	recovery.repeatable	STRING	false		repeatable,not-repeatable	false		method:ONE_OF:POST,PUT,PATCH,DELETE			0	0	0	$successOutcome,$failureOutcome
+human-task	title	STRING	true			false					256	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	description	TEXT	false			false					4096	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	responseContentType	STRING	false	application/vnd.ravenroot.payload+json		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	responseSchema	STRING	false	ravenroot.human-task.response		false					128	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	responseSchemaVersion	STRING	false	1		false					128	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	responseKind	STRING	false	MAP	SCALAR,LIST,MAP	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	maxResponseBytes	INTEGER	false	65536		false			1	262144	0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationPresentationVersion	STRING	false		1	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationPrompt	TEXT	false	Confirm this task.		false	confirmationPresentationVersion:EQUALS:1				4096	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationComment	STRING	false	OPTIONAL	DISALLOWED,OPTIONAL,REQUIRED	false	confirmationPresentationVersion:EQUALS:1				0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationActions	STRING	false	RESOLVE,DENY,CANCEL		false	confirmationPresentationVersion:EQUALS:1				0	3	7	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationResolveLabel	STRING	false	Confirm		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationDenyLabel	STRING	false	Deny		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	confirmationCancelLabel	STRING	false	Cancel		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	authorizedRoles	TEXT	false			false					0	16	256	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	authorizedScopes	TEXT	false			false					0	16	256	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	escalateAfterSeconds	INTEGER	false	0		false			0	2591999	0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	expiresAfterSeconds	INTEGER	false	604800		false			1	2592000	0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	correlationSource	STRING	false	task-id	task-id	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	deduplicationSource	STRING	false	attempt-id	attempt-id	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	resolvedOutcome	STRING	false	resolved		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	deniedOutcome	STRING	false	denied		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	expiredOutcome	STRING	false	expired		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+human-task	cancelledOutcome	STRING	false	cancelled		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
+jdbc.insert	profile	STRING	true			false					0	0	0	continue
+jdbc.insert	statement	STRING	true			false					0	0	0	continue
+jdbc.query	profile	STRING	true			false					0	0	0	continue
+jdbc.query	statement	STRING	true			false					0	0	0	continue
+json-parse	source	TEXT	false	{{payload}}		false					0	0	0	continue
+json-path	path	STRING	true			false					0	0	0	continue
+kafka.consume	clusterProfile	STRING	true			false					0	0	0	—
+kafka.consume	subscriptionMode	STRING	false	profile	profile,topics,pattern	false					0	0	0	—
+kafka.consume	topics	STRING	false			false	subscriptionMode:EQUALS:topics	subscriptionMode:EQUALS:topics			0	0	0	—
+kafka.consume	topicPattern	STRING	false			false	subscriptionMode:EQUALS:pattern	subscriptionMode:EQUALS:pattern			0	0	0	—
+kafka.consume	group	STRING	false			false					0	0	0	—
+kafka.consume	staticMember	STRING	false	profile	profile,dynamic	false					0	0	0	—
+kafka.consume	maxInFlight	INTEGER	false			false					0	0	0	—
+kafka.consume	pollTimeoutMs	INTEGER	false			false					0	0	0	—
+kafka.consume	drainTimeoutMs	INTEGER	false			false					0	0	0	—
+kafka.consume	retryBackoffMs	INTEGER	false			false					0	0	0	—
+kafka.consume	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
+kafka.consume	poisonAttempts	INTEGER	false			false					0	0	0	—
+kafka.consume	poisonPolicy	STRING	false	profile	profile,halt,dead-letter	false					0	0	0	—
+kafka.consume	deadLetterTopic	STRING	false			false	poisonPolicy:EQUALS:dead-letter	poisonPolicy:EQUALS:dead-letter			0	0	0	—
+kafka.consume	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
+kafka.produce	clusterProfile	STRING	true			false					0	0	0	—
+kafka.produce	topic	STRING	false			false					0	0	0	—
+kafka.produce	timeoutMs	INTEGER	false			false					0	0	0	—
+kafka.produce	maxConcurrency	INTEGER	false			false					0	0	0	—
+kafka.produce	maxRecordBytes	INTEGER	false			false					0	0	0	—
+kafka.produce	correlationId	STRING	false			false					0	0	0	—
+kafka.produce	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+llm-prompt	provider	STRING	true			true					0	0	0	continue
+llm-prompt	prompt	TEXT	true			false					0	0	0	continue
+llm-prompt	model	STRING	false			false					0	0	0	continue
+llm-prompt	timeoutMs	INTEGER	false			false					0	0	0	continue
+llm-prompt	maxTokens	INTEGER	false			false					0	0	0	continue
+llm-prompt	temperature	STRING	false			false					0	0	0	continue
+llm-prompt	topP	STRING	false			false					0	0	0	continue
+llm-prompt	seed	INTEGER	false			false					0	0	0	continue
+log	message	TEXT	false	{{payload}}		false					0	0	0	continue
+mail.imap.consume	profile	STRING	true			false					0	0	0	—
+mail.imap.consume	folder	STRING	false			false					0	0	0	—
+mail.imap.consume	pollIntervalMs	INTEGER	false			false					0	0	0	—
+mail.imap.consume	batchSize	INTEGER	false			false					0	0	0	—
+mail.imap.consume	maxInFlight	INTEGER	false	1	1	false					0	0	0	—
+mail.imap.consume	retryBackoffMs	INTEGER	false			false					0	0	0	—
+mail.imap.consume	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
+mail.imap.consume	poisonAttempts	INTEGER	false			false					0	0	0	—
+mail.imap.consume	contentMode	STRING	false	metadata	metadata,preview	false					0	0	0	—
+mail.imap.consume	previewChars	INTEGER	false			false	contentMode:EQUALS:preview	contentMode:EQUALS:preview			0	0	0	—
+mail.imap.consume	allowedHeaders	STRING	false			false					0	0	0	—
+mail.imap.consume	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
+mail.imap.delete	profile	STRING	true			false					0	0	0	—
+mail.imap.delete	sourceFolder	STRING	false	INBOX		false					0	0	0	—
+mail.imap.delete	deleteMode	STRING	false	TRASH	TRASH,HARD_DELETE	false					0	0	0	—
+mail.imap.delete	hardDeleteAcknowledgement	STRING	false		I_UNDERSTAND_EXPUNGE_IS_PERMANENT	false	deleteMode:EQUALS:HARD_DELETE	deleteMode:EQUALS:HARD_DELETE			0	0	0	—
+mail.imap.delete	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.imap.delete	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+mail.imap.move	profile	STRING	true			false					0	0	0	—
+mail.imap.move	sourceFolder	STRING	false	INBOX		false					0	0	0	—
+mail.imap.move	destinationFolder	STRING	true			false					0	0	0	—
+mail.imap.move	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.imap.move	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+mail.imap.query	profile	STRING	true			false					0	0	0	—
+mail.imap.query	folder	STRING	false	INBOX		false					0	0	0	—
+mail.imap.query	limit	INTEGER	false	50		false					0	0	0	—
+mail.imap.query	contentMode	STRING	false	preview	preview,full	false					0	0	0	—
+mail.imap.query	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.imap.query	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+mail.send	mailProfile	STRING	true			false					0	0	0	—
+mail.send	host	STRING	false			false					0	0	0	—
+mail.send	port	INTEGER	false			false					0	0	0	—
+mail.send	securityMode	STRING	false			false					0	0	0	—
+mail.send	tlsVerify	BOOLEAN	false	true		false					0	0	0	—
+mail.send	authUsername	STRING	false			false					0	0	0	—
+mail.send	credentialRef	SECRET_REFERENCE	false			false					0	0	0	—
+mail.send	connectTimeoutMs	INTEGER	false			false					0	0	0	—
+mail.send	readTimeoutMs	INTEGER	false			false					0	0	0	—
+mail.send	writeTimeoutMs	INTEGER	false			false					0	0	0	—
+mail.send	retries	INTEGER	false			false					0	0	0	—
+mail.send	maxRecipients	INTEGER	false			false					0	0	0	—
+mail.send	maxHeaders	INTEGER	false			false					0	0	0	—
+mail.send	maxHeaderChars	INTEGER	false			false					0	0	0	—
+mail.send	maxBodyChars	INTEGER	false			false					0	0	0	—
+mail.send	maxAttachments	INTEGER	false			false					0	0	0	—
+mail.send	maxAttachmentBytes	INTEGER	false			false					0	0	0	—
+mail.send	maxTotalAttachmentBytes	INTEGER	false			false					0	0	0	—
+mail.send	maxEncodedAttachmentBytes	INTEGER	false			false					0	0	0	—
+mail.send	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.send	defaultFrom	STRING	false			false					0	0	0	—
+object.delete	storageProfile	STRING	true			false					0	0	0	—
+object.delete	key	STRING	true			false					0	0	0	—
+object.delete	timeoutMs	INTEGER	false			false					0	0	0	—
+object.delete	maxConcurrency	INTEGER	false			false					0	0	0	—
+object.delete	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+object.get	storageProfile	STRING	true			false					0	0	0	—
+object.get	key	STRING	true			false					0	0	0	—
+object.get	encoding	STRING	false	base64	text,base64	false					0	0	0	—
+object.get	maxBytes	INTEGER	false			false					0	0	0	—
+object.get	timeoutMs	INTEGER	false			false					0	0	0	—
+object.get	maxConcurrency	INTEGER	false			false					0	0	0	—
+object.list	storageProfile	STRING	true			false					0	0	0	—
+object.list	prefix	STRING	false			false					0	0	0	—
+object.list	projection	STRING	false			false					0	0	0	—
+object.list	maxResults	INTEGER	false	100		false					0	0	0	—
+object.list	timeoutMs	INTEGER	false			false					0	0	0	—
+object.list	maxConcurrency	INTEGER	false			false					0	0	0	—
+object.list	retries	INTEGER	false	0		false					0	0	0	—
+object.list	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+object.put	storageProfile	STRING	true			false					0	0	0	—
+object.put	key	STRING	true			false					0	0	0	—
+object.put	maxBytes	INTEGER	false			false					0	0	0	—
+object.put	timeoutMs	INTEGER	false			false					0	0	0	—
+object.put	maxConcurrency	INTEGER	false			false					0	0	0	—
+ocr.extract	ocrProfile	STRING	true			false					0	0	0	—
+ocr.extract	language	STRING	true			false					0	0	0	—
+ocr.extract	deadlineMs	INTEGER	false			false					0	0	0	—
+ocr.extract	maxInputBytes	INTEGER	false			false					0	0	0	—
+ocr.extract	maxOutputBytes	INTEGER	false			false					0	0	0	—
+ocr.extract	maxConcurrency	INTEGER	false			false					0	0	0	—
+openapi.call	apiProfile	STRING	true			false					0	0	0	—
+openapi.call	operationId	STRING	true			false					0	0	0	—
+openapi.call	timeoutMs	INTEGER	false			false					0	0	0	—
+openapi.call	maxRequestBytes	INTEGER	false			false					0	0	0	—
+openapi.call	maxResponseBytes	INTEGER	false			false					0	0	0	—
+openapi.call	maxConcurrency	INTEGER	false			false					0	0	0	—
+openapi.receive	apiProfile	STRING	true			false					0	0	0	—
+openapi.receive	operations	STRING	false			false					0	0	0	—
+openapi.receive	maxRequestBytes	INTEGER	false			false					0	0	0	—
+openapi.receive	maxIdempotencyBytes	INTEGER	false			false					0	0	0	—
+openapi.receive	deadlineMs	INTEGER	false			false					0	0	0	—
+openapi.receive	maxConcurrency	INTEGER	false			false					0	0	0	—
+openapi.request-reply	apiProfile	STRING	true			false					0	0	0	responded
+openapi.request-reply	operations	STRING	false			false					0	0	0	responded
+openapi.request-reply	maxRequestBytes	INTEGER	false			false					0	0	0	responded
+openapi.request-reply	maxIdempotencyBytes	INTEGER	false			false					0	0	0	responded
+openapi.request-reply	maxResponseBytes	INTEGER	false			false					0	0	0	responded
+openapi.request-reply	deadlineMs	INTEGER	false			false					0	0	0	responded
+openapi.request-reply	maxConcurrency	INTEGER	false			false					0	0	0	responded
+program	language	STRING	true			false					0	0	0	continue
+program	source	TEXT	true			false					0	0	0	continue
+program	testPayload	TEXT	false	test payload		false					0	0	0	continue
+program	artifactId	STRING	false			false					0	0	0	continue
+project-transition	githubProfile	STRING	true			false					0	0	0	—
+project-transition	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+release-prepare	githubProfile	STRING	true			false					0	0	0	—
+release-prepare	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+slack.commands	slackProfile	STRING	true			false					0	0	0	—
+slack.events	slackProfile	STRING	true			false					0	0	0	—
+slack.post-message	slackProfile	STRING	true			false					0	0	0	—
+slack.post-message	channelId	STRING	false			false					0	0	0	—
+slack.post-message	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+slack.post-message	maxTextChars	INTEGER	false			false					0	0	0	—
+slack.post-message	maxConcurrency	INTEGER	false			false					0	0	0	—
+slack.post-message	retries	INTEGER	false			false					0	0	0	—
+spel.decision	expression	TEXT	true			false					0	0	0	$trueOutcome,$falseOutcome
+spel.decision	trueOutcome	STRING	false	true		false					0	0	0	$trueOutcome,$falseOutcome
+spel.decision	falseOutcome	STRING	false	false		false					0	0	0	$trueOutcome,$falseOutcome
+spel.transform	expression	TEXT	true			false					0	0	0	continue
+telegram.answer.callback	botProfile	STRING	true			false					0	0	0	—
+telegram.answer.callback	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	maxTextChars	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	retries	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+telegram.delete.message	botProfile	STRING	true			false					0	0	0	—
+telegram.delete.message	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.delete.message	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.delete.message	retries	INTEGER	false			false					0	0	0	—
+telegram.delete.message	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+telegram.edit.message	botProfile	STRING	true			false					0	0	0	—
+telegram.edit.message	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.edit.message	maxTextChars	INTEGER	false			false					0	0	0	—
+telegram.edit.message	maxButtons	INTEGER	false			false					0	0	0	—
+telegram.edit.message	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.edit.message	retries	INTEGER	false			false					0	0	0	—
+telegram.edit.message	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+telegram.send	botProfile	STRING	true			false					0	0	0	—
+telegram.send	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.send	maxTextChars	INTEGER	false			false					0	0	0	—
+telegram.send	maxMediaBytes	INTEGER	false			false					0	0	0	—
+telegram.send	maxButtons	INTEGER	false			false					0	0	0	—
+telegram.send	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.send	retries	INTEGER	false			false					0	0	0	—
+template	template	TEXT	true			false					0	0	0	continue
+websocket.receive	websocketProfile	STRING	true			false					0	0	0	—
+websocket.receive	maxMessageBytes	INTEGER	false			false					0	0	0	—
+websocket.receive	maxFragments	INTEGER	false			false					0	0	0	—
+websocket.receive	timeoutMs	INTEGER	false			false					0	0	0	—
+websocket.send	websocketProfile	STRING	true			false					0	0	0	—
+websocket.send	maxMessageBytes	INTEGER	false			false					0	0	0	—
+websocket.send	maxFragments	INTEGER	false			false					0	0	0	—
+websocket.send	timeoutMs	INTEGER	false			false					0	0	0	—

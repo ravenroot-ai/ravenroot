@@ -13,6 +13,18 @@ from pathlib import Path
 NAVIGATION_URL = re.compile(
     r"^\s+url:\s*(?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))\s*$"
 )
+RAVENROOT_TEMPLATE = re.compile(
+    r"\{\{(?:payload|attributes\.[A-Za-z0-9_.-]+|properties\.[A-Za-z0-9_.-]+)\}\}"
+)
+RENDERED_CODE_LITERALS = {
+    "/get-started/first-graph.html": {"{{payload}}"},
+    "/reference/nodes-payload-limits.html": {"{{payload}}"},
+    "/reference/core-nodes.html": {
+        "{{payload}}", "{{attributes.name}}", "{{properties.name}}",
+    },
+    "/reference/node-contracts.html": {"{{payload}}"},
+    "/reference/bundles/ai.html": {"{{payload}}"},
+}
 
 
 def document_url(path: Path, source_dir: Path) -> str:
@@ -54,6 +66,8 @@ class GeneratedPage(HTMLParser):
         self.has_main_content = False
         self.has_skip_link = False
         self.has_color_scheme = False
+        self.code_depth = 0
+        self.code_text: list[str] = []
 
     @staticmethod
     def _attributes(attrs: list[tuple[str, str | None]]) -> dict[str, str]:
@@ -84,10 +98,27 @@ class GeneratedPage(HTMLParser):
                     self.current_links.append(href)
             if "skip-link" in classes and href == "#main-content":
                 self.has_skip_link = True
+        if tag == "code":
+            self.code_depth += 1
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "nav" and self.primary_navigation:
             self.primary_navigation = False
+        if tag == "code" and self.code_depth:
+            self.code_depth -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self.code_depth:
+            self.code_text.append(data)
+
+
+def unprotected_template_literals(text: str) -> list[str]:
+    protected = {
+        match.start(1)
+        for match in re.finditer(r"\{% raw %\}(\{\{[^}\n]+\}\})\{% endraw %\}", text)
+    }
+    return [match.group(0) for match in RAVENROOT_TEMPLATE.finditer(text)
+            if match.start() not in protected]
 
 
 def parse_generated_page(path: Path) -> GeneratedPage:
@@ -116,6 +147,14 @@ def validate_source(source_dir: Path) -> tuple[list[str], list[str]]:
     if cname != "docs.ravenroot.ai":
         errors.append("docs/CNAME must contain exactly docs.ravenroot.ai")
 
+    for path in sorted(source_dir.rglob("*.md")):
+        unprotected = unprotected_template_literals(path.read_text(encoding="utf-8"))
+        if unprotected:
+            errors.append(
+                f"Ravenroot template literals are not protected from Liquid in {path}: "
+                + ", ".join(sorted(set(unprotected)))
+            )
+
     return navigation, errors
 
 
@@ -142,6 +181,10 @@ def validate_generated_site(site_dir: Path, navigation: list[str]) -> list[str]:
             errors.append(f"Skip link is missing on {url}")
         if not page.has_color_scheme:
             errors.append(f"Light and dark color-scheme metadata is missing on {url}")
+        rendered_code = "".join(page.code_text)
+        for literal in sorted(RENDERED_CODE_LITERALS.get(url, set())):
+            if literal not in rendered_code:
+                errors.append(f"Rendered code on {url} is missing Ravenroot literal {literal}")
 
     stylesheet = site_dir / "assets" / "css" / "site.css"
     if not stylesheet.is_file():

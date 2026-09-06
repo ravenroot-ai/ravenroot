@@ -30,7 +30,7 @@ GraphML `data` entries, not a replacement syntax.
 
 | Field | Contract |
 |---|---|
-| Property | Optional `message` text, default `{{payload}}`; also supports `{{attributes.name}}` and `{{properties.name}}` |
+| Property | Optional `message` text, default `{% raw %}{{payload}}{% endraw %}`; also supports `{% raw %}{{attributes.name}}{% endraw %}` and `{% raw %}{{properties.name}}{% endraw %}` |
 | Output | Original payload; adds Boolean attribute `ravenroot.logged=true`; outcome `continue` |
 | Effect and retry | Writes one bounded INFO diagnostic. A retry writes another entry; there is no idempotency key. Cancellation has no separate action once the synchronous write begins. |
 | Failures | An unresolvable template placeholder fails before an outcome. |
@@ -38,7 +38,7 @@ GraphML `data` entries, not a replacement syntax.
 ```xml
 <node id="action">
   <data key="kind">BEHAVIOR</data><data key="behavior">log</data>
-  <data key="message">received {{payload}}</data>
+  <data key="message">received {% raw %}{{payload}}{% endraw %}</data>
 </node>
 ```
 
@@ -75,7 +75,7 @@ Run completes after at least the scheduled wait and returns `example input` on `
 ```xml
 <node id="action">
   <data key="kind">BEHAVIOR</data><data key="behavior">template</data>
-  <data key="template">Hello, {{payload}}.</data>
+  <data key="template">Hello, {% raw %}{{payload}}{% endraw %}.</data>
 </node>
 ```
 
@@ -85,7 +85,7 @@ Payload `example input` becomes `Hello, example input.`.
 
 | Field | Contract |
 |---|---|
-| Property | Optional `source` text template, default `{{payload}}` |
+| Property | Optional `source` text template, default `{% raw %}{{payload}}{% endraw %}` |
 | Input/output | Parses JSON text into a bounded canonical scalar, list, or map; attributes pass through; outcome `continue` |
 | Effect and retry | Deterministic and side-effect free. |
 | Failures | Invalid JSON, reserved keys, unresolved template values, and payload budget violations fail; no partial value is emitted. |
@@ -93,7 +93,7 @@ Payload `example input` becomes `Hello, example input.`.
 ```xml
 <node id="action">
   <data key="kind">BEHAVIOR</data><data key="behavior">json-parse</data>
-  <data key="source">{"message":"{{payload}}"}</data>
+  <data key="source">{"message":"{% raw %}{{payload}}{% endraw %}"}</data>
 </node>
 ```
 
@@ -162,7 +162,7 @@ Run with payload `{"items":[{"name":"a"},{"name":"b"}]}` and expect `["a","b"]`.
 |---|---|---|
 | `url` | URI | required HTTP(S) endpoint; resolved destination must be operator-allowlisted |
 | `method` | string enum | `GET`; one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE` |
-| `body` | text template | empty; supports `{{payload}}` |
+| `body` | text template | empty; supports `{% raw %}{{payload}}{% endraw %}` |
 | `timeoutMs` | integer | 10000, capped by the server maximum |
 | `credentialRef` | secret reference | empty; resolved only by the server |
 | `credentialHeader` | string | `Authorization` |
@@ -201,7 +201,7 @@ follows `continue`; a 4xx/5xx response follows `error`. Test mode performs no re
 | Failures | Missing sandbox/runtime, validation, approval, activation, timeout, heap/output, or supervisor faults fail with the artifact/runtime contract and no unsupervised fallback. |
 
 The repository's executable example is
-[`ravenroot-programmable.graphml`](https://github.com/ravenroot-ai/ravenroot/blob/4aea699ae39b99c8866858ccec0d6531aeb020ea/ravenroot/ravenroot-ui/public/examples/ravenroot-programmable.graphml).
+[`ravenroot-programmable.graphml`](https://github.com/ravenroot-ai/ravenroot/blob/f58cd7c7d98cd370c89199829d5436c6a7e8eb8b/ravenroot/ravenroot-ui/public/examples/ravenroot-programmable.graphml).
 Validate it first; Run requires the configured language runtime and sandbox supervisor. Expected
 output and exact lifecycle are in [Model, agent, and program integration](../integrator-guide/ai-programs.md).
 

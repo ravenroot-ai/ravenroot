@@ -30,12 +30,14 @@ GROUPS = {
                        "startup setting; the runbook gives each type and default"),
     "bundle": Group("Bundle profile", "bundles/",
                     "optional package only; its bundle page defines the strict profile"),
-    "credential": Group("Credentials and egress", "../operator-guide/credentials-egress.md",
+    "credential": Group("Credentials and egress", "configuration.md#secret-handling",
                         "operator secret/profile or bounded outbound policy"),
     "embed": Group("Embedded viewer", "embed-extension-contracts.md",
                    "startup setting; disabled unless explicitly enabled"),
     "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits",
                    "positive bounded startup limit; blank uses the documented default"),
+    "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy",
+                        "startup policy family; JVM property overrides environment, and blank uses the documented default"),
     "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls",
                       "startup identity, listener, origin, proxy, or request boundary"),
     "observability": Group("Observability", "configuration.md#observability",
@@ -93,6 +95,8 @@ def group(name: str) -> str:
         return "agent"
     if name.startswith("RAVENROOT_GRAPH"):
         return "graph"
+    if name.startswith("RAVENROOT_HUMAN_TASK_"):
+        return "human-task"
     if name.startswith("RAVENROOT_EMBED_") or name == "RAVENROOT_REPLICAS":
         return "embed"
     if name.startswith("RAVENROOT_RATELIMIT_") or name in {

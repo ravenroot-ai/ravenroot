@@ -98,7 +98,7 @@ Detailed contract: [Bundle profile](bundles/).
 
 ## Credentials and egress
 
-Detailed contract: [Credentials and egress](../operator-guide/credentials-egress.md).
+Detailed contract: [Credentials and egress](configuration.md#secret-handling).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
@@ -149,6 +149,41 @@ Detailed contract: [Graph execution](configuration.md#graph-execution-resource-l
 | `RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT` | positive bounded startup limit; blank uses the documented default |
 | `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | positive bounded startup limit; blank uses the documented default |
 | `RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS` | positive bounded startup limit; blank uses the documented default |
+
+## Human Task policy
+
+Detailed contract: [Human Task policy](configuration.md#human-task-operational-policy).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_HUMAN_TASK_` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
 
 ## Identity and HTTP boundary
 

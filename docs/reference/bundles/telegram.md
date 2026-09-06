@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 The optional package identity is `ai.ravenroot.extensions.telegram`.
@@ -82,6 +82,10 @@ properties, URLs, logs, exceptions, or documentation. Create and revoke tokens w
 ```
 
 The optional properties are tightening-only: a value above the operator profile ceiling is rejected.
+An omitted or blank optional property inherits the corresponding profile ceiling. A malformed value,
+a value below its minimum, or a value above the profile is refused rather than clamped.
+`maxMediaBytes` applies only to `telegram.send`; `maxButtons` applies to `telegram.send` and
+`telegram.edit.message`, and is absent from callback and delete.
 
 ## Input contract
 

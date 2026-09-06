@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 `ai.ravenroot.extensions.ocr.OcrNodePackage` contributes the deterministic `ocr.extract` behavior.
@@ -82,7 +82,7 @@ stdout is retained only through the configured byte ceiling and stderr is always
 
 ## Optional OCR image
 
-The module-scoped [`container/Dockerfile`](https://github.com/ravenroot-ai/ravenroot/blob/4aea699ae39b99c8866858ccec0d6531aeb020ea/ravenroot/ravenroot-extensions/ravenroot-ocr/container/Dockerfile) extends an already published
+The module-scoped [`container/Dockerfile`](https://github.com/ravenroot-ai/ravenroot/blob/f58cd7c7d98cd370c89199829d5436c6a7e8eb8b/ravenroot/ravenroot-extensions/ravenroot-ocr/container/Dockerfile) extends an already published
 Ravenroot image and adds only the validated OCR bundle plus version-pinned Ubuntu Noble Tesseract
 packages. It has no mutable base default: `RAVENROOT_IMAGE` must be an OCI index digest. This keeps
 the standard distribution unchanged and makes the OCR/native dependency an explicit opt-in.

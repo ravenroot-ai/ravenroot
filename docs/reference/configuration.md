@@ -298,8 +298,10 @@ API keys and tokens never belong in GraphML. Credential POST writes secret mater
 |---|---|
 | `RAVENROOT_CREDENTIAL_DIR` | user credential database directory; `./data/credentials` |
 | `RAVENROOT_CREDENTIAL_<REFERENCE_UTF8_HEX>` | legacy operator secret family for exact opaque references; absent means unavailable |
-| `RAVENROOT_HTTP_ALLOWED_HOSTS`, `RAVENROOT_HTTP_ALLOWED_PORTS` | comma-separated exact outbound allowlists; empty denies |
-| `RAVENROOT_HTTP_MAX_REQUEST_BYTES`, `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | non-negative byte ceilings; blank delegates to the managed policy's bounded default |
+| `RAVENROOT_HTTP_ALLOWED_HOSTS` | comma-separated exact outbound hosts; empty denies every host |
+| `RAVENROOT_HTTP_ALLOWED_PORTS` | comma-separated ports; blank selects the bounded default `80,443` |
+| `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | request-body byte ceiling; blank, zero, or negative selects 1 MiB (`1048576`) |
+| `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | response-body byte ceiling; blank, zero, or negative selects 8 MiB (`8388608`) |
 | `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | comma-separated reviewed reserved-network exceptions; empty |
 | `RAVENROOT_TOKEN` | remote CLI bearer token when `--token-file` is absent; no default |
 
@@ -336,8 +338,16 @@ only with the matching classpath deployment, then restart or recreate the applic
 
 `RAVENROOT_PLUGINS_INSTALL_DIR` selects the installed bundle directory and defaults to
 `/opt/ravenroot/plugins`. `RAVENROOT_NODE_PACKAGE_SERVICES_<PACKAGE_KEY>` is the strict dynamic family
-that grants a package's declared services; absent grants none. Each package reference names its exact
-capabilities and required services. Both are startup-only settings.
+that grants a package's declared services; absent or blank grants none. `PACKAGE_KEY` is the uppercase
+hex encoding of the package ID's UTF-8 bytes. The value is canonical Base64 of strict JSON with a
+nonempty `capabilities` array. Supported capability names are `credential-resolution`,
+`outbound-http`, `outbound-websocket`, `tool-authorization`, and `agent-resources`. The optional JSON
+members are `origins`, `httpMethods`, `requestHeaders`, `responseHeaders`,
+`webSocketSubprotocols`, `credentialBindings`, `awsSigV4Bindings`, `credentialReferences`, and
+`limits`; unknown members and malformed, noncanonical, or empty grants refuse startup. Exact schema,
+encoding commands, package recipes, and Compose propagation are in the
+[bundle lifecycle](../operator-guide/plugin-bundles.md#grant-required-runtime-services). Both settings
+are startup-only.
 
 The `RAVENROOT_ASSISTANT_*` family configures the workspace authoring assistant. It is independent of
 the optional `llm-prompt` and `agent` graph nodes and their `RAVENROOT_LLM_PROFILE_*` family. Exact

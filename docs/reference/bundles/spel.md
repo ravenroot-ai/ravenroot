@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 `ai.ravenroot.extensions.spel` is an optional migration package. It contributes
@@ -48,7 +48,7 @@ Build and validate the private bundle:
 ```
 
 Spring Expression and its runtime dependencies remain inside that bundle. See
-[`DEPENDENCIES.md`](https://github.com/ravenroot-ai/ravenroot/blob/4aea699ae39b99c8866858ccec0d6531aeb020ea/ravenroot/ravenroot-extensions/ravenroot-spel/DEPENDENCIES.md) for the pinned inventory, licenses, and source-artifact hashes.
+[`DEPENDENCIES.md`](https://github.com/ravenroot-ai/ravenroot/blob/f58cd7c7d98cd370c89199829d5436c6a7e8eb8b/ravenroot/ravenroot-extensions/ravenroot-spel/DEPENDENCIES.md) for the pinned inventory, licenses, and source-artifact hashes.
 
 ## Exact node fields and examples
 

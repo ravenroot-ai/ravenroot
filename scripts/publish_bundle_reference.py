@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 EXTENSIONS = ROOT / "ravenroot" / "ravenroot-extensions"
 OUTPUT = ROOT / "docs" / "reference" / "bundles"
 EXAMPLES = ROOT / "docs" / "reference" / "bundle-node-examples.md"
-BASELINE = "4aea699ae39b99c8866858ccec0d6531aeb020ea"
+BASELINE = "f58cd7c7d98cd370c89199829d5436c6a7e8eb8b"
 
 
 @dataclass(frozen=True)
@@ -78,6 +78,7 @@ BUNDLES = (
 )
 
 LINK = re.compile(r"(?<!!)\[([^]]+)]\(([^)]+)\)")
+LIQUID_LITERAL = re.compile(r"\{\{(?:payload|attributes\.[A-Za-z0-9_.-]+|properties\.[A-Za-z0-9_.-]+)\}\}")
 
 
 def discovered_modules() -> set[str]:
@@ -113,6 +114,7 @@ def render(bundle: Bundle) -> str:
         return f"[{match.group(1)}]({_published_link(bundle, match.group(2))})"
 
     source = LINK.sub(rewrite, source).rstrip() + "\n"
+    source = LIQUID_LITERAL.sub(lambda match: "{% raw %}" + match.group(0) + "{% endraw %}", source)
     title, separator, body = source.partition("\n")
     if not title.startswith("# ") or not separator:
         raise ValueError(f"{bundle.source.relative_to(ROOT)} must start with a level-one title")
@@ -132,7 +134,7 @@ def render(bundle: Bundle) -> str:
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 """
     return header + body
@@ -164,8 +166,15 @@ def errors() -> list[str]:
         for behavior in bundle.behaviors:
             if behavior not in source:
                 problems.append(f"{bundle.source.relative_to(ROOT)} does not name node {behavior}")
-            if f'<data key="behavior">{behavior}</data>' not in examples:
-                problems.append(f"bundle example is missing exact node selector: {behavior}")
+            example_link = f"../examples/nodes/{behavior}.graphml"
+            example_file = ROOT / "docs" / "examples" / "nodes" / f"{behavior}.graphml"
+            if example_link not in examples:
+                problems.append(f"bundle example index is missing complete graph link: {behavior}")
+            elif not example_file.is_file():
+                problems.append(f"bundle example graph is missing: {behavior}")
+            elif example_file.read_text(encoding="utf-8").count(
+                    f'<data key="behavior">{behavior}</data>') != 1:
+                problems.append(f"bundle example graph does not select exactly one {behavior} node")
         if len(bundle.node_package_sources) != 1:
             problems.append(
                 f"{bundle.module} must have exactly one NodePackage source; "

@@ -61,11 +61,13 @@ Commands:
                                          artifact and image this project publishes. Always prints
                                          how many bundles it inspected, including zero.
 
-  install <bundle-or-dir> [--dir plugins-dir]
+  install <bundle-or-dir> [--dir plugins-dir] [--name name]
                                          Validate, then copy one bundle into the convention
                                          directory. Refuses to overwrite an existing installation,
                                          including a byte-identical one, preserving the original
-                                         fail-closed single-bundle contract.
+                                         fail-closed single-bundle contract. By default the validated
+                                         manifest id names the destination; --name overrides that
+                                         component for compatibility. Use only the exact manifest id.
 
   install --all [-st|--skip-tests] [-r|--remove-existing] [--replace-existing|--force]
                 [--dir plugins-dir]

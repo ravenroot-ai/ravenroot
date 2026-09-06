@@ -120,15 +120,91 @@ At startup, Ravenroot activates only installed manifests whose exact IDs appear 
 missing classes/dependencies, duplicate package IDs, and duplicate node behaviors refuse startup.
 The allowlist is immutable for the process; change it by recreating or restarting the service.
 
+## Grant required runtime services
+
+Startup registers a package only after every service required by any behavior in that package has an
+operator grant. The current package requirements are exact:
+
+| Package ID | Required capabilities |
+|---|---|
+| `ai.ravenroot.extensions.ai` | `outbound-http`, `tool-authorization`, `agent-resources` |
+| `ai.ravenroot.extensions.discord` | `outbound-http` |
+| `ai.ravenroot.extensions.gitworkspace` | `credential-resolution` |
+| `ai.ravenroot.extensions.github` | `credential-resolution`, `outbound-http` |
+| `ai.ravenroot.extensions.jdbc` | `credential-resolution` |
+| `ai.ravenroot.extensions.storage` | `outbound-http` |
+| `ai.ravenroot.extensions.openapi.client` | `outbound-http` |
+| `ai.ravenroot.extensions.slack` | `credential-resolution`, `outbound-http` |
+| `ai.ravenroot.extensions.websocket` | `outbound-websocket` |
+
+The AMQP, filesystem, Kafka, mail, OCR, OpenAPI server, SpEL, and Telegram packages declare no
+managed service capability in this baseline. Their operator profiles and credentials still apply as
+listed in their bundle references. The package-level grant is the union required by its behaviors;
+enabling only one behavior does not partially register a package.
+
+The variable suffix is uppercase hex of the manifest package ID's UTF-8 bytes. Its value is canonical
+Base64 of compact JSON. This example creates the exact variable and value for OpenAPI client without
+putting a credential in either:
+
+```sh
+package_id=ai.ravenroot.extensions.openapi.client
+package_key=$(PACKAGE_ID="$package_id" python3 -c \
+  'import os; print(os.environ["PACKAGE_ID"].encode().hex().upper())')
+grant_json='{"capabilities":["outbound-http"],"origins":[{"scheme":"https","host":"api.example.com","port":443}],"httpMethods":["GET","POST"],"requestHeaders":["content-type"],"responseHeaders":["content-type"],"limits":{"maxRequestBytes":1048576,"maxResponseBytes":8388608}}'
+grant_value=$(printf %s "$grant_json" | python3 -c \
+  'import base64,sys; print(base64.b64encode(sys.stdin.buffer.read()).decode())')
+printf 'RAVENROOT_NODE_PACKAGE_SERVICES_%s=%s\n' "$package_key" "$grant_value"
+```
+
+Canonical Base64 includes padding and must encode strict JSON. `capabilities` must be nonempty.
+Optional grant members are `origins`, `httpMethods`, `requestHeaders`, `responseHeaders`,
+`webSocketSubprotocols`, `credentialBindings`, `awsSigV4Bindings`, `credentialReferences`, and
+`limits`; unknown members, capability names, or limit names refuse startup.
+
+| JSON member | Exact shape |
+|---|---|
+| `capabilities` | nonempty array of the five capability strings listed above |
+| `origins` | array of objects with exactly string `scheme`, string `host`, and integer `port` |
+| `httpMethods`, `requestHeaders`, `responseHeaders`, `webSocketSubprotocols` | arrays of nonblank strings |
+| `credentialBindings` | array of objects with `bindingId`, nested HTTPS/WSS `origin`, `headerName`, and optional `prefix` |
+| `awsSigV4Bindings` | array of objects with `bindingId`, nested HTTPS `origin`, `credentialReference`, `region`, and `service` |
+| `credentialReferences` | nonempty array of the only opaque references this package may resolve; required to include a SigV4 reference when clear-text credential resolution is also granted |
+| `limits` | object containing any of `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, or `maxWebSocketIdleMs`; every supplied value is a positive integer |
+
+An outbound capability
+does not grant every destination: add the exact HTTPS/WSS origins, methods, headers, credential
+bindings, and ceilings that the bundle profile needs. `credential-resolution` alone resolves only
+the references separately made available to that package.
+
+Compose does not pass an arbitrary host variable through unless the service's `environment` map names
+it. For the OpenAPI example, use the maintained
+[override file](../examples/plugins/compose.openapi-client.override.yaml):
+
+```sh
+export RAVENROOT_COMPOSE_OVERRIDE_FILE=$PWD/docs/examples/plugins/compose.openapi-client.override.yaml
+export RAVENROOT_OPENAPI_CLIENT_GRANT=$grant_value
+docker compose -f compose.yaml -f "$RAVENROOT_COMPOSE_OVERRIDE_FILE" config --quiet
+./service.sh restart -si
+```
+
+The maintained Compose regression renders this exact override and requires the long
+`RAVENROOT_NODE_PACKAGE_SERVICES_...` key to contain the generated Base64 value. Add one explicit
+mapping per enabled package that requires a grant to a deployment-owned override. The explicit
+override variable avoids replacing an existing local override and makes `service.sh` force-recreate
+with that file; `-si` is correct for environment-only changes because the existing image already
+contains the bundle. Use `config --quiet` on real configuration so validation does not print values.
+
 Verify the service and catalog:
 
 ```sh
 ./service.sh status
 curl --fail --silent http://127.0.0.1:8080/ready
-ravenroot --server http://127.0.0.1:8080 --token-file /secure/token node-types
+curl --fail --silent http://127.0.0.1:8080/v1/node-types
 ```
 
-The token path is an operator-controlled placeholder. Require the expected node IDs in `node-types`;
+The repository Compose mode uses disabled authentication on a loopback-only port, so the direct HTTP
+probe is reproducible from the stated prerequisites. For an authenticated deployment, use the
+application CLI with that deployment's real `--token-file`. Require the expected node IDs in `node-types`;
 installed files or a healthy process alone do not prove activation. Then run the minimal example from
 the bundle reference in Test mode where applicable and a bounded Run only after effectful authority
 has been reviewed.

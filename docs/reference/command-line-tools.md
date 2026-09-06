@@ -21,14 +21,14 @@ directory is `./ravenroot-plugins`, overridden by `RAVENROOT_PLUGINS_DIR` or the
 | Command | Options and effect |
 |---|---|
 | `list [plugins-dir]` | Validate and list every bundle under the selected directory. The positional directory overrides `RAVENROOT_PLUGINS_DIR`. |
-| `build EXTENSION` | Build one discovered `ravenroot-extensions/ravenroot-EXTENSION` module and write `target/plugin-bundle`. `-st` and `--skip-tests` pass `-DskipTests`. |
+| `build EXTENSION` | Build one module and write `target/plugin-bundle`. `EXTENSION` accepts a discovered short ID such as `kafka`, the module directory name such as `ravenroot-kafka`, or a path to a Maven module containing one production `NodePackage`. `-st` and `--skip-tests` pass `-DskipTests`. |
 | `build --all` | Build every discovered first-party node-package module except `ai`, which is always an explicit choice, and `jdbc` unless complete `--driver-jar FILE --driver-sha256 HEX` pairs are supplied. `--all` and an extension name are mutually exclusive. |
 | `validate BUNDLE` | Validate one bundle or a directory of bundles with the runtime validator. No files are installed. |
 | `check-published PLUGINS-DIR` | Apply the publication boundary to a staged directory and refuse any manifest declaring `ai` or `agentic`. A locally installable bundle can still be ineligible for official publication. |
-| `install BUNDLE [--dir DIR]` | Validate then copy one bundle. An existing destination, even byte-identical, is refused. |
+| `install BUNDLE [--dir DIR] [--name NAME]` | Validate then copy one bundle. By default the destination component is the validated manifest ID. `--name` replaces that component; the current parser does not validate it, so use only the exact validated manifest ID as a simple path component. An existing destination, even byte-identical, is refused. |
 | `install --all` | Build and prevalidate the batch before changing the destination. `--replace-existing` and its alias `--force` permit replacement of a differing destination; `-r` and `--remove-existing` reinstall selected existing bundles after the entire batch stages successfully. `--dir`, `--skip-tests`, `-st`, and JDBC driver/digest pairs have the build meanings above. |
 | `remove ID [--dir DIR]` | Remove the installed directory for the manifest ID. The command is idempotent. It does not edit the enabled allowlist; startup later refuses an enabled ID that is absent. |
-| `bundle-dir EXTENSION` | Print the exact output directory that `build` uses, without building or parsing build output. |
+| `bundle-dir EXTENSION` | Print the exact output directory that `build` uses, without building or parsing build output. It accepts the same short ID, module directory name, or module path as `build`. |
 
 `install --all` leaves byte-identical destinations `UNCHANGED` by default and rejects the whole
 batch before installation when a differing destination exists. Use replacement flags only after
@@ -180,8 +180,11 @@ attestation: `--gate-deployment`, `--gate-provenance`, `--gate-classification`, 
 before a mutation. See [Embed and extension contracts](embed-extension-contracts.md) for the exact
 registration contract.
 
-Application CLI misuse returns 2, an accepted command returns 0, and a refused or failed operation
-returns 1 unless a command's reference specifies a classified HTTP result. Exact output fields,
+Application CLI help, an unknown command, and command parsers that classify argument misuse return 2.
+Two current parser paths instead return 1: a missing value for a global option is thrown before the
+CLI dispatch catch, and malformed credential-add list syntax is handled as a runtime failure. An
+accepted command returns 0, and a refused or failed operation returns 1 unless a command's reference
+specifies a classified HTTP result. Exact output fields,
 payload limits, remote-query constraints, retention behavior, and transport mappings are in
 [HTTP API and CLI](api-cli.md); backup files and recovery steps are in
 [Backup and recovery bundle](backup-recovery.md).

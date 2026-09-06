@@ -6,7 +6,7 @@ from scripts.check_operational_docs import assistant_variables, cli_tokens, core
 class CheckOperationalDocsTest(unittest.TestCase):
     def test_contract_sources_expose_expected_high_risk_tokens(self):
         scripts = script_contract_tokens()
-        self.assertTrue({"--all", "--driver-jar", "check-published"} <= scripts["plugin.sh"])
+        self.assertTrue({"--all", "--driver-jar", "--name", "check-published"} <= scripts["plugin.sh"])
         self.assertTrue({"--skipimage", "RAVENROOT_IMAGE_DIGEST"} <= scripts["service.sh"])
         self.assertTrue({"--with-tests", "bench"} <= scripts["dev.sh"])
         self.assertTrue(

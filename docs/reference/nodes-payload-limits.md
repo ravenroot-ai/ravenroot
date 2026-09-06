@@ -32,7 +32,7 @@ optional AI bundle and are not part of the default core catalog.
 | Behavior | Property | Type | Default or domain |
 |---|---|---|---|
 | `delay` | `durationMs` | integer | default 1000; 0–86,400,000 |
-| `json-parse` | `source` | string template | `{{payload}}` |
+| `json-parse` | `source` | string template | `{% raw %}{{payload}}{% endraw %}` |
 | `json-path` | `path` | string | required RFC 9535 expression |
 | `template` | `template` | string | required template text |
 | `human-task` | `title` / `description` | string / text | required / optional; UTF-8 budgets come from the Human Task operator policy |

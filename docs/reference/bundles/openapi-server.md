@@ -9,7 +9,7 @@
 > The package targets `ravenroot.node-sdk/2`; fields absent from a node's descriptor do not apply.
 > Installing a bundle does not enable it; the operator must also allow its manifest identity and
 > recreate or restart the service as described in the [bundle lifecycle](../../operator-guide/plugin-bundles.md).
-> Copy its runnable node fragments from the [first-party bundle examples](../bundle-node-examples.md).
+> Download its complete admission-ready GraphML from the [first-party bundle examples](../bundle-node-examples.md).
 
 
 `ai.ravenroot.extensions.openapi.server` is an optional Node SDK `/2` plugin contributing the
@@ -90,6 +90,12 @@ distinct and are leased independently. The environment compiler refuses disagree
 silently broadening one profile to satisfy another. Graph properties are only `apiProfile`, an
 optional comma-separated operation subset, and optional lower ceilings; no graph value can supply a
 specification, route, scope, principal type or target.
+
+An omitted optional graph limit inherits its ceiling. An authored blank value, malformed number,
+non-positive number, or value above that ceiling is refused rather than clamped. Request bytes,
+idempotency bytes, deadline, and concurrency inherit the selected profile. The
+`openapi.request-reply.maxResponseBytes` property is the exception: it inherits the package
+authority's response ceiling because an OpenAPI server profile has no response-byte field.
 
 The OpenAPI document is strict JSON 3.0.3. YAML, 3.1, server overrides, external references, vendor
 extensions, callbacks, links, generated classes and document-defined security are outside v1 and fail

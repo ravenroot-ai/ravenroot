@@ -17,6 +17,9 @@
 plugin bundle (`./plugin.sh build mail`); a direct classpath deployment can instead set
 `RAVENROOT_NODE_PACKAGES=ai.ravenroot.extensions.mail.MailNodePackage`.
 
+The module's transport, deadline, and concurrency test strategy and race audit are recorded in
+[`QA.md`](https://github.com/ravenroot-ai/ravenroot/blob/dev/ravenroot/ravenroot-extensions/ravenroot-mail/QA.md).
+
 The graph stores only `mailProfile`, never an endpoint, authentication choice, or password. The operator
 binds that opaque name (and the deployment tenant) atomically to SMTP endpoint, TLS mode, authentication
 username and credential reference, sender/recipient/header allowlists, and hard limits. The default

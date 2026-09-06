@@ -41,9 +41,7 @@ import java.net.Socket;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Date;
-import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -231,29 +229,25 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
             long nextUid = after == Long.MAX_VALUE ? 1 : Math.max(Math.max(1, after + 1), request.uidMin());
             checkDeadline(deadline);
             long upper = after == Long.MAX_VALUE ? 0 : Math.min(request.uidMax(), Math.max(0, imapFolder.getUIDNext() - 1));
-            int scanLimit = Math.min(MAX_SCANNED_MESSAGES, Math.max(UID_WINDOW, Math.multiplyExact(profile.maxResults(), UID_WINDOW)));
-            int scanned = 0, windows = 0;
-            while (nextUid <= upper && !more) {
-                checkDeadline(deadline);
-                if (++windows > Math.min(MAX_UID_WINDOWS, scanLimit)) throw resourceLimit();
-                long windowEnd = Math.min(upper, nextUid > Long.MAX_VALUE - (UID_WINDOW - 1L) ? Long.MAX_VALUE : nextUid + UID_WINDOW - 1L);
-                Message[] candidates = uidFolder.getMessagesByUID(nextUid, windowEnd);
-                scanned += candidates.length;
-                if (scanned > scanLimit) throw resourceLimit();
-                Message[] found = folder.search(request.term(), candidates);
-                Map<Message, Long> uids = new IdentityHashMap<>();
-                for (Message message : found) uids.put(message, uidFolder.getUID(message));
-                Arrays.sort(found, Comparator.comparingLong(uids::get));
-                for (Message message : found) {
-                    checkDeadline(deadline);
-                    long uid = uids.get(message);
-                    if (uid < nextUid || uid > windowEnd) continue;
-                    if (rows.size() == request.limit()) { more = true; break; }
-                    rows.add(row(message, uid, profile.maxPreviewChars(), request.full()));
-                }
-                if (windowEnd == Long.MAX_VALUE) break;
-                nextUid = windowEnd + 1;
-            }
+            int scanLimit = Math.min(MAX_SCANNED_MESSAGES,
+                    Math.max(UID_WINDOW, Math.multiplyExact(profile.maxResults(), UID_WINDOW)));
+            Folder searchFolder = folder;
+            more = BoundedUidScanner.scan(nextUid, upper, UID_WINDOW, scanLimit, MAX_UID_WINDOWS,
+                    new BoundedUidScanner.Mailbox<Message>() {
+                        @Override public List<Message> fetch(long firstUid, long lastUid) throws Exception {
+                            return Arrays.asList(uidFolder.getMessagesByUID(firstUid, lastUid));
+                        }
+                        @Override public List<Message> search(List<Message> candidates) throws Exception {
+                            return Arrays.asList(searchFolder.search(request.term(), candidates.toArray(Message[]::new)));
+                        }
+                        @Override public long uid(Message message) throws Exception {
+                            return uidFolder.getUID(message);
+                        }
+                    }, (message, uid) -> {
+                        if (rows.size() == request.limit()) return false;
+                        rows.add(row(message, uid, profile.maxPreviewChars(), request.full()));
+                        return true;
+                    }, () -> checkDeadline(deadline));
             long last = rows.isEmpty() ? after : ((Number) rows.getLast().get("uid")).longValue();
             checkDeadline(deadline);
             return NodeResult.continueWith(Map.of("version", "mail.imap.query.v1", "folder", request.folder(),

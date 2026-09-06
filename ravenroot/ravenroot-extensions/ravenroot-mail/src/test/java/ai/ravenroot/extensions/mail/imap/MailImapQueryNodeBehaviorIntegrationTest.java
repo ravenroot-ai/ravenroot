@@ -85,7 +85,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
      * mutation, run three times, the class landed at a stable 4
      * failures + 6 errors + 9 green out of 19 every time on this host: failures on
      * {@code actionAdmissionRejectsBeforeSecretsAndRecoversAfterTransportFailure},
-     * {@code boundedUidScanFailsBeforeTraversingAnUnboundedMailboxAndRecovers},
+     * the former live-mailbox bounded-scan assertion,
      * {@code mimeDepthAndAddressBudgetsFailTypedAndReleaseResourcesForRecovery} and
      * {@code rejectsFractionalNonFiniteOverflowAndStaleCursorNumbersExactly}; errors on six more that
      * expect success. <b>Not</b> "every other test in the class" -- nine stayed green, including the
@@ -94,6 +94,8 @@ class MailImapQueryNodeBehaviorIntegrationTest {
      * measurement time, not of the mutation: on a heavier-loaded host, the same mutation produced
      * 3 failures + 6 errors + 10 green. Widened to the same
      * {@code GENEROUS_TIMEOUT_MS = 10_000} convention used by the corresponding SMTP tests.
+     * The bounded-scan branch is now exercised without a transport or watchdog by
+     * {@link BoundedUidScannerTest}; this class retains real IMAPS coverage for the adapter.
      *
      * <p>Four literals across the module are a tight budget against a live listener. Two,
      * {@link #operatorDeadlineFailsTypedClosesResourcesAndAllowsRecovery} and
@@ -396,19 +398,6 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             // says `preview`, and one that names `preview` overrides a node that says `full`.
             assertTrue(messages(output(action(fixture, 1, "full"), Map.of("version", "mail.imap.query.v1"))).getFirst().containsKey("content"));
             assertEquals(previewShape, messages(output(action(fixture, 1, "full"), Map.of("version", "mail.imap.query.v1", "contentMode", "preview"))).getFirst().keySet());
-        }
-    }
-
-    @Test void boundedUidScanFailsBeforeTraversingAnUnboundedMailboxAndRecovers() throws Exception {
-        try (var fixture = DeterministicImapFixture.startImaps()) {
-            var user = fixture.server().setUser("reader@example.test", "reader", "secret");
-            Instant base = Instant.parse("2025-01-01T00:00:00Z");
-            for (int i = 0; i < 129; i++) user.deliver(message("skip", "body", base.plusSeconds(i), false));
-            user.deliver(message("target", "body", base.plusSeconds(130), false));
-            NodeAction action = action(fixture, "localhost", "IMAPS", Set.of("INBOX"), ref -> secret(), 10, 1, "1");
-            CompletionException bounded = assertThrows(CompletionException.class, () -> output(action, Map.of("version", "mail.imap.query.v1", "subject", "target")));
-            assertEquals(ImapQueryException.Code.RESOURCE_LIMIT, ((ImapQueryException) bounded.getCause()).code());
-            assertEquals("target", messages(output(action, Map.of("version", "mail.imap.query.v1", "subject", "target", "uidMin", 130))).getFirst().get("subject"));
         }
     }
 

@@ -65,6 +65,10 @@ def reference(behavior: str) -> str:
     return f"[{BUNDLES[behavior]} bundle reference](bundles/{BUNDLES[behavior]}.md)"
 
 
+def anchor(behavior: str) -> str:
+    return "node-" + behavior.replace(".", "-")
+
+
 def render() -> str:
     grouped: OrderedDict[str, list[dict[str, str]]] = OrderedDict()
     with SOURCE.open(encoding="utf-8", newline="") as source:
@@ -81,7 +85,7 @@ def render() -> str:
            "`PublishedNodeContractTest` from compiled Java descriptors; the same test parses and schema-checks ",
            "one complete GraphML file for every node. Regenerate deliberately with:", "",
            "```sh", "cd ravenroot", "mvn -pl ravenroot-extensions/ravenroot-extensions-all -am -DskipTests install",
-           "mvn -pl ravenroot-extensions/ravenroot-extensions-all \\",
+           "mvn -f ../scripts/fixtures/node-contracts/pom.xml \\",
            "  -Dravenroot.docs.update=true -Dtest=PublishedNodeContractTest test", "cd ..",
            "python3 scripts/publish_node_contract_reference.py", "```", "",
            "> The table records catalog metadata and the admission checks driven by it. A blank descriptor ",
@@ -99,14 +103,34 @@ def render() -> str:
            "authored empty string; the latter is invalid. `openapi.request-reply.maxResponseBytes` inherits its ",
            "package authority ceiling. Telegram `maxMediaBytes` applies only to send; `maxButtons` applies only ",
            "to send and edit. These rules are behavior-level contracts and are therefore maintained in the linked ",
-           "bundle references rather than inferred from the descriptor snapshot.", ""]
+           "bundle references rather than inferred from the descriptor snapshot.", "",
+           "## Node index", "",
+           "Each property table may scroll horizontally on a narrow viewport. Jump directly to a node:", ""]
+    links = [f"[`{behavior}`](#{anchor(behavior)})" for behavior in grouped]
+    for offset in range(0, len(links), 7):
+        out.append("- " + " · ".join(links[offset:offset + 7]))
+    out.append("")
     for behavior, rows in grouped.items():
+        descriptor = rows[0]
         outcomes = rows[0]["descriptorOutcomes"]
         if not outcomes or outcomes == "—":
             outcomes = "Not declared"
-        out.extend([f"## `{behavior}`", "",
-                    f"Descriptor outcomes: `{outcomes}`. Canonical runtime rules: {reference(behavior)}. ",
+        out.extend([f"## `{behavior}` {{#{anchor(behavior)}}}", "",
+                    f"Canonical runtime rules: {reference(behavior)}. ",
                     f"[Complete GraphML example](../examples/nodes/{behavior}.graphml).", "",
+                    "| Catalog field | Runtime descriptor value |",
+                    "|---|---|",
+                    f"| Display name | {display(descriptor['displayName'])} |",
+                    f"| Category | {display(descriptor['category'])} |",
+                    f"| Description | {display(descriptor['description'])} |",
+                    f"| Visual type | {display(descriptor['visualType'])} |",
+                    f"| Agentic | {descriptor['agentic']} |",
+                    f"| Capabilities | {display(descriptor['capabilities'])} |",
+                    f"| Declared default nature | {display(descriptor['defaultNature'])} |",
+                    f"| Declared allowed natures | {display(descriptor['allowedNatures'])} |",
+                    f"| Application command allowlist | {display(descriptor['commands'])} |",
+                    f"| Runtime concurrency | default {descriptor['runtimeConcurrencyDefault']}; ceiling {descriptor['runtimeConcurrencyCeiling']} |",
+                    f"| Outcomes | {display(outcomes)} |", "",
                     "| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |",
                     "|---|---|---:|---|---|---:|---|---|---|"])
         for row in rows:

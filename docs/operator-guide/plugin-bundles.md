@@ -125,22 +125,33 @@ The allowlist is immutable for the process; change it by recreating or restartin
 Startup registers a package only after every service required by any behavior in that package has an
 operator grant. The current package requirements are exact:
 
+<!-- node-package-required-services:start -->
 | Package ID | Required capabilities |
 |---|---|
 | `ai.ravenroot.extensions.ai` | `outbound-http`, `tool-authorization`, `agent-resources` |
+| `ai.ravenroot.extensions.amqp091` | None |
 | `ai.ravenroot.extensions.discord` | `outbound-http` |
+| `ai.ravenroot.extensions.filesystem` | None |
 | `ai.ravenroot.extensions.gitworkspace` | `credential-resolution` |
 | `ai.ravenroot.extensions.github` | `credential-resolution`, `outbound-http` |
 | `ai.ravenroot.extensions.jdbc` | `credential-resolution` |
+| `ai.ravenroot.extensions.kafka` | None |
+| `ai.ravenroot.extensions.mail` | None |
+| `ai.ravenroot.extensions.ocr` | None |
 | `ai.ravenroot.extensions.storage` | `outbound-http` |
 | `ai.ravenroot.extensions.openapi.client` | `outbound-http` |
+| `ai.ravenroot.extensions.openapi.server` | None |
 | `ai.ravenroot.extensions.slack` | `credential-resolution`, `outbound-http` |
+| `ai.ravenroot.extensions.spel` | None |
+| `ai.ravenroot.extensions.telegram` | None |
 | `ai.ravenroot.extensions.websocket` | `outbound-websocket` |
+<!-- node-package-required-services:end -->
 
-The AMQP, filesystem, Kafka, mail, OCR, OpenAPI server, SpEL, and Telegram packages declare no
-managed service capability in this baseline. Their operator profiles and credentials still apply as
-listed in their bundle references. The package-level grant is the union required by its behaviors;
-enabling only one behavior does not partially register a package.
+`None` means the package declares no managed service requirement in this baseline. Its operator
+profiles and credentials still apply as listed in its bundle reference. The package-level grant is
+the union required by its behaviors; enabling only one behavior does not partially register a
+package. The compiled documentation gate derives this table from every package's
+`NodeBehavior.requiredServices()` result.
 
 The variable suffix is uppercase hex of the manifest package ID's UTF-8 bytes. Its value is canonical
 Base64 of compact JSON. This example creates the exact variable and value for OpenAPI client without
@@ -161,20 +172,57 @@ Optional grant members are `origins`, `httpMethods`, `requestHeaders`, `response
 `webSocketSubprotocols`, `credentialBindings`, `awsSigV4Bindings`, `credentialReferences`, and
 `limits`; unknown members, capability names, or limit names refuse startup.
 
-| JSON member | Exact shape |
-|---|---|
-| `capabilities` | nonempty array of the five capability strings listed above |
-| `origins` | array of objects with exactly string `scheme`, string `host`, and integer `port` |
-| `httpMethods`, `requestHeaders`, `responseHeaders`, `webSocketSubprotocols` | arrays of nonblank strings |
-| `credentialBindings` | array of objects with `bindingId`, nested HTTPS/WSS `origin`, `headerName`, and optional `prefix` |
-| `awsSigV4Bindings` | array of objects with `bindingId`, nested HTTPS `origin`, `credentialReference`, `region`, and `service` |
-| `credentialReferences` | nonempty array of the only opaque references this package may resolve; required to include a SigV4 reference when clear-text credential resolution is also granted |
-| `limits` | object containing any of `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, or `maxWebSocketIdleMs`; every supplied value is a positive integer |
+<!-- node-package-grant-schema:start -->
+| JSON member | Exact nested members | Contract |
+|---|---|---|
+| `capabilities` | — | required nonempty array containing only the five capability strings listed above |
+| `origins` | `scheme`, `host`, `port` | optional array of exact origin objects |
+| `httpMethods` | — | optional array of nonblank HTTP method strings |
+| `requestHeaders` | — | optional array of nonblank request-header names |
+| `responseHeaders` | — | optional array of nonblank response-header names |
+| `webSocketSubprotocols` | — | optional array of nonblank WebSocket subprotocol tokens |
+| `credentialBindings` | `bindingId`, `origin`, `headerName`, `prefix` | optional array; `prefix` is optional and the other nested members are required |
+| `awsSigV4Bindings` | `bindingId`, `origin`, `credentialReference`, `region`, `service` | optional array of exact signing-binding objects |
+| `credentialReferences` | — | optional nonempty array of the only opaque references this package may resolve |
+| `limits` | `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, `maxWebSocketIdleMs` | optional exact object; every supplied value is a positive integer |
+<!-- node-package-grant-schema:end -->
 
-An outbound capability
-does not grant every destination: add the exact HTTPS/WSS origins, methods, headers, credential
-bindings, and ceilings that the bundle profile needs. `credential-resolution` alone resolves only
-the references separately made available to that package.
+Omitted ceilings inherit these finite policy defaults; byte values are bytes and time values are
+milliseconds:
+
+<!-- node-package-grant-defaults:start -->
+| Limit | Omission default | Additional relation |
+|---|---:|---|
+| `maxRequestBytes` | `1048576` | positive |
+| `maxResponseBytes` | `8388608` | positive |
+| `maxWebSocketMessageBytes` | `1048576` | positive |
+| `maxWebSocketFragments` | `64` | positive |
+| `maxQueuedWebSocketSends` | `16` | positive |
+| `maxConcurrentOperations` | `32` | positive package maximum |
+| `maxConcurrentPerTenant` | `8` | positive and no greater than `maxConcurrentOperations` |
+| `maxDeadlineMs` | `30000` | positive |
+| `maxWebSocketLifetimeMs` | `3600000` | positive |
+| `maxWebSocketIdleMs` | `300000` | positive and no greater than `maxWebSocketLifetimeMs` |
+<!-- node-package-grant-defaults:end -->
+
+<!-- node-package-egress-rules:start -->
+An outbound capability does not grant every destination. Each origin is the exact lowercase-normalized
+`http`, `https`, `ws`, or `wss` scheme, host, and port from 1 through 65535; a request must match the
+complete origin and protocol. Destinations reject user information and fragments. HTTP methods are
+uppercase alphabetic tokens; `CONNECT` and `TRACE` are always refused. Header and WebSocket
+subprotocol allowlists are exact. Credential bindings require `https` or `wss`, cannot place a secret
+in a transport-authority header, and must match the destination origin. SigV4 bindings require HTTPS,
+the exact listed credential reference and region, and the `s3` service. If a grant combines
+`credential-resolution`, a `credentialReferences` list, and SigV4 bindings, that list must include
+every signing reference or startup refuses the grant. `credential-resolution` without an explicit
+list can resolve every deployment-held reference for that package, so define the narrow list whenever
+that broader capability is required. `maxConcurrentPerTenant` cannot exceed
+`maxConcurrentOperations`, and `maxWebSocketIdleMs` cannot exceed `maxWebSocketLifetimeMs`.
+<!-- node-package-egress-rules:end -->
+
+The compiled documentation gate compares the top-level and nested member sets above with the grant
+reader, compares every omission default with the constructed runtime policy, and exercises the
+cross-field, origin, method, credential-binding, and SigV4 refusals.
 
 Compose does not pass an arbitrary host variable through unless the service's `environment` map names
 it. For the OpenAPI example, use the maintained

@@ -1,18 +1,23 @@
-package ai.ravenroot.extensions.all;
+package dev.ravenroot.docs;
 
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
+import ai.ravenroot.api.catalog.NodeRuntimeConcurrency;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.node.NodePackage;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.core.graph.GraphManager;
+import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.runtime.BehaviorPropertySchema;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
 import ai.ravenroot.core.runtime.NodePackages;
 import ai.ravenroot.core.runtime.BehaviorEnvironment;
 import ai.ravenroot.core.humantask.HumanTaskService;
+import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import ai.ravenroot.api.publication.PublicationAuditSink;
 import ai.ravenroot.api.publication.PublicationPolicyResolver;
 import ai.ravenroot.extensions.ai.AiNodePackage;
@@ -33,19 +38,28 @@ import ai.ravenroot.extensions.storage.StorageNodePackage;
 import ai.ravenroot.extensions.telegram.TelegramNodePackage;
 import ai.ravenroot.extensions.websocket.WebSocketNodePackage;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
+import ai.ravenroot.server.plugin.EnvironmentNodePackageServiceGrants;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.Optional;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -56,6 +70,7 @@ final class PublishedNodeContractTest {
     private static final Path REPOSITORY = repositoryRoot();
     private static final Path SNAPSHOT = REPOSITORY.resolve("docs/reference/node-descriptor-contracts.tsv");
     private static final Path EXAMPLES = REPOSITORY.resolve("docs/examples/nodes");
+    private static final Path PLUGIN_GUIDE = REPOSITORY.resolve("docs/operator-guide/plugin-bundles.md");
 
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
@@ -116,6 +131,31 @@ final class PublishedNodeContractTest {
     }
 
     @Test
+    void nonPropertyAndRuntimeConcurrencyMutationsChangeTheComparedContract() {
+        List<NodeTypeDescriptor> descriptors = descriptors();
+        NodeTypeDescriptor first = descriptors.get(0);
+        var capabilities = new java.util.TreeSet<>(first.capabilities());
+        capabilities.add("documentation-mutation");
+        var changedCapability = new NodeTypeDescriptor(first.behavior(), first.displayName(), first.category(),
+                first.description(), first.visualType(), first.agentic(), first.properties(), capabilities,
+                first.defaultNature(), first.allowedNatures(), first.commands(), first.outcomes(),
+                first.runtimeConcurrency());
+        var capabilityMutation = new ArrayList<>(descriptors);
+        capabilityMutation.set(0, changedCapability);
+        assertTrue(!snapshot(descriptors).equals(snapshot(capabilityMutation)),
+                "a non-property capability change must fail the descriptor snapshot gate");
+
+        var changedConcurrency = new NodeTypeDescriptor(first.behavior(), first.displayName(), first.category(),
+                first.description(), first.visualType(), first.agentic(), first.properties(), first.capabilities(),
+                first.defaultNature(), first.allowedNatures(), first.commands(), first.outcomes(),
+                new NodeRuntimeConcurrency(3, 5));
+        var concurrencyMutation = new ArrayList<>(descriptors);
+        concurrencyMutation.set(0, changedConcurrency);
+        assertTrue(!snapshot(descriptors).equals(snapshot(concurrencyMutation)),
+                "a runtime-concurrency change must fail the descriptor snapshot gate");
+    }
+
+    @Test
     void sensitiveOpenApiAndTelegramFieldShapesArePartOfTheRuntimeComparison() {
         List<NodeTypeDescriptor> descriptors = descriptors();
         NodeTypeDescriptor openapi = descriptors.stream()
@@ -150,6 +190,88 @@ final class PublishedNodeContractTest {
         assertTrue(capable.properties().stream().anyMatch(
                 p -> p.name().equals("confirmationPresentationVersion")));
         assertTrue(capable.capabilities().contains("embedded-confirmation-v1"));
+    }
+
+    @Test
+    void jdbcExamplesCrossTheBehaviorIdentifierBoundary() throws Exception {
+        JdbcNodePackage jdbc = new JdbcNodePackage();
+        for (Map.Entry<String, String> expected : Map.of(
+                "jdbc.query", "find-user", "jdbc.insert", "add-user").entrySet()) {
+            GraphNode node = exampleAction(expected.getKey());
+            assertEquals(expected.getValue(), node.properties().get("statement"));
+            NodeBehavior behavior = jdbc.behaviors().stream()
+                    .filter(candidate -> candidate.descriptor().behavior().equals(expected.getKey()))
+                    .findFirst().orElseThrow();
+            NodeConfiguration configuration = new NodeConfiguration(node.id(), node.behavior(), node.properties());
+            assertDoesNotThrow(() -> behavior.create(configuration),
+                    expected.getKey() + " example must pass behavior-level identifier validation");
+            RuntimeException rawSql = assertThrows(RuntimeException.class, () -> behavior.create(
+                    new NodeConfiguration("raw-sql", expected.getKey(), Map.of(
+                            "profile", "operator-profile", "statement", "SELECT 1"))));
+            assertEquals("JDBC_PROFILE_UNAVAILABLE", rawSql.getMessage());
+        }
+    }
+
+    @Test
+    void packageServiceGuideMatchesBehaviorRequirementsAndGrantReaderSchema() throws Exception {
+        String guide = Files.readString(PLUGIN_GUIDE);
+        assertEquals(requiredServicesByPackage(), documentedRequiredServices(guide),
+                "required-services table must be derived from every NodeBehavior.requiredServices() declaration");
+
+        Map<String, Set<String>> schema = documentedGrantSchema(guide);
+        assertEquals(privateSet("GRANT_KEYS"), schema.keySet(),
+                "grant schema table must name every accepted top-level member and no stale member");
+        assertEquals(privateSet("ORIGIN_KEYS"), schema.get("origins"));
+        assertEquals(privateSet("CREDENTIAL_BINDING_KEYS"), schema.get("credentialBindings"));
+        assertEquals(privateSet("SIGV4_BINDING_KEYS"), schema.get("awsSigV4Bindings"));
+        assertEquals(privateSet("LIMIT_KEYS"), schema.get("limits"));
+
+        NodePackageEgressPolicy defaults = NodePackageEgressPolicy.builder().build();
+        Map<String, String> actualDefaults = Map.of(
+                "maxRequestBytes", Long.toString(defaults.maximumRequestBytes()),
+                "maxResponseBytes", Long.toString(defaults.maximumResponseBytes()),
+                "maxWebSocketMessageBytes", Long.toString(defaults.maximumWebSocketMessageBytes()),
+                "maxWebSocketFragments", Integer.toString(defaults.maximumWebSocketFragments()),
+                "maxQueuedWebSocketSends", Integer.toString(defaults.maximumQueuedWebSocketSends()),
+                "maxConcurrentOperations", Integer.toString(defaults.maximumConcurrentOperations()),
+                "maxConcurrentPerTenant", Integer.toString(defaults.maximumConcurrentPerTenant()),
+                "maxDeadlineMs", Long.toString(defaults.maximumDeadline().toMillis()),
+                "maxWebSocketLifetimeMs", Long.toString(defaults.maximumWebSocketLifetime().toMillis()),
+                "maxWebSocketIdleMs", Long.toString(defaults.maximumWebSocketIdle().toMillis()));
+        assertEquals(actualDefaults, documentedGrantDefaults(guide));
+
+        String rules = marked(guide, "node-package-egress-rules");
+        for (String token : List.of("CONNECT", "TRACE", "https", "wss", "s3",
+                "credentialReferences", "maxConcurrentOperations", "maxWebSocketLifetimeMs")) {
+            assertTrue(rules.contains("`" + token + "`") || rules.contains(token),
+                    "egress rule documentation is missing " + token);
+        }
+        assertThrows(IllegalArgumentException.class, () -> NodePackageEgressPolicy.builder()
+                .concurrencyLimits(1, 2).build());
+        assertThrows(IllegalArgumentException.class, () -> NodePackageEgressPolicy.builder()
+                .webSocketLimits(1, 1, Duration.ofSeconds(1), Duration.ofSeconds(2)).build());
+        assertThrows(IllegalArgumentException.class,
+                () -> new NodePackageEgressPolicy.Origin("ftp", "example.com", 21));
+        assertThrows(IllegalArgumentException.class,
+                () -> new NodePackageEgressPolicy.Origin("https", "example.com", 0));
+        assertThrows(IllegalArgumentException.class,
+                () -> NodePackageEgressPolicy.builder().allowHttpMethod("CONNECT"));
+        assertThrows(IllegalArgumentException.class,
+                () -> NodePackageEgressPolicy.builder().allowHttpMethod("TRACE"));
+
+        assertDoesNotThrow(() -> parseGrant("{\"capabilities\":[\"outbound-http\"]}"));
+        assertThrows(RuntimeException.class, () -> parseGrant(
+                "{\"capabilities\":[\"outbound-http\"],\"unknown\":[]}"));
+        assertThrows(RuntimeException.class, () -> parseGrant(
+                "{\"capabilities\":[\"outbound-http\"],\"credentialBindings\":[{"
+                        + "\"bindingId\":\"api\",\"origin\":{\"scheme\":\"http\","
+                        + "\"host\":\"example.com\",\"port\":80},\"headerName\":\"x-api-key\"}]}"));
+        assertThrows(RuntimeException.class, () -> parseGrant(
+                "{\"capabilities\":[\"outbound-http\"],\"awsSigV4Bindings\":[{"
+                        + "\"bindingId\":\"sign\",\"origin\":{\"scheme\":\"https\","
+                        + "\"host\":\"example.com\",\"port\":443},"
+                        + "\"credentialReference\":\"key\",\"region\":\"eu-west-1\","
+                        + "\"service\":\"execute-api\"}]}"));
     }
 
     private static BehaviorRegistry registry() {
@@ -198,17 +320,109 @@ final class PublishedNodeContractTest {
                 new WebSocketNodePackage());
     }
 
+    private static GraphNode exampleAction(String behavior) throws Exception {
+        try (var input = Files.newInputStream(EXAMPLES.resolve(fileName(behavior)));
+             var graph = GraphManager.readGraphMl(input)) {
+            return graph.definition().node("action");
+        }
+    }
+
+    private static Map<String, Set<String>> requiredServicesByPackage() {
+        Map<String, Set<String>> actual = new java.util.TreeMap<>();
+        for (NodePackage nodePackage : packages()) {
+            Set<String> required = nodePackage.behaviors().stream()
+                    .flatMap(behavior -> behavior.requiredServices().stream())
+                    .map(NodePackageCapability::capabilityName)
+                    .collect(java.util.stream.Collectors.toCollection(java.util.TreeSet::new));
+            actual.put(nodePackage.id(), required);
+        }
+        return actual;
+    }
+
+    private static Map<String, Set<String>> documentedRequiredServices(String guide) {
+        String table = marked(guide, "node-package-required-services");
+        Pattern row = Pattern.compile("^\\| `([^`]+)` \\| (.*?) \\|$", Pattern.MULTILINE);
+        Map<String, Set<String>> documented = new java.util.TreeMap<>();
+        Matcher matcher = row.matcher(table);
+        while (matcher.find()) {
+            Set<String> capabilities = new java.util.TreeSet<>();
+            Matcher token = Pattern.compile("`([^`]+)`").matcher(matcher.group(2));
+            while (token.find()) capabilities.add(token.group(1));
+            documented.put(matcher.group(1), capabilities);
+        }
+        return documented;
+    }
+
+    private static Map<String, Set<String>> documentedGrantSchema(String guide) {
+        String table = marked(guide, "node-package-grant-schema");
+        Pattern row = Pattern.compile("^\\| `([^`]+)` \\| (.*?) \\| .*? \\|$", Pattern.MULTILINE);
+        Map<String, Set<String>> documented = new LinkedHashMap<>();
+        Matcher matcher = row.matcher(table);
+        while (matcher.find()) {
+            Set<String> nested = new java.util.LinkedHashSet<>();
+            Matcher token = Pattern.compile("`([^`]+)`").matcher(matcher.group(2));
+            while (token.find()) nested.add(token.group(1));
+            documented.put(matcher.group(1), Set.copyOf(nested));
+        }
+        return documented;
+    }
+
+    private static Map<String, String> documentedGrantDefaults(String guide) {
+        String table = marked(guide, "node-package-grant-defaults");
+        Pattern row = Pattern.compile("^\\| `([^`]+)` \\| `([^`]+)` \\| .*? \\|$", Pattern.MULTILINE);
+        Map<String, String> documented = new LinkedHashMap<>();
+        Matcher matcher = row.matcher(table);
+        while (matcher.find()) documented.put(matcher.group(1), matcher.group(2));
+        return documented;
+    }
+
+    private static void parseGrant(String json) {
+        String variable = EnvironmentNodePackageServiceGrants.environmentVariableName(
+                "ai.ravenroot.extensions.documentation-test");
+        String encoded = Base64.getEncoder().encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        EnvironmentNodePackageServiceGrants.fromEnvironment(Map.of(variable, encoded),
+                (packageId, tenantId, reference) -> Optional.empty());
+    }
+
+    private static String marked(String guide, String name) {
+        String start = "<!-- " + name + ":start -->";
+        String end = "<!-- " + name + ":end -->";
+        int from = guide.indexOf(start);
+        int to = guide.indexOf(end);
+        assertTrue(from >= 0 && to > from, "missing maintained guide markers for " + name);
+        return guide.substring(from + start.length(), to);
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Set<String> privateSet(String fieldName) throws Exception {
+        Field field = EnvironmentNodePackageServiceGrants.class.getDeclaredField(fieldName);
+        field.setAccessible(true);
+        return Set.copyOf((Set<String>) field.get(null));
+    }
+
     private static String snapshot(List<NodeTypeDescriptor> descriptors) {
-        StringBuilder out = new StringBuilder("behavior\tproperty\ttype\trequired\tdefault\tallowed\tadapterBinding\tvisibleWhen\trequiredWhen\tminimum\tmaximum\tmaximumUtf8Bytes\tmaximumItems\tmaximumItemUtf8Bytes\tdescriptorOutcomes\n");
+        StringBuilder out = new StringBuilder("behavior\tdisplayName\tcategory\tdescription\tvisualType\tagentic\tcapabilities\tdefaultNature\tallowedNatures\tcommands\truntimeConcurrencyDefault\truntimeConcurrencyCeiling\tproperty\ttype\trequired\tdefault\tallowed\tadapterBinding\tvisibleWhen\trequiredWhen\tminimum\tmaximum\tmaximumUtf8Bytes\tmaximumItems\tmaximumItemUtf8Bytes\tdescriptorOutcomes\n");
         for (NodeTypeDescriptor descriptor : descriptors.stream()
                 .sorted(Comparator.comparing(NodeTypeDescriptor::behavior)).toList()) {
             String outcomes = descriptor.outcomes().stream()
-                    .map(value -> value.parameterized() ? "$" + value.fromProperty() : value.name())
-                    .collect(java.util.stream.Collectors.joining(","));
+                    .map(value -> (value.parameterized() ? "$" + value.fromProperty() : value.name())
+                            + ": " + value.description())
+                    .collect(java.util.stream.Collectors.joining("; "));
             List<NodePropertyDescriptor> properties = descriptor.properties().isEmpty()
                     ? List.of((NodePropertyDescriptor) null) : descriptor.properties();
             for (NodePropertyDescriptor property : properties) {
-                out.append(cell(descriptor.behavior())).append('\t');
+                out.append(cell(descriptor.behavior())).append('\t')
+                        .append(cell(descriptor.displayName())).append('\t')
+                        .append(cell(descriptor.category())).append('\t')
+                        .append(cell(descriptor.description())).append('\t')
+                        .append(cell(descriptor.visualType())).append('\t')
+                        .append(descriptor.agentic()).append('\t')
+                        .append(cell(sorted(descriptor.capabilities()))).append('\t')
+                        .append(cell(descriptor.defaultNature())).append('\t')
+                        .append(cell(sorted(descriptor.allowedNatures()))).append('\t')
+                        .append(cell(sorted(descriptor.commands()))).append('\t')
+                        .append(descriptor.runtimeConcurrency().defaultValue()).append('\t')
+                        .append(descriptor.runtimeConcurrency().ceiling()).append('\t');
                 if (property == null) {
                     out.append("—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t");
                 } else {
@@ -226,6 +440,11 @@ final class PublishedNodeContractTest {
             }
         }
         return out.toString();
+    }
+
+    private static String sorted(Set<?> values) {
+        return values.stream().map(String::valueOf).sorted()
+                .collect(java.util.stream.Collectors.joining(","));
     }
 
     private static NodeTypeDescriptor copyWithProperties(NodeTypeDescriptor descriptor,
@@ -300,7 +519,7 @@ final class PublishedNodeContractTest {
             return "replace-with-operator-profile";
         }
         if (property.name().equals("statement")) return behavior.equals("jdbc.insert")
-                ? "INSERT INTO example_table(value) VALUES ('example')" : "SELECT 1";
+                ? "add-user" : "find-user";
         if (property.name().equals("path")) return behavior.equals("json-path") ? "$" : "example.txt";
         if (property.name().equals("url")) return "https://example.com/health";
         if (property.name().equals("policyId")) return "example-policy";
@@ -345,7 +564,10 @@ final class PublishedNodeContractTest {
     }
 
     private static Path repositoryRoot() {
-        Path candidate = Path.of("").toAbsolutePath();
+        String configured = System.getProperty("ravenroot.repository", "");
+        Path candidate = configured.isBlank()
+                ? Path.of("").toAbsolutePath()
+                : Path.of(configured).toAbsolutePath().normalize();
         while (candidate != null && !Files.isDirectory(candidate.resolve("docs"))) candidate = candidate.getParent();
         if (candidate == null) throw new IllegalStateException("Cannot locate repository root from " + Path.of("").toAbsolutePath());
         return candidate;

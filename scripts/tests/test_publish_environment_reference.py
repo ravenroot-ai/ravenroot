@@ -1,6 +1,6 @@
 import unittest
 
-from scripts.publish_environment_reference import group, render, undocumented_variables, variables
+from scripts.publish_environment_reference import boundary, group, render, undocumented_variables, variables
 
 
 class PublishEnvironmentReferenceTest(unittest.TestCase):
@@ -21,6 +21,13 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
 
     def test_every_name_has_a_semantic_reference(self):
         self.assertEqual([], undocumented_variables())
+
+    def test_variable_specific_boundaries_do_not_inherit_false_group_defaults(self):
+        self.assertIn("unset grants no managed services", boundary("RAVENROOT_NODE_PACKAGE_SERVICES_"))
+        self.assertIn("whose behaviors require none can still load", boundary("RAVENROOT_NODE_PACKAGE_SERVICES_"))
+        self.assertIn("/opt/ravenroot/plugins", boundary("RAVENROOT_PLUGINS_INSTALL_DIR"))
+        self.assertIn("defaults to `1`", boundary("RAVENROOT_REPLICAS"))
+        self.assertIn("comma-separated exact IP literals", boundary("RAVENROOT_TRUSTED_PROXY_ADDRESSES"))
 
 
 if __name__ == "__main__":

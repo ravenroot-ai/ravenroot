@@ -59,7 +59,8 @@ rules.
 ## Integrating changes on `dev`
 
 Topic branches start from the current `dev`. Each pull request contains the implementation,
-verification, public documentation, and a [change fragment](../../.changes/README.md) when the result is
+verification, public documentation, and a
+[change fragment](https://github.com/ravenroot-ai/ravenroot/blob/dev/.changes/README.md) when the result is
 user-visible. Topic pull requests may be squash-merged to keep each contribution atomic.
 
 Every public file, commit message, pull request, changelog entry, and release note is written in

@@ -14,7 +14,7 @@
       <data key="kind">BEHAVIOR</data>
       <data key="behavior">jdbc.query</data>
       <data key="property-profile">replace-with-operator-profile</data>
-      <data key="property-statement">SELECT 1</data>
+      <data key="property-statement">find-user</data>
     </node>
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>

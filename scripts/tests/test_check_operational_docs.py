@@ -1,6 +1,13 @@
 import unittest
 
-from scripts.check_operational_docs import assistant_variables, cli_tokens, core_nodes, script_contract_tokens
+from scripts.check_operational_docs import (
+    CORE_DOC,
+    assistant_variables,
+    cli_tokens,
+    core_example_errors,
+    core_nodes,
+    script_contract_tokens,
+)
 
 
 class CheckOperationalDocsTest(unittest.TestCase):
@@ -27,6 +34,12 @@ class CheckOperationalDocsTest(unittest.TestCase):
     def test_standard_core_catalog_is_derived_from_composition(self):
         self.assertEqual(11, len(core_nodes()))
         self.assertTrue({"human-task", "http-request", "boundary-guard"} <= core_nodes())
+
+    def test_core_reference_links_matching_complete_graphs(self):
+        self.assertEqual(
+            [],
+            core_example_errors(CORE_DOC.read_text(encoding="utf-8"), core_nodes()),
+        )
 
 
 if __name__ == "__main__":

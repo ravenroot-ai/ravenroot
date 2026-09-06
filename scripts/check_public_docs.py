@@ -46,7 +46,8 @@ def local_link_errors(files: list[Path]) -> list[str]:
             except ValueError:
                 errors.append(f"{document.relative_to(ROOT)}: local link escapes the repository: {target}")
                 continue
-            if not resolved.exists():
+            generated_source = resolved.with_suffix(".md") if resolved.suffix == ".html" else None
+            if not resolved.exists() and not (generated_source and generated_source.is_file()):
                 errors.append(f"{document.relative_to(ROOT)}: broken local link: {target}")
     return errors
 

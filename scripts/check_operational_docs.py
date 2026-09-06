@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 
@@ -109,6 +110,31 @@ def missing_tokens(text: str, tokens: set[str]) -> list[str]:
     )
 
 
+def core_example_errors(core_doc: str, nodes: set[str]) -> list[str]:
+    problems: list[str] = []
+    if "replace its `greet` node" in core_doc:
+        problems.append("core reference still instructs readers to create dangling greet/action edges")
+    for behavior in sorted(nodes):
+        relative = f"../examples/nodes/{behavior}.graphml"
+        if not re.search(rf"\[[^\]]+\]\({re.escape(relative)}\)", core_doc):
+            problems.append(f"core reference does not link the complete {behavior} graph")
+            continue
+        path = (CORE_DOC.parent / relative).resolve()
+        if not path.is_file():
+            problems.append(f"core reference links missing example: {relative}")
+            continue
+        root = ET.parse(path).getroot()
+        selectors = [
+            (element.text or "").strip()
+            for element in root.findall(".//{http://graphml.graphdrawing.org/xmlns}data[@key='behavior']")
+        ]
+        if selectors != [behavior]:
+            problems.append(
+                f"core example {relative} selects {selectors!r} instead of exactly {behavior!r}"
+            )
+    return problems
+
+
 def errors() -> list[str]:
     problems: list[str] = []
     command_doc = COMMAND_DOC.read_text(encoding="utf-8")
@@ -130,6 +156,7 @@ def errors() -> list[str]:
     missing_core = missing_tokens(core_doc, core_nodes())
     if missing_core:
         problems.append(f"standard core nodes missing from core reference: {', '.join(missing_core)}")
+    problems.extend(core_example_errors(core_doc, core_nodes()))
     return problems
 
 

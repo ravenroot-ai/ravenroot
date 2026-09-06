@@ -20,41 +20,43 @@ VARIABLE = re.compile(r'"(RAVENROOT_[A-Z0-9_]+)"')
 class Group:
     title: str
     link: str
-    applicability: str
 
 
 GROUPS = {
-    "agent": Group("Agent authority", "configuration.md#agent-authority-and-budgets",
-                   "typed startup policy; unset uses the finite table defaults"),
-    "assistant": Group("Authoring assistant", "../operator-guide/authoring-assistant.md#setting-reference",
-                       "startup setting; the runbook gives each type and default"),
-    "bundle": Group("Bundle profile", "bundles/",
-                    "optional package only; its bundle page defines the strict profile"),
-    "credential": Group("Credentials and egress", "configuration.md#secret-handling",
-                        "operator secret/profile or bounded outbound policy"),
-    "embed": Group("Embedded viewer", "embed-extension-contracts.md",
-                   "startup setting; disabled unless explicitly enabled"),
-    "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits",
-                   "positive bounded startup limit; blank uses the documented default"),
-    "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy",
-                        "startup policy family; JVM property overrides environment, and blank uses the documented default"),
-    "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls",
-                      "startup identity, listener, origin, proxy, or request boundary"),
-    "observability": Group("Observability", "configuration.md#observability",
-                           "startup setting; telemetry is disabled by default"),
-    "persistence": Group("Persistence and recovery", "../operator-guide/persistence-lifecycle.md",
-                         "startup store/path setting; the runbook states durability"),
-    "plugin": Group("Package activation", "../operator-guide/plugin-bundles.md",
-                    "startup package selection; unset loads no optional packages"),
-    "program": Group("Programs and artifacts", "configuration.md#programmable-artifacts",
-                     "startup runtime, supervisor, artifact, or resource limit"),
-    "rate": Group("HTTP rate and representation limits", "configuration.md#http-rate-and-representation-limits",
-                  "positive integer startup limit; blank uses the table default"),
-    "runtime": Group("Server lifecycle", "configuration.md#server-process-and-readiness",
-                     "startup process, deployment, readiness, or UI setting"),
-    "tool": Group("Tool and approval policy", "configuration.md#tool-and-approval-policy",
-                  "startup allowlist or durable approval policy"),
+    "agent": Group("Agent authority", "configuration.md#agent-authority-and-budgets"),
+    "assistant": Group("Authoring assistant", "../operator-guide/authoring-assistant.md#setting-reference"),
+    "bundle": Group("Bundle profile", "bundles/"),
+    "credential": Group("Credentials and egress", "configuration.md#secret-handling"),
+    "embed": Group("Embedded viewer", "embed-extension-contracts.md"),
+    "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits"),
+    "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy"),
+    "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls"),
+    "observability": Group("Observability", "configuration.md#observability"),
+    "persistence": Group("Persistence and recovery", "../operator-guide/persistence-lifecycle.md"),
+    "plugin": Group("Package activation", "../operator-guide/plugin-bundles.md"),
+    "program": Group("Programs and artifacts", "configuration.md#programmable-artifacts"),
+    "rate": Group("HTTP rate and representation limits", "configuration.md#http-rate-and-representation-limits"),
+    "runtime": Group("Server lifecycle", "configuration.md#server-process-and-readiness"),
+    "tool": Group("Tool and approval policy", "configuration.md#tool-and-approval-policy"),
 }
+
+ROW_BOUNDARIES = {
+    "RAVENROOT_ENABLED_PLUGINS": "unset enables no installed manifest bundles",
+    "RAVENROOT_NODE_PACKAGES": "unset registers no optional classpath node packages",
+    "RAVENROOT_NODE_PACKAGE_SERVICES_": (
+        "dynamic package-key family; unset grants no managed services, while an enabled package "
+        "whose behaviors require none can still load"
+    ),
+    "RAVENROOT_PLUGINS_INSTALL_DIR": "installed-bundle directory; unset defaults to `/opt/ravenroot/plugins`",
+    "RAVENROOT_REPLICAS": "positive replica count; unset defaults to `1`",
+    "RAVENROOT_TRUSTED_PROXY_ADDRESSES": (
+        "comma-separated exact IP literals trusted as proxy peers; blank trusts none"
+    ),
+}
+
+
+def boundary(name: str) -> str:
+    return ROW_BOUNDARIES.get(name, "See the linked contract for exact type, default, and applicability.")
 
 BUNDLE_PREFIXES = (
     "RAVENROOT_AMQP091_", "RAVENROOT_DISCORD_", "RAVENROOT_FILESYSTEM_",
@@ -157,7 +159,7 @@ def render() -> str:
             continue
         body.extend((f"## {definition.title}", "", f"Detailed contract: [{definition.title}]({definition.link}).", "",
                      "| Variable or family | Applicability and default boundary |", "|---|---|"))
-        body.extend(f"| `{name}` | {definition.applicability} |" for name in names)
+        body.extend(f"| `{name}` | {boundary(name)} |" for name in names)
         body.append("")
     body.extend(("## Validation", "",
                  "`python3 scripts/publish_environment_reference.py --check` re-extracts literal names",

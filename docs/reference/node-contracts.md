@@ -12,7 +12,7 @@ one complete GraphML file for every node. Regenerate deliberately with:
 ```sh
 cd ravenroot
 mvn -pl ravenroot-extensions/ravenroot-extensions-all -am -DskipTests install
-mvn -pl ravenroot-extensions/ravenroot-extensions-all \
+mvn -f ../scripts/fixtures/node-contracts/pom.xml \
   -Dravenroot.docs.update=true -Dtest=PublishedNodeContractTest test
 cd ..
 python3 scripts/publish_node_contract_reference.py
@@ -37,10 +37,37 @@ package authority ceiling. Telegram `maxMediaBytes` applies only to send; `maxBu
 to send and edit. These rules are behavior-level contracts and are therefore maintained in the linked
 bundle references rather than inferred from the descriptor snapshot.
 
-## `agent`
+## Node index
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [ai bundle reference](bundles/ai.md).
+Each property table may scroll horizontally on a narrow viewport. Jump directly to a node:
+
+- [`agent`](#node-agent) · [`amqp.consume`](#node-amqp-consume) · [`amqp.publish`](#node-amqp-publish) · [`boundary-guard`](#node-boundary-guard) · [`cel-decision`](#node-cel-decision) · [`cel-transform`](#node-cel-transform) · [`delay`](#node-delay)
+- [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review) · [`github-events-source`](#node-github-events-source)
+- [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse) · [`json-path`](#node-json-path)
+- [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move)
+- [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract)
+- [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands)
+- [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message)
+- [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
+
+## `agent` {#node-agent}
+
+Canonical runtime rules: [ai bundle reference](bundles/ai.md).
 [Complete GraphML example](../examples/nodes/agent.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Agent |
+| Category | AI |
+| Description | Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer. |
+| Visual type | agent |
+| Agentic | true |
+| Capabilities | agentic,ai,credential-reference,external-provider,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -81,10 +108,24 @@ Descriptor outcomes: `continue`. Canonical runtime rules: [ai bundle reference](
 | `skills.8.description` | `STRING` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
 | `skills.8.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
 
-## `amqp.consume`
+## `amqp.consume` {#node-amqp-consume}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
+Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 [Complete GraphML example](../examples/nodes/amqp.consume.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Consume AMQP deliveries |
+| Category | AMQP 0-9-1 |
+| Description | Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -100,10 +141,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [amqp091 bundle re
 | `deadLetterMode` | `STRING` | false | Not declared | broker-dlx | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
 | `checkpointPolicy` | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 
-## `amqp.publish`
+## `amqp.publish` {#node-amqp-publish}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
+Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 [Complete GraphML example](../examples/nodes/amqp.publish.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Publish AMQP message |
+| Category | AMQP 0-9-1 |
+| Description | Publishes one bounded message with mandatory returns and publisher confirms. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -127,10 +182,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [amqp091 bundle re
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `boundary-guard`
+## `boundary-guard` {#node-boundary-guard}
 
-Descriptor outcomes: `continue,violation`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/boundary-guard.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Publication boundary guard |
+| Category | Security |
+| Description | Evaluates a typed publication candidate against an operator-owned immutable policy profile. It validates but never publishes, rewrites, or silently redacts content. |
+| Visual type | decision |
+| Agentic | false |
+| Capabilities | policy,publication-boundary |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The exact candidate passed the pinned policy.; violation: Evaluation failed closed or a policy rule refused the candidate. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -138,10 +207,24 @@ Descriptor outcomes: `continue,violation`. Canonical runtime rules: [core behavi
 | `policyVersion` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `policyDigest` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `cel-decision`
+## `cel-decision` {#node-cel-decision}
 
-Descriptor outcomes: `$trueOutcome,$falseOutcome`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/cel-decision.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | CEL decision |
+| Category | Control flow |
+| Description | Routes the unchanged payload using the result of a checked CEL boolean expression. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | cel,deterministic |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | $trueOutcome: The expression evaluated to true.; $falseOutcome: The expression evaluated to anything other than true. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -149,37 +232,93 @@ Descriptor outcomes: `$trueOutcome,$falseOutcome`. Canonical runtime rules: [cor
 | `trueOutcome` | `STRING` | false | true | Not declared | false | Not declared | Not declared | Not declared |
 | `falseOutcome` | `STRING` | false | false | Not declared | false | Not declared | Not declared | Not declared |
 
-## `cel-transform`
+## `cel-transform` {#node-cel-transform}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/cel-transform.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | CEL transform |
+| Category | Transformations |
+| Description | Evaluates a checked, non-Turing-complete CEL expression against payload, attributes and properties. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | cel,deterministic |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The expression result becomes the outgoing payload. The only outcome this node produces: a CEL evaluation error fails the node instead. Note that cel-transform never branches on its result — cel-decision does. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `expression` | `CEL_EXPRESSION` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `delay`
+## `delay` {#node-delay}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/delay.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Delay |
+| Category | Control flow |
+| Description | Waits asynchronously for a bounded duration, then passes the payload through unchanged. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | control-flow,non-blocking |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The wait elapsed and the payload passes through unchanged. The only outcome this node produces: the handler below returns it unconditionally. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `durationMs` | `INTEGER` | false | 1000 | Not declared | false | Not declared | Not declared | Not declared |
 
-## `discord.interactions`
+## `discord.interactions` {#node-discord-interactions}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [discord bundle reference](bundles/discord.md).
+Canonical runtime rules: [discord bundle reference](bundles/discord.md).
 [Complete GraphML example](../examples/nodes/discord.interactions.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive Discord slash command |
+| Category | Discord |
+| Description | Verifies and durably accepts guild slash commands relayed with the original signed body. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `discordProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `discord.send`
+## `discord.send` {#node-discord-send}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [discord bundle reference](bundles/discord.md).
+Canonical runtime rules: [discord bundle reference](bundles/discord.md).
 [Complete GraphML example](../examples/nodes/discord.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send Discord message |
+| Category | Discord |
+| Description | Sends one bounded discord.message.v1 payload through an operator-owned profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -192,10 +331,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [discord bundle re
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `filesystem.read`
+## `filesystem.read` {#node-filesystem-read}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
+Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
 [Complete GraphML example](../examples/nodes/filesystem.read.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Read file |
+| Category | Filesystem |
+| Description | Reads one bounded regular file through an operator-owned root-confined profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | filesystem |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -205,10 +358,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [filesystem bundle
 | `maxBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `filesystem.write`
+## `filesystem.write` {#node-filesystem-write}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
+Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
 [Complete GraphML example](../examples/nodes/filesystem.write.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Write file |
+| Category | Filesystem |
+| Description | Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | filesystem,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -220,48 +387,118 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [filesystem bundle
 | `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `git-workspace`
+## `git-workspace` {#node-git-workspace}
 
-Descriptor outcomes: `continue,conflict,unmerged`. Canonical runtime rules: [git-workspace bundle reference](bundles/git-workspace.md).
+Canonical runtime rules: [git-workspace bundle reference](bundles/git-workspace.md).
 [Complete GraphML example](../examples/nodes/git-workspace.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Confined Git workspace |
+| Category | Source control |
+| Description | Provisions, integrates, and verifies one operator-confined provider-neutral Git workspace. |
+| Visual type | process |
+| Agentic | false |
+| Capabilities | filesystem,network,process,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The operation completed or reconciled safely.; conflict: Existing workspace or branch state requires review.; unmerged: The accepted content is absent from the remote base. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `workspaceProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `github-app-review`
+## `github-app-review` {#node-github-app-review}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [github bundle reference](bundles/github.md).
+Canonical runtime rules: [github bundle reference](bundles/github.md).
 [Complete GraphML example](../examples/nodes/github-app-review.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Submit GitHub App review |
+| Category | GitHub |
+| Description | Submits one content-bound formal review only after an exact-head check. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `github-events-source`
+## `github-events-source` {#node-github-events-source}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [github bundle reference](bundles/github.md).
+Canonical runtime rules: [github bundle reference](bundles/github.md).
 [Complete GraphML example](../examples/nodes/github-events-source.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive GitHub event |
+| Category | GitHub |
+| Description | Verifies and durably accepts a relayed GitHub webhook. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | credential-reference,durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `github-workflow-watch`
+## `github-workflow-watch` {#node-github-workflow-watch}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [github bundle reference](bundles/github.md).
+Canonical runtime rules: [github bundle reference](bundles/github.md).
 [Complete GraphML example](../examples/nodes/github-workflow-watch.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Watch GitHub workflows |
+| Category | GitHub |
+| Description | Waits durably for configured workflows on one exact commit. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `http-request`
+## `http-request` {#node-http-request}
 
-Descriptor outcomes: `$successOutcome,$failureOutcome`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/http-request.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | HTTP request |
+| Category | Connectors |
+| Description | Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference. |
+| Visual type | consumer |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | $successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -276,10 +513,24 @@ Descriptor outcomes: `$successOutcome,$failureOutcome`. Canonical runtime rules:
 | `failureOutcome` | `STRING` | false | error | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | method:ONE_OF:POST,PUT,PATCH,DELETE | Not declared |
 
-## `human-task`
+## `human-task` {#node-human-task}
 
-Descriptor outcomes: `$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/human-task.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Human task |
+| Category | Human workflow |
+| Description | Creates durable, tenant-scoped work for a person and resumes from the pinned graph version. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | $resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -308,48 +559,118 @@ Descriptor outcomes: `$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelled
 | `expiredOutcome` | `STRING` | false | expired | Not declared | false | Not declared | Not declared | Not declared |
 | `cancelledOutcome` | `STRING` | false | cancelled | Not declared | false | Not declared | Not declared | Not declared |
 
-## `jdbc.insert`
+## `jdbc.insert` {#node-jdbc-insert}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
+Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
 [Complete GraphML example](../examples/nodes/jdbc.insert.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Profiled JDBC insert |
+| Category | Integrations |
+| Description | Executes one operator-approved prepared JDBC statement with bounded named parameters. |
+| Visual type | database |
+| Agentic | false |
+| Capabilities | network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The bounded JDBC result. |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `statement` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `jdbc.query`
+## `jdbc.query` {#node-jdbc-query}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
+Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
 [Complete GraphML example](../examples/nodes/jdbc.query.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Profiled JDBC query |
+| Category | Data |
+| Description | Executes one operator-approved prepared JDBC statement with bounded named parameters. |
+| Visual type | database |
+| Agentic | false |
+| Capabilities | network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The bounded JDBC result. |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `statement` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `json-parse`
+## `json-parse` {#node-json-parse}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/json-parse.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | JSON parse |
+| Category | Transformations |
+| Description | Parses JSON text into a structured payload that later nodes can address field by field. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The decoded value becomes the outgoing payload. Non-JSON text, or a document beyond the limits, fails the node instead of producing an outcome. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `source` | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
 
-## `json-path`
+## `json-path` {#node-json-path}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/json-path.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | JSONPath |
+| Category | Transformations |
+| Description | Selects RFC 9535 JSONPath matches from bounded structured JSON or JSON text. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic,json,rfc-9535 |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The ordered match array becomes the outgoing payload. Invalid input, query, or resource usage fails the node instead. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `path` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `kafka.consume`
+## `kafka.consume` {#node-kafka-consume}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
+Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 [Complete GraphML example](../examples/nodes/kafka.consume.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Consume Kafka records |
+| Category | Kafka |
+| Description | Consumes an operator-authorized Kafka group with manual contiguous durable offset commits. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -369,10 +690,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [kafka bundle refe
 | `deadLetterTopic` | `STRING` | false | Not declared | Not declared | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
 | `checkpointPolicy` | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 
-## `kafka.produce`
+## `kafka.produce` {#node-kafka-produce}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
+Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 [Complete GraphML example](../examples/nodes/kafka.produce.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Produce Kafka record |
+| Category | Kafka |
+| Description | Produces one bounded idempotent Kafka record. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -384,10 +719,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [kafka bundle refe
 | `correlationId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `llm-prompt`
+## `llm-prompt` {#node-llm-prompt}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [ai bundle reference](bundles/ai.md).
+Canonical runtime rules: [ai bundle reference](bundles/ai.md).
 [Complete GraphML example](../examples/nodes/llm-prompt.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | LLM prompt |
+| Category | AI |
+| Description | Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer. |
+| Visual type | agent |
+| Agentic | false |
+| Capabilities | ai,credential-reference,external-provider,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -400,19 +749,47 @@ Descriptor outcomes: `continue`. Canonical runtime rules: [ai bundle reference](
 | `topP` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `seed` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `log`
+## `log` {#node-log}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/log.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Log |
+| Category | Actions |
+| Description | Writes an intentional workflow message to the server log and passes the payload through. |
+| Visual type | handler |
+| Agentic | false |
+| Capabilities | deterministic,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The message was written and the payload passes through. The only outcome this node produces: an unresolvable placeholder fails the node instead. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `message` | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
 
-## `mail.imap.consume`
+## `mail.imap.consume` {#node-mail-imap-consume}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle reference](bundles/mail.md).
+Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 [Complete GraphML example](../examples/nodes/mail.imap.consume.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Consume mailbox messages |
+| Category | Mail |
+| Description | Polls one operator-authorized IMAP folder and starts one durable traversal per message. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -429,10 +806,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle refer
 | `allowedHeaders` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `checkpointPolicy` | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 
-## `mail.imap.delete`
+## `mail.imap.delete` {#node-mail-imap-delete}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle reference](bundles/mail.md).
+Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 [Complete GraphML example](../examples/nodes/mail.imap.delete.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Delete message |
+| Category | Mail |
+| Description | Moves one IMAP message to trash or explicitly expunges exactly one UID. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -443,10 +834,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle refer
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `mail.imap.move`
+## `mail.imap.move` {#node-mail-imap-move}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle reference](bundles/mail.md).
+Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 [Complete GraphML example](../examples/nodes/mail.imap.move.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Move message |
+| Category | Mail |
+| Description | Moves one IMAP message by source folder, UIDVALIDITY and UID. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -456,10 +861,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle refer
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `mail.imap.query`
+## `mail.imap.query` {#node-mail-imap-query}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle reference](bundles/mail.md).
+Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 [Complete GraphML example](../examples/nodes/mail.imap.query.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Query mailbox |
+| Category | Mail |
+| Description | One-shot read-only IMAP query. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -470,10 +889,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle refer
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `mail.send`
+## `mail.send` {#node-mail-send}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle reference](bundles/mail.md).
+Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 [Complete GraphML example](../examples/nodes/mail.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send email |
+| Category | Mail |
+| Description | Sends a mail.send.v1 message through SMTP. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -499,10 +932,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [mail bundle refer
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `defaultFrom` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `object.delete`
+## `object.delete` {#node-object-delete}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
+Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
 [Complete GraphML example](../examples/nodes/object.delete.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Delete object |
+| Category | Object storage |
+| Description | Deletes one object inside an operator-owned S3-compatible profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -512,10 +959,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bu
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `object.get`
+## `object.get` {#node-object-get}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
+Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
 [Complete GraphML example](../examples/nodes/object.get.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Get object |
+| Category | Object storage |
+| Description | Reads one bounded object from an operator-owned S3-compatible profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -526,10 +987,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bu
 | `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `object.list`
+## `object.list` {#node-object-list}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
+Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
 [Complete GraphML example](../examples/nodes/object.list.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | List objects |
+| Category | Object storage |
+| Description | Lists bounded safe metadata within an operator-owned S3-compatible profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -542,10 +1017,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bu
 | `retries` | `INTEGER` | false | 0 | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `object.put`
+## `object.put` {#node-object-put}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
+Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
 [Complete GraphML example](../examples/nodes/object.put.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Put object |
+| Category | Object storage |
+| Description | Writes one bounded object to an operator-owned S3-compatible profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -555,10 +1044,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [object-storage bu
 | `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `ocr.extract`
+## `ocr.extract` {#node-ocr-extract}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [ocr bundle reference](bundles/ocr.md).
+Canonical runtime rules: [ocr bundle reference](bundles/ocr.md).
 [Complete GraphML example](../examples/nodes/ocr.extract.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Extract text with OCR |
+| Category | Documents |
+| Description | Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | compute,local-process |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -569,10 +1072,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [ocr bundle refere
 | `maxOutputBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `openapi.call`
+## `openapi.call` {#node-openapi-call}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [openapi-client bundle reference](bundles/openapi-client.md).
+Canonical runtime rules: [openapi-client bundle reference](bundles/openapi-client.md).
 [Complete GraphML example](../examples/nodes/openapi.call.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Call OpenAPI operation |
+| Category | OpenAPI |
+| Description | Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -583,10 +1100,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [openapi-client bu
 | `maxResponseBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `openapi.receive`
+## `openapi.receive` {#node-openapi-receive}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-server.md).
+Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-server.md).
 [Complete GraphML example](../examples/nodes/openapi.receive.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive OpenAPI request |
+| Category | OpenAPI |
+| Description | Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -597,10 +1128,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [openapi-server bu
 | `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `openapi.request-reply`
+## `openapi.request-reply` {#node-openapi-request-reply}
 
-Descriptor outcomes: `responded`. Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-server.md).
+Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-server.md).
 [Complete GraphML example](../examples/nodes/openapi.request-reply.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | OpenAPI request/reply |
+| Category | OpenAPI |
+| Description | Waits for one declared, validated OpenAPI response from a graph traversal. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | inbound-source,network,request-reply |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | respond |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | responded: A declared response was accepted for the active HTTP exchange. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -612,10 +1157,24 @@ Descriptor outcomes: `responded`. Canonical runtime rules: [openapi-server bundl
 | `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `program`
+## `program` {#node-program}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/program.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Program artifact |
+| Category | Programming |
+| Description | Builds and executes tenant-scoped source through the governed sandbox runtime. |
+| Visual type | handler |
+| Agentic | false |
+| Capabilities | artifact-governed,programmable,sandbox-required |
+| Declared default nature | WORKER |
+| Declared allowed natures | TRAVERSAL,WORKER |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The artifact ran and its result becomes the outgoing payload. The only outcome this node produces: a sandbox or artifact error fails the node. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -624,48 +1183,118 @@ Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior referen
 | `testPayload` | `TEXT` | false | test payload | Not declared | false | Not declared | Not declared | Not declared |
 | `artifactId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `project-transition`
+## `project-transition` {#node-project-transition}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [github bundle reference](bundles/github.md).
+Canonical runtime rules: [github bundle reference](bundles/github.md).
 [Complete GraphML example](../examples/nodes/project-transition.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Transition GitHub Project item |
+| Category | GitHub |
+| Description | Applies one generation-fenced Project status transition. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `release-prepare`
+## `release-prepare` {#node-release-prepare}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [github bundle reference](bundles/github.md).
+Canonical runtime rules: [github bundle reference](bundles/github.md).
 [Complete GraphML example](../examples/nodes/release-prepare.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Prepare release metadata |
+| Category | GitHub |
+| Description | Reads an exact commit and proposes bounded release metadata without mutation authority. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `slack.commands`
+## `slack.commands` {#node-slack-commands}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [slack bundle reference](bundles/slack.md).
+Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 [Complete GraphML example](../examples/nodes/slack.commands.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive Slack command |
+| Category | Slack |
+| Description | Verifies and durably accepts Slack slash commands. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `slackProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `slack.events`
+## `slack.events` {#node-slack-events}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [slack bundle reference](bundles/slack.md).
+Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 [Complete GraphML example](../examples/nodes/slack.events.graphml).
 
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive Slack event |
+| Category | Slack |
+| Description | Verifies and durably accepts Slack Events API callbacks. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `slackProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `slack.post-message`
+## `slack.post-message` {#node-slack-post-message}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [slack bundle reference](bundles/slack.md).
+Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 [Complete GraphML example](../examples/nodes/slack.post-message.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Post Slack message |
+| Category | Slack |
+| Description | Posts one bounded slack.message.v1 payload through an operator-owned profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -676,10 +1305,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [slack bundle refe
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `spel.decision`
+## `spel.decision` {#node-spel-decision}
 
-Descriptor outcomes: `$trueOutcome,$falseOutcome`. Canonical runtime rules: [spel bundle reference](bundles/spel.md).
+Canonical runtime rules: [spel bundle reference](bundles/spel.md).
 [Complete GraphML example](../examples/nodes/spel.decision.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Restricted SpEL decision |
+| Category | Control flow |
+| Description | Routes a bounded canonical payload using an allowlisted Boolean SpEL expression. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic,spel |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | $trueOutcome: Expression returned true.; $falseOutcome: Expression returned false. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -687,19 +1330,47 @@ Descriptor outcomes: `$trueOutcome,$falseOutcome`. Canonical runtime rules: [spe
 | `trueOutcome` | `STRING` | false | true | Not declared | false | Not declared | Not declared | Not declared |
 | `falseOutcome` | `STRING` | false | false | Not declared | false | Not declared | Not declared | Not declared |
 
-## `spel.transform`
+## `spel.transform` {#node-spel-transform}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [spel bundle reference](bundles/spel.md).
+Canonical runtime rules: [spel bundle reference](bundles/spel.md).
 [Complete GraphML example](../examples/nodes/spel.transform.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Restricted SpEL transform |
+| Category | Transformations |
+| Description | Evaluates an allowlisted SpEL expression over a bounded canonical payload tree. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic,spel |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The bounded expression result. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `expression` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `telegram.answer.callback`
+## `telegram.answer.callback` {#node-telegram-answer-callback}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
+Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 [Complete GraphML example](../examples/nodes/telegram.answer.callback.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Answer Telegram callback |
+| Category | Telegram |
+| Description | Acknowledges one callback query through an operator-owned bot profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -710,10 +1381,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle r
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `telegram.delete.message`
+## `telegram.delete.message` {#node-telegram-delete-message}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
+Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 [Complete GraphML example](../examples/nodes/telegram.delete.message.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Delete Telegram message |
+| Category | Telegram |
+| Description | Explicitly requests deletion of one operator-authorized Telegram message. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -723,10 +1408,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle r
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `telegram.edit.message`
+## `telegram.edit.message` {#node-telegram-edit-message}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
+Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 [Complete GraphML example](../examples/nodes/telegram.edit.message.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Edit Telegram message |
+| Category | Telegram |
+| Description | Explicitly edits text, caption, or inline markup without sending a new message. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -738,10 +1437,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle r
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
-## `telegram.send`
+## `telegram.send` {#node-telegram-send}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
+Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 [Complete GraphML example](../examples/nodes/telegram.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send Telegram message |
+| Category | Telegram |
+| Description | Sends one bounded telegram.send.v1 message through an operator-owned bot profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -753,19 +1466,47 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [telegram bundle r
 | `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `template`
+## `template` {#node-template}
 
-Descriptor outcomes: `continue`. Canonical runtime rules: [core behavior reference](core-nodes.md).
+Canonical runtime rules: [core behavior reference](core-nodes.md).
 [Complete GraphML example](../examples/nodes/template.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Template |
+| Category | Transformations |
+| Description | Builds a text output from the incoming payload, attributes and node properties. |
+| Visual type | flow |
+| Agentic | false |
+| Capabilities | deterministic |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | continue: The rendered text becomes the outgoing payload. The only outcome this node produces: an unresolvable placeholder fails the node instead. |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
 | `template` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `websocket.receive`
+## `websocket.receive` {#node-websocket-receive}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
+Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 [Complete GraphML example](../examples/nodes/websocket.receive.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive WebSocket frames |
+| Category | WebSocket |
+| Description | Starts a process-local, non-replayable WSS receive source; accepted frames start new traversals and never produce a correlated reply. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|
@@ -774,10 +1515,24 @@ Descriptor outcomes: `Not declared`. Canonical runtime rules: [websocket bundle 
 | `maxFragments` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
-## `websocket.send`
+## `websocket.send` {#node-websocket-send}
 
-Descriptor outcomes: `Not declared`. Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
+Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 [Complete GraphML example](../examples/nodes/websocket.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send WebSocket frame |
+| Category | WebSocket |
+| Description | Writes one bounded text or binary frame through an operator-owned WSS profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
 
 | Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---:|---|---|---:|---|---|---|

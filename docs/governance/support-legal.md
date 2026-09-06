@@ -14,5 +14,5 @@ Ravenroot documentation and source are licensed under Apache License 2.0. Third-
 
 ## References
 
-- [Related contract](../../LICENSE)
+- [Related contract](https://github.com/ravenroot-ai/ravenroot/blob/dev/LICENSE)
 - [Related guide](../security/embed-privacy.md)

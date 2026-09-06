@@ -20,26 +20,26 @@ Detailed contract: [Agent authority](configuration.md#agent-authority-and-budget
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_AGENT_AUTHORITY_SCOPES` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_COST_CURRENCY` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_DATA_SCOPES` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_COST_MICROS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_DELEGATION_DEPTH` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_ELAPSED_MILLIS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_INPUT_TOKENS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_OUTPUT_TOKENS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_TEAM_ACTIVE` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_TOOL_CALLS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_MAX_TURNS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_POLICY_VERSION` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_RATE_CARD_VERSION` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS` | typed startup policy; unset uses the finite table defaults |
-| `RAVENROOT_AGENT_RUNTIME_INSTANCE` | typed startup policy; unset uses the finite table defaults |
+| `RAVENROOT_AGENT_AUTHORITY_SCOPES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_COST_CURRENCY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_DATA_SCOPES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_COST_MICROS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_DELEGATION_DEPTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_ELAPSED_MILLIS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_INPUT_TOKENS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_OUTPUT_TOKENS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_TEAM_ACTIVE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_TOOL_CALLS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_MAX_TURNS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_POLICY_VERSION` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_RATE_CARD_VERSION` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AGENT_RUNTIME_INSTANCE` | See the linked contract for exact type, default, and applicability. |
 
 ## Authoring assistant
 
@@ -47,21 +47,21 @@ Detailed contract: [Authoring assistant](../operator-guide/authoring-assistant.m
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_ASSISTANT_ALLOWED_HOSTS` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_ALLOWED_PORTS` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_API_KEY` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_CONSENT_DIR` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_CREDENTIAL_SOURCE` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_DEVICE_AUTHORIZATION_ENDPOINT` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_ENABLED` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_ENDPOINT` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_MODEL` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_OAUTH_CLIENT_ID` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_PROVIDER` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_SESSION_MINUTES` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_TIMEOUT_SECONDS` | startup setting; the runbook gives each type and default |
-| `RAVENROOT_ASSISTANT_TOKEN_ENDPOINT` | startup setting; the runbook gives each type and default |
+| `RAVENROOT_ASSISTANT_ALLOWED_HOSTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_ALLOWED_PORTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_API_KEY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_CONSENT_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_CREDENTIAL_SOURCE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_DEVICE_AUTHORIZATION_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_ENABLED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_MODEL` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_OAUTH_CLIENT_ID` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_PROVIDER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_SESSION_MINUTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_TIMEOUT_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_TOKEN_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
 
 ## Bundle profile
 
@@ -69,32 +69,32 @@ Detailed contract: [Bundle profile](bundles/).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_AMQP091_CONSUMER_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_AMQP091_CREDENTIAL_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_AMQP091_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_DISCORD_CONFIG` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_FILESYSTEM_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_GITHUB_CONFIG` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_GIT_WORKSPACE_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_IMAP_CONSUMER_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_IMAP_MUTATION_POLICY_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_IMAP_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_JDBC_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_KAFKA_CONSUMER_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_KAFKA_CREDENTIAL_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_KAFKA_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_LLM_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_MAIL_CREDENTIAL_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_MAIL_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_MCP_SERVER_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_OBJECT_STORAGE_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_OCR_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_OPENAPI_CLIENT_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_OPENAPI_SERVER_CONFIG` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_SLACK_CONFIG` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_TELEGRAM_CREDENTIAL_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_TELEGRAM_PROFILE_` | optional package only; its bundle page defines the strict profile |
-| `RAVENROOT_WEBSOCKET_PROFILE_` | optional package only; its bundle page defines the strict profile |
+| `RAVENROOT_AMQP091_CONSUMER_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AMQP091_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AMQP091_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_DISCORD_CONFIG` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_FILESYSTEM_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GITHUB_CONFIG` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GIT_WORKSPACE_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_IMAP_CONSUMER_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_IMAP_MUTATION_POLICY_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_IMAP_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_JDBC_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_KAFKA_CONSUMER_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_KAFKA_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_KAFKA_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_LLM_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_MAIL_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_MAIL_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_MCP_SERVER_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OBJECT_STORAGE_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OCR_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OPENAPI_CLIENT_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OPENAPI_SERVER_CONFIG` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_SLACK_CONFIG` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TELEGRAM_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TELEGRAM_PROFILE_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_WEBSOCKET_PROFILE_` | See the linked contract for exact type, default, and applicability. |
 
 ## Credentials and egress
 
@@ -102,13 +102,13 @@ Detailed contract: [Credentials and egress](configuration.md#secret-handling).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_CREDENTIAL_` | operator secret/profile or bounded outbound policy |
-| `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | operator secret/profile or bounded outbound policy |
-| `RAVENROOT_HTTP_ALLOWED_HOSTS` | operator secret/profile or bounded outbound policy |
-| `RAVENROOT_HTTP_ALLOWED_PORTS` | operator secret/profile or bounded outbound policy |
-| `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | operator secret/profile or bounded outbound policy |
-| `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | operator secret/profile or bounded outbound policy |
-| `RAVENROOT_TOKEN` | operator secret/profile or bounded outbound policy |
+| `RAVENROOT_CREDENTIAL_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EGRESS_RESERVED_EXCEPTIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HTTP_ALLOWED_HOSTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HTTP_ALLOWED_PORTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HTTP_MAX_REQUEST_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HTTP_MAX_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOKEN` | See the linked contract for exact type, default, and applicability. |
 
 ## Embedded viewer
 
@@ -116,18 +116,18 @@ Detailed contract: [Embedded viewer](embed-extension-contracts.md).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_EMBED_BEARER_TTL_SECONDS` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_ENABLED` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_EXCHANGE_TTL_SECONDS` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_PROOF_TTL_SECONDS` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_REGISTRATION_DIR` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_REPLAY_CAPACITY` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_SESSION_CAPACITY` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_TICKET_CAPACITY` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_TICKET_TTL_SECONDS` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_EMBED_VIEWER_ORIGIN` | startup setting; disabled unless explicitly enabled |
-| `RAVENROOT_REPLICAS` | startup setting; disabled unless explicitly enabled |
+| `RAVENROOT_EMBED_BEARER_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_ENABLED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_EXCHANGE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_PROOF_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_REGISTRATION_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_REPLAY_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_SESSION_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_SINGLE_PROCESS_ACKNOWLEDGED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_TICKET_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_TICKET_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EMBED_VIEWER_ORIGIN` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_REPLICAS` | positive replica count; unset defaults to `1` |
 
 ## Graph execution
 
@@ -135,20 +135,20 @@ Detailed contract: [Graph execution](configuration.md#graph-execution-resource-l
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_GRAPHML_MAX_BYTES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_EDGES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_FAN_OUT` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_NODES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_PROPERTIES` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | positive bounded startup limit; blank uses the documented default |
-| `RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS` | positive bounded startup limit; blank uses the documented default |
+| `RAVENROOT_GRAPHML_MAX_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_EDGES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_FAN_OUT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_NODES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PROPERTIES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS` | See the linked contract for exact type, default, and applicability. |
 
 ## Human Task policy
 
@@ -156,34 +156,34 @@ Detailed contract: [Human Task policy](configuration.md#human-task-operational-p
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_HUMAN_TASK_` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT` | startup policy family; JVM property overrides environment, and blank uses the documented default |
-| `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | startup policy family; JVM property overrides environment, and blank uses the documented default |
+| `RAVENROOT_HUMAN_TASK_` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | See the linked contract for exact type, default, and applicability. |
 
 ## Identity and HTTP boundary
 
@@ -191,22 +191,22 @@ Detailed contract: [Identity and HTTP boundary](configuration.md#identity-and-br
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_AUTH_AUDIENCE` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_CLOCK_SKEW_SECONDS` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_ISSUER` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_JWKS_URI` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_LOCAL_TOKEN` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_MODE` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_BIND_ADDRESS` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_BROWSER_ALLOWED_ORIGINS` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_CONTAINER_LOOPBACK_ONLY` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_LOCAL_HOST_BIND_ADDRESS` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_PUBLIC_ORIGIN` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_TRUSTED_TLS_TERMINATOR` | startup identity, listener, origin, proxy, or request boundary |
-| `RAVENROOT_UI_CONNECT_ORIGINS` | startup identity, listener, origin, proxy, or request boundary |
+| `RAVENROOT_AUTH_AUDIENCE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_CLOCK_SKEW_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_ISSUER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_JWKS_CACHE_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_JWKS_URI` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_LOCAL_TOKEN` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_MODE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_AUTH_PRINCIPAL_TYPE_CLAIM` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_BIND_ADDRESS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_BROWSER_ALLOWED_ORIGINS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_CONTAINER_LOOPBACK_ONLY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_LOCAL_HOST_BIND_ADDRESS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PUBLIC_ORIGIN` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TRUSTED_TLS_TERMINATOR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_UI_CONNECT_ORIGINS` | See the linked contract for exact type, default, and applicability. |
 
 ## Observability
 
@@ -214,10 +214,10 @@ Detailed contract: [Observability](configuration.md#observability).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_OTEL_ENABLED` | startup setting; telemetry is disabled by default |
-| `RAVENROOT_OTEL_ENDPOINT` | startup setting; telemetry is disabled by default |
-| `RAVENROOT_OTEL_EXPORTER` | startup setting; telemetry is disabled by default |
-| `RAVENROOT_OTEL_SERVICE_NAME` | startup setting; telemetry is disabled by default |
+| `RAVENROOT_OTEL_ENABLED` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OTEL_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OTEL_EXPORTER` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_OTEL_SERVICE_NAME` | See the linked contract for exact type, default, and applicability. |
 
 ## Persistence and recovery
 
@@ -225,10 +225,10 @@ Detailed contract: [Persistence and recovery](../operator-guide/persistence-life
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_AUDIT_DIR` | startup store/path setting; the runbook states durability |
-| `RAVENROOT_CREDENTIAL_DIR` | startup store/path setting; the runbook states durability |
-| `RAVENROOT_EXECUTION_STORE_DIR` | startup store/path setting; the runbook states durability |
-| `RAVENROOT_EXECUTION_STORE_ENABLED` | startup store/path setting; the runbook states durability |
+| `RAVENROOT_AUDIT_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_CREDENTIAL_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_EXECUTION_STORE_ENABLED` | See the linked contract for exact type, default, and applicability. |
 
 ## Package activation
 
@@ -236,10 +236,10 @@ Detailed contract: [Package activation](../operator-guide/plugin-bundles.md).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_ENABLED_PLUGINS` | startup package selection; unset loads no optional packages |
-| `RAVENROOT_NODE_PACKAGES` | startup package selection; unset loads no optional packages |
-| `RAVENROOT_NODE_PACKAGE_SERVICES_` | startup package selection; unset loads no optional packages |
-| `RAVENROOT_PLUGINS_INSTALL_DIR` | startup package selection; unset loads no optional packages |
+| `RAVENROOT_ENABLED_PLUGINS` | unset enables no installed manifest bundles |
+| `RAVENROOT_NODE_PACKAGES` | unset registers no optional classpath node packages |
+| `RAVENROOT_NODE_PACKAGE_SERVICES_` | dynamic package-key family; unset grants no managed services, while an enabled package whose behaviors require none can still load |
+| `RAVENROOT_PLUGINS_INSTALL_DIR` | installed-bundle directory; unset defaults to `/opt/ravenroot/plugins` |
 
 ## Programs and artifacts
 
@@ -247,15 +247,15 @@ Detailed contract: [Programs and artifacts](configuration.md#programmable-artifa
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_ARTIFACT_DUAL_CONTROL` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_ARTIFACT_PROVENANCE` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_ARTIFACT_STORE_DIR` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_GRAAL_JAVA` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_GRAAL_RESOURCE_CACHE_DIR` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_GRAAL_SANDBOX_SUPERVISOR` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_PROGRAM_MAX_HEAP_MB` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_PROGRAM_RUNTIME` | startup runtime, supervisor, artifact, or resource limit |
-| `RAVENROOT_PROGRAM_TIMEOUT_MS` | startup runtime, supervisor, artifact, or resource limit |
+| `RAVENROOT_ARTIFACT_DUAL_CONTROL` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ARTIFACT_PROVENANCE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ARTIFACT_STORE_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAAL_JAVA` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAAL_RESOURCE_CACHE_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAAL_SANDBOX_SUPERVISOR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_MAX_HEAP_MB` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_RUNTIME` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PROGRAM_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
 
 ## HTTP rate and representation limits
 
@@ -263,31 +263,31 @@ Detailed contract: [HTTP rate and representation limits](configuration.md#http-r
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_RATELIMIT_ADDRESS_BURST` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_ADDRESS_RPS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_HEADER_BYTES` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_HEADER_COUNT` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_QUERY_BYTES` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_PRINCIPAL_BURST` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_PRINCIPAL_RPS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_SUBMISSION_BURST` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_SUBMISSION_RPS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_TENANT_BURST` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_TENANT_RPS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_RATELIMIT_TENANT_STREAMS` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_SSE_QUEUE_CAPACITY` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_TRUSTED_PROXY_ADDRESSES` | positive integer startup limit; blank uses the table default |
-| `RAVENROOT_TRUSTED_PROXY_HOPS` | positive integer startup limit; blank uses the table default |
+| `RAVENROOT_RATELIMIT_ADDRESS_BURST` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_ADDRESS_RPS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_COUNT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_QUERY_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_BURST` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_RPS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_SUBMISSION_BURST` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_SUBMISSION_RPS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_TENANT_BURST` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_TENANT_RPS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_RATELIMIT_TENANT_STREAMS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_SSE_QUEUE_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TRUSTED_PROXY_ADDRESSES` | comma-separated exact IP literals trusted as proxy peers; blank trusts none |
+| `RAVENROOT_TRUSTED_PROXY_HOPS` | See the linked contract for exact type, default, and applicability. |
 
 ## Server lifecycle
 
@@ -295,14 +295,14 @@ Detailed contract: [Server lifecycle](configuration.md#server-process-and-readin
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_ENGINE` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_MAX_ACTIVE_DEPLOYMENTS` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_PORT` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_READY_DRAIN_GRACE_MS` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_READY_STORE_CHECK_TIMEOUT_MS` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_SERVER_STOP_DELAY_SECONDS` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_UI_DIR` | startup process, deployment, readiness, or UI setting |
-| `RAVENROOT_UNKNOWN_BEHAVIOR` | startup process, deployment, readiness, or UI setting |
+| `RAVENROOT_ENGINE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_MAX_ACTIVE_DEPLOYMENTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_PORT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_READY_DRAIN_GRACE_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_READY_STORE_CHECK_TIMEOUT_MS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_SERVER_STOP_DELAY_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_UI_DIR` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_UNKNOWN_BEHAVIOR` | See the linked contract for exact type, default, and applicability. |
 
 ## Tool and approval policy
 
@@ -310,13 +310,13 @@ Detailed contract: [Tool and approval policy](configuration.md#tool-and-approval
 
 | Variable or family | Applicability and default boundary |
 |---|---|
-| `RAVENROOT_ALLOWED_TOOLS` | startup allowlist or durable approval policy |
-| `RAVENROOT_TOOL_APPROVAL_RECOVERY_TENANTS` | startup allowlist or durable approval policy |
-| `RAVENROOT_TOOL_APPROVAL_REQUESTER_MAY_APPROVE` | startup allowlist or durable approval policy |
-| `RAVENROOT_TOOL_APPROVAL_REQUIRED_ROLES` | startup allowlist or durable approval policy |
-| `RAVENROOT_TOOL_APPROVAL_REQUIRED_SCOPES` | startup allowlist or durable approval policy |
-| `RAVENROOT_TOOL_APPROVAL_TTL_SECONDS` | startup allowlist or durable approval policy |
-| `RAVENROOT_TOOL_POLICY_VERSION` | startup allowlist or durable approval policy |
+| `RAVENROOT_ALLOWED_TOOLS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOOL_APPROVAL_RECOVERY_TENANTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOOL_APPROVAL_REQUESTER_MAY_APPROVE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOOL_APPROVAL_REQUIRED_ROLES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOOL_APPROVAL_REQUIRED_SCOPES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOOL_APPROVAL_TTL_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_TOOL_POLICY_VERSION` | See the linked contract for exact type, default, and applicability. |
 
 ## Validation
 

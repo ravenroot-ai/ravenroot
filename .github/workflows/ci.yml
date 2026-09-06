@@ -60,11 +60,13 @@ jobs:
           cache: maven
       - name: Compare node documentation and examples with compiled descriptors
         working-directory: ravenroot
-        run: >-
-          mvn -B --no-transfer-progress
-          -pl ravenroot-extensions/ravenroot-extensions-all -am
-          -Dtest=PublishedNodeContractTest
-          -Dsurefire.failIfNoSpecifiedTests=false test
+        run: |
+          mvn -B --no-transfer-progress \
+            -pl ravenroot-extensions/ravenroot-extensions-all -am \
+            -DskipTests install
+          mvn -B --no-transfer-progress \
+            -f ../scripts/fixtures/node-contracts/pom.xml \
+            -Dtest=PublishedNodeContractTest test
       - name: Verify maintained operational documentation contracts
         run: |
           python3 -m unittest scripts.tests.test_publish_bundle_reference -v

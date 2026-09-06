@@ -31,4 +31,4 @@ Actor isolation turns node attempts into supervised messages while the execution
 
 - [Exact contract](../reference/execution-events.md)
 - [Procedure or recovery](../user-guide/test-run-observe.md)
-- [Decision record](../../adr/0035-cancellation-as-a-distinct-termination-reason.md)
+- [Decision record](https://github.com/ravenroot-ai/ravenroot/blob/dev/adr/0035-cancellation-as-a-distinct-termination-reason.md)

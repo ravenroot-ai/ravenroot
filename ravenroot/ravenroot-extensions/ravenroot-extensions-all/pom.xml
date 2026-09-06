@@ -17,23 +17,6 @@
     <dependencies>
         <dependency>
             <groupId>ai.ravenroot</groupId>
-            <artifactId>ravenroot-core</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>ai.ravenroot</groupId>
-            <artifactId>ravenroot-persistence-sqlite</artifactId>
-            <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.junit.jupiter</groupId>
-            <artifactId>junit-jupiter</artifactId>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-ai</artifactId>
             <version>${project.version}</version>
         </dependency>

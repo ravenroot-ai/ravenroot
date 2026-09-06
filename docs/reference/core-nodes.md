@@ -13,18 +13,32 @@ safe.
 
 ## Minimal example harness
 
-For each example, start with the complete graph from [Build your first graph](../get-started/first-graph.md),
-replace its `greet` node with the shown node, declare each shown property as a GraphML `<key>` with
-`for="node"` and `attr.type="string"`, and connect the node's stated outcome to `end`. Keep the
-unlabelled edge to `error`. Validate and run it with:
+Use the maintained complete GraphML file for the behavior you want to try:
+
+- [`log`](../examples/nodes/log.graphml), [`delay`](../examples/nodes/delay.graphml),
+  [`template`](../examples/nodes/template.graphml), [`json-parse`](../examples/nodes/json-parse.graphml),
+  and [`json-path`](../examples/nodes/json-path.graphml)
+- [`cel-transform`](../examples/nodes/cel-transform.graphml) and
+  [`cel-decision`](../examples/nodes/cel-decision.graphml)
+- [`human-task`](../examples/nodes/human-task.graphml),
+  [`http-request`](../examples/nodes/http-request.graphml),
+  [`program`](../examples/nodes/program.graphml), and
+  [`boundary-guard`](../examples/nodes/boundary-guard.graphml)
+
+Each file already declares its property keys, uses one consistently named `action` node, routes every
+declared outcome, and has a separate unlabelled failure edge to `error`. Do not paste an `action`
+fragment into the first-graph tutorial's `greet` graph without also renaming every incident edge.
+Replace any operator-profile or digest placeholder and meet the behavior prerequisites described in
+its section, then validate and run the downloaded file with:
 
 ```sh
 ravenroot validate example.graphml
 ravenroot run example.graphml 'example input'
 ```
 
-Use the UI's Test action before Run when a node can perform an effect. The fragments are exact
-GraphML `data` entries, not a replacement syntax.
+Use the UI's Test action before Run when a node can perform an effect. The fragments below show the
+action node's exact GraphML `data` entries for explanation; they are not standalone graphs or a
+replacement syntax.
 
 ## `log`
 
@@ -232,13 +246,18 @@ no policy profiles, so this example fails closed until the host supplies one. Se
 
 ## `human-task`
 
-`human-task` creates durable, authorized work and has a larger contract. Its exact properties are:
+`human-task` creates durable, authorized work and has a larger contract. The fields below are the
+base task contract. A production registry backed by a confirmation-capable durable store also
+publishes the seven `confirmation*` presentation fields in the
+[generated descriptor table](node-contracts.md#node-human-task); a registry without that capability
+omits them. Their admission and settlement semantics are in the
+[durable Human Task authoring contract](human-tasks.md#authoring-contract).
 
 | Property | Required/default |
 |---|---|
 | `title` | required static text, at most 256 UTF-8 bytes |
 | `description` | empty; static text, at most 4 KiB |
-| `responseContentType` | `application/vnd.ravenroot.human-task-response+json` |
+| `responseContentType` | `application/vnd.ravenroot.payload+json` |
 | `responseSchema` / `responseSchemaVersion` | `ravenroot.human-task.response` / `1` |
 | `responseKind` | `MAP`; one of `SCALAR`, `LIST`, `MAP` |
 | `maxResponseBytes` | 65,536; inclusive range 1–262,144 |

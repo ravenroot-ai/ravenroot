@@ -1,326 +1,326 @@
-behavior	property	type	required	default	allowed	adapterBinding	visibleWhen	requiredWhen	minimum	maximum	maximumUtf8Bytes	maximumItems	maximumItemUtf8Bytes	descriptorOutcomes
-agent	provider	STRING	true			true					0	0	0	continue
-agent	instructions	TEXT	true			false					0	0	0	continue
-agent	objective	TEXT	true			false					0	0	0	continue
-agent	model	STRING	false			false					0	0	0	continue
-agent	mcpServers	STRING	false			false					0	0	0	continue
-agent	maxTurns	INTEGER	false			false					0	0	0	continue
-agent	maxTotalTokens	INTEGER	false			false					0	0	0	continue
-agent	timeoutMs	INTEGER	false			false					0	0	0	continue
-agent	maxTokens	INTEGER	false			false					0	0	0	continue
-agent	temperature	STRING	false			false					0	0	0	continue
-agent	topP	STRING	false			false					0	0	0	continue
-agent	seed	INTEGER	false			false					0	0	0	continue
-agent	skills.1.name	STRING	false			false					0	0	0	continue
-agent	skills.1.description	STRING	false			false					0	0	0	continue
-agent	skills.1.instructions	TEXT	false			false					0	0	0	continue
-agent	skills.2.name	STRING	false			false	skills.1.name:PRESENT:				0	0	0	continue
-agent	skills.2.description	STRING	false			false	skills.1.name:PRESENT:				0	0	0	continue
-agent	skills.2.instructions	TEXT	false			false	skills.1.name:PRESENT:				0	0	0	continue
-agent	skills.3.name	STRING	false			false	skills.2.name:PRESENT:				0	0	0	continue
-agent	skills.3.description	STRING	false			false	skills.2.name:PRESENT:				0	0	0	continue
-agent	skills.3.instructions	TEXT	false			false	skills.2.name:PRESENT:				0	0	0	continue
-agent	skills.4.name	STRING	false			false	skills.3.name:PRESENT:				0	0	0	continue
-agent	skills.4.description	STRING	false			false	skills.3.name:PRESENT:				0	0	0	continue
-agent	skills.4.instructions	TEXT	false			false	skills.3.name:PRESENT:				0	0	0	continue
-agent	skills.5.name	STRING	false			false	skills.4.name:PRESENT:				0	0	0	continue
-agent	skills.5.description	STRING	false			false	skills.4.name:PRESENT:				0	0	0	continue
-agent	skills.5.instructions	TEXT	false			false	skills.4.name:PRESENT:				0	0	0	continue
-agent	skills.6.name	STRING	false			false	skills.5.name:PRESENT:				0	0	0	continue
-agent	skills.6.description	STRING	false			false	skills.5.name:PRESENT:				0	0	0	continue
-agent	skills.6.instructions	TEXT	false			false	skills.5.name:PRESENT:				0	0	0	continue
-agent	skills.7.name	STRING	false			false	skills.6.name:PRESENT:				0	0	0	continue
-agent	skills.7.description	STRING	false			false	skills.6.name:PRESENT:				0	0	0	continue
-agent	skills.7.instructions	TEXT	false			false	skills.6.name:PRESENT:				0	0	0	continue
-agent	skills.8.name	STRING	false			false	skills.7.name:PRESENT:				0	0	0	continue
-agent	skills.8.description	STRING	false			false	skills.7.name:PRESENT:				0	0	0	continue
-agent	skills.8.instructions	TEXT	false			false	skills.7.name:PRESENT:				0	0	0	continue
-amqp.consume	brokerProfile	STRING	true			false					0	0	0	—
-amqp.consume	queue	STRING	false			false					0	0	0	—
-amqp.consume	prefetch	INTEGER	false			false					0	0	0	—
-amqp.consume	maxInFlight	INTEGER	false			false					0	0	0	—
-amqp.consume	retryBackoffMs	INTEGER	false			false					0	0	0	—
-amqp.consume	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
-amqp.consume	drainTimeoutMs	INTEGER	false			false					0	0	0	—
-amqp.consume	poisonAttempts	INTEGER	false			false					0	0	0	—
-amqp.consume	poisonPolicy	STRING	false	profile	profile,dead-letter	false					0	0	0	—
-amqp.consume	deadLetterMode	STRING	false		broker-dlx	false	poisonPolicy:EQUALS:dead-letter	poisonPolicy:EQUALS:dead-letter			0	0	0	—
-amqp.consume	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
-amqp.publish	brokerProfile	STRING	true			false					0	0	0	—
-amqp.publish	exchange	STRING	false			false					0	0	0	—
-amqp.publish	routingKey	STRING	false			false					0	0	0	—
-amqp.publish	mandatory	BOOLEAN	false	true		false					0	0	0	—
-amqp.publish	contentType	STRING	false			false					0	0	0	—
-amqp.publish	contentEncoding	STRING	false			false					0	0	0	—
-amqp.publish	persistent	BOOLEAN	false	false		false					0	0	0	—
-amqp.publish	priority	INTEGER	false			false					0	0	0	—
-amqp.publish	expirationMs	INTEGER	false			false					0	0	0	—
-amqp.publish	messageId	STRING	false			false					0	0	0	—
-amqp.publish	correlationId	STRING	false			false					0	0	0	—
-amqp.publish	replyTo	STRING	false			false					0	0	0	—
-amqp.publish	type	STRING	false			false					0	0	0	—
-amqp.publish	appId	STRING	false			false					0	0	0	—
-amqp.publish	headers	TEXT	false			false					0	0	0	—
-amqp.publish	confirmTimeoutMs	INTEGER	false			false					0	0	0	—
-amqp.publish	maxConcurrency	INTEGER	false			false					0	0	0	—
-amqp.publish	retries	INTEGER	false			false					0	0	0	—
-amqp.publish	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-boundary-guard	policyId	STRING	true			false					0	0	0	continue,violation
-boundary-guard	policyVersion	STRING	true			false					0	0	0	continue,violation
-boundary-guard	policyDigest	STRING	true			false					0	0	0	continue,violation
-cel-decision	expression	CEL_EXPRESSION	true			false					0	0	0	$trueOutcome,$falseOutcome
-cel-decision	trueOutcome	STRING	false	true		false					0	0	0	$trueOutcome,$falseOutcome
-cel-decision	falseOutcome	STRING	false	false		false					0	0	0	$trueOutcome,$falseOutcome
-cel-transform	expression	CEL_EXPRESSION	true			false					0	0	0	continue
-delay	durationMs	INTEGER	false	1000		false					0	0	0	continue
-discord.interactions	discordProfile	STRING	true			false					0	0	0	—
-discord.send	discordProfile	STRING	true			false					0	0	0	—
-discord.send	channelId	STRING	false			false					0	0	0	—
-discord.send	requestTimeoutMs	INTEGER	false			false					0	0	0	—
-discord.send	maxContentChars	INTEGER	false			false					0	0	0	—
-discord.send	maxAttachmentBytes	INTEGER	false			false					0	0	0	—
-discord.send	maxAttachments	INTEGER	false			false					0	0	0	—
-discord.send	maxConcurrency	INTEGER	false			false					0	0	0	—
-discord.send	retries	INTEGER	false			false					0	0	0	—
-filesystem.read	filesystemProfile	STRING	true			false					0	0	0	—
-filesystem.read	path	STRING	true			false					0	0	0	—
-filesystem.read	encoding	STRING	false	utf-8	utf-8,base64	false					0	0	0	—
-filesystem.read	maxBytes	INTEGER	false			false					0	0	0	—
-filesystem.read	deadlineMs	INTEGER	false			false					0	0	0	—
-filesystem.write	filesystemProfile	STRING	true			false					0	0	0	—
-filesystem.write	path	STRING	true			false					0	0	0	—
-filesystem.write	encoding	STRING	false	utf-8	utf-8,base64	false					0	0	0	—
-filesystem.write	mode	STRING	false	create-new	create-new,replace	false					0	0	0	—
-filesystem.write	maxBytes	INTEGER	false			false					0	0	0	—
-filesystem.write	deadlineMs	INTEGER	false			false					0	0	0	—
-filesystem.write	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-git-workspace	workspaceProfile	STRING	true			false					0	0	0	continue,conflict,unmerged
-github-app-review	githubProfile	STRING	true			false					0	0	0	—
-github-app-review	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-github-events-source	githubProfile	STRING	true			false					0	0	0	—
-github-workflow-watch	githubProfile	STRING	true			false					0	0	0	—
-github-workflow-watch	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-http-request	url	URI	true			false					0	0	0	$successOutcome,$failureOutcome
-http-request	method	STRING	false	GET	GET,POST,PUT,PATCH,DELETE	false					0	0	0	$successOutcome,$failureOutcome
-http-request	body	TEXT	false			false					0	0	0	$successOutcome,$failureOutcome
-http-request	timeoutMs	INTEGER	false	10000		false					0	0	0	$successOutcome,$failureOutcome
-http-request	credentialRef	SECRET_REFERENCE	false			false					0	0	0	$successOutcome,$failureOutcome
-http-request	credentialHeader	STRING	false	Authorization		false					0	0	0	$successOutcome,$failureOutcome
-http-request	credentialScheme	STRING	false	Bearer		false					0	0	0	$successOutcome,$failureOutcome
-http-request	successOutcome	STRING	false	continue		false					0	0	0	$successOutcome,$failureOutcome
-http-request	failureOutcome	STRING	false	error		false					0	0	0	$successOutcome,$failureOutcome
-http-request	recovery.repeatable	STRING	false		repeatable,not-repeatable	false		method:ONE_OF:POST,PUT,PATCH,DELETE			0	0	0	$successOutcome,$failureOutcome
-human-task	title	STRING	true			false					256	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	description	TEXT	false			false					4096	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	responseContentType	STRING	false	application/vnd.ravenroot.payload+json		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	responseSchema	STRING	false	ravenroot.human-task.response		false					128	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	responseSchemaVersion	STRING	false	1		false					128	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	responseKind	STRING	false	MAP	SCALAR,LIST,MAP	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	maxResponseBytes	INTEGER	false	65536		false			1	262144	0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationPresentationVersion	STRING	false		1	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationPrompt	TEXT	false	Confirm this task.		false	confirmationPresentationVersion:EQUALS:1				4096	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationComment	STRING	false	OPTIONAL	DISALLOWED,OPTIONAL,REQUIRED	false	confirmationPresentationVersion:EQUALS:1				0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationActions	STRING	false	RESOLVE,DENY,CANCEL		false	confirmationPresentationVersion:EQUALS:1				0	3	7	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationResolveLabel	STRING	false	Confirm		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationDenyLabel	STRING	false	Deny		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	confirmationCancelLabel	STRING	false	Cancel		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	authorizedRoles	TEXT	false			false					0	16	256	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	authorizedScopes	TEXT	false			false					0	16	256	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	escalateAfterSeconds	INTEGER	false	0		false			0	2591999	0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	expiresAfterSeconds	INTEGER	false	604800		false			1	2592000	0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	correlationSource	STRING	false	task-id	task-id	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	deduplicationSource	STRING	false	attempt-id	attempt-id	false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	resolvedOutcome	STRING	false	resolved		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	deniedOutcome	STRING	false	denied		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	expiredOutcome	STRING	false	expired		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-human-task	cancelledOutcome	STRING	false	cancelled		false					0	0	0	$resolvedOutcome,$deniedOutcome,$expiredOutcome,$cancelledOutcome
-jdbc.insert	profile	STRING	true			false					0	0	0	continue
-jdbc.insert	statement	STRING	true			false					0	0	0	continue
-jdbc.query	profile	STRING	true			false					0	0	0	continue
-jdbc.query	statement	STRING	true			false					0	0	0	continue
-json-parse	source	TEXT	false	{{payload}}		false					0	0	0	continue
-json-path	path	STRING	true			false					0	0	0	continue
-kafka.consume	clusterProfile	STRING	true			false					0	0	0	—
-kafka.consume	subscriptionMode	STRING	false	profile	profile,topics,pattern	false					0	0	0	—
-kafka.consume	topics	STRING	false			false	subscriptionMode:EQUALS:topics	subscriptionMode:EQUALS:topics			0	0	0	—
-kafka.consume	topicPattern	STRING	false			false	subscriptionMode:EQUALS:pattern	subscriptionMode:EQUALS:pattern			0	0	0	—
-kafka.consume	group	STRING	false			false					0	0	0	—
-kafka.consume	staticMember	STRING	false	profile	profile,dynamic	false					0	0	0	—
-kafka.consume	maxInFlight	INTEGER	false			false					0	0	0	—
-kafka.consume	pollTimeoutMs	INTEGER	false			false					0	0	0	—
-kafka.consume	drainTimeoutMs	INTEGER	false			false					0	0	0	—
-kafka.consume	retryBackoffMs	INTEGER	false			false					0	0	0	—
-kafka.consume	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
-kafka.consume	poisonAttempts	INTEGER	false			false					0	0	0	—
-kafka.consume	poisonPolicy	STRING	false	profile	profile,halt,dead-letter	false					0	0	0	—
-kafka.consume	deadLetterTopic	STRING	false			false	poisonPolicy:EQUALS:dead-letter	poisonPolicy:EQUALS:dead-letter			0	0	0	—
-kafka.consume	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
-kafka.produce	clusterProfile	STRING	true			false					0	0	0	—
-kafka.produce	topic	STRING	false			false					0	0	0	—
-kafka.produce	timeoutMs	INTEGER	false			false					0	0	0	—
-kafka.produce	maxConcurrency	INTEGER	false			false					0	0	0	—
-kafka.produce	maxRecordBytes	INTEGER	false			false					0	0	0	—
-kafka.produce	correlationId	STRING	false			false					0	0	0	—
-kafka.produce	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-llm-prompt	provider	STRING	true			true					0	0	0	continue
-llm-prompt	prompt	TEXT	true			false					0	0	0	continue
-llm-prompt	model	STRING	false			false					0	0	0	continue
-llm-prompt	timeoutMs	INTEGER	false			false					0	0	0	continue
-llm-prompt	maxTokens	INTEGER	false			false					0	0	0	continue
-llm-prompt	temperature	STRING	false			false					0	0	0	continue
-llm-prompt	topP	STRING	false			false					0	0	0	continue
-llm-prompt	seed	INTEGER	false			false					0	0	0	continue
-log	message	TEXT	false	{{payload}}		false					0	0	0	continue
-mail.imap.consume	profile	STRING	true			false					0	0	0	—
-mail.imap.consume	folder	STRING	false			false					0	0	0	—
-mail.imap.consume	pollIntervalMs	INTEGER	false			false					0	0	0	—
-mail.imap.consume	batchSize	INTEGER	false			false					0	0	0	—
-mail.imap.consume	maxInFlight	INTEGER	false	1	1	false					0	0	0	—
-mail.imap.consume	retryBackoffMs	INTEGER	false			false					0	0	0	—
-mail.imap.consume	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
-mail.imap.consume	poisonAttempts	INTEGER	false			false					0	0	0	—
-mail.imap.consume	contentMode	STRING	false	metadata	metadata,preview	false					0	0	0	—
-mail.imap.consume	previewChars	INTEGER	false			false	contentMode:EQUALS:preview	contentMode:EQUALS:preview			0	0	0	—
-mail.imap.consume	allowedHeaders	STRING	false			false					0	0	0	—
-mail.imap.consume	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
-mail.imap.delete	profile	STRING	true			false					0	0	0	—
-mail.imap.delete	sourceFolder	STRING	false	INBOX		false					0	0	0	—
-mail.imap.delete	deleteMode	STRING	false	TRASH	TRASH,HARD_DELETE	false					0	0	0	—
-mail.imap.delete	hardDeleteAcknowledgement	STRING	false		I_UNDERSTAND_EXPUNGE_IS_PERMANENT	false	deleteMode:EQUALS:HARD_DELETE	deleteMode:EQUALS:HARD_DELETE			0	0	0	—
-mail.imap.delete	maxConcurrency	INTEGER	false			false					0	0	0	—
-mail.imap.delete	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-mail.imap.move	profile	STRING	true			false					0	0	0	—
-mail.imap.move	sourceFolder	STRING	false	INBOX		false					0	0	0	—
-mail.imap.move	destinationFolder	STRING	true			false					0	0	0	—
-mail.imap.move	maxConcurrency	INTEGER	false			false					0	0	0	—
-mail.imap.move	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-mail.imap.query	profile	STRING	true			false					0	0	0	—
-mail.imap.query	folder	STRING	false	INBOX		false					0	0	0	—
-mail.imap.query	limit	INTEGER	false	50		false					0	0	0	—
-mail.imap.query	contentMode	STRING	false	preview	preview,full	false					0	0	0	—
-mail.imap.query	maxConcurrency	INTEGER	false			false					0	0	0	—
-mail.imap.query	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-mail.send	mailProfile	STRING	true			false					0	0	0	—
-mail.send	host	STRING	false			false					0	0	0	—
-mail.send	port	INTEGER	false			false					0	0	0	—
-mail.send	securityMode	STRING	false			false					0	0	0	—
-mail.send	tlsVerify	BOOLEAN	false	true		false					0	0	0	—
-mail.send	authUsername	STRING	false			false					0	0	0	—
-mail.send	credentialRef	SECRET_REFERENCE	false			false					0	0	0	—
-mail.send	connectTimeoutMs	INTEGER	false			false					0	0	0	—
-mail.send	readTimeoutMs	INTEGER	false			false					0	0	0	—
-mail.send	writeTimeoutMs	INTEGER	false			false					0	0	0	—
-mail.send	retries	INTEGER	false			false					0	0	0	—
-mail.send	maxRecipients	INTEGER	false			false					0	0	0	—
-mail.send	maxHeaders	INTEGER	false			false					0	0	0	—
-mail.send	maxHeaderChars	INTEGER	false			false					0	0	0	—
-mail.send	maxBodyChars	INTEGER	false			false					0	0	0	—
-mail.send	maxAttachments	INTEGER	false			false					0	0	0	—
-mail.send	maxAttachmentBytes	INTEGER	false			false					0	0	0	—
-mail.send	maxTotalAttachmentBytes	INTEGER	false			false					0	0	0	—
-mail.send	maxEncodedAttachmentBytes	INTEGER	false			false					0	0	0	—
-mail.send	maxConcurrency	INTEGER	false			false					0	0	0	—
-mail.send	defaultFrom	STRING	false			false					0	0	0	—
-object.delete	storageProfile	STRING	true			false					0	0	0	—
-object.delete	key	STRING	true			false					0	0	0	—
-object.delete	timeoutMs	INTEGER	false			false					0	0	0	—
-object.delete	maxConcurrency	INTEGER	false			false					0	0	0	—
-object.delete	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-object.get	storageProfile	STRING	true			false					0	0	0	—
-object.get	key	STRING	true			false					0	0	0	—
-object.get	encoding	STRING	false	base64	text,base64	false					0	0	0	—
-object.get	maxBytes	INTEGER	false			false					0	0	0	—
-object.get	timeoutMs	INTEGER	false			false					0	0	0	—
-object.get	maxConcurrency	INTEGER	false			false					0	0	0	—
-object.list	storageProfile	STRING	true			false					0	0	0	—
-object.list	prefix	STRING	false			false					0	0	0	—
-object.list	projection	STRING	false			false					0	0	0	—
-object.list	maxResults	INTEGER	false	100		false					0	0	0	—
-object.list	timeoutMs	INTEGER	false			false					0	0	0	—
-object.list	maxConcurrency	INTEGER	false			false					0	0	0	—
-object.list	retries	INTEGER	false	0		false					0	0	0	—
-object.list	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-object.put	storageProfile	STRING	true			false					0	0	0	—
-object.put	key	STRING	true			false					0	0	0	—
-object.put	maxBytes	INTEGER	false			false					0	0	0	—
-object.put	timeoutMs	INTEGER	false			false					0	0	0	—
-object.put	maxConcurrency	INTEGER	false			false					0	0	0	—
-ocr.extract	ocrProfile	STRING	true			false					0	0	0	—
-ocr.extract	language	STRING	true			false					0	0	0	—
-ocr.extract	deadlineMs	INTEGER	false			false					0	0	0	—
-ocr.extract	maxInputBytes	INTEGER	false			false					0	0	0	—
-ocr.extract	maxOutputBytes	INTEGER	false			false					0	0	0	—
-ocr.extract	maxConcurrency	INTEGER	false			false					0	0	0	—
-openapi.call	apiProfile	STRING	true			false					0	0	0	—
-openapi.call	operationId	STRING	true			false					0	0	0	—
-openapi.call	timeoutMs	INTEGER	false			false					0	0	0	—
-openapi.call	maxRequestBytes	INTEGER	false			false					0	0	0	—
-openapi.call	maxResponseBytes	INTEGER	false			false					0	0	0	—
-openapi.call	maxConcurrency	INTEGER	false			false					0	0	0	—
-openapi.receive	apiProfile	STRING	true			false					0	0	0	—
-openapi.receive	operations	STRING	false			false					0	0	0	—
-openapi.receive	maxRequestBytes	INTEGER	false			false					0	0	0	—
-openapi.receive	maxIdempotencyBytes	INTEGER	false			false					0	0	0	—
-openapi.receive	deadlineMs	INTEGER	false			false					0	0	0	—
-openapi.receive	maxConcurrency	INTEGER	false			false					0	0	0	—
-openapi.request-reply	apiProfile	STRING	true			false					0	0	0	responded
-openapi.request-reply	operations	STRING	false			false					0	0	0	responded
-openapi.request-reply	maxRequestBytes	INTEGER	false			false					0	0	0	responded
-openapi.request-reply	maxIdempotencyBytes	INTEGER	false			false					0	0	0	responded
-openapi.request-reply	maxResponseBytes	INTEGER	false			false					0	0	0	responded
-openapi.request-reply	deadlineMs	INTEGER	false			false					0	0	0	responded
-openapi.request-reply	maxConcurrency	INTEGER	false			false					0	0	0	responded
-program	language	STRING	true			false					0	0	0	continue
-program	source	TEXT	true			false					0	0	0	continue
-program	testPayload	TEXT	false	test payload		false					0	0	0	continue
-program	artifactId	STRING	false			false					0	0	0	continue
-project-transition	githubProfile	STRING	true			false					0	0	0	—
-project-transition	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-release-prepare	githubProfile	STRING	true			false					0	0	0	—
-release-prepare	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-slack.commands	slackProfile	STRING	true			false					0	0	0	—
-slack.events	slackProfile	STRING	true			false					0	0	0	—
-slack.post-message	slackProfile	STRING	true			false					0	0	0	—
-slack.post-message	channelId	STRING	false			false					0	0	0	—
-slack.post-message	requestTimeoutMs	INTEGER	false			false					0	0	0	—
-slack.post-message	maxTextChars	INTEGER	false			false					0	0	0	—
-slack.post-message	maxConcurrency	INTEGER	false			false					0	0	0	—
-slack.post-message	retries	INTEGER	false			false					0	0	0	—
-spel.decision	expression	TEXT	true			false					0	0	0	$trueOutcome,$falseOutcome
-spel.decision	trueOutcome	STRING	false	true		false					0	0	0	$trueOutcome,$falseOutcome
-spel.decision	falseOutcome	STRING	false	false		false					0	0	0	$trueOutcome,$falseOutcome
-spel.transform	expression	TEXT	true			false					0	0	0	continue
-telegram.answer.callback	botProfile	STRING	true			false					0	0	0	—
-telegram.answer.callback	requestTimeoutMs	INTEGER	false			false					0	0	0	—
-telegram.answer.callback	maxTextChars	INTEGER	false			false					0	0	0	—
-telegram.answer.callback	maxConcurrency	INTEGER	false			false					0	0	0	—
-telegram.answer.callback	retries	INTEGER	false			false					0	0	0	—
-telegram.answer.callback	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-telegram.delete.message	botProfile	STRING	true			false					0	0	0	—
-telegram.delete.message	requestTimeoutMs	INTEGER	false			false					0	0	0	—
-telegram.delete.message	maxConcurrency	INTEGER	false			false					0	0	0	—
-telegram.delete.message	retries	INTEGER	false			false					0	0	0	—
-telegram.delete.message	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-telegram.edit.message	botProfile	STRING	true			false					0	0	0	—
-telegram.edit.message	requestTimeoutMs	INTEGER	false			false					0	0	0	—
-telegram.edit.message	maxTextChars	INTEGER	false			false					0	0	0	—
-telegram.edit.message	maxButtons	INTEGER	false			false					0	0	0	—
-telegram.edit.message	maxConcurrency	INTEGER	false			false					0	0	0	—
-telegram.edit.message	retries	INTEGER	false			false					0	0	0	—
-telegram.edit.message	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
-telegram.send	botProfile	STRING	true			false					0	0	0	—
-telegram.send	requestTimeoutMs	INTEGER	false			false					0	0	0	—
-telegram.send	maxTextChars	INTEGER	false			false					0	0	0	—
-telegram.send	maxMediaBytes	INTEGER	false			false					0	0	0	—
-telegram.send	maxButtons	INTEGER	false			false					0	0	0	—
-telegram.send	maxConcurrency	INTEGER	false			false					0	0	0	—
-telegram.send	retries	INTEGER	false			false					0	0	0	—
-template	template	TEXT	true			false					0	0	0	continue
-websocket.receive	websocketProfile	STRING	true			false					0	0	0	—
-websocket.receive	maxMessageBytes	INTEGER	false			false					0	0	0	—
-websocket.receive	maxFragments	INTEGER	false			false					0	0	0	—
-websocket.receive	timeoutMs	INTEGER	false			false					0	0	0	—
-websocket.send	websocketProfile	STRING	true			false					0	0	0	—
-websocket.send	maxMessageBytes	INTEGER	false			false					0	0	0	—
-websocket.send	maxFragments	INTEGER	false			false					0	0	0	—
-websocket.send	timeoutMs	INTEGER	false			false					0	0	0	—
+behavior	displayName	category	description	visualType	agentic	capabilities	defaultNature	allowedNatures	commands	runtimeConcurrencyDefault	runtimeConcurrencyCeiling	property	type	required	default	allowed	adapterBinding	visibleWhen	requiredWhen	minimum	maximum	maximumUtf8Bytes	maximumItems	maximumItemUtf8Bytes	descriptorOutcomes
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	provider	STRING	true			true					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	instructions	TEXT	true			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	objective	TEXT	true			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	model	STRING	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	mcpServers	STRING	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	maxTurns	INTEGER	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	maxTotalTokens	INTEGER	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	timeoutMs	INTEGER	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	maxTokens	INTEGER	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	temperature	STRING	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	topP	STRING	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	seed	INTEGER	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.1.name	STRING	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.1.description	STRING	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.1.instructions	TEXT	false			false					0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.2.name	STRING	false			false	skills.1.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.2.description	STRING	false			false	skills.1.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.2.instructions	TEXT	false			false	skills.1.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.3.name	STRING	false			false	skills.2.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.3.description	STRING	false			false	skills.2.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.3.instructions	TEXT	false			false	skills.2.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.4.name	STRING	false			false	skills.3.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.4.description	STRING	false			false	skills.3.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.4.instructions	TEXT	false			false	skills.3.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.5.name	STRING	false			false	skills.4.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.5.description	STRING	false			false	skills.4.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.5.instructions	TEXT	false			false	skills.4.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.6.name	STRING	false			false	skills.5.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.6.description	STRING	false			false	skills.5.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.6.instructions	TEXT	false			false	skills.5.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.7.name	STRING	false			false	skills.6.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.7.description	STRING	false			false	skills.6.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.7.instructions	TEXT	false			false	skills.6.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.8.name	STRING	false			false	skills.7.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.8.description	STRING	false			false	skills.7.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+agent	Agent	AI	Runs a bounded agent loop against an operator-configured OpenAI-compatible model: the model plans, calls the tools this node exposes, reads their results, and continues with its final answer.	agent	true	agentic,ai,credential-reference,external-provider,network				64	256	skills.8.instructions	TEXT	false			false	skills.7.name:PRESENT:				0	0	0	continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	brokerProfile	STRING	true			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	queue	STRING	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	prefetch	INTEGER	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxInFlight	INTEGER	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	retryBackoffMs	INTEGER	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	drainTimeoutMs	INTEGER	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	poisonAttempts	INTEGER	false			false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	poisonPolicy	STRING	false	profile	profile,dead-letter	false					0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	deadLetterMode	STRING	false		broker-dlx	false	poisonPolicy:EQUALS:dead-letter	poisonPolicy:EQUALS:dead-letter			0	0	0	—
+amqp.consume	Consume AMQP deliveries	AMQP 0-9-1	Consumes an operator-authorized queue with bounded QoS and durable manual acknowledgements.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	brokerProfile	STRING	true			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	exchange	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	routingKey	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	mandatory	BOOLEAN	false	true		false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	contentType	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	contentEncoding	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	persistent	BOOLEAN	false	false		false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	priority	INTEGER	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	expirationMs	INTEGER	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	messageId	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	correlationId	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	replyTo	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	type	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	appId	STRING	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	headers	TEXT	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	confirmTimeoutMs	INTEGER	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+amqp.publish	Publish AMQP message	AMQP 0-9-1	Publishes one bounded message with mandatory returns and publisher confirms.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+boundary-guard	Publication boundary guard	Security	Evaluates a typed publication candidate against an operator-owned immutable policy profile. It validates but never publishes, rewrites, or silently redacts content.	decision	false	policy,publication-boundary				64	256	policyId	STRING	true			false					0	0	0	continue: The exact candidate passed the pinned policy.; violation: Evaluation failed closed or a policy rule refused the candidate.
+boundary-guard	Publication boundary guard	Security	Evaluates a typed publication candidate against an operator-owned immutable policy profile. It validates but never publishes, rewrites, or silently redacts content.	decision	false	policy,publication-boundary				64	256	policyVersion	STRING	true			false					0	0	0	continue: The exact candidate passed the pinned policy.; violation: Evaluation failed closed or a policy rule refused the candidate.
+boundary-guard	Publication boundary guard	Security	Evaluates a typed publication candidate against an operator-owned immutable policy profile. It validates but never publishes, rewrites, or silently redacts content.	decision	false	policy,publication-boundary				64	256	policyDigest	STRING	true			false					0	0	0	continue: The exact candidate passed the pinned policy.; violation: Evaluation failed closed or a policy rule refused the candidate.
+cel-decision	CEL decision	Control flow	Routes the unchanged payload using the result of a checked CEL boolean expression.	flow	false	cel,deterministic				64	256	expression	CEL_EXPRESSION	true			false					0	0	0	$trueOutcome: The expression evaluated to true.; $falseOutcome: The expression evaluated to anything other than true.
+cel-decision	CEL decision	Control flow	Routes the unchanged payload using the result of a checked CEL boolean expression.	flow	false	cel,deterministic				64	256	trueOutcome	STRING	false	true		false					0	0	0	$trueOutcome: The expression evaluated to true.; $falseOutcome: The expression evaluated to anything other than true.
+cel-decision	CEL decision	Control flow	Routes the unchanged payload using the result of a checked CEL boolean expression.	flow	false	cel,deterministic				64	256	falseOutcome	STRING	false	false		false					0	0	0	$trueOutcome: The expression evaluated to true.; $falseOutcome: The expression evaluated to anything other than true.
+cel-transform	CEL transform	Transformations	Evaluates a checked, non-Turing-complete CEL expression against payload, attributes and properties.	flow	false	cel,deterministic				64	256	expression	CEL_EXPRESSION	true			false					0	0	0	continue: The expression result becomes the outgoing payload. The only outcome this node produces: a CEL evaluation error fails the node instead. Note that cel-transform never branches on its result — cel-decision does.
+delay	Delay	Control flow	Waits asynchronously for a bounded duration, then passes the payload through unchanged.	flow	false	control-flow,non-blocking				64	256	durationMs	INTEGER	false	1000		false					0	0	0	continue: The wait elapsed and the payload passes through unchanged. The only outcome this node produces: the handler below returns it unconditionally.
+discord.interactions	Receive Discord slash command	Discord	Verifies and durably accepts guild slash commands relayed with the original signed body.	source	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	discordProfile	STRING	true			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	discordProfile	STRING	true			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	channelId	STRING	false			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	maxContentChars	INTEGER	false			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	maxAttachmentBytes	INTEGER	false			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	maxAttachments	INTEGER	false			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+discord.send	Send Discord message	Discord	Sends one bounded discord.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+filesystem.read	Read file	Filesystem	Reads one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem				64	256	filesystemProfile	STRING	true			false					0	0	0	—
+filesystem.read	Read file	Filesystem	Reads one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem				64	256	path	STRING	true			false					0	0	0	—
+filesystem.read	Read file	Filesystem	Reads one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem				64	256	encoding	STRING	false	utf-8	utf-8,base64	false					0	0	0	—
+filesystem.read	Read file	Filesystem	Reads one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem				64	256	maxBytes	INTEGER	false			false					0	0	0	—
+filesystem.read	Read file	Filesystem	Reads one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem				64	256	deadlineMs	INTEGER	false			false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	filesystemProfile	STRING	true			false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	path	STRING	true			false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	encoding	STRING	false	utf-8	utf-8,base64	false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	mode	STRING	false	create-new	create-new,replace	false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	maxBytes	INTEGER	false			false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	deadlineMs	INTEGER	false			false					0	0	0	—
+filesystem.write	Write file	Filesystem	Atomically creates or replaces one bounded regular file through an operator-owned root-confined profile.	actor	false	filesystem,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+git-workspace	Confined Git workspace	Source control	Provisions, integrates, and verifies one operator-confined provider-neutral Git workspace.	process	false	filesystem,network,process,side-effect				64	256	workspaceProfile	STRING	true			false					0	0	0	continue: The operation completed or reconciled safely.; conflict: Existing workspace or branch state requires review.; unmerged: The accepted content is absent from the remote base.
+github-app-review	Submit GitHub App review	GitHub	Submits one content-bound formal review only after an exact-head check.	actor	false	credential-reference,network,side-effect				64	256	githubProfile	STRING	true			false					0	0	0	—
+github-app-review	Submit GitHub App review	GitHub	Submits one content-bound formal review only after an exact-head check.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+github-events-source	Receive GitHub event	GitHub	Verifies and durably accepts a relayed GitHub webhook.	source	false	credential-reference,durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	githubProfile	STRING	true			false					0	0	0	—
+github-workflow-watch	Watch GitHub workflows	GitHub	Waits durably for configured workflows on one exact commit.	actor	false	credential-reference,network				64	256	githubProfile	STRING	true			false					0	0	0	—
+github-workflow-watch	Watch GitHub workflows	GitHub	Waits durably for configured workflows on one exact commit.	actor	false	credential-reference,network				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	url	URI	true			false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	method	STRING	false	GET	GET,POST,PUT,PATCH,DELETE	false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	body	TEXT	false			false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	timeoutMs	INTEGER	false	10000		false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	credentialRef	SECRET_REFERENCE	false			false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	credentialHeader	STRING	false	Authorization		false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	credentialScheme	STRING	false	Bearer		false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	successOutcome	STRING	false	continue		false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	failureOutcome	STRING	false	error		false					0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+http-request	HTTP request	Connectors	Calls an allowlisted HTTP endpoint. Secrets are resolved server-side by opaque reference.	consumer	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false		method:ONE_OF:POST,PUT,PATCH,DELETE			0	0	0	$successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	title	STRING	true			false					256	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	description	TEXT	false			false					4096	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	responseContentType	STRING	false	application/vnd.ravenroot.payload+json		false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	responseSchema	STRING	false	ravenroot.human-task.response		false					128	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	responseSchemaVersion	STRING	false	1		false					128	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	responseKind	STRING	false	MAP	SCALAR,LIST,MAP	false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	maxResponseBytes	INTEGER	false	65536		false			1	262144	0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationPresentationVersion	STRING	false		1	false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationPrompt	TEXT	false	Confirm this task.		false	confirmationPresentationVersion:EQUALS:1				4096	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationComment	STRING	false	OPTIONAL	DISALLOWED,OPTIONAL,REQUIRED	false	confirmationPresentationVersion:EQUALS:1				0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationActions	STRING	false	RESOLVE,DENY,CANCEL		false	confirmationPresentationVersion:EQUALS:1				0	3	7	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationResolveLabel	STRING	false	Confirm		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationDenyLabel	STRING	false	Deny		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	confirmationCancelLabel	STRING	false	Cancel		false	confirmationPresentationVersion:EQUALS:1				64	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	authorizedRoles	TEXT	false			false					0	16	256	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	authorizedScopes	TEXT	false			false					0	16	256	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	escalateAfterSeconds	INTEGER	false	0		false			0	2591999	0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	expiresAfterSeconds	INTEGER	false	604800		false			1	2592000	0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	correlationSource	STRING	false	task-id	task-id	false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	deduplicationSource	STRING	false	attempt-id	attempt-id	false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	resolvedOutcome	STRING	false	resolved		false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	deniedOutcome	STRING	false	denied		false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	expiredOutcome	STRING	false	expired		false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+human-task	Human task	Human workflow	Creates durable, tenant-scoped work for a person and resumes from the pinned graph version.	flow	false	bounded-metadata,durable,embedded-confirmation-v1,human-task,restart-safe				64	256	cancelledOutcome	STRING	false	cancelled		false					0	0	0	$resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task.
+jdbc.insert	Profiled JDBC insert	Integrations	Executes one operator-approved prepared JDBC statement with bounded named parameters.	database	false	network,side-effect				64	256	profile	STRING	true			false					0	0	0	continue: The bounded JDBC result.
+jdbc.insert	Profiled JDBC insert	Integrations	Executes one operator-approved prepared JDBC statement with bounded named parameters.	database	false	network,side-effect				64	256	statement	STRING	true			false					0	0	0	continue: The bounded JDBC result.
+jdbc.query	Profiled JDBC query	Data	Executes one operator-approved prepared JDBC statement with bounded named parameters.	database	false	network				64	256	profile	STRING	true			false					0	0	0	continue: The bounded JDBC result.
+jdbc.query	Profiled JDBC query	Data	Executes one operator-approved prepared JDBC statement with bounded named parameters.	database	false	network				64	256	statement	STRING	true			false					0	0	0	continue: The bounded JDBC result.
+json-parse	JSON parse	Transformations	Parses JSON text into a structured payload that later nodes can address field by field.	flow	false	deterministic				64	256	source	TEXT	false	{{payload}}		false					0	0	0	continue: The decoded value becomes the outgoing payload. Non-JSON text, or a document beyond the limits, fails the node instead of producing an outcome.
+json-path	JSONPath	Transformations	Selects RFC 9535 JSONPath matches from bounded structured JSON or JSON text.	flow	false	deterministic,json,rfc-9535				64	256	path	STRING	true			false					0	0	0	continue: The ordered match array becomes the outgoing payload. Invalid input, query, or resource usage fails the node instead.
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	clusterProfile	STRING	true			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	subscriptionMode	STRING	false	profile	profile,topics,pattern	false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	topics	STRING	false			false	subscriptionMode:EQUALS:topics	subscriptionMode:EQUALS:topics			0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	topicPattern	STRING	false			false	subscriptionMode:EQUALS:pattern	subscriptionMode:EQUALS:pattern			0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	group	STRING	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	staticMember	STRING	false	profile	profile,dynamic	false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxInFlight	INTEGER	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	pollTimeoutMs	INTEGER	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	drainTimeoutMs	INTEGER	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	retryBackoffMs	INTEGER	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	poisonAttempts	INTEGER	false			false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	poisonPolicy	STRING	false	profile	profile,halt,dead-letter	false					0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	deadLetterTopic	STRING	false			false	poisonPolicy:EQUALS:dead-letter	poisonPolicy:EQUALS:dead-letter			0	0	0	—
+kafka.consume	Consume Kafka records	Kafka	Consumes an operator-authorized Kafka group with manual contiguous durable offset commits.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	clusterProfile	STRING	true			false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	topic	STRING	false			false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	maxRecordBytes	INTEGER	false			false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	correlationId	STRING	false			false					0	0	0	—
+kafka.produce	Produce Kafka record	Kafka	Produces one bounded idempotent Kafka record.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	provider	STRING	true			true					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	prompt	TEXT	true			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	model	STRING	false			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	timeoutMs	INTEGER	false			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	maxTokens	INTEGER	false			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	temperature	STRING	false			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	topP	STRING	false			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+llm-prompt	LLM prompt	AI	Sends the incoming payload to an operator-configured OpenAI-compatible model, following a prompt, and continues with the model's answer.	agent	false	ai,credential-reference,external-provider,network				64	256	seed	INTEGER	false			false					0	0	0	continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node.
+log	Log	Actions	Writes an intentional workflow message to the server log and passes the payload through.	handler	false	deterministic,side-effect				64	256	message	TEXT	false	{{payload}}		false					0	0	0	continue: The message was written and the payload passes through. The only outcome this node produces: an unresolvable placeholder fails the node instead.
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	profile	STRING	true			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	folder	STRING	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	pollIntervalMs	INTEGER	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	batchSize	INTEGER	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxInFlight	INTEGER	false	1	1	false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	retryBackoffMs	INTEGER	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxRetryBackoffMs	INTEGER	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	poisonAttempts	INTEGER	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	contentMode	STRING	false	metadata	metadata,preview	false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	previewChars	INTEGER	false			false	contentMode:EQUALS:preview	contentMode:EQUALS:preview			0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	allowedHeaders	STRING	false			false					0	0	0	—
+mail.imap.consume	Consume mailbox messages	Mail	Polls one operator-authorized IMAP folder and starts one durable traversal per message.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	checkpointPolicy	STRING	false	require-durable	require-durable	false					0	0	0	—
+mail.imap.delete	Delete message	Mail	Moves one IMAP message to trash or explicitly expunges exactly one UID.	actor	false	credential-reference,network,side-effect				64	256	profile	STRING	true			false					0	0	0	—
+mail.imap.delete	Delete message	Mail	Moves one IMAP message to trash or explicitly expunges exactly one UID.	actor	false	credential-reference,network,side-effect				64	256	sourceFolder	STRING	false	INBOX		false					0	0	0	—
+mail.imap.delete	Delete message	Mail	Moves one IMAP message to trash or explicitly expunges exactly one UID.	actor	false	credential-reference,network,side-effect				64	256	deleteMode	STRING	false	TRASH	TRASH,HARD_DELETE	false					0	0	0	—
+mail.imap.delete	Delete message	Mail	Moves one IMAP message to trash or explicitly expunges exactly one UID.	actor	false	credential-reference,network,side-effect				64	256	hardDeleteAcknowledgement	STRING	false		I_UNDERSTAND_EXPUNGE_IS_PERMANENT	false	deleteMode:EQUALS:HARD_DELETE	deleteMode:EQUALS:HARD_DELETE			0	0	0	—
+mail.imap.delete	Delete message	Mail	Moves one IMAP message to trash or explicitly expunges exactly one UID.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.imap.delete	Delete message	Mail	Moves one IMAP message to trash or explicitly expunges exactly one UID.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+mail.imap.move	Move message	Mail	Moves one IMAP message by source folder, UIDVALIDITY and UID.	actor	false	credential-reference,network,side-effect				64	256	profile	STRING	true			false					0	0	0	—
+mail.imap.move	Move message	Mail	Moves one IMAP message by source folder, UIDVALIDITY and UID.	actor	false	credential-reference,network,side-effect				64	256	sourceFolder	STRING	false	INBOX		false					0	0	0	—
+mail.imap.move	Move message	Mail	Moves one IMAP message by source folder, UIDVALIDITY and UID.	actor	false	credential-reference,network,side-effect				64	256	destinationFolder	STRING	true			false					0	0	0	—
+mail.imap.move	Move message	Mail	Moves one IMAP message by source folder, UIDVALIDITY and UID.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.imap.move	Move message	Mail	Moves one IMAP message by source folder, UIDVALIDITY and UID.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+mail.imap.query	Query mailbox	Mail	One-shot read-only IMAP query.	actor	false	credential-reference,network				64	256	profile	STRING	true			false					0	0	0	—
+mail.imap.query	Query mailbox	Mail	One-shot read-only IMAP query.	actor	false	credential-reference,network				64	256	folder	STRING	false	INBOX		false					0	0	0	—
+mail.imap.query	Query mailbox	Mail	One-shot read-only IMAP query.	actor	false	credential-reference,network				64	256	limit	INTEGER	false	50		false					0	0	0	—
+mail.imap.query	Query mailbox	Mail	One-shot read-only IMAP query.	actor	false	credential-reference,network				64	256	contentMode	STRING	false	preview	preview,full	false					0	0	0	—
+mail.imap.query	Query mailbox	Mail	One-shot read-only IMAP query.	actor	false	credential-reference,network				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.imap.query	Query mailbox	Mail	One-shot read-only IMAP query.	actor	false	credential-reference,network				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	mailProfile	STRING	true			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	host	STRING	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	port	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	securityMode	STRING	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	tlsVerify	BOOLEAN	false	true		false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	authUsername	STRING	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	credentialRef	SECRET_REFERENCE	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	connectTimeoutMs	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	readTimeoutMs	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	writeTimeoutMs	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxRecipients	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxHeaders	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxHeaderChars	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxBodyChars	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxAttachments	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxAttachmentBytes	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxTotalAttachmentBytes	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxEncodedAttachmentBytes	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+mail.send	Send email	Mail	Sends a mail.send.v1 message through SMTP.	actor	false	credential-reference,network,side-effect				64	256	defaultFrom	STRING	false			false					0	0	0	—
+object.delete	Delete object	Object storage	Deletes one object inside an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	storageProfile	STRING	true			false					0	0	0	—
+object.delete	Delete object	Object storage	Deletes one object inside an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	key	STRING	true			false					0	0	0	—
+object.delete	Delete object	Object storage	Deletes one object inside an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+object.delete	Delete object	Object storage	Deletes one object inside an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+object.delete	Delete object	Object storage	Deletes one object inside an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+object.get	Get object	Object storage	Reads one bounded object from an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	storageProfile	STRING	true			false					0	0	0	—
+object.get	Get object	Object storage	Reads one bounded object from an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	key	STRING	true			false					0	0	0	—
+object.get	Get object	Object storage	Reads one bounded object from an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	encoding	STRING	false	base64	text,base64	false					0	0	0	—
+object.get	Get object	Object storage	Reads one bounded object from an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	maxBytes	INTEGER	false			false					0	0	0	—
+object.get	Get object	Object storage	Reads one bounded object from an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+object.get	Get object	Object storage	Reads one bounded object from an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	storageProfile	STRING	true			false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	prefix	STRING	false			false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	projection	STRING	false			false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	maxResults	INTEGER	false	100		false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	retries	INTEGER	false	0		false					0	0	0	—
+object.list	List objects	Object storage	Lists bounded safe metadata within an operator-owned S3-compatible profile.	actor	false	credential-reference,network				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+object.put	Put object	Object storage	Writes one bounded object to an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	storageProfile	STRING	true			false					0	0	0	—
+object.put	Put object	Object storage	Writes one bounded object to an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	key	STRING	true			false					0	0	0	—
+object.put	Put object	Object storage	Writes one bounded object to an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	maxBytes	INTEGER	false			false					0	0	0	—
+object.put	Put object	Object storage	Writes one bounded object to an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+object.put	Put object	Object storage	Writes one bounded object to an operator-owned S3-compatible profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+ocr.extract	Extract text with OCR	Documents	Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable.	actor	false	compute,local-process				64	256	ocrProfile	STRING	true			false					0	0	0	—
+ocr.extract	Extract text with OCR	Documents	Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable.	actor	false	compute,local-process				64	256	language	STRING	true			false					0	0	0	—
+ocr.extract	Extract text with OCR	Documents	Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable.	actor	false	compute,local-process				64	256	deadlineMs	INTEGER	false			false					0	0	0	—
+ocr.extract	Extract text with OCR	Documents	Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable.	actor	false	compute,local-process				64	256	maxInputBytes	INTEGER	false			false					0	0	0	—
+ocr.extract	Extract text with OCR	Documents	Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable.	actor	false	compute,local-process				64	256	maxOutputBytes	INTEGER	false			false					0	0	0	—
+ocr.extract	Extract text with OCR	Documents	Extracts bounded UTF-8 text from one inline PNG, JPEG or TIFF using an operator-fixed local Tesseract executable.	actor	false	compute,local-process				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+openapi.call	Call OpenAPI operation	OpenAPI	Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile.	actor	false	credential-reference,network,side-effect				64	256	apiProfile	STRING	true			false					0	0	0	—
+openapi.call	Call OpenAPI operation	OpenAPI	Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile.	actor	false	credential-reference,network,side-effect				64	256	operationId	STRING	true			false					0	0	0	—
+openapi.call	Call OpenAPI operation	OpenAPI	Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile.	actor	false	credential-reference,network,side-effect				64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+openapi.call	Call OpenAPI operation	OpenAPI	Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile.	actor	false	credential-reference,network,side-effect				64	256	maxRequestBytes	INTEGER	false			false					0	0	0	—
+openapi.call	Call OpenAPI operation	OpenAPI	Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile.	actor	false	credential-reference,network,side-effect				64	256	maxResponseBytes	INTEGER	false			false					0	0	0	—
+openapi.call	Call OpenAPI operation	OpenAPI	Calls one operation from an immutable operator-owned OpenAPI 3.0.3 profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+openapi.receive	Receive OpenAPI request	OpenAPI	Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202.	actor	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	apiProfile	STRING	true			false					0	0	0	—
+openapi.receive	Receive OpenAPI request	OpenAPI	Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202.	actor	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	operations	STRING	false			false					0	0	0	—
+openapi.receive	Receive OpenAPI request	OpenAPI	Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202.	actor	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	maxRequestBytes	INTEGER	false			false					0	0	0	—
+openapi.receive	Receive OpenAPI request	OpenAPI	Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202.	actor	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	maxIdempotencyBytes	INTEGER	false			false					0	0	0	—
+openapi.receive	Receive OpenAPI request	OpenAPI	Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202.	actor	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	deadlineMs	INTEGER	false			false					0	0	0	—
+openapi.receive	Receive OpenAPI request	OpenAPI	Durably accepts an operator-authorized OpenAPI 3.0.3 operation and returns HTTP 202.	actor	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	apiProfile	STRING	true			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	operations	STRING	false			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	maxRequestBytes	INTEGER	false			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	maxIdempotencyBytes	INTEGER	false			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	maxResponseBytes	INTEGER	false			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	deadlineMs	INTEGER	false			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+openapi.request-reply	OpenAPI request/reply	OpenAPI	Waits for one declared, validated OpenAPI response from a graph traversal.	actor	false	inbound-source,network,request-reply	SOURCE	SOURCE	respond	64	256	maxConcurrency	INTEGER	false			false					0	0	0	responded: A declared response was accepted for the active HTTP exchange.
+program	Program artifact	Programming	Builds and executes tenant-scoped source through the governed sandbox runtime.	handler	false	artifact-governed,programmable,sandbox-required	WORKER	TRAVERSAL,WORKER		64	256	language	STRING	true			false					0	0	0	continue: The artifact ran and its result becomes the outgoing payload. The only outcome this node produces: a sandbox or artifact error fails the node.
+program	Program artifact	Programming	Builds and executes tenant-scoped source through the governed sandbox runtime.	handler	false	artifact-governed,programmable,sandbox-required	WORKER	TRAVERSAL,WORKER		64	256	source	TEXT	true			false					0	0	0	continue: The artifact ran and its result becomes the outgoing payload. The only outcome this node produces: a sandbox or artifact error fails the node.
+program	Program artifact	Programming	Builds and executes tenant-scoped source through the governed sandbox runtime.	handler	false	artifact-governed,programmable,sandbox-required	WORKER	TRAVERSAL,WORKER		64	256	testPayload	TEXT	false	test payload		false					0	0	0	continue: The artifact ran and its result becomes the outgoing payload. The only outcome this node produces: a sandbox or artifact error fails the node.
+program	Program artifact	Programming	Builds and executes tenant-scoped source through the governed sandbox runtime.	handler	false	artifact-governed,programmable,sandbox-required	WORKER	TRAVERSAL,WORKER		64	256	artifactId	STRING	false			false					0	0	0	continue: The artifact ran and its result becomes the outgoing payload. The only outcome this node produces: a sandbox or artifact error fails the node.
+project-transition	Transition GitHub Project item	GitHub	Applies one generation-fenced Project status transition.	actor	false	credential-reference,network,side-effect				64	256	githubProfile	STRING	true			false					0	0	0	—
+project-transition	Transition GitHub Project item	GitHub	Applies one generation-fenced Project status transition.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+release-prepare	Prepare release metadata	GitHub	Reads an exact commit and proposes bounded release metadata without mutation authority.	actor	false	credential-reference,network				64	256	githubProfile	STRING	true			false					0	0	0	—
+release-prepare	Prepare release metadata	GitHub	Reads an exact commit and proposes bounded release metadata without mutation authority.	actor	false	credential-reference,network				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+slack.commands	Receive Slack command	Slack	Verifies and durably accepts Slack slash commands.	source	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	slackProfile	STRING	true			false					0	0	0	—
+slack.events	Receive Slack event	Slack	Verifies and durably accepts Slack Events API callbacks.	source	false	durable-ingress,inbound-source,network	SOURCE	SOURCE		64	256	slackProfile	STRING	true			false					0	0	0	—
+slack.post-message	Post Slack message	Slack	Posts one bounded slack.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	slackProfile	STRING	true			false					0	0	0	—
+slack.post-message	Post Slack message	Slack	Posts one bounded slack.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	channelId	STRING	false			false					0	0	0	—
+slack.post-message	Post Slack message	Slack	Posts one bounded slack.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+slack.post-message	Post Slack message	Slack	Posts one bounded slack.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	maxTextChars	INTEGER	false			false					0	0	0	—
+slack.post-message	Post Slack message	Slack	Posts one bounded slack.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+slack.post-message	Post Slack message	Slack	Posts one bounded slack.message.v1 payload through an operator-owned profile.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+spel.decision	Restricted SpEL decision	Control flow	Routes a bounded canonical payload using an allowlisted Boolean SpEL expression.	flow	false	deterministic,spel				64	256	expression	TEXT	true			false					0	0	0	$trueOutcome: Expression returned true.; $falseOutcome: Expression returned false.
+spel.decision	Restricted SpEL decision	Control flow	Routes a bounded canonical payload using an allowlisted Boolean SpEL expression.	flow	false	deterministic,spel				64	256	trueOutcome	STRING	false	true		false					0	0	0	$trueOutcome: Expression returned true.; $falseOutcome: Expression returned false.
+spel.decision	Restricted SpEL decision	Control flow	Routes a bounded canonical payload using an allowlisted Boolean SpEL expression.	flow	false	deterministic,spel				64	256	falseOutcome	STRING	false	false		false					0	0	0	$trueOutcome: Expression returned true.; $falseOutcome: Expression returned false.
+spel.transform	Restricted SpEL transform	Transformations	Evaluates an allowlisted SpEL expression over a bounded canonical payload tree.	flow	false	deterministic,spel				64	256	expression	TEXT	true			false					0	0	0	continue: The bounded expression result.
+telegram.answer.callback	Answer Telegram callback	Telegram	Acknowledges one callback query through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	botProfile	STRING	true			false					0	0	0	—
+telegram.answer.callback	Answer Telegram callback	Telegram	Acknowledges one callback query through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	Answer Telegram callback	Telegram	Acknowledges one callback query through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	maxTextChars	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	Answer Telegram callback	Telegram	Acknowledges one callback query through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	Answer Telegram callback	Telegram	Acknowledges one callback query through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+telegram.answer.callback	Answer Telegram callback	Telegram	Acknowledges one callback query through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+telegram.delete.message	Delete Telegram message	Telegram	Explicitly requests deletion of one operator-authorized Telegram message.	actor	false	credential-reference,network,side-effect				64	256	botProfile	STRING	true			false					0	0	0	—
+telegram.delete.message	Delete Telegram message	Telegram	Explicitly requests deletion of one operator-authorized Telegram message.	actor	false	credential-reference,network,side-effect				64	256	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.delete.message	Delete Telegram message	Telegram	Explicitly requests deletion of one operator-authorized Telegram message.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.delete.message	Delete Telegram message	Telegram	Explicitly requests deletion of one operator-authorized Telegram message.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+telegram.delete.message	Delete Telegram message	Telegram	Explicitly requests deletion of one operator-authorized Telegram message.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	botProfile	STRING	true			false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	maxTextChars	INTEGER	false			false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	maxButtons	INTEGER	false			false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+telegram.edit.message	Edit Telegram message	Telegram	Explicitly edits text, caption, or inline markup without sending a new message.	actor	false	credential-reference,network,side-effect				64	256	recovery.repeatable	STRING	false		repeatable,not-repeatable	false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	botProfile	STRING	true			false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	requestTimeoutMs	INTEGER	false			false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	maxTextChars	INTEGER	false			false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	maxMediaBytes	INTEGER	false			false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	maxButtons	INTEGER	false			false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	maxConcurrency	INTEGER	false			false					0	0	0	—
+telegram.send	Send Telegram message	Telegram	Sends one bounded telegram.send.v1 message through an operator-owned bot profile.	actor	false	credential-reference,network,side-effect				64	256	retries	INTEGER	false			false					0	0	0	—
+template	Template	Transformations	Builds a text output from the incoming payload, attributes and node properties.	flow	false	deterministic				64	256	template	TEXT	true			false					0	0	0	continue: The rendered text becomes the outgoing payload. The only outcome this node produces: an unresolvable placeholder fails the node instead.
+websocket.receive	Receive WebSocket frames	WebSocket	Starts a process-local, non-replayable WSS receive source; accepted frames start new traversals and never produce a correlated reply.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	websocketProfile	STRING	true			false					0	0	0	—
+websocket.receive	Receive WebSocket frames	WebSocket	Starts a process-local, non-replayable WSS receive source; accepted frames start new traversals and never produce a correlated reply.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxMessageBytes	INTEGER	false			false					0	0	0	—
+websocket.receive	Receive WebSocket frames	WebSocket	Starts a process-local, non-replayable WSS receive source; accepted frames start new traversals and never produce a correlated reply.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	maxFragments	INTEGER	false			false					0	0	0	—
+websocket.receive	Receive WebSocket frames	WebSocket	Starts a process-local, non-replayable WSS receive source; accepted frames start new traversals and never produce a correlated reply.	actor	false	credential-reference,inbound-source,network	SOURCE	SOURCE		64	256	timeoutMs	INTEGER	false			false					0	0	0	—
+websocket.send	Send WebSocket frame	WebSocket	Writes one bounded text or binary frame through an operator-owned WSS profile.	actor	false	credential-reference,network,side-effect				64	256	websocketProfile	STRING	true			false					0	0	0	—
+websocket.send	Send WebSocket frame	WebSocket	Writes one bounded text or binary frame through an operator-owned WSS profile.	actor	false	credential-reference,network,side-effect				64	256	maxMessageBytes	INTEGER	false			false					0	0	0	—
+websocket.send	Send WebSocket frame	WebSocket	Writes one bounded text or binary frame through an operator-owned WSS profile.	actor	false	credential-reference,network,side-effect				64	256	maxFragments	INTEGER	false			false					0	0	0	—
+websocket.send	Send WebSocket frame	WebSocket	Writes one bounded text or binary frame through an operator-owned WSS profile.	actor	false	credential-reference,network,side-effect				64	256	timeoutMs	INTEGER	false			false					0	0	0	—

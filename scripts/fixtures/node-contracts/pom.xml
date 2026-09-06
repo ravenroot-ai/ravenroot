@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+        <relativePath>../../../ravenroot/pom.xml</relativePath>
+    </parent>
+
+    <groupId>dev.ravenroot.fixture</groupId>
+    <artifactId>ravenroot-node-contract-docs-fixture</artifactId>
+    <name>Ravenroot node contract documentation fixture</name>
+    <description>Non-reactor test harness for generated node contracts and GraphML examples.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-extensions-all</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-core</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-persistence-sqlite</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-server</artifactId>
+            <version>${project.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <ravenroot.repository>${project.basedir}/../../..</ravenroot.repository>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

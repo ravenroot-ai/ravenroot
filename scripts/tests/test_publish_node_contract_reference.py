@@ -25,9 +25,37 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
         self.assertNotIn("`maxButtons`", delete)
         self.assertNotIn("`maxMediaBytes`", delete)
 
+    def test_render_publishes_the_full_catalog_metadata_shape(self) -> None:
+        rendered = PUBLISHER.render()
+        self.assertEqual(53, rendered.count("| Catalog field | Runtime descriptor value |"))
+        for label in (
+            "Display name",
+            "Category",
+            "Description",
+            "Visual type",
+            "Agentic",
+            "Capabilities",
+            "Declared default nature",
+            "Declared allowed natures",
+            "Application command allowlist",
+            "Runtime concurrency",
+            "Outcomes",
+        ):
+            self.assertEqual(53, rendered.count(f"| {label} |"), label)
+
     def test_each_node_links_a_complete_graph(self) -> None:
         rendered = PUBLISHER.render()
         self.assertEqual(53, rendered.count("Complete GraphML example"))
+
+    def test_regeneration_uses_the_isolated_non_reactor_fixture(self) -> None:
+        rendered = PUBLISHER.render()
+        self.assertIn("-DskipTests install", rendered)
+        self.assertIn("-f ../scripts/fixtures/node-contracts/pom.xml", rendered)
+
+    def test_compact_index_links_every_node_anchor(self) -> None:
+        rendered = PUBLISHER.render()
+        self.assertEqual(53, rendered.count("](#"))
+        self.assertIn("may scroll horizontally", rendered)
 
 
 if __name__ == "__main__":

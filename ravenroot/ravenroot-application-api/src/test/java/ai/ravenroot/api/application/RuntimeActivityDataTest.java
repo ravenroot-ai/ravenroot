@@ -1,6 +1,7 @@
 package ai.ravenroot.api.application;
 
 import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadValue;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
@@ -8,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -169,6 +171,71 @@ class RuntimeActivityDataTest {
         assertTrue(json.contains(RuntimeActivityData.TRUNCATION_MARKER), json);
         assertTrue(json.getBytes(StandardCharsets.UTF_8).length <= RuntimeActivityData.MAX_OUTPUT_UTF8_BYTES,
                 () -> "wire bytes=" + json.getBytes(StandardCharsets.UTF_8).length);
+    }
+
+    @Test
+    void oversizedMapsKeepTheSameSortedPrefixWithBoundedAuxiliaryRetention() {
+        Map<String, Object> large = new LinkedHashMap<>();
+        for (int index = 9_999; index >= 0; index--) {
+            large.put("field-%05d".formatted(index), index);
+        }
+
+        String json = PayloadJson.write(RuntimeActivityData.output(large).value());
+
+        assertTrue(json.contains("field-00000"));
+        assertTrue(json.contains("field-00030"));
+        assertFalse(json.contains("field-00031"));
+        assertFalse(json.contains("field-09999"));
+        assertTrue(json.contains("ravenroot:truncated:collection"));
+    }
+
+    @Test
+    void closedPayloadValuesKeepTheSameCanonicalProjectionWithoutExpandingToJava() {
+        PayloadValue closed = PayloadValue.map(Map.of(
+                "alpha", PayloadValue.list(List.of(PayloadValue.of(1L), PayloadValue.of("two"))),
+                "secret", PayloadValue.of("not-a-credential-key")));
+        Map<String, Object> javaValue = Map.of(
+                "alpha", List.of(1L, "two"),
+                "secret", "not-a-credential-key");
+
+        var fromClosed = RuntimeActivityData.output(closed);
+        var fromJava = RuntimeActivityData.output(javaValue);
+
+        assertEquals(PayloadJson.write(fromJava.value()), PayloadJson.write(fromClosed.value()));
+        assertEquals(fromJava.redacted(), fromClosed.redacted());
+        assertEquals(fromJava.truncated(), fromClosed.truncated());
+    }
+
+    @Test
+    void oversizedClosedListsConsumeTheSameBudgetBeforeFollowingSiblings() {
+        List<PayloadValue> oversized = java.util.stream.IntStream.range(0, 40)
+                .mapToObj(index -> PayloadValue.of((long) index)).toList();
+        List<PayloadValue> full = java.util.stream.IntStream.range(0, 32)
+                .mapToObj(index -> PayloadValue.of((long) index)).toList();
+        PayloadValue closed = PayloadValue.map(Map.of(
+                "a", PayloadValue.list(oversized),
+                "b", PayloadValue.list(full),
+                "c", PayloadValue.list(full),
+                "z", PayloadValue.of("tail")));
+        Map<String, Object> javaValue = Map.of(
+                "a", oversized.stream().map(PayloadValue::toJava).toList(),
+                "b", full.stream().map(PayloadValue::toJava).toList(),
+                "c", full.stream().map(PayloadValue::toJava).toList(),
+                "z", "tail");
+
+        assertEquals(PayloadJson.write(RuntimeActivityData.output(javaValue).value()),
+                PayloadJson.write(RuntimeActivityData.output(closed).value()));
+    }
+
+    @Test
+    void cyclicOutputTerminatesAtTheDeclaredMarker() {
+        Map<String, Object> cyclic = new LinkedHashMap<>();
+        cyclic.put("self", cyclic);
+
+        var projected = RuntimeActivityData.output(cyclic);
+
+        assertTrue(projected.truncated());
+        assertTrue(PayloadJson.write(projected.value()).contains("ravenroot:truncated:cycle"));
     }
 
     private static boolean hasLoneSurrogate(String value) {

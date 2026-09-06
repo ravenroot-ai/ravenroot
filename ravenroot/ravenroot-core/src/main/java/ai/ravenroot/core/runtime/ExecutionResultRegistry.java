@@ -1,7 +1,8 @@
 package ai.ravenroot.core.runtime;
 
 import ai.ravenroot.api.persistence.DurableExecutionResult;
-import ai.ravenroot.api.persistence.ExecutionResultNodes;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.application.ExecutionLookup;
@@ -129,7 +130,8 @@ public final class ExecutionResultRegistry {
     private final int maxResults;
     private final int maxTombstones;
     private final Map<Key, ExecutionOutcome> results = new LinkedHashMap<>();
-    private final Map<Key, ai.ravenroot.api.payload.PayloadException> payloadFailures = new LinkedHashMap<>();
+    /** Canonical payload decisions for terminal entries; running entries deliberately have none. */
+    private final Map<Key, ExecutionResultPayload> payloads = new LinkedHashMap<>();
     /**
      * What survives eviction of a full result: the terminal status <em>and</em> why it was reached.
      *
@@ -191,9 +193,9 @@ public final class ExecutionResultRegistry {
     public synchronized void started(Key key, UUID processInstanceId) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(processInstanceId, "processInstanceId");
-        payloadFailures.remove(key);
+        payloads.remove(key);
         put(key, new ExecutionOutcome(processInstanceId, key.executionId(), ProcessInstanceStatus.RUNNING,
-                null, Set.of(), Set.of()));
+                null, Set.of(), Set.of()), null);
     }
 
     /**
@@ -211,16 +213,26 @@ public final class ExecutionResultRegistry {
      * success. {@code untakenEdges} is not a node set like the other three: it names edges the
      * engine skipped for a bypassed node, not nodes the traversal reached, but the same argument
      * applies to it unchanged -- computed and discarded is still discarded.</p>
+     *
+     * <p>The engine's raw payload is deliberately ignored here. {@code payload} is the immutable,
+     * already-measured decision made before this method was entered, and it is the only payload form
+     * retained. Removing the old two-argument overload makes a retain-before-admit shortcut
+     * inexpressible at this boundary rather than relying on every caller to remember the ordering.</p>
+     *
+     * @param key tenant-scoped execution identity
+     * @param result terminal traversal facts; its raw payload is not retained
+     * @param payload canonical admitted payload state and bytes
      */
-    public synchronized void completed(Key key, GraphExecutionResult result) {
+    public synchronized void completed(Key key, GraphExecutionResult result, ExecutionResultPayload payload) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(result, "result");
+        Objects.requireNonNull(payload, "payload");
         results.remove(key);
-        payloadFailures.remove(key);
+        payloads.remove(key);
         put(key, new ExecutionOutcome(result.processInstanceId(), key.executionId(),
-                ProcessInstanceStatus.COMPLETED, result.payload(), result.visitedNodes(),
+                ProcessInstanceStatus.COMPLETED, null, result.visitedNodes(),
                 result.defaultedNodes(), result.bypassedNodes(), result.handledFailureNodes(),
-                result.untakenEdges()));
+                result.untakenEdges()), payload);
     }
 
     /**
@@ -232,7 +244,11 @@ public final class ExecutionResultRegistry {
      * detail of a failed run lives in the event journal, which does carry it with causation.</p>
      */
     public synchronized void failed(Key key, UUID processInstanceId) {
-        terminated(key, processInstanceId, null);
+        failed(key, processInstanceId, ExecutionResultPayload.none());
+    }
+
+    public synchronized void failed(Key key, UUID processInstanceId, ExecutionResultPayload payload) {
+        terminated(key, processInstanceId, null, payload);
     }
 
     /**
@@ -249,27 +265,32 @@ public final class ExecutionResultRegistry {
      * @param processInstanceId the durable process that contained the cancelled traversal.
      */
     public synchronized void cancelled(Key key, UUID processInstanceId) {
-        terminated(key, processInstanceId, ExecutionTerminationReason.CANCELLED);
+        cancelled(key, processInstanceId, ExecutionResultPayload.none());
+    }
+
+    public synchronized void cancelled(Key key, UUID processInstanceId, ExecutionResultPayload payload) {
+        terminated(key, processInstanceId, ExecutionTerminationReason.CANCELLED, payload);
     }
 
     private synchronized void terminated(Key key, UUID processInstanceId,
-                                         ExecutionTerminationReason reason) {
+                                         ExecutionTerminationReason reason, ExecutionResultPayload payload) {
         Objects.requireNonNull(key, "key");
         Objects.requireNonNull(processInstanceId, "processInstanceId");
+        Objects.requireNonNull(payload, "payload");
         results.remove(key);
-        payloadFailures.remove(key);
+        payloads.remove(key);
         put(key, new ExecutionOutcome(processInstanceId, key.executionId(), ProcessInstanceStatus.FAILED,
-                null, Set.of(), Set.of(), Set.of(), Set.of(), Set.of(), false, reason));
+                null, Set.of(), Set.of(), Set.of(), Set.of(), Set.of(), false, reason),
+                payload);
     }
 
     /**
      * Retains only the typed bounded payload refusal, never the rejected object or its text.
      *
-     * <p>What is retained is the {@link ai.ravenroot.api.payload.PayloadException.Reason}, and
-     * {@link #lookup} renders it as {@link ExecutionLookup.Redacted} through
-     * {@link ai.ravenroot.api.persistence.ExecutionResultPayload#refused} — the same classification
-     * the durable write applies to the same rejection, so the warm answer and the record cannot
-     * disagree about which refusal it was.</p>
+     * <p>What is retained is the already-classified {@link ExecutionResultPayload}, the exact object
+     * the durable record receives. {@link #lookup} renders its closed state as
+     * {@link ExecutionLookup.Redacted}, so the warm answer and the record cannot disagree about
+     * which refusal it was.</p>
      *
      * <p>It used to be rethrown from {@link #lookup} instead. That made a read of this execution
      * answer the rejection's own recommended status while the entry was warm and
@@ -280,12 +301,16 @@ public final class ExecutionResultRegistry {
      *
      * @param key               the tenant-scoped execution being recorded.
      * @param processInstanceId the durable process that contained the refused traversal.
-     * @param failure           the typed rejection the traversal terminated on.
+     * @param payload           the typed canonical refusal the traversal terminated on.
      */
     public synchronized void payloadFailed(Key key, UUID processInstanceId,
-                                           ai.ravenroot.api.payload.PayloadException failure) {
-        failed(key, processInstanceId);
-        payloadFailures.put(key, Objects.requireNonNull(failure, "failure"));
+                                           ExecutionResultPayload payload) {
+        Objects.requireNonNull(payload, "payload");
+        if (payload.state() != ResultPayloadState.WITHHELD
+                && payload.state() != ResultPayloadState.UNCONVERTIBLE) {
+            throw new IllegalArgumentException("a failed payload must be WITHHELD or UNCONVERTIBLE");
+        }
+        failed(key, processInstanceId, payload);
     }
 
     /**
@@ -371,19 +396,9 @@ public final class ExecutionResultRegistry {
     private synchronized ExecutionLookup lookupLocal(Key key) {
         Objects.requireNonNull(key, "key");
         ExecutionOutcome outcome = results.get(key);
-        ai.ravenroot.api.payload.PayloadException payloadFailure = payloadFailures.get(key);
-        if (payloadFailure != null) {
-            // Checked before the outcome because payloadFailed writes both: the outcome carries the
-            // terminal status and its reason, and the rejection carries the one thing the outcome
-            // cannot express -- that a payload existed and none of it is being returned.
-            return new ExecutionLookup.Redacted(key.executionId(),
-                    outcome == null ? ProcessInstanceStatus.FAILED : outcome.status(),
-                    outcome == null ? null : outcome.terminationReason(),
-                    ai.ravenroot.api.persistence.ExecutionResultPayload.refused(
-                            payloadFailure.reason()).state());
-        }
         if (outcome != null) {
-            return new ExecutionLookup.Found(outcome);
+            ExecutionResultPayload payload = payloads.get(key);
+            return payload == null ? new ExecutionLookup.Found(outcome) : project(outcome, payload);
         }
         Tombstone tombstone = tombstones.get(key);
         if (tombstone != null) {
@@ -431,7 +446,7 @@ public final class ExecutionResultRegistry {
     public synchronized void forgetLocally(Key key) {
         Objects.requireNonNull(key, "key");
         results.remove(key);
-        payloadFailures.remove(key);
+        payloads.remove(key);
         tombstones.remove(key);
     }
 
@@ -450,35 +465,41 @@ public final class ExecutionResultRegistry {
      */
     public static ExecutionLookup project(DurableExecutionResult result) {
         Objects.requireNonNull(result, "result");
+        ExecutionOutcome outcome = new ExecutionOutcome(result.key().processInstanceId(),
+                result.traversalId(), result.status(), null, Set.copyOf(result.nodes().visitedNodes()),
+                Set.copyOf(result.nodes().defaultedNodes()), Set.copyOf(result.nodes().bypassedNodes()),
+                Set.copyOf(result.nodes().handledFailureNodes()), Set.copyOf(result.nodes().untakenEdges()),
+                false, result.terminationReason());
         return switch (result.payload().state()) {
-            case NONE, RETAINED -> found(result);
-            case WITHHELD, UNCONVERTIBLE -> new ExecutionLookup.Redacted(result.traversalId(),
-                    result.status(), result.terminationReason(), result.payload().state());
+            case NONE, RETAINED, WITHHELD, UNCONVERTIBLE -> project(outcome, result.payload());
             case EXPIRED -> new ExecutionLookup.Expired(result.traversalId(), result.status(),
                     result.terminationReason());
         };
     }
 
-    private static ExecutionLookup found(DurableExecutionResult result) {
-        Object payload;
+    private static ExecutionLookup project(ExecutionOutcome outcome, ExecutionResultPayload payload) {
+        if (payload.state() == ResultPayloadState.WITHHELD
+                || payload.state() == ResultPayloadState.UNCONVERTIBLE) {
+            return new ExecutionLookup.Redacted(outcome.executionId(), outcome.status(),
+                    outcome.terminationReason(), payload.state());
+        }
+        Object decoded;
         try {
-            payload = result.payload().retained() == null ? null
-                    : PayloadJson.read(result.payload().retained().bytes(), PayloadLimits.DEFAULTS)
+            decoded = payload.retained() == null ? null
+                    : PayloadJson.read(payload.retained().bytes(), PayloadLimits.DEFAULTS)
                             .toJava();
         } catch (RuntimeException undecodable) {
             // Reported as a refusal rather than as an absent payload. A caller told the run produced
             // nothing would act on that; one told the output is not returnable knows to look
             // elsewhere, which is the difference this hierarchy's fourth member exists to keep.
-            return new ExecutionLookup.Redacted(result.traversalId(), result.status(),
-                    result.terminationReason(),
+            return new ExecutionLookup.Redacted(outcome.executionId(), outcome.status(),
+                    outcome.terminationReason(),
                     ai.ravenroot.api.persistence.ResultPayloadState.UNCONVERTIBLE);
         }
-        ExecutionResultNodes nodes = result.nodes();
-        return new ExecutionLookup.Found(new ExecutionOutcome(result.key().processInstanceId(),
-                result.traversalId(), result.status(), payload, Set.copyOf(nodes.visitedNodes()),
-                Set.copyOf(nodes.defaultedNodes()), Set.copyOf(nodes.bypassedNodes()),
-                Set.copyOf(nodes.handledFailureNodes()), Set.copyOf(nodes.untakenEdges()), false,
-                result.terminationReason()));
+        return new ExecutionLookup.Found(new ExecutionOutcome(outcome.processInstanceId(),
+                outcome.executionId(), outcome.status(), decoded, outcome.visitedNodes(),
+                outcome.defaultedNodes(), outcome.bypassedNodes(), outcome.handledFailureNodes(),
+                outcome.untakenEdges(), false, outcome.terminationReason()));
     }
 
     /** Retained full results. Exists so a test can assert the bound rather than infer it. */
@@ -491,13 +512,15 @@ public final class ExecutionResultRegistry {
         return tombstones.size();
     }
 
-    private void put(Key key, ExecutionOutcome outcome) {
+    private void put(Key key, ExecutionOutcome outcome, ExecutionResultPayload payload) {
         tombstones.remove(key);
         results.put(key, outcome);
+        if (payload == null) payloads.remove(key);
+        else payloads.put(key, payload);
         while (results.size() > maxResults) {
             var eldest = results.entrySet().iterator().next();
             results.remove(eldest.getKey());
-            payloadFailures.remove(eldest.getKey());
+            payloads.remove(eldest.getKey());
             entomb(eldest.getKey(), eldest.getValue());
         }
     }

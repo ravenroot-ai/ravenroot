@@ -24,12 +24,15 @@ BUNDLES = {
     "jdbc.insert": "jdbc", "kafka.produce": "kafka", "kafka.consume": "kafka",
     "mail.send": "mail", "mail.imap.query": "mail", "mail.imap.consume": "mail",
     "mail.imap.move": "mail", "mail.imap.delete": "mail", "object.get": "object-storage",
+    "matrix.send": "matrix", "matrix.sync": "matrix", "mattermost.send": "mattermost",
+    "mattermost.outgoing-webhook": "mattermost",
     "object.put": "object-storage", "object.list": "object-storage", "object.delete": "object-storage",
     "ocr.extract": "ocr", "openapi.call": "openapi-client", "openapi.receive": "openapi-server",
     "openapi.request-reply": "openapi-server", "slack.events": "slack", "slack.commands": "slack",
     "slack.post-message": "slack", "spel.transform": "spel", "spel.decision": "spel",
     "telegram.send": "telegram", "telegram.answer.callback": "telegram",
     "telegram.edit.message": "telegram", "telegram.delete.message": "telegram",
+    "teams.send": "teams", "teams.outgoing-webhook": "teams",
     "websocket.send": "websocket", "websocket.receive": "websocket",
 }
 TEMPLATE_LITERAL = re.compile(r"\{\{[^{}\n]+\}\}")

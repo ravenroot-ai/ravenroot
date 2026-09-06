@@ -6,7 +6,7 @@ released `0.1.0-alpha.1` notes remain the authority for that release; a developm
 not be read as a claim that an older release contains it.
 
 The default server composition registers the 11 core node types below. Optional first-party source
-contains 17 buildable bundle modules and 42 node descriptors. The snapshot's CI publication
+contains 20 buildable bundle modules and 48 node descriptors. The snapshot's CI publication
 selection is empty, so its official image assembly path stages no optional bundles. That is evidence
 about this snapshot's configured path, not a retrospective inventory of already-published artifacts.
 An operator can build optional bundles explicitly and include them in an operator-built image.
@@ -57,16 +57,19 @@ allowed value, condition, descriptor limit, and declared outcome from compiled c
 | `jdbc` | `ai.ravenroot.extensions.jdbc` | `jdbc.query`, `jdbc.insert` | [JDBC](bundles/jdbc.md) |
 | `kafka` | `ai.ravenroot.extensions.kafka` | `kafka.produce`, `kafka.consume` | [Kafka](bundles/kafka.md) |
 | `mail` | `ai.ravenroot.extensions.mail` | `mail.send`, `mail.imap.query`, `mail.imap.consume`, `mail.imap.move`, `mail.imap.delete` | [Mail](bundles/mail.md) |
+| `matrix` | `ai.ravenroot.extensions.matrix` | `matrix.send`, `matrix.sync` | [Matrix](bundles/matrix.md) |
+| `mattermost` | `ai.ravenroot.extensions.mattermost` | `mattermost.send`, `mattermost.outgoing-webhook` | [Mattermost](bundles/mattermost.md) |
 | `object-storage` | `ai.ravenroot.extensions.storage` | `object.get`, `object.put`, `object.list`, `object.delete` | [Object storage](bundles/object-storage.md) |
 | `ocr` | `ai.ravenroot.extensions.ocr` | `ocr.extract` | [OCR](bundles/ocr.md) |
 | `openapi-client` | `ai.ravenroot.extensions.openapi.client` | `openapi.call` | [OpenAPI client](bundles/openapi-client.md) |
 | `openapi-server` | `ai.ravenroot.extensions.openapi.server` | `openapi.receive`, `openapi.request-reply` | [OpenAPI server](bundles/openapi-server.md) |
 | `slack` | `ai.ravenroot.extensions.slack` | `slack.events`, `slack.commands`, `slack.post-message` | [Slack](bundles/slack.md) |
 | `spel` | `ai.ravenroot.extensions.spel` | `spel.transform`, `spel.decision` | [Restricted SpEL](bundles/spel.md) |
+| `teams` | `ai.ravenroot.extensions.teams` | `teams.send`, `teams.outgoing-webhook` | [Microsoft Teams](bundles/teams.md) |
 | `telegram` | `ai.ravenroot.extensions.telegram` | `telegram.send`, `telegram.answer.callback`, `telegram.edit.message`, `telegram.delete.message` | [Telegram](bundles/telegram.md) |
 | `websocket` | `ai.ravenroot.extensions.websocket` | `websocket.send`, `websocket.receive` | [WebSocket](bundles/websocket.md) |
 
-All 17 are source-supported packages, optional at runtime, and absent from the default core catalog.
+All 20 are source-supported packages, optional at runtime, and absent from the default core catalog.
 The deployable-bundle path requires explicit installation plus manifest-ID activation; an embedding
 application can instead include extension jars and explicitly name their package classes through the
 separate classpath mechanism. The [bundle lifecycle](../operator-guide/plugin-bundles.md) is the

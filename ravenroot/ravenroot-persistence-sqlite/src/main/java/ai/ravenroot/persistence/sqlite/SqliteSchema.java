@@ -903,7 +903,157 @@ final class SqliteSchema {
                                 + "created_at_epoch_second, created_at_nano, task_id, status)",
                         "CREATE INDEX human_task_context_attention ON human_task "
                                 + "(tenant_id, graph_version_pin, created_at_epoch_second, "
-                                + "created_at_nano, task_id, status)")));
+                                + "created_at_nano, task_id, status)")),
+                // Four tables for the deployment registry (ADR 0038), purely additive: nothing above
+                // this step is touched, exactly as SqliteExecutionManifestStore's own migration left the
+                // execution-store tables it landed beside untouched. `deployment` carries revision,
+                // fence and generation on the same row for the reason ADR 0038 D1 states -- three
+                // disjoint monotone axes on one aggregate -- and no `desired_generation` column exists
+                // because the aggregate's own `generation` always is the generation the current desired
+                // state was stamped with (see DeploymentRegistry.Desired.generation()); a second column
+                // could only ever agree with the first or be a bug. The fencing token deliberately lives
+                // on `deployment.fence` and not on `deployment_lease`, for the identical reason
+                // `process_instance.fencing_token` lives on the instance and not on `lease`: a release
+                // deletes the lease row without resetting the counter, and a token column on the lease
+                // row would vanish with it and let a fence restart from a value a stale holder could
+                // replay.
+                new SchemaMigration(22, "durable deployment registry aggregate, versions, command ledger and lease", List.of(
+                """
+                CREATE TABLE deployment (
+                    tenant_id                   TEXT    NOT NULL,
+                    deployment_id               TEXT    NOT NULL,
+                    latest_version              INTEGER NOT NULL,
+                    generation                  INTEGER NOT NULL,
+                    revision                    INTEGER NOT NULL,
+                    fence                       INTEGER NOT NULL,
+                    desired_kind                TEXT    NOT NULL,
+                    desired_version             INTEGER,
+                    update_strategy             TEXT,
+                    observed_kind               TEXT    NOT NULL,
+                    observed_version            INTEGER,
+                    observed_generation         INTEGER NOT NULL,
+                    observed_at_epoch_second    INTEGER NOT NULL,
+                    observed_at_nano            INTEGER NOT NULL,
+                    failure_code                TEXT,
+                    failure_message             TEXT,
+                    failure_at_epoch_second     INTEGER,
+                    failure_at_nano             INTEGER,
+                    tombstone_reason            TEXT,
+                    tombstone_at_epoch_second   INTEGER,
+                    tombstone_at_nano           INTEGER,
+                    created_at_epoch_second     INTEGER NOT NULL,
+                    created_at_nano             INTEGER NOT NULL,
+                    updated_at_epoch_second     INTEGER NOT NULL,
+                    updated_at_nano             INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id)
+                )
+                """,
+                // Immutable graph bytes, one row per aggregate version. `digest` is redundant with a
+                // SHA-256 recomputed from `canonical_bytes` on every read, on the model of
+                // SqliteExecutionManifestStore's own verification column: it separates "a field
+                // changed" from "this row cannot be read back", which matters because
+                // `GraphVersion.canonicalDigest()` is part of the value callers compare against.
+                """
+                CREATE TABLE deployment_version (
+                    tenant_id            TEXT    NOT NULL,
+                    deployment_id        TEXT    NOT NULL,
+                    version              INTEGER NOT NULL,
+                    format_version       INTEGER NOT NULL,
+                    canonical_bytes      BLOB    NOT NULL,
+                    digest               BLOB    NOT NULL CHECK (length(digest) = 32),
+                    author               TEXT    NOT NULL,
+                    created_at_epoch_second INTEGER NOT NULL,
+                    created_at_nano         INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id, version),
+                    FOREIGN KEY (tenant_id, deployment_id)
+                        REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
+                )
+                """,
+                // The idempotency ledger for every mutation, including `create` (ADR 0038 D11). A
+                // replayed command must return the exact outcome it produced the first time, not the
+                // aggregate's current state, because a later unrelated mutation must not change what an
+                // earlier replay reports -- so this table stores the whole `Record` the mutation
+                // produced, as columns, rather than the aggregate's current row. `create` has no
+                // deployment id to key on until one is minted, which is exactly what
+                // idx_deployment_command_create_replay exists to resolve: it looks the row up by
+                // `(tenant_id, action, command_key)` alone and reads the minted id back out of the row
+                // it finds.
+                """
+                CREATE TABLE deployment_command (
+                    tenant_id                          TEXT    NOT NULL,
+                    deployment_id                       TEXT    NOT NULL,
+                    action                               TEXT    NOT NULL,
+                    command_key                          TEXT    NOT NULL,
+                    digest                               TEXT    NOT NULL,
+                    recorded_latest_version              INTEGER NOT NULL,
+                    recorded_generation                  INTEGER NOT NULL,
+                    recorded_revision                    INTEGER NOT NULL,
+                    recorded_desired_kind                TEXT    NOT NULL,
+                    recorded_desired_version             INTEGER,
+                    recorded_update_strategy             TEXT,
+                    recorded_observed_kind               TEXT    NOT NULL,
+                    recorded_observed_version            INTEGER,
+                    recorded_observed_generation         INTEGER NOT NULL,
+                    recorded_observed_at_epoch_second    INTEGER NOT NULL,
+                    recorded_observed_at_nano            INTEGER NOT NULL,
+                    recorded_lease_owner                 TEXT,
+                    recorded_lease_fence                 INTEGER,
+                    recorded_lease_acquired_at_epoch_second INTEGER,
+                    recorded_lease_acquired_at_nano       INTEGER,
+                    recorded_lease_expires_at_epoch_second INTEGER,
+                    recorded_lease_expires_at_nano        INTEGER,
+                    recorded_failure_code                 TEXT,
+                    recorded_failure_message              TEXT,
+                    recorded_failure_at_epoch_second      INTEGER,
+                    recorded_failure_at_nano              INTEGER,
+                    recorded_tombstone_reason             TEXT,
+                    recorded_tombstone_at_epoch_second    INTEGER,
+                    recorded_tombstone_at_nano            INTEGER,
+                    recorded_created_at_epoch_second      INTEGER NOT NULL,
+                    recorded_created_at_nano              INTEGER NOT NULL,
+                    recorded_updated_at_epoch_second      INTEGER NOT NULL,
+                    recorded_updated_at_nano              INTEGER NOT NULL,
+                    recorded_at_epoch_second              INTEGER NOT NULL,
+                    recorded_at_nano                      INTEGER NOT NULL,
+                    expires_at_epoch_second               INTEGER NOT NULL,
+                    expires_at_nano                       INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id, action, command_key),
+                    FOREIGN KEY (tenant_id, deployment_id)
+                        REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
+                )
+                """,
+                // Resolves a create-replay by (tenant, key) alone, before any deployment id is known.
+                // Partial, restricted to the one action that is ever looked up this way; every other
+                // action already carries its owning deployment id and reaches this table by the primary
+                // key instead.
+                "CREATE INDEX idx_deployment_command_create_replay ON deployment_command "
+                        + "(tenant_id, action, command_key) WHERE action = 'CREATE'",
+                // Serves purgeExpiredCommandRecords(tenantId), on the model of idx_idempotency_expiry:
+                // without it, bounding the ledger's retention would force a full scan of every tenant's
+                // rows on every purge.
+                "CREATE INDEX idx_deployment_command_expiry ON deployment_command "
+                        + "(tenant_id, expires_at_epoch_second, expires_at_nano)",
+                // One row while a lease is held, deleted on release; `fence` here is this lease's own
+                // token, copied from `deployment.fence` at acquire time for direct reads. No expiry
+                // index: every access to this table is a point lookup by (tenant_id, deployment_id),
+                // which the primary key already serves, and unlike idempotency records this table is
+                // never scanned by a background purge -- a lease is evaluated lazily against the
+                // caller's presented token, never reaped (ADR 0038 D0 rule 1).
+                """
+                CREATE TABLE deployment_lease (
+                    tenant_id                 TEXT    NOT NULL,
+                    deployment_id             TEXT    NOT NULL,
+                    owner                     TEXT    NOT NULL,
+                    fence                     INTEGER NOT NULL,
+                    acquired_at_epoch_second  INTEGER NOT NULL,
+                    acquired_at_nano          INTEGER NOT NULL,
+                    expires_at_epoch_second   INTEGER NOT NULL,
+                    expires_at_nano           INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id),
+                    FOREIGN KEY (tenant_id, deployment_id)
+                        REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
+                )
+                """)));
     }
 
     static int currentVersion() {

@@ -114,7 +114,9 @@ test('reload restores durable ids, order, selection and modes without stale runt
     return { first: first.documentId, second: secondId };
   });
   await page.locator('#btn-modify').click();
-  await page.evaluate(() => window.cy.getElementById('dosomething').select());
+  await page.evaluate(() => {
+    window.cy.getElementById('dosomething').select();
+  });
   await page.locator('#node-editor input[name="name"]').fill('Persisted without a flush hook');
   await page.locator('#node-editor input[name="name"]').press('Tab');
   await expect.poll(() => page.evaluate(() =>

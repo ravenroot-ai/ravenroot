@@ -34,6 +34,7 @@ An unavailable privileged dependency does not become available because its ident
 | `template` | `template` | string | required template text |
 | `human-task` | `title` / `description` | string / text | required / optional; UTF-8 budgets come from the Human Task operator policy |
 | `human-task` | `responseKind` / `maxResponseBytes` | enum / integer | `MAP` / policy default; graph value may narrow the policy ceiling |
+| `human-task` | `responseSchema` / `responseSchemaVersion` | string / string | `ravenroot.human-task.response` / `1`; fixed 1–128 ASCII `PayloadEnvelope` labels, with the policy able to narrow only `responseSchema` |
 | `human-task` | `escalateAfterSeconds` / `expiresAfterSeconds` | integer / integer | policy defaults and ceilings; zero escalation disables it and escalation precedes expiry |
 
 `delay` preserves payload and attributes and returns `continue`. `json-parse` accepts top-level scalars, arrays, or objects; 64-bit integers remain integers and fractional or exponent numbers become doubles. Invalid JSON fails. `json-path` returns an ordered array and returns `[]` when nothing matches.

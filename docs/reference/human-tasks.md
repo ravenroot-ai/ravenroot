@@ -18,13 +18,17 @@ kind (`SCALAR`, `LIST`, or `MAP`), and a byte ceiling bounded by the deployment'
 resolving request must be a Ravenroot `ravenroot.payload/1` envelope matching every part of that
 declaration. Responder roles and scopes are comma-separated conjunctions: a responder must hold every
 declared token. The original requester can cancel its own task even when it is not an authorized
-responder. Schema labels use the fixed ASCII alphanumeric `PayloadEnvelope` token grammar plus
-`._-:+/` and its 128-unit cap; the operator setting may narrow that bound but cannot widen it.
+responder. Both schema name and schema version use the fixed ASCII alphanumeric `PayloadEnvelope`
+token grammar plus `._-:+/` and its 128-unit cap. The operator setting may narrow the schema-name
+budget but cannot widen it; schema version has the fixed protocol bound and no separate operator
+setting.
 
-Tasks persisted before that authoring check can still be listed, read, and cancelled even if their
-stored labels are not valid current payload-envelope labels. Resolving one is refused because Ravenroot
-cannot create a compatible response envelope; this preserves the durable record and its cancellation
-path without pretending that an unrepresentable label is a valid wire contract.
+The service applies this admission contract to every current task creation. Supported durable adapters
+apply the same check only after exact deduplication, so an exact replay of an already accepted request
+remains idempotent after a policy change. Pre-existing tasks with stored labels that do not satisfy the
+current payload-envelope rule can still be listed, read, and cancelled. Resolving one is refused because
+Ravenroot cannot create a compatible response envelope; this preserves the durable record and its
+cancellation path without treating an unrepresentable label as a valid current wire contract.
 
 `expiresAfterSeconds` creates a durable expiry timer. A non-zero `escalateAfterSeconds` creates a
 second durable timer that moves the task to `ESCALATED` while leaving it resolvable. Both delays are

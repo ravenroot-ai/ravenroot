@@ -79,7 +79,7 @@ the default below. Values are read at process startup and require a restart to c
 | `ravenroot.human-task.max-expiry-seconds` / `RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS` | 2,592,000 | 1–2,147,483,647; above `max-escalation-seconds` | largest graph expiry delay |
 | `ravenroot.human-task.max-title-bytes` / `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | 256 | 1–67,108,864 | UTF-8 title budget |
 | `ravenroot.human-task.max-description-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | 4,096 | 1–67,108,864 | UTF-8 description budget |
-| `ravenroot.human-task.max-response-schema-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | 128 | 1–128 | ASCII `PayloadEnvelope` schema-label budget |
+| `ravenroot.human-task.max-response-schema-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | 128 | 1–128 | ASCII `PayloadEnvelope` schema-name budget; schema version uses the fixed protocol bound |
 | `ravenroot.human-task.max-authorization-tokens` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | 16 | 1–256 | required responder role/scope tokens |
 | `ravenroot.human-task.max-authorization-token-bytes` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | 256 | 1–4,096 | UTF-8 bytes in one authorization token |
 | `ravenroot.human-task.max-decision-body-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | 262,144 | 1–67,108,864; at least `max-response-bytes` | raw encoded PayloadEnvelope HTTP decision body |
@@ -122,11 +122,12 @@ an earlier policy. Human Task retention remains part of durable execution-store 
 policy; there is no separate Human Task retention or outstanding-task quota.
 
 Response media-type identity, schema name/version, payload-envelope identity, deterministic task ID,
-and generation fencing are per-task wire or persistence contracts. Schema labels use the existing
-ASCII alphanumeric `PayloadEnvelope` token grammar plus `._-:+/` and its fixed 128-unit cap, so bytes
-and units are identical. The former larger policy maximum was never a usable wire label. These
-contracts are deliberately not global operator settings because changing them would make existing
-clients or durable records ambiguous.
+and generation fencing are per-task wire or persistence contracts. Schema names and schema versions
+use the existing ASCII alphanumeric `PayloadEnvelope` token grammar plus `._-:+/` and its fixed
+128-unit cap, so bytes and units are identical. The configured schema-name budget may narrow that
+bound; schema version has no separate operator setting. The former larger policy maximum was never a
+usable wire label. These contracts are deliberately not global operator settings because changing them
+would make existing clients or durable records ambiguous.
 
 ## Identity and browser controls
 

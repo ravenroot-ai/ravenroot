@@ -308,9 +308,18 @@ class GraalVmProgramRuntimeTest {
         var timeout = assertThrows(ExecutionException.class, () -> runtime(deadline, Duration.ofSeconds(1)).test(artifact("() => 1", ArtifactState.VALIDATED), request("x")).toCompletableFuture().get());
         assertTrue(timeout.getCause().getMessage().contains("SANDBOX_DEADLINE_EXCEEDED")); assertEquals(1, deadline.terminations);
         var cancelled = new FakeSupervisor(); cancelled.block = true;
-        var future = runtime(cancelled, Duration.ofSeconds(5)).test(artifact("() => 1", ArtifactState.VALIDATED), request("x")).toCompletableFuture();
-        while (cancelled.launches == 0) Thread.yield(); assertTrue(future.cancel(true));
-        assertEquals(1, cancelled.terminations); assertTrue(cancelled.reaped);
+        cancelled.awaitEntered = new java.util.concurrent.CountDownLatch(1);
+        var admission = TestAdmission.of(artifact("() => 1", ArtifactState.ACTIVE));
+        var future = runtime(cancelled, Duration.ofSeconds(5)).execute(admission, request("x")).toCompletableFuture();
+        try {
+            assertTrue(cancelled.awaitEntered.await(2, TimeUnit.SECONDS),
+                    "the session must be published and awaiting its outcome before cancellation");
+            assertTrue(future.cancel(true));
+            awaitInvocationCleanup(admission);
+            assertEquals(1, cancelled.terminations); assertTrue(cancelled.reaped);
+        } finally {
+            if (!future.isDone()) future.cancel(true);
+        }
     }
 
     @Test void cancellationDuringLaunchRetainsAdmissionUntilThePublishedSessionIsReaped() throws Exception {
@@ -320,19 +329,22 @@ class GraalVmProgramRuntimeTest {
         var admission = TestAdmission.of(artifact("() => 1", ArtifactState.ACTIVE));
         var future = runtime(supervisor, Duration.ofSeconds(5)).execute(admission, request("x"))
                 .toCompletableFuture();
-        assertTrue(supervisor.launchEntered.await(2, TimeUnit.SECONDS));
-
-        assertTrue(future.cancel(true));
-        assertEquals(0, admission.closes.get(),
-                "a cancelled public future must not release admission while launch can still publish a session");
-        supervisor.releaseLaunch.countDown();
-        for (int attempt = 0; attempt < 100 && admission.closes.get() == 0; attempt++) {
-            Thread.onSpinWait();
-            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(2));
+        try {
+            assertTrue(supervisor.launchEntered.await(2, TimeUnit.SECONDS));
+            assertEquals(1, supervisor.launches,
+                    "the launch counter is visible before launch returns its unpublished session");
+            assertTrue(future.cancel(true));
+            assertEquals(0, supervisor.terminations,
+                    "cleanup cannot terminate a session that launch has not returned");
+            assertFalse(supervisor.reaped);
+            assertEquals(0, admission.closes.get(),
+                    "a cancelled public future must not release admission while launch can still publish a session");
+        } finally {
+            supervisor.releaseLaunch.countDown();
         }
+        awaitInvocationCleanup(admission);
         assertEquals(1, supervisor.terminations);
         assertTrue(supervisor.reaped);
-        assertEquals(1, admission.closes.get());
     }
 
     @Test void sandboxPolicyExposesTheSameFiniteInputOutputDeadlineAndCancellationBoundsItEnforces() {
@@ -467,6 +479,15 @@ class GraalVmProgramRuntimeTest {
     }
 
     private static GraalVmProgramRuntime runtime(FakeSupervisor supervisor, Duration timeout) { return new GraalVmProgramRuntime(supervisor, policy(timeout)); }
+    private static void awaitInvocationCleanup(TestAdmission admission) {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+        while (admission.closes.get() == 0 && System.nanoTime() - deadline < 0) {
+            Thread.onSpinWait();
+            java.util.concurrent.locks.LockSupport.parkNanos(TimeUnit.MILLISECONDS.toNanos(2));
+        }
+        assertEquals(1, admission.closes.get(),
+                "admission closes only after invocation cleanup settles");
+    }
     private static SandboxPolicy policy(Duration timeout) {
         return new SandboxPolicy(timeout, Math.toIntExact(timeout.toMillis()), 64, 32, 256, 64,
                 2 * 1024 * 1024, Path.of(System.getProperty("java.class.path")),

@@ -1,5 +1,7 @@
 # Ravenroot AI node bundle
 
+The optional package identity is `ai.ravenroot.extensions.ai`.
+
 Two node types against an operator-configured OpenAI-compatible endpoint:
 
 - **`llm-prompt`** sends the incoming payload following a prompt and continues with the model's
@@ -19,9 +21,11 @@ with `./plugin.sh build ai`, installed with `./plugin.sh install`, named in
 skips this extension and says so; `./plugin.sh check-published` refuses it in any directory destined
 for publication.
 
-The operator guide — the four environment variables, the profile document, the service grant, the
-reserved-network exception, a graph that uses the node, and what to do when it does not answer —
-is covered by the public [model, agent, and program integration guide](../../../docs/integrator-guide/ai-programs.md).
+The provider profile, service grants, reserved-network exception, and troubleshooting sequence are
+covered on this page and in the public
+[model, agent, and program integration guide](../../../docs/integrator-guide/ai-programs.md). The
+browser authoring assistant uses a separate server configuration described in the
+[authoring assistant runbook](../../../docs/operator-guide/authoring-assistant.md).
 
 ## What is inside
 
@@ -40,6 +44,108 @@ is covered by the public [model, agent, and program integration guide](../../../
 | `AgentSkill` | the author-declared skill: the numbered slot properties, the reader, and every declaration this bundle refuses to build a node from |
 | `AgentException` | the agent's closed failure vocabulary, separate because a loop can exhaust turns and tokens and one call cannot |
 | `AgentSkillException` | a skill declaration the bundle can never serve, refused while the graph is composed. An `IllegalArgumentException`, which is what makes the refusal answerable rather than merely early — see its Javadoc for the author-facing diagnostic gap |
+
+## Operator profile and exact node fields
+
+Set `RAVENROOT_LLM_PROFILE_<PROFILE_UTF8_HEX>` to strict canonical Base64 of JSON. Profile names are
+1–64 ASCII letters, digits, dots, underscores, or hyphens and begin with an alphanumeric.
+
+```json
+{
+  "endpoint": "http://127.0.0.1:8000/v1/chat/completions",
+  "model": "local-model",
+  "credentialBindingId": "",
+  "credentialReference": "",
+  "timeoutMs": 60000,
+  "maxResponseBytes": 8388608,
+  "maxConcurrency": 4,
+  "systemPreamble": ""
+}
+```
+
+Only `endpoint` and `model` are required. The other defaults are empty credential binding, 60,000 ms,
+8 MiB, four concurrent calls per tenant/profile, and an empty preamble. Timeout is 1–600,000 ms,
+response bytes 1–8 MiB, concurrency 1–256, model at most 256 characters, and system preamble at most
+8,192 characters. A credential binding requires HTTPS. The package also requires an operator service
+grant for `outbound-http`; `agent` additionally requires `tool-authorization` and `agent-resources`.
+
+For each MCP server named by an `agent`, set
+`RAVENROOT_MCP_SERVER_<PROFILE_UTF8_HEX>` to strict canonical Base64 of this JSON shape:
+
+```json
+{
+  "endpoint": "https://mcp.example.com/mcp",
+  "credentialBindingId": "mcp",
+  "credentialReference": "mcp-token",
+  "timeoutMs": 30000,
+  "maxResponseBytes": 1048576,
+  "maxConcurrency": 4,
+  "allowedTools": ["search", "fetch_document"]
+}
+```
+
+`endpoint` and the nonempty `allowedTools` list are required. Credential binding ID and reference
+default to empty and must be supplied together; a credential requires HTTPS. Timeout defaults to
+30,000 ms and is limited to 1–600,000 ms. Response bytes default to 1 MiB and are limited to 1–4 MiB.
+Concurrency defaults to four and is limited to 1–256 per tenant/profile. A profile permits at most
+64 distinct tools; each tool name is at most 128 characters, and the exposed
+`<profile>__<tool>` name must match the provider-safe 1–64 character identifier. Unknown JSON fields,
+noncanonical Base64, an invalid endpoint, an empty tool list, or an out-of-range value makes the
+profile absent and the node fails `MCP_PROFILE_UNKNOWN`.
+
+For a profile named `search`, whose UTF-8 hex suffix is `736561726368`, a portable shell assignment
+is:
+
+```sh
+mcp_profile='{"endpoint":"https://mcp.example.com/mcp","credentialBindingId":"mcp","credentialReference":"mcp-token","allowedTools":["search"]}'
+export RAVENROOT_MCP_SERVER_736561726368="$(printf %s "$mcp_profile" | base64 | tr -d '\n')"
+```
+
+The endpoint must also appear in the package's `outbound-http` service grant and egress policy. Tool
+discovery never widens `allowedTools`; the model sees only the intersection of the operator list and
+the server's advertised tools.
+
+`llm-prompt` has adapter-reference `provider`, required `prompt`, and optional `model`, `timeoutMs`,
+`maxTokens`, `temperature`, `topP`, and `seed`. The timeout may only tighten the profile. One model
+answer becomes the payload on `continue`; attributes pass through. The node performs one provider
+call, never retries it, and maps cancellation to `DEADLINE_EXCEEDED` while cancelling the managed
+call.
+
+```xml
+<node id="prompt">
+  <data key="kind">BEHAVIOR</data><data key="behavior">llm-prompt</data>
+  <data key="provider">local</data>
+  <data key="prompt">Reply briefly to {{payload}}</data>
+</node>
+```
+
+`agent` has adapter-reference `provider`; required `instructions` and `objective`; optional `model`,
+`mcpServers`, `maxTurns` (default 8, maximum 64), `maxTotalTokens`, whole-run `timeoutMs`, per-turn
+`maxTokens`, `temperature`, `topP`, and `seed`; plus eight ordered optional skill triples named
+`skills.N.name`, `skills.N.description`, and `skills.N.instructions`. Skill names, descriptions, and
+bodies are limited to 64, 512, and 16,384 characters. At most eight MCP server profile names are
+accepted. The final answer becomes the payload on `continue`; tool requests are independently
+authorized immediately before effect and tool errors return to the model as bounded tool results.
+
+```xml
+<node id="agent">
+  <data key="kind">BEHAVIOR</data><data key="behavior">agent</data>
+  <data key="provider">local</data>
+  <data key="instructions">Work only with the supplied payload.</data>
+  <data key="objective">Summarize {{payload}}</data>
+  <data key="maxTurns">4</data>
+</node>
+```
+
+Run either graph only after installing the profile, exact origin/method/header/limit grant, and the
+bundle allowlist. Test mode bypasses model egress. `llm-prompt` exposes the stable failures
+`PROFILE_UNKNOWN`, `PROMPT_UNRENDERABLE`, `DESTINATION_REFUSED`, `CREDENTIAL_UNAVAILABLE`,
+`ENDPOINT_REJECTED`, `RESPONSE_UNREADABLE`, `RESPONSE_TOO_LARGE`, `COMPLETION_REFUSED`,
+`COMPLETION_EMPTY`, `DEADLINE_EXCEEDED`, `CAPACITY_UNAVAILABLE`, and `TRANSPORT_UNAVAILABLE`.
+`agent` adds template, tool-call, turn/token budget, MCP discovery/call, skill declaration, approval,
+and agent-resource refusal families. Neither node has an idempotency or automatic retry field; each
+model or tool dispatch consumes its applicable budget and may have external effects according to the
+authorized tool contract.
 
 ## Two properties worth knowing before reading the code
 

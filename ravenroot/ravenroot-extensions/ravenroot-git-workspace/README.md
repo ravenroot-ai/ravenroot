@@ -1,5 +1,7 @@
 # Ravenroot confined Git workspace extension
 
+The optional package identity is `ai.ravenroot.extensions.gitworkspace`.
+
 This optional, independently installable node package contributes the single `git-workspace`
 behavior. It provisions one durable workspace from an immutable remote base, integrates an approved
 workspace commit into its one issue branch, and verifies that the accepted commit or identical tree

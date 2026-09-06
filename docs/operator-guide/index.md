@@ -7,6 +7,8 @@ Run Ravenroot as a controlled service with explicit identity, storage, deploymen
 - [Deployment and startup](deployment-startup.md) — Select a topology, bind safely, verify health, and expose only the intended service boundary.
 - [Identity and browser boundary](identity-browser.md) — Configure local token or OIDC authentication, exact origins, hosts, and session behavior.
 - [Credentials, connectors, and egress](credentials-egress.md) — Own secret references, connector installation, tool allowlists, and outbound-network policy.
+- [Plugin bundle lifecycle](plugin-bundles.md) — Build, batch-select, validate, install, activate, include, update, remove, and verify optional node packages.
+- [Authoring assistant](authoring-assistant.md) — Configure hosted, local, or OAuth-backed workspace assistance and diagnose every availability boundary.
 - [Persistence, lifecycle, and recovery](persistence-lifecycle.md) — Operate readiness, drain, durable state, backup, restore, and controlled upgrades.
 - [Embedded-viewer operations](embed-operations.md) — Register a deployment, record seven attestations, issue sessions, audit access, and revoke it.
 

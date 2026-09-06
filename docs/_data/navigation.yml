@@ -40,6 +40,10 @@
       url: /operator-guide/persistence-lifecycle.html
     - title: Credentials, connectors, and egress
       url: /operator-guide/credentials-egress.html
+    - title: Plugin bundle lifecycle
+      url: /operator-guide/plugin-bundles.html
+    - title: Authoring assistant
+      url: /operator-guide/authoring-assistant.html
     - title: Embedded-viewer operations
       url: /operator-guide/embed-operations.html
 
@@ -99,18 +103,69 @@
       url: /reference/graphml.html
     - title: Node catalog, payloads, and limits
       url: /reference/nodes-payload-limits.html
+    - title: Core node reference
+      url: /reference/core-nodes.html
+    - title: Node descriptor contracts
+      url: /reference/node-contracts.html
+    - title: Operational coverage inventory
+      url: /reference/coverage-inventory.html
     - title: Durable human tasks
       url: /reference/human-tasks.html
     - title: Executions, outcomes, and events
       url: /reference/execution-events.html
     - title: HTTP API and CLI
       url: /reference/api-cli.html
+    - title: Command-line tools
+      url: /reference/command-line-tools.html
     - title: Configuration and defaults
       url: /reference/configuration.html
+    - title: Environment-variable inventory
+      url: /reference/environment-variables.html
     - title: Embed and extension contracts
       url: /reference/embed-extension-contracts.html
     - title: Backup and recovery bundle
       url: /reference/backup-recovery.html
+
+- title: First-party bundle reference
+  items:
+    - title: Bundle reference overview
+      url: /reference/bundles/
+    - title: Bundle node examples
+      url: /reference/bundle-node-examples.html
+    - title: AI
+      url: /reference/bundles/ai.html
+    - title: AMQP 0-9-1
+      url: /reference/bundles/amqp091.html
+    - title: Discord
+      url: /reference/bundles/discord.html
+    - title: Filesystem
+      url: /reference/bundles/filesystem.html
+    - title: Git workspace
+      url: /reference/bundles/git-workspace.html
+    - title: GitHub automation
+      url: /reference/bundles/github.html
+    - title: JDBC
+      url: /reference/bundles/jdbc.html
+    - title: Kafka
+      url: /reference/bundles/kafka.html
+    - title: Mail
+      url: /reference/bundles/mail.html
+    - title: Object storage
+      url: /reference/bundles/object-storage.html
+    - title: OCR
+      url: /reference/bundles/ocr.html
+    - title: OpenAPI client
+      url: /reference/bundles/openapi-client.html
+    - title: OpenAPI server
+      url: /reference/bundles/openapi-server.html
+    - title: Slack
+      url: /reference/bundles/slack.html
+    - title: Restricted SpEL
+      url: /reference/bundles/spel.html
+    - title: Telegram
+      url: /reference/bundles/telegram.html
+    - title: WebSocket
+      url: /reference/bundles/websocket.html
 
 - title: Troubleshooting
   items:

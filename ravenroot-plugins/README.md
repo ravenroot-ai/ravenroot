@@ -35,7 +35,7 @@ build warning.
 The OCI build (see `Dockerfile`) copies only the subdirectories that pass validation into
 `/opt/ravenroot/plugins/<plugin-id>/` inside the image, read-only, owned by the non-root runtime
 user. Presence there does not make a bundle run: it still has to be named in the runtime allowlist
-(`RAVENROOT_ENABLED_PLUGINS` or an equivalent `plugins.lock.yaml`) before the server will load it.
+(`RAVENROOT_ENABLED_PLUGINS`) before the server will load it.
 
 **This directory, and everything above, is the LOCAL/Compose path only.** It is what a developer or
 integrator running `docker build .` (or `docker compose build`) against their own checkout gets, and

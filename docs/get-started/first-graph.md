@@ -23,7 +23,7 @@ Save the following as `hello.graphml` in that directory:
     <node id="greet">
       <data key="kind">BEHAVIOR</data>
       <data key="behavior">template</data>
-      <data key="template">Hello, {{payload}}! Ravenroot received your request.</data>
+      <data key="template">Hello, {% raw %}{{payload}}{% endraw %}! Ravenroot received your request.</data>
     </node>
     <node id="end"><data key="kind">END</data></node>
     <node id="error"><data key="kind">ERROR</data></node>

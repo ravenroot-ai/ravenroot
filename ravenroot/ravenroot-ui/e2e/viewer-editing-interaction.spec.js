@@ -217,7 +217,7 @@ test('Viewer node drag persists layout while Editing direct drag of an unselecte
   await expect(page.locator('#btn-undo')).toHaveAttribute('title', /Move start/);
 
   await page.locator('#btn-modify').click();
-  await expect(page.locator('#graph-mode-label')).toHaveText('Editing');
+  await expect(page.locator('#graph-mode-label')).toContainText('Editing');
   await page.evaluate(() => { window.cy.elements().unselect(); });
   const sourceBefore = await page.evaluate(() => window.cy.getElementById('start').position());
   const from = await nodePoint(page, 'start');

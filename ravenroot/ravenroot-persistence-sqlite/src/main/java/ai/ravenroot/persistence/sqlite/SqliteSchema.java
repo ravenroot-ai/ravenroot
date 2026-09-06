@@ -893,7 +893,17 @@ final class SqliteSchema {
                         "ALTER TABLE human_task ADD COLUMN created_at_epoch_second INTEGER NOT NULL DEFAULT 0",
                         "ALTER TABLE human_task ADD COLUMN created_at_nano INTEGER NOT NULL DEFAULT 0",
                         "CREATE INDEX human_task_created_order ON human_task "
-                                + "(tenant_id, created_at_epoch_second, created_at_nano, task_id)")));
+                                + "(tenant_id, created_at_epoch_second, created_at_nano, task_id)")),
+                // Attention is derived directly from durable task and process rows. The process-key
+                // index lets both process scope and the deployment join reach only the owning tasks;
+                // the context-order index serves graph-wide node counts and stable page ordering.
+                new SchemaMigration(21, "authorized exact-context human-task attention", List.of(
+                        "CREATE INDEX human_task_process_attention ON human_task "
+                                + "(tenant_id, process_instance_id, graph_version_pin, "
+                                + "created_at_epoch_second, created_at_nano, task_id, status)",
+                        "CREATE INDEX human_task_context_attention ON human_task "
+                                + "(tenant_id, graph_version_pin, created_at_epoch_second, "
+                                + "created_at_nano, task_id, status)")));
     }
 
     static int currentVersion() {

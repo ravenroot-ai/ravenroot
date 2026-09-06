@@ -1,7 +1,8 @@
 package ai.ravenroot.api.persistence;
 
 import java.nio.charset.StandardCharsets;
-import java.util.EnumSet;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 
@@ -11,12 +12,20 @@ import java.util.Set;
  * <p>The value is display data and action policy only. It deliberately carries no HTML, URL,
  * callback, credential, execution payload, or third-party protocol. Version zero denotes the
  * classic Human Task experience and preserves rows created before embedded confirmations existed.</p>
+ *
+ * @param version presentation wire version, zero for classic tasks.
+ * @param prompt bounded plain-text confirmation prompt.
+ * @param commentRequirement decision-comment rule.
+ * @param actions unique actions in authored display order.
+ * @param resolveLabel label for the resolve action.
+ * @param denyLabel label for the deny action.
+ * @param cancelLabel label for the cancel action.
  */
 public record HumanTaskConfirmationPresentation(
         int version,
         String prompt,
         HumanTaskCommentRequirement commentRequirement,
-        Set<HumanTaskConfirmationAction> actions,
+        List<HumanTaskConfirmationAction> actions,
         String resolveLabel,
         String denyLabel,
         String cancelLabel) {
@@ -30,7 +39,7 @@ public record HumanTaskConfirmationPresentation(
 
     private static final HumanTaskConfirmationPresentation NONE =
             new HumanTaskConfirmationPresentation(0, "", HumanTaskCommentRequirement.DISALLOWED,
-                    Set.of(), "", "", "");
+                    List.of(), "", "", "");
 
     /** Validates the structural, versioned presentation shape. */
     public HumanTaskConfirmationPresentation {
@@ -39,7 +48,11 @@ public record HumanTaskConfirmationPresentation(
         }
         prompt = requireText(prompt, "prompt", HARD_MAX_PROMPT_UTF8_BYTES, version != 0);
         commentRequirement = Objects.requireNonNull(commentRequirement, "commentRequirement");
-        actions = actions == null || actions.isEmpty() ? Set.of() : Set.copyOf(EnumSet.copyOf(actions));
+        actions = List.copyOf(actions == null ? List.of() : actions);
+        if (actions.stream().anyMatch(Objects::isNull)
+                || new HashSet<>(actions).size() != actions.size()) {
+            throw new IllegalArgumentException("embedded confirmation actions must be unique");
+        }
         resolveLabel = requireText(resolveLabel, "resolveLabel", HARD_MAX_ACTION_LABEL_UTF8_BYTES, false);
         denyLabel = requireText(denyLabel, "denyLabel", HARD_MAX_ACTION_LABEL_UTF8_BYTES, false);
         cancelLabel = requireText(cancelLabel, "cancelLabel", HARD_MAX_ACTION_LABEL_UTF8_BYTES, false);
@@ -66,7 +79,37 @@ public record HumanTaskConfirmationPresentation(
         }
     }
 
-    /** Returns the exact label pinned for one supported action. */
+    /**
+     * Compatibility constructor for callers that supplied the former unordered action set.
+     *
+     * <p>The enum declaration order is the only deterministic order an unordered set can express.
+     * New graph authoring paths use the canonical list constructor and retain authored order.</p>
+     *
+     * @param version presentation wire version.
+     * @param prompt bounded confirmation prompt.
+     * @param commentRequirement decision-comment rule.
+     * @param actions unordered action subset.
+     * @param resolveLabel label for resolve.
+     * @param denyLabel label for deny.
+     * @param cancelLabel label for cancel.
+     */
+    public HumanTaskConfirmationPresentation(int version, String prompt,
+                                             HumanTaskCommentRequirement commentRequirement,
+                                             Set<HumanTaskConfirmationAction> actions,
+                                             String resolveLabel, String denyLabel,
+                                             String cancelLabel) {
+        this(version, prompt, commentRequirement,
+                actions == null ? List.of() : java.util.Arrays.stream(
+                        HumanTaskConfirmationAction.values()).filter(actions::contains).toList(),
+                resolveLabel, denyLabel, cancelLabel);
+    }
+
+    /**
+     * Returns the exact label pinned for one supported action.
+     *
+     * @param action action whose label is requested.
+     * @return immutable pinned label.
+     */
     public String label(HumanTaskConfirmationAction action) {
         return switch (Objects.requireNonNull(action, "action")) {
             case RESOLVE -> resolveLabel;
@@ -75,12 +118,20 @@ public record HumanTaskConfirmationPresentation(
         };
     }
 
-    /** Reports whether this task uses the embedded confirmation presentation. */
+    /**
+     * Reports whether this task uses the embedded confirmation presentation.
+     *
+     * @return true for a nonzero presentation version.
+     */
     public boolean embedded() {
         return version != 0;
     }
 
-    /** Returns the compatibility-preserving classic presentation. */
+    /**
+     * Returns the compatibility-preserving classic presentation.
+     *
+     * @return singleton version-zero presentation.
+     */
     public static HumanTaskConfirmationPresentation none() {
         return NONE;
     }

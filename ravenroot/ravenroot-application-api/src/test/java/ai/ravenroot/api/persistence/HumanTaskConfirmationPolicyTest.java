@@ -12,7 +12,7 @@ class HumanTaskConfirmationPolicyTest {
     void classicPresentationPreservesThePreEmbeddedShape() {
         var presentation = HumanTaskConfirmationPresentation.none();
         assertEquals(0, presentation.version());
-        assertEquals(Set.of(), presentation.actions());
+        assertEquals(java.util.List.of(), presentation.actions());
         assertEquals("", presentation.prompt());
     }
 

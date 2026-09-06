@@ -21,6 +21,11 @@ import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
@@ -48,6 +53,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
@@ -197,6 +203,45 @@ public final class HumanTaskService {
                     + policy.inboxMaxPageSize());
         }
         return await(store.listHumanTasks(context.tenantId(), query));
+    }
+
+    /**
+     * Reads authorized actionable embedded tasks in one exact durable runtime context.
+     *
+     * @param context authenticated caller identity and current authority.
+     * @param query exact bounded attention query.
+     * @return safe attention page with authoritative counts.
+     */
+    public HumanTaskAttentionPage attention(RequestContext context, HumanTaskAttentionQuery query) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(query, "query");
+        if (query.limit() > policy.confirmation().attentionMaxPageSize()) {
+            throw new IllegalArgumentException("human-task page limit must be between 1 and "
+                    + policy.confirmation().attentionMaxPageSize());
+        }
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        var authorization = new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+        return await(store.listHumanTaskAttention(context.tenantId(), query, authorization));
+    }
+
+    /**
+     * Recovers one authorized actionable embedded task without browser-held runtime context.
+     *
+     * @param context authenticated caller identity and current authority.
+     * @param locator durable task identity and exact generation.
+     * @return safe task projection, or empty for every unavailable state.
+     */
+    public Optional<HumanTaskAttentionItem> attention(
+            RequestContext context, HumanTaskAttentionLocator locator) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(locator, "locator");
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        var authorization = new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+        return await(store.findHumanTaskAttention(context.tenantId(), locator, authorization));
     }
 
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,

@@ -33,6 +33,7 @@ import java.util.Set;
  * @param responseMaxTextLength inclusive maximum UTF-16 code units in a response text value
  * @param responseMaxKeyLength inclusive maximum UTF-16 code units in a response object key
  * @param writeAttempts inclusive maximum optimistic persistence attempts for one task transition
+ * @param confirmation embedded confirmation presentation and attention controls
  */
 public record HumanTaskPolicy(
         int defaultResponseBytes,
@@ -92,6 +93,27 @@ public record HumanTaskPolicy(
      *
      * <p>Embedded confirmation controls default to {@link Confirmation#DEFAULTS}; callers that
      * need an operator-specific value use the canonical constructor.</p>
+     *
+     * @param defaultResponseBytes default encoded response bytes
+     * @param maxResponseBytes maximum encoded response bytes
+     * @param defaultEscalationSeconds default escalation delay
+     * @param maxEscalationSeconds maximum escalation delay
+     * @param defaultExpirySeconds default expiry delay
+     * @param maxExpirySeconds maximum expiry delay
+     * @param maxTitleUtf8Bytes maximum title bytes
+     * @param maxDescriptionUtf8Bytes maximum description bytes
+     * @param maxResponseSchemaUtf8Bytes maximum response-schema bytes
+     * @param maxAuthorizationTokens maximum roles or scopes
+     * @param maxAuthorizationTokenUtf8Bytes maximum bytes in one role or scope
+     * @param decisionBodyMaxBytes maximum raw decision-body bytes
+     * @param inboxDefaultPageSize default classic inbox page size
+     * @param inboxMaxPageSize maximum classic inbox page size
+     * @param responseMaxDepth maximum structured-response depth
+     * @param responseMaxCollectionSize maximum collection members
+     * @param responseMaxValueCount maximum total structured values
+     * @param responseMaxTextLength maximum response text length
+     * @param responseMaxKeyLength maximum response key length
+     * @param writeAttempts maximum optimistic write attempts
      */
     public HumanTaskPolicy(int defaultResponseBytes, int maxResponseBytes,
                            long defaultEscalationSeconds, long maxEscalationSeconds,
@@ -256,7 +278,11 @@ public record HumanTaskPolicy(
         }
     }
 
-    /** Returns the immutable embedded-confirmation limits to pin with a newly admitted task. */
+    /**
+     * Returns the immutable embedded-confirmation limits to pin with a newly admitted task.
+     *
+     * @return current presentation and comment limits.
+     */
     public HumanTaskConfirmationLimits confirmationLimits() {
         return new HumanTaskConfirmationLimits(confirmation.maxPromptUtf8Bytes(),
                 confirmation.maxActionLabelUtf8Bytes(), confirmation.maxCommentUtf8Bytes());
@@ -276,7 +302,17 @@ public record HumanTaskPolicy(
         }
     }
 
-    /** Immutable operator-owned controls for embedded Human Task confirmations. */
+    /**
+     * Immutable operator-owned controls for embedded Human Task confirmations.
+     *
+     * @param maxPromptUtf8Bytes maximum prompt bytes.
+     * @param maxActionLabelUtf8Bytes maximum bytes in one action label.
+     * @param maxCommentUtf8Bytes maximum decision-comment bytes.
+     * @param pollAfterMillis initial attention refresh delay.
+     * @param pollBackoffMaxMillis maximum attention refresh delay.
+     * @param attentionDefaultPageSize default attention page size.
+     * @param attentionMaxPageSize maximum attention page size.
+     */
     public record Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
                                int maxCommentUtf8Bytes, int pollAfterMillis,
                                int pollBackoffMaxMillis, int attentionDefaultPageSize,
@@ -291,22 +327,31 @@ public record HumanTaskPolicy(
         public static final int HARD_MAX_POLL_MILLIS = 300_000;
         /** A selected-node page carries presentation copy; cap it at 100 rows for a 6.4 MiB prompt bound. */
         public static final int HARD_MAX_ATTENTION_PAGE_SIZE = 100;
+        /** Matches the GraphML parser's supported node ceiling. */
+        public static final int HARD_MAX_ATTENTION_NODE_COUNTS = 1_000_000;
         /** Static default rendered when a graph opts into presentation version one. */
         public static final String DEFAULT_PROMPT = "Confirm this task.";
         /** Default decision metadata rule for the built-in presentation. */
         public static final HumanTaskCommentRequirement DEFAULT_COMMENT_REQUIREMENT =
                 HumanTaskCommentRequirement.OPTIONAL;
-        /** Ordered built-in action set for presentation version one. */
-        public static final java.util.Set<HumanTaskConfirmationAction> DEFAULT_ACTIONS =
-                java.util.Collections.unmodifiableSet(java.util.EnumSet.allOf(
-                        HumanTaskConfirmationAction.class));
+        /** Ordered built-in actions for presentation version one. */
+        public static final java.util.List<HumanTaskConfirmationAction> DEFAULT_ACTIONS =
+                java.util.List.of(HumanTaskConfirmationAction.values());
         public static final String DEFAULT_RESOLVE_LABEL = "Confirm";
         public static final String DEFAULT_DENY_LABEL = "Deny";
         public static final String DEFAULT_CANCEL_LABEL = "Cancel";
         public static final Confirmation DEFAULTS = new Confirmation(4 * 1024, 64,
                 4 * 1024, 1_000, 10_000, 20, 100);
 
-        /** Compatibility constructor for the initial five confirmation controls. */
+        /**
+         * Compatibility constructor for the initial five confirmation controls.
+         *
+         * @param maxPromptUtf8Bytes maximum prompt bytes.
+         * @param maxActionLabelUtf8Bytes maximum bytes in one action label.
+         * @param maxCommentUtf8Bytes maximum decision-comment bytes.
+         * @param pollAfterMillis initial attention refresh delay.
+         * @param pollBackoffMaxMillis maximum attention refresh delay.
+         */
         public Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
                             int maxCommentUtf8Bytes, int pollAfterMillis,
                             int pollBackoffMaxMillis) {
@@ -315,6 +360,7 @@ public record HumanTaskPolicy(
                     DEFAULTS.attentionMaxPageSize());
         }
 
+        /** Validates technical ceilings and relationships between defaults and maxima. */
         public Confirmation {
             confirmationBounded(maxPromptUtf8Bytes, 1, HARD_MAX_PROMPT_UTF8_BYTES, "maxPromptUtf8Bytes");
             confirmationBounded(maxActionLabelUtf8Bytes, 1, HARD_MAX_ACTION_LABEL_UTF8_BYTES,
@@ -333,7 +379,11 @@ public record HumanTaskPolicy(
             }
         }
 
-        /** Validates the graph-authored display contract against this deployment policy. */
+        /**
+         * Validates the graph-authored display contract against this deployment policy.
+         *
+         * @param presentation graph-authored presentation to validate.
+         */
         public void requirePresentation(HumanTaskConfirmationPresentation presentation) {
             presentation = Objects.requireNonNull(presentation, "presentation");
             if (!presentation.embedded()) return;
@@ -344,7 +394,13 @@ public record HumanTaskPolicy(
             }
         }
 
-        /** Normalizes bounded decision metadata, deliberately separate from execution payload. */
+        /**
+         * Normalizes bounded decision metadata, deliberately separate from execution payload.
+         *
+         * @param comment untrusted decision comment.
+         * @param requirement pinned decision-comment rule.
+         * @return stripped, validated comment.
+         */
         public String normalizeComment(String comment, HumanTaskCommentRequirement requirement) {
             requirement = Objects.requireNonNull(requirement, "requirement");
             comment = comment == null ? "" : comment.strip();

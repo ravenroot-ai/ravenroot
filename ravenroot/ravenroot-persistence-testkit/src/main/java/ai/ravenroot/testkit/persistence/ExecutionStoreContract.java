@@ -56,6 +56,10 @@ import ai.ravenroot.api.persistence.HumanTaskConfirmationLimits;
 import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
 import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
@@ -2302,7 +2306,13 @@ public abstract class ExecutionStoreContract {
 
     private StoredProcessInstance scheduleRunningAttempt(ExecutionKey key, UUID traversalId, UUID invocationId,
                                                          UUID attemptId, NodeCommand command) {
-        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        return scheduleRunningAttempt(key, traversalId, invocationId, attemptId, command, "graph-v1");
+    }
+
+    private StoredProcessInstance scheduleRunningAttempt(ExecutionKey key, UUID traversalId, UUID invocationId,
+                                                         UUID attemptId, NodeCommand command,
+                                                         String graphVersion) {
+        StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, graphVersion)));
         return await(store().apply(ExecutionBatch.to(key)
                 .expecting(RevisionExpectation.exactly(created.revision()))
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
@@ -3374,6 +3384,185 @@ public abstract class ExecutionStoreContract {
                 new HumanTaskTransition.Denied(embedded.taskId(), 1,
                         "issuer|USER|responder", "changed comment")));
         assertInstanceOf(ExecutionStoreFailure.HumanTaskNotResolvable.class, changed);
+    }
+
+    @Test
+    final void humanTaskAttentionAuthorizesBeforeCountsAndUsesAStableScopedCursor() {
+        assumeCapability(StoreCapability.HUMAN_TASK_CONFIRMATIONS);
+        String tenant = "human-attention-tenant";
+        var responder = new HumanTaskAttentionAuthorization("issuer|USER|responder",
+                Set.of("REVIEWER"), Set.of("human:decide"));
+        var orderedActions = List.of(HumanTaskConfirmationAction.DENY,
+                HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.CANCEL);
+        HumanTaskFixture first = waitingEmbeddedHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000101"), "node-a",
+                "attention-dedup-1", "attention-correlation-1", "deployment-a", "graph-v1",
+                new HandlerAuthorization(Set.of("REVIEWER"), Set.of("human:decide")),
+                "requester-a", orderedActions, HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        HumanTaskFixture unauthorized = waitingEmbeddedHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000102"), "node-a",
+                "attention-dedup-2", "attention-correlation-2", "deployment-a", "graph-v1",
+                HandlerAuthorization.ofRoles("OPERATIONS"), "requester-b", orderedActions,
+                HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        clock().advance(Duration.ofSeconds(1));
+        HumanTaskFixture second = waitingEmbeddedHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000103"), "node-b",
+                "attention-dedup-3", "attention-correlation-3", "deployment-a", "graph-v1",
+                new HandlerAuthorization(Set.of("REVIEWER"), Set.of("human:decide")),
+                "requester-c", orderedActions, HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        waitingEmbeddedHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000104"), "node-a",
+                "attention-dedup-4", "attention-correlation-4", "deployment-b", "graph-v1",
+                new HandlerAuthorization(Set.of("REVIEWER"), Set.of("human:decide")),
+                "requester-d", orderedActions, HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        waitingEmbeddedHumanTask(keyFor(tenant),
+                UUID.fromString("00000000-0000-0000-0000-000000000105"), "node-a",
+                "attention-dedup-5", "attention-correlation-5", "deployment-a", "graph-v2",
+                new HandlerAuthorization(Set.of("REVIEWER"), Set.of("human:decide")),
+                "requester-e", orderedActions, HumanTaskPolicy.DEFAULTS.confirmationLimits());
+
+        HumanTaskAttentionQuery query = HumanTaskAttentionQuery.forDeployment(
+                "graph-v1", "deployment-a", 1);
+        HumanTaskAttentionPage page = await(store().listHumanTaskAttention(tenant, query, responder));
+        assertEquals(2L, page.counts().pending(),
+                "an unauthorized row must not enter counts before it is removed from the page");
+        assertEquals(0L, page.counts().escalated());
+        assertEquals(List.of("node-a", "node-b"), page.nodeCounts().stream()
+                .map(count -> count.nodeId()).toList());
+        assertEquals(List.of(1L, 1L), page.nodeCounts().stream()
+                .map(count -> count.pending()).toList());
+        assertEquals(page.counts().pending(), page.nodeCounts().stream()
+                .mapToLong(count -> count.pending()).sum(),
+                "aggregate per-node counts must be complete rather than truncated");
+        assertEquals(first.registration().taskId(), page.items().getFirst().taskId());
+        assertEquals(orderedActions, page.items().getFirst().availableActions(),
+                "the safe projection must preserve pinned authored action order");
+        assertEquals(4096, page.items().getFirst().promptMaxUtf8Bytes());
+        assertEquals(64, page.items().getFirst().actionLabelMaxUtf8Bytes());
+        assertEquals(4096, page.items().getFirst().commentMaxUtf8Bytes());
+        var cursor = page.nextCursor().orElseThrow();
+
+        transitionHumanTask(first, new HumanTaskTransition.Denied(
+                first.registration().taskId(), 1L, responder.actor()));
+        HumanTaskAttentionPage continued = await(store().listHumanTaskAttention(
+                tenant, query.after(cursor), responder));
+        assertEquals(List.of(second.registration().taskId()), continued.items().stream()
+                .map(item -> item.taskId()).toList(),
+                "settling the cursor row must not invalidate the self-contained boundary");
+        assertEquals(1L, continued.counts().pending(),
+                "counts are current and authoritative rather than frozen into the cursor");
+
+        ExecutionStoreFailure changedAuthority = failureOf(() -> await(store().listHumanTaskAttention(
+                tenant, query.after(cursor), new HumanTaskAttentionAuthorization(
+                        responder.actor(), Set.of("REVIEWER", "OPERATIONS"),
+                        Set.of("human:decide")))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, changedAuthority,
+                "authority changes must reset paging instead of skipping newly authorized rows");
+        ExecutionStoreFailure changedContext = failureOf(() -> await(store().listHumanTaskAttention(
+                tenant, HumanTaskAttentionQuery.forDeployment("graph-v1", "deployment-b", 1)
+                        .after(cursor), responder)));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, changedContext);
+
+        HumanTaskAttentionPage exactProcess = await(store().listHumanTaskAttention(tenant,
+                HumanTaskAttentionQuery.forProcess("graph-v1", second.key().processInstanceId(), 10),
+                responder));
+        assertEquals(List.of(second.registration().taskId()), exactProcess.items().stream()
+                .map(item -> item.taskId()).toList());
+        assertEquals(Optional.of("deployment-a"), exactProcess.items().getFirst().deploymentId());
+        assertFalse(exactProcess.items().stream()
+                .anyMatch(item -> item.taskId().equals(unauthorized.registration().taskId())));
+    }
+
+    @Test
+    final void humanTaskAttentionProjectsOnlyRequesterCancelAndHonorsExactTaskGeneration() {
+        assumeCapability(StoreCapability.HUMAN_TASK_CONFIRMATIONS);
+        String tenant = "human-requester-attention";
+        HumanTaskFixture fixture = waitingEmbeddedHumanTask(keyFor(tenant), UUID.randomUUID(),
+                "node-cancel", "requester-dedup", "requester-correlation", "deployment-c",
+                "graph-v1", HandlerAuthorization.ofRoles("OPERATIONS"), "requester",
+                List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.CANCEL),
+                HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        var requester = new HumanTaskAttentionAuthorization("issuer|USER|requester",
+                Set.of(), Set.of());
+        HumanTaskAttentionQuery exact = new HumanTaskAttentionQuery("graph-v1",
+                Optional.of("deployment-c"), Optional.empty(),
+                Optional.of(fixture.registration().traversalId()), Optional.of("node-cancel"),
+                Optional.of(fixture.registration().taskId()), Optional.of(1L), Optional.empty(), 10);
+        HumanTaskAttentionPage visible = await(store().listHumanTaskAttention(tenant, exact, requester));
+        assertEquals(1L, visible.counts().pending());
+        assertEquals(List.of(HumanTaskConfirmationAction.CANCEL),
+                visible.items().getFirst().availableActions());
+        assertTrue(visible.nodeCounts().isEmpty(),
+                "a selected-node response must not duplicate or broaden aggregate counts");
+
+        var locator = new HumanTaskAttentionLocator(fixture.registration().taskId(), 1L);
+        var recovered = await(store().findHumanTaskAttention(tenant, locator, requester)).orElseThrow();
+        assertEquals("graph-v1", recovered.graphVersion());
+        assertEquals(Optional.of("deployment-c"), recovered.deploymentId());
+        assertEquals(fixture.key().processInstanceId(), recovered.processInstanceId());
+        assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), recovered.availableActions());
+        assertTrue(await(store().findHumanTaskAttention(tenant,
+                new HumanTaskAttentionLocator(fixture.registration().taskId(), 2L), requester)).isEmpty(),
+                "a stale generation must be indistinguishable from an absent task");
+        assertTrue(await(store().findHumanTaskAttention("different-tenant", locator, requester)).isEmpty(),
+                "the bare locator must not disclose a task across tenant boundaries");
+
+        HumanTaskAttentionPage staleGeneration = await(store().listHumanTaskAttention(tenant,
+                new HumanTaskAttentionQuery("graph-v1", Optional.of("deployment-c"), Optional.empty(),
+                        Optional.empty(), Optional.empty(), Optional.of(fixture.registration().taskId()),
+                        Optional.of(2L), Optional.empty(), 10), requester));
+        assertTrue(staleGeneration.items().isEmpty());
+        assertEquals(0L, staleGeneration.counts().pending());
+
+        var unrelated = new HumanTaskAttentionAuthorization("issuer|USER|other", Set.of(), Set.of());
+        HumanTaskAttentionPage hidden = await(store().listHumanTaskAttention(tenant, exact, unrelated));
+        assertTrue(hidden.items().isEmpty());
+        assertEquals(0L, hidden.counts().pending(),
+                "same-tenant unauthorized callers receive no row or count oracle");
+        assertTrue(hidden.nodeCounts().isEmpty());
+        assertTrue(await(store().findHumanTaskAttention(tenant, locator, unrelated)).isEmpty(),
+                "the bare locator must not disclose an unauthorized task");
+
+        transitionHumanTask(fixture, new HumanTaskTransition.Cancelled(
+                fixture.registration().taskId(), 1L, requester.actor()));
+        assertTrue(await(store().findHumanTaskAttention(tenant, locator, requester)).isEmpty(),
+                "terminal tasks are no longer actionable after reload");
+    }
+
+    private HumanTaskFixture waitingEmbeddedHumanTask(
+            ExecutionKey key, UUID taskId, String nodeId, String deduplicationKey,
+            String correlationKey, String deploymentId, String graphVersion,
+            HandlerAuthorization authorization, String requesterSubject,
+            List<HumanTaskConfirmationAction> actions, HumanTaskConfirmationLimits limits) {
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        StoredProcessInstance scheduled = scheduleRunningAttempt(key, traversalId, invocationId,
+                attemptId, NodeCommand.PROCESS, graphVersion);
+        StoredProcessInstance running = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(scheduled.revision()))
+                .apply(new ExecutionTransition.AttemptTransitioned(traversalId, invocationId, attemptId,
+                        NodeAttemptStatus.RUNNING))
+                .recordOrigin(ExecutionOrigin.of(deploymentId, null, null)).build()));
+        var registration = new HumanTaskRegistration(taskId, traversalId, invocationId, attemptId,
+                nodeId, correlationKey, deduplicationKey,
+                new HumanTaskMetadata("Review this request", "Confirm the public request details."),
+                new HumanTaskResponseSchema("application/json", "ravenroot.human-task.confirmation",
+                        "1", PayloadKind.SCALAR, 4096), authorization,
+                new SecurityContext("request", key.tenantId(), requesterSubject,
+                        PrincipalType.USER, "issuer"), new GraphVersionPin(graphVersion),
+                Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
+                clock().instant().plus(Duration.ofMinutes(5)),
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                HumanTaskPolicy.DEFAULTS.executionLimits(4096), 2, new byte[] {1, 2, 3},
+                digest(new byte[] {1, 2, 3}),
+                new HumanTaskConfirmationPresentation(1, "Confirm after review.",
+                        HumanTaskCommentRequirement.OPTIONAL, actions,
+                        "Confirm", "Deny", "Cancel"), limits);
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(running.revision()))
+                .registerHumanTask(registration).build()));
+        return new HumanTaskFixture(key, registration);
     }
 
     private HumanTaskFixture waitingHumanTask(ExecutionKey key, UUID taskId, String deduplicationKey,

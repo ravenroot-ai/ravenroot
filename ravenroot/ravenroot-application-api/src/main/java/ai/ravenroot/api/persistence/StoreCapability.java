@@ -72,6 +72,17 @@ public enum StoreCapability {
     HUMAN_TASKS,
 
     /**
+     * Embedded Human Task confirmations have durable pinned presentation and comment limits,
+     * atomic attributable decisions, and an authorized exact-context attention query with stable
+     * paging and authoritative counts.
+     *
+     * <p>This is deliberately stronger than {@link #HUMAN_TASKS}. A store that implements the
+     * classic generic task lifecycle must not advertise embedded confirmation support unless it
+     * also implements the complete presentation, decision and attention contract.</p>
+     */
+    HUMAN_TASK_CONFIRMATIONS,
+
+    /**
      * Operator holds on a traversal can be committed, read back and settled atomically with
      * execution state.
      *

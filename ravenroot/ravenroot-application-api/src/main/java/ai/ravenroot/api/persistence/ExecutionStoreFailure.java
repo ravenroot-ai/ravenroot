@@ -496,6 +496,23 @@ public sealed interface ExecutionStoreFailure {
     }
 
     /**
+     * Stored Human Tasks name more distinct nodes than any supported graph can contain. The store
+     * refuses this corrupt/inconsistent state rather than returning silently incomplete counts.
+     *
+     * @param observedNodeCounts number observed when the graph-safety bound was crossed.
+     * @param limit supported graph node ceiling and complete-count projection bound.
+     */
+    record HumanTaskAttentionTooLarge(long observedNodeCounts, int limit)
+            implements ExecutionStoreFailure {
+        @Override public Retryability retryability() { return Retryability.DETERMINISTIC_REJECT; }
+
+        @Override public String describe() {
+            return "human-task attention context has at least " + observedNodeCounts
+                    + " actionable nodes, above the supported graph-node ceiling of " + limit;
+        }
+    }
+
+    /**
      * An execution-pause transition conflicts with the first durable lifecycle winner.
      *
      * @param pauseId target hold identity.

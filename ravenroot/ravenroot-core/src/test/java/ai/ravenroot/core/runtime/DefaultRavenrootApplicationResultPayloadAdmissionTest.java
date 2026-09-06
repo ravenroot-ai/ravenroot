@@ -107,21 +107,23 @@ class DefaultRavenrootApplicationResultPayloadAdmissionTest {
                          "x".repeat(256))) {
                 Thread submission = Thread.startVirtualThread(() -> application.startGraphMl(
                         TestIdentities.TENANT_A, traversalId, graph(), "input"));
-
-                assertTrue(enteredResultWrite.await(10, TimeUnit.SECONDS),
-                        "the completion callback must reach the deliberately blocked result write");
-                var redacted = assertInstanceOf(ExecutionLookup.Redacted.class,
-                        application.executionResult(TestIdentities.TENANT_A.tenantId(), traversalId));
-                assertEquals(ResultPayloadState.WITHHELD, redacted.payloadState(),
-                        "local visibility must already contain the admitted state while persistence is blocked");
-                assertEquals(ResultPayloadState.WITHHELD, recorded.get().payload().state());
-                assertNull(recorded.get().payload().retained());
-
-                releaseResultWrite.countDown();
-                submission.join(Duration.ofSeconds(10));
-                assertTrue(!submission.isAlive());
-            } finally {
-                releaseResultWrite.countDown();
+                try {
+                    assertTrue(enteredResultWrite.await(10, TimeUnit.SECONDS),
+                            "the completion callback must reach the deliberately blocked result write");
+                    var redacted = assertInstanceOf(ExecutionLookup.Redacted.class,
+                            application.executionResult(TestIdentities.TENANT_A.tenantId(), traversalId));
+                    assertEquals(ResultPayloadState.WITHHELD, redacted.payloadState(),
+                            "local visibility must already contain the admitted state while persistence is blocked");
+                    assertEquals(ResultPayloadState.WITHHELD, recorded.get().payload().state());
+                    assertNull(recorded.get().payload().retained());
+                } finally {
+                    // Release and join before try-with-resources closes the application. In the RED
+                    // mutation this block still runs after the assertion exposes raw retention, so
+                    // teardown never waits behind the test's own deliberately blocked store call.
+                    releaseResultWrite.countDown();
+                    submission.join(Duration.ofSeconds(10));
+                    assertTrue(!submission.isAlive(), "the submission thread must terminate before teardown");
+                }
             }
         }
     }

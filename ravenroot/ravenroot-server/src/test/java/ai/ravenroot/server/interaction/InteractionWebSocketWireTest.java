@@ -423,6 +423,7 @@ class InteractionWebSocketWireTest {
                 assertTrue(storeStarted.await(5, TimeUnit.SECONDS));
                 assertEquals(0, interactions.availableBackendOperations());
                 blockedSocket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(5, TimeUnit.SECONDS);
+                assertEquals(WebSocket.NORMAL_CLOSURE, blocked.closeCode.get(5, TimeUnit.SECONDS));
 
                 for (int index = 0; index < 3; index++) {
                     var refused = new RecordingListener();

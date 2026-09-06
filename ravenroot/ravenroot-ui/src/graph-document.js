@@ -1,4 +1,5 @@
 import { assertStableEdgeId, stableEdgeIdViolation } from './stable-edge-id.js';
+import { VISUAL_GROUPS_PROPERTY, readVisualGroups } from './visual-groups.js';
 
 const GRAPHML_NS = 'http://graphml.graphdrawing.org/xmlns';
 
@@ -801,7 +802,47 @@ export function serializeGraphML(graph) {
     graphElement.insertBefore(data, graphElement.firstChild);
   }
 
+  // Only this editor-owned presentation property may replace graph data. Preserve opaque/future
+  // input verbatim until an explicit repair writes a valid v1 value (including an empty tombstone).
+  if (readVisualGroups(graph).status === 'valid') {
+    const ownedKeys = Array.from(root.children).filter(key => key.namespaceURI === namespace
+      && key.localName === 'key'
+      && (key.getAttribute('attr.name') || key.getAttribute('attrname') || key.getAttribute('id')) === VISUAL_GROUPS_PROPERTY
+      && ['graph', 'all'].includes(key.getAttribute('for') || 'all'));
+    const ownedIds = new Set(ownedKeys.map(key => key.getAttribute('id')));
+    directChildren('data').filter(data => ownedIds.has(data.getAttribute('key'))).forEach(data => data.remove());
+    // An all-scope declaration may also own node/edge defaults and opaque data. Split its
+    // non-graph scopes with equivalent declarations instead of deleting that unrelated meaning.
+    const usedKeyIds = new Set(Array.from(root.children).filter(key => key.localName === 'key')
+      .map(key => key.getAttribute('id')));
+    for (const key of ownedKeys.filter(key => (key.getAttribute('for') || 'all') === 'all')) {
+      const oldId = key.getAttribute('id');
+      for (const scope of ['edge', 'graphml', 'port', 'hyperedge', 'endpoint']) {
+        const scoped = key.cloneNode(true);
+        let id = `${oldId}-${scope}`; let suffix = 2;
+        while (usedKeyIds.has(id)) id = `${oldId}-${scope}-${suffix++}`;
+        usedKeyIds.add(id);
+        scoped.setAttribute('for', scope); scoped.setAttribute('id', id);
+        root.insertBefore(scoped, graphElement);
+        keysById.set(id, { name: VISUAL_GROUPS_PROPERTY, scope });
+        keyDefinitions.set(`${scope}:${VISUAL_GROUPS_PROPERTY.toLowerCase()}`, { id, key: scoped });
+        Array.from(root.getElementsByTagNameNS(namespace, 'data'))
+          .filter(data => data.getAttribute('key') === oldId && data.parentElement?.localName === scope)
+          .forEach(data => data.setAttribute('key', id));
+      }
+      key.setAttribute('for', 'node');
+      keysById.set(oldId, { name: VISUAL_GROUPS_PROPERTY, scope: 'node' });
+      keyDefinitions.set(`node:${VISUAL_GROUPS_PROPERTY.toLowerCase()}`, { id: oldId, key });
+    }
+    // Removing graph-only declarations removes their stale defaults as well as aliases. The new
+    // declaration below has exactly one current value and cannot inherit an obsolete group.
+    ownedKeys.filter(key => key.getAttribute('for') === 'graph').forEach(key => key.remove());
+    keyDefinitions.delete(`graph:${VISUAL_GROUPS_PROPERTY.toLowerCase()}`);
+    keyDefinitions.delete(`all:${VISUAL_GROUPS_PROPERTY.toLowerCase()}`);
+    setGraphProperty(VISUAL_GROUPS_PROPERTY, graph.graphProperties[VISUAL_GROUPS_PROPERTY]);
+  }
   Object.entries(graph.graphProperties || {}).forEach(([name, value]) => {
+    if (name === VISUAL_GROUPS_PROPERTY) return;
     if (value != null && value !== '') setGraphProperty(name, value);
   });
 

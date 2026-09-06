@@ -1,4 +1,8 @@
 import cytoscape from 'cytoscape';
+import { readVisualGroups, reconcileVisualGroupState, graphWithVisualGroupPresentation } from './visual-groups.js';
+import { createVisualGroup, editVisualGroups } from './graph-editing.js';
+import { createVisualGroupRenderer } from './visual-group-renderer.js';
+import { normalizedCanvasState, visualGroupPresentation } from './graph-view-state.js';
 import cytoscapeDagre from 'cytoscape-dagre';
 import cytoscapeElk from 'cytoscape-elk';
 import cytoscapeEuler from 'cytoscape-euler';
@@ -772,7 +776,7 @@ function scheduleWorkspacePersistence() {
   workspacePersistenceTimer = setTimeout(() => {
     workspacePersistenceTimer = null;
     void flushWorkspacePersistence();
-  }, 40);
+  }, visualGroupTransitionIsAnimating(workspace.active) ? 300 : 40);
 }
 
 function flushWorkspacePersistence({ allowSuspended = false } = {}) {
@@ -782,6 +786,7 @@ function flushWorkspacePersistence({ allowSuspended = false } = {}) {
     clearTimeout(workspacePersistenceTimer);
     workspacePersistenceTimer = null;
   }
+  workspace.documents.forEach(owner => finishVisualGroups(owner));
   captureActiveDocument();
   const scope = activeWorkspaceScope;
   const generation = workspacePersistenceGeneration;
@@ -1601,6 +1606,273 @@ function routeNodeActionGesture(event) {
   event.stopImmediatePropagation();
 }
 
+function groupProjection(owner = workspace.active) {
+  return elasticRendererFor(owner)?.elasticMount?.visualGroupProjection || owner?.visualGroupsRenderer?.projection;
+}
+
+function groupForVisibleNode(id, owner = workspace.active) {
+  const projection = groupProjection(owner);
+  if (!projection?.syntheticIds.has(id)) return null;
+  projection.groupByVisibleId ||= new Map(projection.groups.flatMap(group => [[group.summaryId, group], [group.headerId, group]]));
+  return projection.groupByVisibleId.get(id) || null;
+}
+
+function selectedVisualGroup(owner = workspace.active) {
+  const ids = owner?.cy?.nodes(':selected').map(node => node.id()) || [];
+  if (owner?.layoutMode === 'elastic' && owner?.focusedVisualGroupId) {
+    return readVisualGroups(owner.graph).groups.find(group => group.id === owner.focusedVisualGroupId) || null;
+  }
+  return ids.length === 1 ? groupForVisibleNode(ids[0], owner) : null;
+}
+
+function managedVisualGroup(owner = workspace.active) {
+  return selectedVisualGroup(owner) || readVisualGroups(owner?.graph).groups
+    .find(group => group.id === owner?.selectedVisualGroupId) || null;
+}
+
+function groupAuthoringAllowed(owner = workspace.active) {
+  return Boolean(owner === workspace.active && documentIsEditable(owner) && modifyEnabled
+    && canModifyGraph(owner.graph, owner.layoutMode) && !layoutBusy);
+}
+
+function selectedRealNodeIds(owner = workspace.active, captured = null) {
+  return (captured || owner?.cy?.nodes(':selected').map(node => node.id()) || [])
+    .filter(id => Object.hasOwn(owner?.graph?.nodeMap || {}, id));
+}
+
+function finishVisualGroups(owner = workspace.active) {
+  owner?.visualGroupsRenderer?.finish();
+  elasticRendererFor(owner)?.elasticMount?.finishVisualGroupTransition?.();
+}
+
+// Group presentation lives only on its document; it has no module-level working-view mirror.
+function visualGroupTransitionIsAnimating(owner) {
+  return Boolean(owner && workspace.find(owner.id) === owner
+    && (owner.visualGroupsRenderer?.isAnimating || owner.renderer?.elasticMount?.visualGroupAnimating));
+}
+
+function visualGroupPresentationIsDirty(owner) {
+  return Boolean(owner && workspace.find(owner.id) === owner && owner.visualGroupPresentationDirty);
+}
+
+function suspendVisualGroups(owner) {
+  if (!owner || workspace.find(owner.id) !== owner) return;
+  finishVisualGroups(owner);
+  owner.visualGroupsRenderer?.suspend();
+}
+
+function destroyDesignVisualGroups(owner, target) {
+  if (!owner || workspace.find(owner.id) !== owner || owner.cy !== target) return;
+  owner.visualGroupsRenderer?.destroy();
+  owner.visualGroupsRenderer = null;
+}
+
+function refreshVisualGroups(owner = workspace.active, { animate = false, selection, focus } = {}) {
+  if (!owner?.graph || !owner.cy || owner.cy.destroyed()) return;
+  const metadata = readVisualGroups(owner.graph);
+  owner.visualGroupState = reconcileVisualGroupState(metadata.groups, owner.visualGroupState);
+  const target = owner.cy;
+  const selected = selection || target.$(':selected').map(element => element.id());
+  const selectedFocus = focus ?? owner.cursorId;
+  const onSelection = (ids, context = {}) => {
+    if (workspace.find(owner.id) !== owner || owner.cy !== target) return;
+    applyStableSelection(target, ids);
+    if (context.groupId) owner.selectedVisualGroupId = context.groupId;
+    if (context.groupId) owner.focusedVisualGroupId = context.groupId;
+    owner.cursorId = context.focus || ids[0] || null;
+    if (owner === workspace.active) {
+      graphCursorId = owner.cursorId;
+      if (context.groupId) showVisualGroupInfo(readVisualGroups(owner.graph).groups.find(group => group.id === context.groupId));
+      else scheduleSelectionInspectorRefresh(target);
+    }
+  };
+  const elastic = elasticRendererFor(owner);
+  if (elastic?.elasticMount?.setVisualGroups) {
+    elastic.elasticMount.setVisualGroups({ groups: metadata.groups, state: owner.visualGroupState, animate,
+      selection: selected, focus: selectedFocus, onSelection,
+      selectedGroupId: owner.restoredVisualGroupSelection ?? owner.focusedVisualGroupId ?? null,
+      focusGroupId: owner === workspace.active
+        ? owner.restoredVisualGroupFocus ?? owner.focusedVisualGroupId ?? null : null,
+      onToggle: (id, collapsed) => toggleVisualGroup(id, collapsed, owner),
+      onUpdate: () => scheduleMinimap(owner) });
+    owner.restoredVisualGroupSelection = null;
+    owner.restoredVisualGroupFocus = null;
+  } else {
+    if (!owner.visualGroupsRenderer) owner.visualGroupsRenderer = createVisualGroupRenderer({ cy: target,
+      isCurrent: () => workspace.find(owner.id) === owner && owner.cy === target,
+      onSelection, onUpdate: (_projection, { final } = {}) => {
+        if (final) applyNodeGrabPolicy(target);
+        scheduleMinimap(owner);
+      } });
+    owner.visualGroupsRenderer.setGroups({ graph: owner.graph, groups: metadata.groups,
+      state: owner.visualGroupState, animate, selection: selected, focus: selectedFocus });
+    applyNodeGrabPolicy(target);
+  }
+  if (metadata.warning && owner.visualGroupWarning !== metadata.warning) {
+    owner.visualGroupWarning = metadata.warning;
+    addActivityMessage('editor', metadata.warning, 'failed');
+  }
+  if (owner === workspace.active) { updateStats(); refreshCommands(); }
+}
+
+function toggleVisualGroup(groupId, collapsed, owner = workspace.active) {
+  const incarnation = owner?.incarnation;
+  return runAfterInspectorDraft(() => {
+    if (workspace.find(owner?.id) !== owner || owner.incarnation !== incarnation || !owner.graph) return false;
+    if (workspace.active !== owner) activateDocument(owner.id);
+    const group = readVisualGroups(owner.graph).groups.find(item => item.id === groupId);
+    if (!group) return false;
+    invalidateDocumentLayouts(owner);
+    const previous = reconcileVisualGroupState([group], owner.visualGroupState)[groupId];
+    const next = typeof collapsed === 'boolean' ? collapsed : !previous.collapsed;
+    const memberSelection = selectedRealNodeIds(owner).filter(id => group.memberNodeIds.includes(id));
+    const focused = group.memberNodeIds.includes(graphCursorId) ? graphCursorId : previous.anchorNodeId;
+    owner.visualGroupState = { ...owner.visualGroupState, [groupId]: { ...previous,
+      collapsed: next, anchorNodeId: next ? focused : previous.anchorNodeId,
+      lastSelectedNodeIds: next && memberSelection.length ? memberSelection : previous.lastSelectedNodeIds } };
+    owner.visualGroupPresentationDirty = true;
+    owner.selectedVisualGroupId = groupId;
+    refreshVisualGroups(owner, { animate: true });
+    updateHistoryUi();
+    return true;
+  });
+}
+
+function visualGroupDialog(title, { value = null, detail = '', submit = 'Save', onCommit }) {
+  const origin = document.activeElement;
+  const owner = workspace.active;
+  const incarnation = owner?.incarnation;
+  const dialog = document.createElement('dialog');
+  dialog.className = 'visual-group-dialog';
+  dialog.setAttribute('aria-label', title);
+  const form = document.createElement('form');
+  const heading = document.createElement('h2'); heading.textContent = title;
+  const explanation = document.createElement('p'); explanation.textContent = detail;
+  const input = document.createElement('input'); input.type = 'text'; input.maxLength = 160;
+  input.setAttribute('aria-label', 'Group name'); input.value = value ?? ''; input.required = true;
+  const error = document.createElement('p'); error.setAttribute('role', 'alert');
+  const actions = document.createElement('div'); actions.className = 'visual-group-dialog-actions';
+  const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel';
+  const save = document.createElement('button'); save.type = 'submit'; save.textContent = submit;
+  cancel.className = 'btn'; save.className = 'btn primary';
+  actions.append(cancel, save); form.append(heading, explanation);
+  if (value !== null) form.append(input);
+  form.append(error, actions); dialog.append(form); document.body.append(dialog);
+  const close = () => { dialog.close(); dialog.remove(); if (origin?.isConnected) origin.focus({ preventScroll: true }); };
+  cancel.addEventListener('click', close); dialog.addEventListener('cancel', event => { event.preventDefault(); close(); });
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    if (workspace.active !== owner || owner.incarnation !== incarnation || !groupAuthoringAllowed(owner)) { close(); return; }
+    try { onCommit(input.value.trim()); close(); } catch (failure) { error.textContent = failure.message; }
+  });
+  dialog.showModal(); if (value !== null) { input.focus(); input.select(); } else save.focus();
+  return true;
+}
+
+function createVisualGroupAction(captured = null) {
+  const owner = workspace.active;
+  const incarnation = owner?.incarnation;
+  const selected = selectedRealNodeIds(owner, captured);
+  return runAfterInspectorDraft(() => {
+    if (workspace.active !== owner || owner?.incarnation !== incarnation) return false;
+    if (!groupAuthoringAllowed() || selected.length < 2) return false;
+    return visualGroupDialog('Group selection', { value: `Group ${readVisualGroups(graphData).groups.length + 1}`,
+      detail: `${selected.length} selected nodes. Visual groups do not change execution.`, submit: 'Create group',
+      onCommit: name => {
+        finishVisualGroups(); syncGraphPositions();
+        const anchor = selected.includes(graphCursorId) ? graphCursorId : [...selected].sort()[0];
+        const group = createVisualGroup(graphData, selected, name, anchor, editHistory);
+        owner.selectedVisualGroupId = group.id;
+        refreshVisualGroups(workspace.active, { animate: true, selection: selected, focus: anchor });
+        updateHistoryUi();
+      } });
+  });
+}
+
+function manageVisualGroup(action, suppliedGroup = null) {
+  const owner = workspace.active;
+  const incarnation = owner?.incarnation;
+  suppliedGroup ||= action === 'replace' ? managedVisualGroup(owner) : selectedVisualGroup(owner);
+  const selected = selectedRealNodeIds();
+  return runAfterInspectorDraft(() => {
+    if (workspace.active !== owner || owner?.incarnation !== incarnation) return false;
+    if (!groupAuthoringAllowed()) return false;
+    const metadata = readVisualGroups(graphData);
+    const group = metadata.groups.find(item => item.id === suppliedGroup?.id);
+    if (action !== 'repair' && !group) return false;
+    const commit = name => {
+      finishVisualGroups();
+      let groups = metadata.groups;
+      if (action === 'repair') groups = [];
+      else if (action === 'ungroup') groups = groups.filter(item => item.id !== group.id);
+      else groups = groups.map(item => item.id !== group.id ? item : action === 'rename' ? { ...item, name }
+        : { ...item, memberNodeIds: selected, anchorNodeId: selected.includes(item.anchorNodeId)
+          ? item.anchorNodeId : [...selected].sort()[0] });
+      editVisualGroups(graphData, groups, editHistory, action === 'ungroup' ? `Ungroup ${group.name}` : `${action === 'rename' ? 'Rename' : action === 'replace' ? 'Replace members of' : 'Remove metadata for'} visual group`);
+      refreshVisualGroups(); updateHistoryUi();
+      if (action === 'ungroup' || action === 'repair') { owner.selectedVisualGroupId = null; closeInfo(); }
+      else showVisualGroupInfo(groups.find(item => item.id === group.id));
+    };
+    if (action === 'ungroup') { commit(); return true; }
+    return visualGroupDialog(action === 'rename' ? 'Rename group' : action === 'replace' ? 'Replace members with selection' : 'Remove visual group metadata', {
+      value: action === 'rename' ? group.name : null,
+      detail: action === 'replace' ? `Replace ${group.memberNodeIds.length} members with ${selected.length} selected real nodes? Nodes and edges remain intact.`
+        : action === 'repair' ? 'Remove the unsupported visual group metadata? All real nodes and edges remain intact. This is undoable.' : '',
+      submit: action === 'replace' ? 'Replace members' : action === 'repair' ? 'Remove metadata' : 'Save', onCommit: commit });
+  });
+}
+
+function showVisualGroupInfo(group, owner = workspace.active) {
+  if (!group || !owner || owner !== workspace.active || workspace.find(owner.id) !== owner) return;
+  const incarnation = owner.incarnation;
+  retireInspectorDraft(); humanTaskController?.selectNode(null); revealInspector();
+  owner.selectedVisualGroupId = group.id;
+  document.getElementById('info-title').textContent = group.name;
+  const body = document.createElement('section'); body.className = 'visual-group-inspector';
+  document.getElementById('info-body').replaceChildren(body);
+  const label = document.createElement('p'); label.textContent = `Visual group · ${group.memberNodeIds.length} members`;
+  body.append(label);
+  const actions = document.createElement('div'); actions.className = 'visual-group-actions'; body.append(actions);
+  const action = (text, handler, enabled = true, reason = '') => {
+    const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
+    button.className = 'btn'; button.disabled = !enabled; button.title = reason;
+    if (!enabled) button.setAttribute('aria-describedby', 'visual-group-edit-help');
+    button.addEventListener('click', () => {
+      if (workspace.active === owner && owner.incarnation === incarnation) handler();
+    }); actions.append(button);
+  };
+  action(owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse', () => toggleVisualGroup(group.id, undefined, owner));
+  const editable = groupAuthoringAllowed();
+  action('Rename group', () => manageVisualGroup('rename', group), editable, 'Available in editable Design documents');
+  action('Replace members with selection', () => manageVisualGroup('replace', group), editable && selectedRealNodeIds().length >= 2,
+    'Select at least two real nodes in editable Design');
+  action('Ungroup', () => manageVisualGroup('ungroup', group), editable, 'Available in editable Design documents');
+  const help = document.createElement('p'); help.id = 'visual-group-edit-help'; help.className = 'visual-group-help';
+  help.textContent = editable ? 'To replace membership, select at least two real nodes, then choose Edit → Replace members with selection.'
+    : 'Rename, membership changes and ungrouping are available in editable Design documents.';
+  body.append(help);
+  const list = document.createElement('ul'); list.className = 'visual-group-members'; body.append(list);
+  group.memberNodeIds.forEach(id => {
+    const item = document.createElement('li'); const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
+    const node = graphData.nodeMap[id]; button.textContent = `${node?.name || id} (${id})`;
+    button.addEventListener('click', () => {
+      if (workspace.active === owner && owner.incarnation === incarnation) revealVisualGroupMember(id, owner);
+    }); item.append(button); list.append(item);
+  });
+}
+
+function revealVisualGroupMember(id, owner = workspace.active) {
+  const incarnation = owner?.incarnation;
+  return runAfterInspectorDraft(() => {
+    if (!owner || workspace.active !== owner || workspace.find(owner.id) !== owner || owner.incarnation !== incarnation) return false;
+    const group = readVisualGroups(graphData).groups.find(item => item.memberNodeIds.includes(id));
+    if (group && owner.visualGroupState[group.id]?.collapsed) toggleVisualGroup(group.id, false, owner);
+    finishVisualGroups();
+    const node = cy.getElementById(id); if (node.empty()) return false;
+    applyStableSelection(cy, [id]); setGraphCursor(id); showNodeInfo(node); return true;
+  });
+}
+
 function nodeActionCatalog(owner, instance, nodeId) {
   const node = instance?.getElementById(nodeId);
   const owned = Boolean(owner && workspace.find(owner.id) === owner && owner.cy === instance);
@@ -1608,12 +1880,18 @@ function nodeActionCatalog(owner, instance, nodeId) {
   const ownerGraph = active ? graphData : owner?.graph;
   const ownerLayoutMode = active ? layoutMode : owner?.layoutMode;
   const label = node && !node.empty() ? nodeActionLabel(node) : 'node';
-  return createNodeActionCatalog({
+  const group = groupForVisibleNode(nodeId, owner);
+  const metadata = readVisualGroups(ownerGraph);
+  const memberGroup = metadata.groups.find(item => item.memberNodeIds.includes(nodeId));
+  const captured = nodeActionOverlays.get(instance)?.selectionAtPointerDown;
+  const selected = selectedRealNodeIds(owner, captured);
+  const authoring = owned && groupAuthoringAllowed(owner);
+  const actions = createNodeActionCatalog({
     targetLabel: label,
     capabilities: {
       trace: Boolean(owned && node && !node.empty()),
       duplicate: Boolean(owned && modifyEnabled && canDuplicateNode(ownerGraph, nodeId, ownerLayoutMode)),
-      delete: Boolean(owned && modifyEnabled && canModifyGraph(ownerGraph, ownerLayoutMode)),
+      delete: Boolean(owned && !group && modifyEnabled && canModifyGraph(ownerGraph, ownerLayoutMode)),
     },
     handlers: {
       trace: () => {
@@ -1627,6 +1905,17 @@ function nodeActionCatalog(owner, instance, nodeId) {
       delete: () => deleteNodeFromActionOverlay(owner, instance, nodeId),
     },
   });
+  const groups = [
+    { id: 'group', glyph: '▦', label: 'Group selection', enabled: Boolean(authoring && selected.length >= 2
+      && ['none', 'valid'].includes(metadata.status) && !selected.some(id => metadata.groups.some(item => item.memberNodeIds.includes(id)))),
+    run: () => createVisualGroupAction(selected) },
+    { id: 'toggleGroup', glyph: '↔', label: group && owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse group',
+      enabled: Boolean(group || memberGroup), run: () => toggleVisualGroup((group || memberGroup).id, group ? undefined : true, owner) },
+    { id: 'renameGroup', label: 'Rename group', enabled: Boolean(authoring && group), run: () => manageVisualGroup('rename', group) },
+    { id: 'replaceGroup', label: 'Replace members with selection', enabled: Boolean(authoring && group && selected.length >= 2), run: () => manageVisualGroup('replace', group) },
+    { id: 'ungroup', label: 'Ungroup', enabled: Boolean(authoring && group), run: () => manageVisualGroup('ungroup', group) },
+  ];
+  return [...actions, ...groups];
 }
 
 function syncNodeActionOverlay(instance) {
@@ -1732,6 +2021,7 @@ function showNodeActionOverlay(owner, node, { pointer = true, allowSelected = fa
   const actions = nodeActionCatalog(owner, instance, node.id());
   actions.forEach(action => {
     const button = overlay.bar.querySelector(`[data-node-action="${action.id}"]`);
+    if (!button) return;
     button.hidden = !action.enabled;
     button.setAttribute('aria-label', action.label);
     button.dataset.tooltip = action.label;
@@ -1872,7 +2162,7 @@ function installNodeActionOverlay(owner, instance, container) {
   const moreButton = actionButton('more', '…');
   moreButton.setAttribute('aria-label', 'More node actions');
   moreButton.dataset.tooltip = 'More node actions';
-  bar.append(traceButton, deleteButton, duplicateButton, moreButton);
+  bar.append(traceButton, deleteButton, duplicateButton, actionButton('group', '▦'), actionButton('toggleGroup', '↔'), moreButton);
   root.append(bridge, bar, menu);
   container.append(root);
   const schedule = () => scheduleNodeActionOverlay(instance);
@@ -2001,6 +2291,18 @@ function captureActiveDocument() {
   document_.execution.finished = finishedExecutions;
   document_.execution.events = recentRuntimeEvents;
   document_.execution.reconciliationState = activeExecutionReconciliation;
+  if (cy && !cy.destroyed()) {
+    const elastic = elasticRendererFor(document_);
+    const transform = elastic?.svg ? d3.zoomTransform(elastic.svg) : null;
+    document_.canvasState = normalizedCanvasState({
+      zoom: transform?.k ?? cy.zoom(), pan: transform ? { x: transform.x, y: transform.y } : cy.pan(),
+      selectedIds: selectedRealNodeIds(document_), focusNodeId: graphCursorId,
+      selectedGroupId: selectedVisualGroup(document_)?.id || null,
+      focusGroupId: selectedVisualGroup(document_)?.id || null,
+      positions: Object.fromEntries(elastic?.nodes ? elastic.nodes.map(node => [node.id, { x: node.x, y: node.y }])
+        : cy.nodes().filter(node => Object.hasOwn(graphData?.nodeMap || {}, node.id())).map(node => [node.id(), node.position()])),
+    }, graphData);
+  }
 }
 
 function cancelRetiredLayouts(cancelled = []) {
@@ -2227,9 +2529,9 @@ function paneDisplayName(document_) {
 }
 
 function paneIsDirty(document_) {
-  return workspace.activeId === document_.id
+  return Boolean(documentIsEditable(document_) && document_.visualGroupPresentationDirty) || (workspace.activeId === document_.id
     ? Boolean(editHistory.state().dirty)
-    : Boolean(document_.history?.isDirty());
+    : Boolean(document_.history?.isDirty()));
 }
 
 function documentModeLabel(document_) {
@@ -2665,6 +2967,9 @@ function syncPaneRenderer(document_) {
   paneRenderedSize.set(document_.id, { width, height });
 
   cy.resize();
+  // Restoring several documents passes through temporary pane sizes. Those intermediate boxes
+  // must not replace each document's saved viewport with an automatic fit or recenter.
+  if (workspaceRestoreInProgress && document_.canvasState) return;
   if (consumePendingRefit) {
     document_.layoutPendingRefit = false;
     cy.scratch('_rrRefitAfterLayout', false);
@@ -2801,6 +3106,8 @@ function addDocumentRecord(name = defaultDocumentName(), displayName = allocateD
   }));
   nextDocumentId += 1;
   if (options.presentation) Object.assign(document_, options.presentation);
+  document_.restoredVisualGroupSelection = document_.canvasState?.selectedGroupId || null;
+  document_.restoredVisualGroupFocus = document_.canvasState?.focusGroupId || null;
   applyActiveDocument();
   documentContainer(document_);
   syncPaneLayout();
@@ -2846,6 +3153,7 @@ function openDocument({ name = defaultDocumentName(), displayName, graph = null,
   }
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(document_);
+  if (presentation?.renderMode === 'monitoring') reconcileActiveRenderModeRenderer();
   scheduleWorkspacePersistence();
   return document_.id;
 }
@@ -2870,6 +3178,8 @@ function forkActiveDocument() {
     tenantId: fork.tenantId,
     mode: fork.mode,
     provenance: fork.provenance,
+    presentation: { ...visualGroupPresentation(fork), renderMode: fork.renderMode,
+      layoutMode: fork.layoutMode, visualStyle: fork.visualStyle, fontSize: fork.fontSize },
   });
   addActivityMessage('editor', `Forked immutable ${source.mode} snapshot as an editable draft`, 'completed');
   scheduleWorkspacePersistence();
@@ -2901,6 +3211,9 @@ function completeReplaceActiveDocument(target, graph, name) {
   destroyDocumentRenderer(target, 'replaced');
   detachExecution(target);
   target.incarnation = createDocumentIncarnation();
+  target.visualGroupState = {};
+  target.canvasState = null;
+  target.visualGroupPresentationDirty = false;
   activeDocumentIncarnation = target.incarnation;
   graphName = name;
   graphDisplayName = allocateDocumentDisplayName(name);
@@ -2940,7 +3253,7 @@ function requestReplaceActiveDocument(graph, name, origin = document.activeEleme
     showInspectorMessage('Only Draft documents can be replaced. Fork this read-only document first.');
     return false;
   }
-  if (!target || !target.history?.isDirty()) return completeReplaceActiveDocument(target, graph, name);
+  if (!target || !paneIsDirty(target)) return completeReplaceActiveDocument(target, graph, name);
   return openUnsavedDocumentDialog({
     documentId: target.id,
     origin,
@@ -2960,6 +3273,7 @@ function replaceActiveDocumentFromText(
 }
 
 function activateDocument(id) {
+  finishVisualGroups(workspace.active);
   if (!workspace.find(id) || workspace.activeId === id) return workspace.activeId;
   if (inspectorDraft?.form.isConnected) {
     return runAfterInspectorDraft(() => activateDocument(id));
@@ -3304,10 +3618,8 @@ function initCy(elements, gd, options = {}) {
     setModifyMode(false);
     editHistory.reset();
     updateHistoryUi();
-    // A genuinely new document's font is its own, starting from its own default — not whatever the
-    // slider happened to show for the document this one is replacing (UI-12). `rebuildGraph`
-    // is the only same-`gd` caller, so ordinary edits never reach this reset.
-    fontSize = DEFAULT_FONT_SIZE;
+    // Activation has already loaded this document's font into the working view. Replacement
+    // explicitly resets that view before loading; reading the record here could revive its old font.
   }
 
   // Register layout extensions (safe re-registration)
@@ -3323,6 +3635,7 @@ function initCy(elements, gd, options = {}) {
   }
 
   if (cy) {
+    destroyDesignVisualGroups(workspace.active, cy);
     releaseCanvasZoomBridge(cy);
     destroySelectionOverlay(cy);
     destroyNodeActionOverlay(cy);
@@ -3357,6 +3670,7 @@ function initCy(elements, gd, options = {}) {
   window.cy = cy;
   if (workspace.active) workspace.active.cy = cy;
   const rendererOwner = workspace.active;
+  if (rendererOwner) rendererOwner.graph = gd;
   if (rendererOwner) registerCytoscapeRenderer(rendererOwner, cy);
 
   // Whether a layout is in flight, tracked per instance so that a pane which changes size mid-layout
@@ -3575,12 +3889,19 @@ function initCy(elements, gd, options = {}) {
     // would restore pre-layout coordinates and the nodes would jump somewhere the user never saw.
     syncGraphPositions();
     const grabbed = e.target.selected() ? e.cy.nodes(':selected').union(e.target) : e.target;
+    const groupMoves = grabbed.map(node => {
+      const group = groupForVisibleNode(node.id(), rendererOwner);
+      return group ? { id: node.id(), position: { ...node.position() }, members: group.memberNodeIds.map(id => ({
+        id, position: { ...e.cy.getElementById(id).position() },
+      })) } : null;
+    }).filter(Boolean);
     dragSnapshot = {
       owner: rendererOwner,
       cy: e.cy,
       graph: graphData,
       history: editHistory,
       nodes: grabbed.map(node => ({ id: node.id(), position: { ...node.position() } })),
+      groupMoves,
     };
   });
   cy.on('free', 'node', e => {
@@ -3593,7 +3914,18 @@ function initCy(elements, gd, options = {}) {
       .map(entry => snapshot.cy.getElementById(entry.id))
       .filter(element => element.nonempty())
       .map(element => ({ id: element.id(), ox: element.position('x'), oy: element.position('y') }));
-    if (!moveNodesTo(snapshot.graph, positions, snapshot.history)) return;
+    for (const group of snapshot.groupMoves || []) {
+      const end = snapshot.cy.getElementById(group.id).position();
+      const dx = end.x - group.position.x; const dy = end.y - group.position.y;
+      for (const member of group.members) {
+        const position = { x: member.position.x + dx, y: member.position.y + dy };
+        snapshot.cy.getElementById(member.id).position(position);
+        positions.push({ id: member.id, ox: position.x, oy: position.y });
+      }
+    }
+    if (!moveNodesTo(snapshot.graph, positions, snapshot.history,
+      snapshot.groupMoves?.length ? 'Move visual group' : null)) return;
+    refreshVisualGroups(snapshot.owner);
     updateHistoryUi();
   });
 
@@ -3602,6 +3934,7 @@ function initCy(elements, gd, options = {}) {
   // notifications into one recalculation per animation frame.
   cy.on('position', 'node', event => {
     const owner = rendererOwner;
+    if (groupProjection(owner)?.syntheticIds.has(event.target.id())) return;
     if (!owner || event.cy !== owner.cy || !['n8n4', 'cyto'].includes(owner.visualStyle)) return;
     if (owner.layoutMode === 'hierarchical') {
       if (owner.cytoEdgeGeometryRaf != null) return;
@@ -3668,6 +4001,23 @@ function initCy(elements, gd, options = {}) {
   const instance = cy;
   const instanceFontSize = fontSize;
   onFontSize(instanceFontSize, instance);
+  if (rendererOwner?.canvasState && documentChanged) {
+    const saved = normalizedCanvasState(rendererOwner.canvasState, gd);
+    instance.batch(() => Object.entries(saved.positions).forEach(([id, position]) => instance.getElementById(id).position(position)));
+    if (saved.zoom && saved.pan) instance.viewport({ zoom: saved.zoom, pan: saved.pan });
+    applyStableSelection(instance, saved.selectedIds);
+    rendererOwner.cursorId = saved.focusNodeId;
+    graphCursorId = saved.focusNodeId;
+    rendererOwner.selectedVisualGroupId = saved.selectedGroupId;
+  }
+  refreshVisualGroups(rendererOwner);
+  if (documentChanged && rendererOwner?.canvasState?.selectedGroupId) {
+    const savedGroup = groupProjection(rendererOwner)?.groups.find(group => group.id === rendererOwner.canvasState.selectedGroupId);
+    if (savedGroup) {
+      const id = savedGroup.collapsed ? savedGroup.summaryId : savedGroup.headerId;
+      applyStableSelection(instance, [id]); setGraphCursor(id);
+    }
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -3829,6 +4179,8 @@ function registerCytoscapeRenderer(owner, target = owner?.cy) {
 }
 
 function destroyDocumentRenderer(owner, reason = 'destroyed') {
+  owner?.visualGroupsRenderer?.destroy();
+  if (owner) owner.visualGroupsRenderer = null;
   if (edgeGestureSession?.owner === owner) cancelEdgeGesture({ clearMessage: true });
   const renderer = rendererFor(owner);
   if (!renderer) return;
@@ -3978,6 +4330,9 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
       : 130;
     return {
       id: e.id(), source: e.source().id(), target: e.target().id(),
+      edgeType: e.data('edgeType'), parallel: e.data('parallel'), outcome: e.data('outcome'),
+      status: e.data('status'), command: e.data('command'), lineStyle: e.style('line-style'),
+      dashPattern: e.style('line-dash-pattern'),
       baseWidth: 1.8, restLen, color,
       label: e.data('label') || '',
       configuredWeight: Number.isFinite(traffic) ? traffic : null,
@@ -4017,13 +4372,16 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
     attraction: initAttr,
     repulsion: initRep,
     initialTransform: designViewport,
-    isLive: () => layoutRequestIsCurrent(token) && rendererSessions.isLive(renderer.token),
+    // Mount eligibility belongs to the layout request; a mounted simulation belongs to the
+    // renderer generation. Presentation toggles may retire pending layouts without retiring it.
+    isLive: () => rendererSessions.isLive(renderer.token) && workspace.find(owner.id) === owner && owner.cy === target,
     onViewportChange: () => {
       if (owner === workspace.active) scheduleMinimap(owner);
     },
   });
   renderer.elasticMount = elasticMount;
   Object.assign(renderer, elasticMount);
+  refreshVisualGroups(owner);
   // The attention projection belongs to the document, so a renderer switch must paint the already
   // known counts immediately instead of waiting for the next server poll to change them.
   applyHumanTaskProjection(owner);
@@ -4663,6 +5021,7 @@ function syncOwnedLayoutBusy(owner) {
 
 function completeOwnedLayout(job) {
   const { owner, token } = job;
+  const current = layoutRequestIsCurrent(token);
   if (job.fitAfterLayout && layoutRequestIsCurrent(token)) {
     if (!owner.container?.clientWidth || !owner.container.clientHeight) owner.layoutPendingRefit = true;
     else {
@@ -4687,6 +5046,7 @@ function completeOwnedLayout(job) {
   layoutJobs.delete(token.generation);
   const released = token.kind === 'elk' ? layoutSessions.complete(token).start : null;
   syncOwnedLayoutBusy(owner);
+  if (current && !released && owner.layoutMode !== 'elastic') refreshVisualGroups(owner);
   if (released) runOwnedLayout(released);
 }
 
@@ -4905,6 +5265,15 @@ function resumePendingElasticLayout(owner) {
 function setLayout(name, options = {}) {
   const owner = workspace.active;
   const target = cy;
+  if (owner && target) {
+    const selectedGroup = selectedVisualGroup(owner);
+    if (selectedGroup) {
+      owner.restoredVisualGroupSelection = selectedGroup.id;
+      owner.restoredVisualGroupFocus = selectedGroup.id;
+    }
+  }
+  finishVisualGroups(owner);
+  owner?.visualGroupsRenderer?.suspend();
   // Native `stop()` may synchronously publish a final frame, so Keep must capture the canvas before
   // the session request invokes cancellation callbacks for the layout it replaces.
   const retainedPositions = options.keepPositions && target ? target.nodes().map(node => ({
@@ -5169,18 +5538,17 @@ function traceDownstream(startNode) {
   // Build a plain adjacency snapshot of the graph and delegate the actual BFS to
   // traceDownstreamIds (graph-trace.js), which is unit-tested independently of Cytoscape.
   // See graph-trace.js for why 'error' does NOT stop the trace.
-  const adjacency = new Map();
-  cy.nodes().forEach(node => {
-    const outEdges = [];
-    node.outgoers('edge').forEach(edge => {
-      outEdges.push({ edgeId: edge.id(), targetId: edge.target().id() });
-    });
-    adjacency.set(node.id(), { nodeType: node.data('nodeType'), outEdges });
-  });
-
-  const { nodeIds, edgeIds } = traceDownstreamIds(adjacency, startNode.id());
-  const visitedNodes = cy.nodes().filter(n => nodeIds.has(n.id()));
-  const visitedEdges = cy.edges().filter(e => edgeIds.has(e.id()));
+  const adjacency = new Map(graphData.nodes.map(node => [node.id, { nodeType: node.nodeType, outEdges: [] }]));
+  graphData.edges.forEach(edge => adjacency.get(edge.source)?.outEdges.push({ edgeId: edge.id, targetId: edge.target }));
+  const group = groupForVisibleNode(startNode.id());
+  const start = group ? Symbol('visual-group-trace') : startNode.id();
+  if (group) adjacency.set(start, { nodeType: '', outEdges: group.memberNodeIds.map(id => ({ edgeId: null, targetId: id })) });
+  const { nodeIds, edgeIds } = traceDownstreamIds(adjacency, start);
+  const projection = groupProjection();
+  const representatives = new Set([...nodeIds].map(id => projection?.representativeByNodeId.get(id) || id));
+  const visitedNodes = cy.nodes(':visible').filter(n => representatives.has(n.id()));
+  const visitedEdges = cy.edges(':visible').filter(e => edgeIds.has(e.id())
+    || projection?.originalEdgeIdsByVisibleId.get(e.id())?.some(id => edgeIds.has(id)));
 
   traceActive = true;
 
@@ -5221,6 +5589,12 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
   if (!skipDraftGuard && modifyEnabled && inspectorDraft?.form.isConnected
       && desiredIds.length === 1 && desiredIds[0] === inspectorDraft.elementId) return;
   if (!skipDraftGuard && guardInspectorSelectionChange(desiredIds)) return;
+  const visualGroup = nodes.length === 1 && edges.empty() ? groupForVisibleNode(nodes.first().id()) : null;
+  if (visualGroup) { showVisualGroupInfo(visualGroup); return; }
+  if (nodes.some(node => groupProjection()?.syntheticIds.has(node.id()))) {
+    showInspectorMessage('Mixed visual groups and real elements. Select one group to manage it, or real nodes to edit.');
+    return;
+  }
   if (nodes.length > 1 && edges.empty()) {
     showMultiNodeInfo(nodes.map(node => node.id()));
   } else if (nodes.length === 1 && edges.empty()) {
@@ -5406,6 +5780,8 @@ function showReadOnlyProgramReadiness(model, state) {
 }
 
 function showNodeInfo(node) {
+  const visualGroup = groupForVisibleNode(node.id());
+  if (visualGroup) { showVisualGroupInfo(visualGroup); return; }
   // Selecting or authoring reveals the Inspector: a selection that silently does nothing
   // because a panel is closed is worse than a panel reappearing.
   revealInspector();
@@ -5455,6 +5831,19 @@ function selectionBadgeLabel(instance) {
 }
 
 function showEdgeInfo(edge) {
+  const projected = groupProjection();
+  if (projected?.syntheticIds.has(edge.id())) {
+    retireInspectorDraft(); revealInspector();
+    document.getElementById('info-title').textContent = 'Original connections';
+    const body = document.getElementById('info-body'); body.replaceChildren();
+    for (const id of projected.originalEdgeIdsByVisibleId.get(edge.id()) || []) {
+      const real = graphData.edges.find(item => item.id === id);
+      const line = document.createElement('p');
+      line.textContent = `${id}: ${real?.source} → ${real?.target} · ${real?.outcome || ''}`;
+      body.append(line);
+    }
+    return;
+  }
   humanTaskController?.selectNode(null);
   // Selecting or authoring reveals the Inspector: a selection that silently does nothing
   // because a panel is closed is worse than a panel reappearing.
@@ -8174,17 +8563,22 @@ function onSearch(q) {
   clearFilter();
   if (!q.trim()) return;
   const lq = q.toLowerCase();
-  const hit = cy.nodes().filter(n =>
+  const hit = cy.nodes().filter(n => Object.hasOwn(graphData?.nodeMap || {}, n.id()) && (
     n.data('name').toLowerCase().includes(lq) ||
     (n.data('classname') || '').toLowerCase().includes(lq)
-  );
+  ));
   if (!hit.length) return;
   filterActive = { type: 'search', q };
   cy.elements().addClass('dim');
   hit.removeClass('dim').addClass('hi');
   hit.connectedEdges().removeClass('dim');
-  if (hit.length === 1)
-    cy.animate({ center: { eles: hit }, zoom: 1.6 }, { duration: 380 });
+  if (hit.length === 1) {
+    revealVisualGroupMember(hit.first().id());
+    cy.animate({ center: { eles: hit } }, { duration: 240 });
+  } else {
+    const projection = groupProjection();
+    hit.forEach(node => cy.getElementById(projection?.representativeByNodeId.get(node.id()) || node.id()).removeClass('dim').addClass('hi'));
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -8312,12 +8706,16 @@ function toggleLegendFilter(elType, type) {
     cy.elements().addClass('dim');
     hit.removeClass('dim').addClass('hi');
     hit.connectedEdges().removeClass('dim');
+    hit.forEach(node => cy.getElementById(groupProjection()?.representativeByNodeId.get(node.id()) || node.id()).removeClass('dim').addClass('hi'));
   } else {
     hit = cy.edges(`[edgeType="${type}"]`);
     cy.elements().addClass('dim');
     hit.removeClass('dim').addClass('hi');
     hit.sources().removeClass('dim');
     hit.targets().removeClass('dim');
+    const ids = new Set(hit.map(edge => edge.id()));
+    cy.edges(':visible').filter(edge => groupProjection()?.originalEdgeIdsByVisibleId.get(edge.id())?.some(id => ids.has(id)))
+      .removeClass('dim').addClass('hi');
   }
 }
 
@@ -8327,14 +8725,19 @@ function toggleLegendFilter(elType, type) {
 
 function updateStats() {
   if (!cy) return;
-  document.getElementById('b-nodes').textContent = cy.nodes().length;
-  document.getElementById('b-edges').textContent = cy.edges().length;
+  document.getElementById('b-nodes').textContent = graphData.nodes.length;
+  document.getElementById('b-edges').textContent = graphData.edges.length;
 
   const nc = {}, ec = {};
-  cy.nodes().forEach(n => { const t = n.data('nodeType'); nc[t] = (nc[t]||0)+1; });
-  cy.edges().forEach(e => { const t = e.data('edgeType'); ec[t] = (ec[t]||0)+1; });
+  graphData.nodes.forEach(n => { const t = n.nodeType; nc[t] = (nc[t]||0)+1; });
+  graphData.edges.forEach(e => { const t = e.edgeType; ec[t] = (ec[t]||0)+1; });
 
-  renderGraphStatistics(document.getElementById('graph-stats'), cy.nodes().length, cy.edges().length, nc, ec);
+  renderGraphStatistics(document.getElementById('graph-stats'), graphData.nodes.length, graphData.edges.length, nc, ec);
+  const summaries = groupProjection()?.groups.filter(group => group.collapsed).length || 0;
+  if (summaries) {
+    const visible = document.createElement('p'); visible.textContent = `${summaries} visible group summaries · ${cy.nodes(':visible').length} visible nodes and headers`;
+    document.getElementById('graph-stats').append(visible);
+  }
   // The graph's content just changed, so what the assistant would attach changed with it.
   // Recomposed HERE rather than on every render because this is already the "graph content
   // changed" hook and already walks every node and edge — the chips stay truthful at the same
@@ -8357,7 +8760,8 @@ function rendererMinimapState(owner = workspace.active) {
   const renderer = rendererFor(owner);
   if (!owner || !renderer) return null;
   if (renderer.kind === 'elastic') {
-    const nodes = (renderer.nodes || []).filter(node => Number.isFinite(node.x) && Number.isFinite(node.y));
+    const visibleGraph = renderer.elasticMount?.getVisibleGraph?.();
+    const nodes = (visibleGraph?.nodes || renderer.nodes || []).filter(node => Number.isFinite(node.x) && Number.isFinite(node.y));
     if (!nodes.length || !renderer.host.clientWidth || !renderer.host.clientHeight) return null;
     const transform = d3.zoomTransform(renderer.svg);
     const contentBounds = normalizeBounds({
@@ -8374,7 +8778,7 @@ function rendererMinimapState(owner = workspace.active) {
         y2: (renderer.host.clientHeight - transform.y) / transform.k,
       }),
       nodes: nodes.map(node => ({ x: node.x, y: node.y, color: node.color })),
-      edges: (renderer.links || []).map(edge => ({
+      edges: (visibleGraph?.links || visibleGraph?.edges || renderer.links || []).map(edge => ({
         source: { x: edge.source.x, y: edge.source.y },
         target: { x: edge.target.x, y: edge.target.y }, color: edge.color,
       })),
@@ -8387,12 +8791,12 @@ function rendererMinimapState(owner = workspace.active) {
   if (!target || !target.width() || !target.height()) return null;
   return {
     kind: 'cytoscape',
-    contentBounds: normalizeBounds(target.elements().boundingBox({ includeLabels: true, includeOverlays: true })),
+    contentBounds: normalizeBounds(target.elements(':visible').boundingBox({ includeLabels: true, includeOverlays: true })),
     visibleBounds: normalizeBounds(target.extent()),
-    nodes: target.nodes().map(node => ({
+    nodes: target.nodes(':visible').filter(node => node.data('rrVisualRole') !== 'ghost').map(node => ({
       ...node.position(), color: NODE_TYPE_COLORS[node.data('nodeType')] || rendererPalette.nodeBorder,
     })),
-    edges: target.edges().map(edge => ({
+    edges: target.edges(':visible').map(edge => ({
       source: edge.source().position(), target: edge.target().position(),
       color: EDGE_TYPE_COLORS[edge.data('edgeType')] || rendererPalette.edgeType.default,
     })),
@@ -8692,7 +9096,9 @@ function prepareDocumentDownload(id) {
   } else if (id !== workspace.activeId && documentIsEditable(target) && target.layoutMode !== 'elastic') {
     syncGraphPositionsFromCy(target.graph, target.cy);
   }
-  const xml = serializeGraphML(target.graph);
+  finishVisualGroups(target);
+  const xml = serializeGraphML(documentIsEditable(target)
+    ? graphWithVisualGroupPresentation(target.graph, target.visualGroupState) : target.graph);
   return {
     target,
     xml,
@@ -8718,6 +9124,7 @@ function markDocumentDownloaded(prepared, { announce = true } = {}) {
   // Exporting GraphML is the only persistence this editor has, so it is the save point: the undo
   // stack keeps its depth and the document becomes clean at its current position.
   target.history.markSaved();
+  if (documentIsEditable(target)) target.visualGroupPresentationDirty = false;
   if (target.id === workspace.activeId) {
     editHistory.markSaved();
     updateHistoryUi();
@@ -8776,12 +9183,14 @@ function rebuildGraph(options = {}) {
 function undoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canUndo()
       || !finalizeInspectorBeforeHistory()) return;
+  suspendVisualGroups(workspace.active);
   applyHistoryStep(editHistory.undo(graphData), 'Undo');
 }
 
 function redoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canRedo()
       || !finalizeInspectorBeforeHistory()) return;
+  suspendVisualGroups(workspace.active);
   applyHistoryStep(editHistory.redo(graphData), 'Redo');
 }
 
@@ -8818,6 +9227,7 @@ function applyHistoryStep(command, verb) {
     nodeIds: null, edgeIds: null, restoreModelPositionIds: modelPositionIds,
   })) rebuildGraph({ syncPositions: false, retainedNodePositions });
   selectCommandTargets(command);
+  refreshVisualGroups();
   updateHistoryUi();
   addActivityMessage('editor', `${verb}: ${command.label}`, 'completed');
 }
@@ -8837,12 +9247,14 @@ function selectCommandTargets(command) {
 }
 
 function confirmDiscardChanges() {
-  if (!editHistory.isDirty()) return true;
+  if (!paneIsDirty(workspace.active)) return true;
   return confirm(discardChangesMessage(graphName));
 }
 
 function updateHistoryUi() {
   const state = editHistory.state();
+  const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
+  const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
   const undoButton = document.getElementById('btn-undo');
   if (undoButton) {
     undoButton.title = state.canUndo ? `Undo ${state.undoLabel}` : 'Nothing to undo';
@@ -8853,12 +9265,12 @@ function updateHistoryUi() {
   }
   const indicator = document.getElementById('dirty-state');
   if (indicator) {
-    indicator.classList.toggle('dirty', state.dirty);
-    indicator.textContent = state.dirty ? 'unsaved changes' : 'saved';
+    indicator.classList.toggle('dirty', dirty);
+    indicator.textContent = dirty ? 'unsaved changes' : presentationDirty ? 'local presentation' : 'saved';
   }
   const exportButton = document.getElementById('btn-export');
   if (exportButton) {
-    exportButton.classList.toggle('primary', state.dirty && graphData?.format !== 'graphify');
+    exportButton.classList.toggle('primary', dirty && graphData?.format !== 'graphify');
   }
   // The pane strip carries the same `*` this indicator carries, for the document it names. Hooked
   // here because this already runs on every edit, undo, redo and save: a modified marker that
@@ -8948,7 +9360,11 @@ function applyNodeGrabPolicy(targetCy, state = canvasInteractionState({
   navigating: navigationEnabled,
 })) {
   if (!targetCy || targetCy.destroyed()) return;
+  const owner = workspace.documents.find(document_ => document_.cy === targetCy);
+  const projection = groupProjection(owner);
   targetCy.nodes().forEach(node => {
+    if (projection?.syntheticIds.has(node.id()) && !groupAuthoringAllowed(owner)) { node.ungrabify(); return; }
+    if (node.data('rrVisualRole') === 'ghost' || node.data('rrVisualRole') === 'header' || !node.visible()) { node.ungrabify(); return; }
     if (nodeIsGrabbable(state, node.selected())) node.grabify();
     else node.ungrabify();
   });
@@ -9124,6 +9540,10 @@ function handleConnectTap(owner, node, originalEvent) {
 
 function edgeSourceIsAvailable(node) {
   if (!node || node.empty()) return false;
+  if (!node.visible() || !Object.hasOwn(graphData?.nodeMap || {}, node.id())) {
+    announceGraph('Expand the visual group and select a real node for edge authoring.');
+    return false;
+  }
   if (nodeCanSourceEdge(node.selected())) return true;
   const label = node.data('name') || node.id();
   const message = `${label} is selected and moves in Editing. Move to an unselected node to start an edge.`;
@@ -9684,7 +10104,7 @@ function edgeGestureTargetAtClientPosition(originalEvent) {
   if (!sourceCenter || !source || source.empty()) return null;
   const sourceRendered = source.renderedPosition();
   const snap = 18;
-  const nearby = session.cy.nodes().filter(node => {
+  const nearby = session.cy.nodes(':visible').filter(node => Object.hasOwn(session.graph.nodeMap, node.id())).filter(node => {
     const rendered = node.renderedPosition();
     const center = {
       x: sourceCenter.x + rendered.x - sourceRendered.x,
@@ -9773,7 +10193,7 @@ function nodeAtModelPosition(position, targetCy = cy) {
 
 function nodeAtRenderedPosition(position, targetCy = edgeGestureSession?.cy) {
   if (!position || !targetCy) return null;
-  const hits = targetCy.nodes().filter(node => {
+  const hits = targetCy.nodes(':visible').filter(node => Object.hasOwn(graphData?.nodeMap || {}, node.id())).filter(node => {
     const center = node.renderedPosition();
     const halfWidth = node.renderedWidth() / 2;
     const halfHeight = node.renderedHeight() / 2;
@@ -9791,7 +10211,7 @@ function edgeGestureTargetAtRenderedPosition(position) {
   // A modest magnetic corridor makes the target state predictable at node boundaries and gives
   // coarse or unsteady pointers the same explicit snap feedback as a pixel-perfect mouse.
   const snap = 18;
-  const nearby = session.cy.nodes().filter(node => {
+  const nearby = session.cy.nodes(':visible').filter(node => Object.hasOwn(session.graph.nodeMap, node.id())).filter(node => {
     const center = node.renderedPosition();
     return Math.abs(position.x - center.x) <= node.renderedWidth() / 2 + snap
       && Math.abs(position.y - center.y) <= node.renderedHeight() / 2 + snap;
@@ -9826,7 +10246,7 @@ function consumeSuppressedEdgeTap(targetCy) {
 function setGraphCursor(nodeId) {
   if (!cy) return;
   const element = nodeId ? cy.getElementById(nodeId) : null;
-  if (!element || element.empty()) return;
+  if (!element || element.empty() || !element.visible()) return;
   graphCursorId = nodeId;
   cy.nodes().removeClass('graph-cursor');
   element.addClass('graph-cursor');
@@ -9838,8 +10258,8 @@ function setGraphCursor(nodeId) {
 }
 
 function ensureGraphCursor() {
-  if (graphCursorId && cy?.getElementById(graphCursorId).nonempty()) return graphCursorId;
-  const first = cy?.nodes().first();
+  if (graphCursorId && cy?.getElementById(graphCursorId).nonempty() && cy.getElementById(graphCursorId).visible()) return graphCursorId;
+  const first = cy?.nodes(':visible').filter(node => node.data('rrVisualRole') !== 'ghost').first();
   if (!first || first.empty()) return null;
   setGraphCursor(first.id());
   return graphCursorId;
@@ -9857,8 +10277,9 @@ function moveGraphCursor(direction) {
   const axis = direction === 'left' || direction === 'right' ? 'x' : 'y';
   const sign = direction === 'right' || direction === 'down' ? 1 : -1;
   let best = null;
-  cy.nodes().forEach(node => {
+  cy.nodes(':visible').forEach(node => {
     if (node.id() === currentId) return;
+    if (node.data('rrVisualRole') === 'ghost') return;
     const to = node.position();
     const along = (to[axis] - from[axis]) * sign;
     if (along <= 0) return;
@@ -9892,8 +10313,11 @@ function cycleIncidentEdge(step, { skipDraftGuard = false } = {}) {
   }
   invalidateStableSelection();
   cy.elements().unselect();
-  cy.getElementById(next.id).select();
-  showEdgeInfo(cy.getElementById(next.id));
+  const projection = groupProjection();
+  const projectedEdge = projection?.edges.find(edge => edge.originalEdgeIds.includes(next.id));
+  const visibleId = projectedEdge?.id || next.id;
+  cy.getElementById(visibleId).select();
+  showEdgeInfo(cy.getElementById(visibleId));
   announceGraph(`${describeEdge(next, graphData)} Press R to move its target, Shift plus R for its source.`);
 }
 
@@ -10037,8 +10461,18 @@ function deleteCurrentSelection({ skipDraftGuard = false } = {}) {
   const selectedNodes = cy.nodes(':selected').map(node => node.id());
   const selectedEdges = cy.edges(':selected').map(edge => edge.id());
   if (!selectedNodes.length && !selectedEdges.length) return false;
+  const projected = groupProjection();
+  const synthetic = [...selectedNodes, ...selectedEdges].filter(id => projected?.syntheticIds.has(id));
+  if (synthetic.length) {
+    const group = selectedNodes.length === 1 && !selectedEdges.length ? groupForVisibleNode(selectedNodes[0]) : null;
+    if (group) return manageVisualGroup('ungroup', group);
+    showInspectorMessage('Cannot delete a mixed selection of visual groups and graph elements. Ungroup first, or select only the intended real elements.');
+    return false;
+  }
+  finishVisualGroups();
   const removed = deleteElements(graphData, selectedNodes, selectedEdges, editHistory);
   cy.remove(cy.$(':selected'));
+  refreshVisualGroups();
   closeInfo();
   updateStats();
   scheduleMinimap();
@@ -10115,6 +10549,7 @@ function duplicateSelectedNode() {
 }
 
 function syncGraphPositions() {
+  finishVisualGroups();
   if (!cy || !graphData || !documentIsEditable(workspace.active)
       || graphData.format === 'graphify' || layoutMode === 'elastic') return;
   syncGraphPositionsFromCy(graphData, cy);
@@ -12923,7 +13358,7 @@ function requestCloseDocument(id, origin = document.activeElement, { skipDraftGu
   captureActiveDocument();
   const target = workspace.find(id);
   if (!target) return false;
-  if (!target.history?.isDirty()) return proceedToCloseDocument(id, origin);
+  if (!paneIsDirty(target)) return proceedToCloseDocument(id, origin);
   return openUnsavedDocumentDialog({
     documentId: id,
     origin,
@@ -13244,6 +13679,12 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   addEdge: () => showAddEdgeForm(),
   duplicateNode: () => duplicateSelectedNode(),
   deleteSelection: () => deleteCurrentSelection(),
+  groupSelection: () => createVisualGroupAction(),
+  toggleGroup: () => { const group = selectedVisualGroup(); return group && toggleVisualGroup(group.id); },
+  renameGroup: () => manageVisualGroup('rename'),
+  replaceGroupMembers: () => manageVisualGroup('replace'),
+  ungroup: () => manageVisualGroup('ungroup'),
+  removeGroupMetadata: () => manageVisualGroup('repair'),
   migrateJoinSemantics: () => migrateJoinSemanticsAction(),
   fit: () => fitGraph(),
   zoomIn: () => zoomBy(1.2),
@@ -13280,7 +13721,16 @@ function commandContext() {
   const sourceSessionActive = sourceSessionIsActive(activeSourceSession);
   const running = transientRunning || sourceSessionActive;
   const selectedNodes = cy?.nodes(':selected');
+  const groupMetadata = readVisualGroups(graphData);
+  const selectedReal = selectedRealNodeIds();
+  const groupedIds = new Set(groupMetadata.groups.flatMap(group => group.memberNodeIds));
   return {
+    hasVisualGroup: Boolean(selectedVisualGroup()),
+    hasManagedVisualGroup: Boolean(managedVisualGroup()),
+    selectedRealNodeCount: selectedReal.length,
+    canGroupSelection: selectedReal.length >= 2 && ['none', 'valid'].includes(groupMetadata.status)
+      && !selectedReal.some(id => groupedIds.has(id)),
+    invalidGroupMetadata: ['invalid', 'future'].includes(groupMetadata.status),
     hasDocument: Boolean(workspace.active && graphData),
     hasOpenDocuments: workspace.size > 0,
     editable: Boolean(graphData && graphData.format !== 'graphify'),

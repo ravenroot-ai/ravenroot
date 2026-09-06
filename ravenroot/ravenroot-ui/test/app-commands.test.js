@@ -15,7 +15,9 @@ describe('application command catalog', () => {
     for (const menu of ['file', 'edit', 'view', 'layout', 'run']) {
       expect(commands.some(command => command.placements?.includes(`menu.${menu}`))).toBe(true);
     }
-    expect(commands.some(command => /save all|recent|rename|preferences/i.test(command.label))).toBe(false);
+    expect(commands.filter(command => command.id !== 'edit.renameGroup')
+      .some(command => /save all|recent|rename|preferences/i.test(command.label))).toBe(false);
+    expect(commands.find(command => command.id === 'edit.renameGroup').label).toBe('Rename group');
     const reserved = commands.flatMap(command => command.shortcuts || [])
       .filter(shortcut => shortcut.primary).map(shortcut => shortcut.key.toLowerCase());
     expect(reserved).not.toContain('n');

@@ -1,3 +1,30 @@
+import { readVisualGroups, reconcileVisualGroupState } from './visual-groups.js';
+
+export function normalizedCanvasState(value, graph) {
+  if (!value || typeof value !== 'object') return null;
+  const ids = new Set((graph?.nodes || []).map(node => node.id));
+  const positions = Object.fromEntries(Object.entries(value.positions || {}).filter(([id, p]) => ids.has(id)
+    && Number.isFinite(p?.x) && Number.isFinite(p?.y)).map(([id, p]) => [id, { x: p.x, y: p.y }]));
+  return {
+    zoom: Number.isFinite(value.zoom) && value.zoom > 0 ? value.zoom : null,
+    pan: Number.isFinite(value.pan?.x) && Number.isFinite(value.pan?.y) ? { x: value.pan.x, y: value.pan.y } : null,
+    selectedIds: Array.isArray(value.selectedIds) ? value.selectedIds.filter(id => ids.has(id)) : [],
+    focusNodeId: ids.has(value.focusNodeId) ? value.focusNodeId : null,
+    selectedGroupId: typeof value.selectedGroupId === 'string' ? value.selectedGroupId : null,
+    focusGroupId: typeof value.focusGroupId === 'string' ? value.focusGroupId : null,
+    positions,
+  };
+}
+
+export function visualGroupPresentation(document_) {
+  const groups = readVisualGroups(document_?.graph).groups;
+  return {
+    visualGroupState: reconcileVisualGroupState(groups, document_?.visualGroupState ?? document_?.presentation?.visualGroupState),
+    visualGroupPresentationDirty: Boolean(document_?.visualGroupPresentationDirty ?? document_?.presentation?.visualGroupPresentationDirty),
+    canvasState: normalizedCanvasState(document_?.canvasState ?? document_?.presentation?.canvasState, document_?.graph),
+  };
+}
+
 export function graphHasPersistedLayout(graph) {
   return Boolean(graph?.nodes?.length
     && graph.nodes.every(node => node._positionIsCenter

@@ -90,10 +90,38 @@ public final class HumanTaskConfiguration {
                         defaults.responseMaxKeyLength()),
                 integer(properties, environment, "ravenroot.human-task.write-attempts",
                         "RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS",
-                        defaults.writeAttempts()));
+                        defaults.writeAttempts()),
+                confirmation(properties, environment, defaults.confirmation()));
         } catch (IllegalArgumentException invalid) {
             throw attributed(invalid);
         }
+    }
+
+    private static HumanTaskPolicy.Confirmation confirmation(Map<String, String> properties,
+                                                               Map<String, String> environment,
+                                                               HumanTaskPolicy.Confirmation defaults) {
+        return new HumanTaskPolicy.Confirmation(
+                integer(properties, environment, "ravenroot.human-task.max-confirmation-prompt-bytes",
+                        "RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES",
+                        defaults.maxPromptUtf8Bytes()),
+                integer(properties, environment, "ravenroot.human-task.max-confirmation-action-label-bytes",
+                        "RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES",
+                        defaults.maxActionLabelUtf8Bytes()),
+                integer(properties, environment, "ravenroot.human-task.max-decision-comment-bytes",
+                        "RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES",
+                        defaults.maxCommentUtf8Bytes()),
+                integer(properties, environment, "ravenroot.human-task.attention-poll-millis",
+                        "RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS",
+                        defaults.pollAfterMillis()),
+                integer(properties, environment, "ravenroot.human-task.attention-poll-backoff-max-millis",
+                        "RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS",
+                        defaults.pollBackoffMaxMillis()),
+                integer(properties, environment, "ravenroot.human-task.default-attention-page-size",
+                        "RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE",
+                        defaults.attentionDefaultPageSize()),
+                integer(properties, environment, "ravenroot.human-task.max-attention-page-size",
+                        "RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE",
+                        defaults.attentionMaxPageSize()));
     }
 
     /** Rejects a Human Task response contract that the active graph traversal cannot carry. */
@@ -175,7 +203,14 @@ public final class HumanTaskConfiguration {
                 {"responseMaxCollectionSize", "response-max-collection-size"},
                 {"responseMaxValueCount", "response-max-value-count"},
                 {"responseMaxTextLength", "response-max-text-length"},
-                {"responseMaxKeyLength", "response-max-key-length"}, {"writeAttempts", "write-attempts"}
+                {"responseMaxKeyLength", "response-max-key-length"}, {"writeAttempts", "write-attempts"},
+                {"maxPromptUtf8Bytes", "max-confirmation-prompt-bytes"},
+                {"maxActionLabelUtf8Bytes", "max-confirmation-action-label-bytes"},
+                {"maxCommentUtf8Bytes", "max-decision-comment-bytes"},
+                {"pollAfterMillis", "attention-poll-millis"},
+                {"pollBackoffMaxMillis", "attention-poll-backoff-max-millis"},
+                {"attentionDefaultPageSize", "default-attention-page-size"},
+                {"attentionMaxPageSize", "max-attention-page-size"}
         };
         for (String[] name : names) {
             if (message.contains(name[0])) {

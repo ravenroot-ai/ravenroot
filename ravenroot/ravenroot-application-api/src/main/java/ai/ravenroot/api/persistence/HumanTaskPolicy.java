@@ -246,6 +246,16 @@ public record HumanTaskPolicy(
         }
         if (registration.confirmationPresentation().embedded()) {
             confirmation.requirePresentation(registration.confirmationPresentation());
+            HumanTaskResponseSchema response = registration.responseSchema();
+            if (!HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE.equals(response.contentType())
+                    || !HumanTaskConfirmationPresentation.RESPONSE_SCHEMA.equals(response.schema())
+                    || !HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION.equals(response.schemaVersion())
+                    || response.kind() != ai.ravenroot.api.payload.PayloadKind.SCALAR
+                    || response.maxBytes() < HumanTaskConfirmationPresentation.responseBytes().length
+                    || confirmation.maximumJsonBodyBytes() > registration.executionLimits()
+                    .decisionBodyMaxBytes()) {
+                throw invalidRegistration("embedded confirmation contract exceeds its pinned transport budgets");
+            }
             if (!confirmationLimits().equals(registration.confirmationLimits())) {
                 throw invalidRegistration("pinned confirmation limits do not match active policy");
             }
@@ -329,6 +339,8 @@ public record HumanTaskPolicy(
         public static final int HARD_MAX_ATTENTION_PAGE_SIZE = 100;
         /** Matches the GraphML parser's supported node ceiling. */
         public static final int HARD_MAX_ATTENTION_NODE_COUNTS = 1_000_000;
+        /** Conservative bytes outside the comment in {@code {"schemaVersion":1,"comment":""}}. */
+        public static final int JSON_BODY_OVERHEAD_BYTES = 32;
         /** Static default rendered when a graph opts into presentation version one. */
         public static final String DEFAULT_PROMPT = "Confirm this task.";
         /** Default decision metadata rule for the built-in presentation. */
@@ -388,10 +400,12 @@ public record HumanTaskPolicy(
             presentation = Objects.requireNonNull(presentation, "presentation");
             if (!presentation.embedded()) return;
             requireBytes(presentation.prompt(), maxPromptUtf8Bytes, "confirmation prompt");
-            for (HumanTaskConfirmationAction action : presentation.actions()) {
-                requireBytes(presentation.label(action), maxActionLabelUtf8Bytes,
-                        "confirmation action label");
-            }
+            requireBytes(presentation.resolveLabel(), maxActionLabelUtf8Bytes,
+                    "confirmation resolve label");
+            requireBytes(presentation.denyLabel(), maxActionLabelUtf8Bytes,
+                    "confirmation deny label");
+            requireBytes(presentation.cancelLabel(), maxActionLabelUtf8Bytes,
+                    "confirmation cancel label");
         }
 
         /**
@@ -429,6 +443,15 @@ public record HumanTaskPolicy(
             }
             requireBytes(comment, maxCommentUtf8Bytes, "decision comment");
             return comment;
+        }
+
+        /**
+         * Maximum JSON request bytes needed to carry any accepted comment, including six-byte
+         * Unicode escapes for every single-byte character.
+         * @return inclusive worst-case request size
+         */
+        public long maximumJsonBodyBytes() {
+            return JSON_BODY_OVERHEAD_BYTES + 6L * maxCommentUtf8Bytes;
         }
 
         private static void requireBytes(String value, int maximum, String name) {

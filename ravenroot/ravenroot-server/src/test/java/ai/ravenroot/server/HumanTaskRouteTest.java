@@ -20,6 +20,9 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
@@ -199,6 +202,154 @@ class HumanTaskRouteTest {
         }
     }
 
+    @Test
+    void embeddedAttentionAndStructuredDecisionsAreSafeAuthorizedAndExactlyReplayable() throws Exception {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        try (var store = new SqliteExecutionStore(directory.resolve("human-task-confirmation-route.db"), clock);
+             var engine = new PekkoExecutionEngine("human-task-confirmation-route-test")) {
+            Fixture resolve = requestEmbedded(store, clock, HumanTaskCommentRequirement.REQUIRED);
+            Fixture deny = requestEmbedded(store, clock, HumanTaskCommentRequirement.OPTIONAL);
+            Fixture cancel = requestEmbedded(store, clock, HumanTaskCommentRequirement.OPTIONAL);
+            Fixture required = requestEmbedded(store, clock, HumanTaskCommentRequirement.REQUIRED);
+            Fixture resolveOnly = requestEmbedded(store, clock, HumanTaskCommentRequirement.OPTIONAL,
+                    HumanTaskPolicy.DEFAULTS, List.of(HumanTaskConfirmationAction.RESOLVE));
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
+                    new TenantApproverAuthenticator())) {
+                server.installHumanTasks(resolve.service(), ignored -> { }, HumanTaskPolicy.DEFAULTS);
+                server.start();
+
+                HttpResponse<String> configuration = rawGet(server, "tenant-a", "/v1/configuration");
+                assertEquals(200, configuration.statusCode(), configuration.body());
+                assertTrue(configuration.body().contains("\"confirmationPresentationVersions\":[1]"));
+                assertTrue(configuration.body().contains("\"attentionPageSize\":20"));
+
+                String context = "/v1/human-tasks/attention?graphVersion=graph-v1&processInstanceId="
+                        + resolve.processInstanceId() + "&limit=10";
+                HttpResponse<String> attention = rawGet(server, "tenant-a", context);
+                assertEquals(200, attention.statusCode(), attention.body());
+                assertTrue(attention.body().contains(resolve.taskId().toString()), attention.body());
+                assertTrue(attention.body().contains("\"actions\":[\"CANCEL\",\"RESOLVE\",\"DENY\"]"),
+                        attention.body());
+                assertFalse(attention.body().contains("private-input"), attention.body());
+                assertFalse(attention.body().contains("decisionComment"), attention.body());
+                assertFalse(attention.body().contains("authorizedRoles"), attention.body());
+
+                HttpResponse<String> exact = rawGet(server, "tenant-a",
+                        "/v1/human-tasks/attention?taskId=" + resolve.taskId() + "&generation=1&limit=20");
+                assertEquals(200, exact.statusCode(), exact.body());
+                assertTrue(exact.body().contains(resolve.taskId().toString()), exact.body());
+                assertTrue(exact.body().contains("\"nodeCounts\":[]"), exact.body());
+                HttpResponse<String> withheld = rawGet(server, "other",
+                        "/v1/human-tasks/attention?taskId=" + resolve.taskId() + "&generation=1&limit=20");
+                assertEquals(200, withheld.statusCode(), withheld.body());
+                assertTrue(withheld.body().contains("\"items\":[]"), withheld.body());
+
+                String comment = "  Reviewed \\\"π\\\"\\nnext  ";
+                HttpResponse<String> applied = confirmation(server, resolve, "tenant-a", "approver",
+                        true, "resolve", 1, "{\"schemaVersion\":1,\"comment\":\"" + comment + "\"}");
+                assertEquals(200, applied.statusCode(), applied.body());
+                assertTrue(applied.body().contains("\"outcome\":\"APPLIED\""), applied.body());
+                assertTrue(applied.body().contains("\"status\":\"RESOLVED\""), applied.body());
+                assertTrue(applied.body().contains("\"availableActions\":[]"), applied.body());
+                for (String forbidden : List.of("Reviewed", "approver", "responseSchema", "continuation",
+                        "resumeTraversalId")) {
+                    assertFalse(applied.body().contains(forbidden), applied.body());
+                }
+                var storedResolve = store.loadHumanTask("tenant-a", resolve.taskId())
+                        .toCompletableFuture().join().orElseThrow();
+                assertEquals("Reviewed \"π\"\nnext", storedResolve.decisionComment());
+                assertEquals(HumanTaskService.confirmationResponse().size(),
+                        store.loadHandler(storedResolve.key(), resolve.taskId()).toCompletableFuture().join()
+                                .orElseThrow().outcomePayload().size());
+
+                HttpResponse<String> replay = confirmation(server, resolve, "tenant-a", "approver", true,
+                        "resolve", 1, "{\"schemaVersion\":1,\"comment\":\"" + comment + "\"}");
+                assertEquals(200, replay.statusCode(), replay.body());
+                assertTrue(replay.body().contains("\"outcome\":\"ALREADY_APPLIED\""), replay.body());
+                assertEquals(409, confirmation(server, resolve, "tenant-a", "approver", true,
+                        "resolve", 1, "{\"schemaVersion\":1,\"comment\":\"changed\"}").statusCode());
+                assertEquals(409, confirmation(server, resolve, "tenant-a", "approver", true,
+                        "deny", 1, "{\"schemaVersion\":1,\"comment\":\"Reviewed \\\"π\\\"\\nnext\"}")
+                        .statusCode(), "a different action is not an exact replay");
+
+                assertEquals(200, confirmation(server, deny, "tenant-a", "approver", true,
+                        "deny", 1, "{\"schemaVersion\":1,\"comment\":\"No\"}").statusCode());
+                assertEquals(200, confirmation(server, cancel, "tenant-a", "requester", false,
+                        "cancel", 1, "{\"schemaVersion\":1,\"comment\":\"Later\"}").statusCode());
+                assertEquals(400, confirmation(server, required, "tenant-a", "approver", true,
+                        "resolve", 1, "{\"schemaVersion\":1,\"comment\":\"\"}").statusCode());
+                assertEquals(400, confirmation(server, required, "tenant-a", "approver", true,
+                        "resolve", 1, "{\"schemaVersion\":1,\"comment\":\""
+                                + "x".repeat(HumanTaskPolicy.DEFAULTS.confirmation()
+                                .maxCommentUtf8Bytes() + 1) + "\"}").statusCode());
+                assertEquals(409, confirmation(server, required, "tenant-a", "approver", true,
+                        "resolve", 2, "{\"schemaVersion\":1,\"comment\":\"yes\"}").statusCode());
+                assertEquals(400, confirmation(server, required, "tenant-a", "approver", true,
+                        "resolve", 1, "{\"schemaVersion\":1,\"comment\":\"yes\",\"extra\":true}")
+                        .statusCode());
+                assertEquals(400, confirmation(server, resolveOnly, "tenant-a", "approver", true,
+                        "deny", 1, "{\"schemaVersion\":1,\"comment\":\"No\"}").statusCode(),
+                        "an authorized caller receives a rule refusal without task internals");
+                assertEquals(404, confirmation(server, required, "tenant-a", "viewer", false,
+                        "resolve", 1, "not-json").statusCode(),
+                        "authorization must precede task-dependent body parsing");
+                assertEquals(404, confirmation(server, new Fixture(resolve.service(), UUID.randomUUID(),
+                                resolve.processInstanceId()), "tenant-a", "approver", true,
+                        "resolve", 1, "not-json").statusCode());
+            }
+        }
+    }
+
+    @Test
+    void anOldPinnedCommentLimitRemainsUsableAfterATighterPolicyRestart() throws Exception {
+        Clock clock = Clock.fixed(NOW, ZoneOffset.UTC);
+        Path database = directory.resolve("human-task-confirmation-policy-drift.db");
+        HumanTaskPolicy originalPolicy = confirmationPolicy(8_192);
+        UUID taskId;
+        UUID processInstanceId;
+        try (var store = new SqliteExecutionStore(database, clock, originalPolicy)) {
+            Fixture fixture = requestEmbedded(store, clock, HumanTaskCommentRequirement.REQUIRED,
+                    originalPolicy);
+            taskId = fixture.taskId();
+            processInstanceId = fixture.processInstanceId();
+        }
+
+        HumanTaskPolicy tighterPolicy = confirmationPolicy(4_096, 1);
+        try (var store = new SqliteExecutionStore(database, clock, tighterPolicy);
+             var engine = new PekkoExecutionEngine("human-task-confirmation-policy-drift")) {
+            var service = new HumanTaskService(store, clock, tighterPolicy);
+            var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor());
+            try (var server = new RavenrootServer(application,
+                    new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null,
+                    new TenantApproverAuthenticator())) {
+                server.installHumanTasks(service, ignored -> { }, tighterPolicy);
+                server.start();
+                HttpResponse<String> configuration = rawGet(server, "tenant-a", "/v1/configuration");
+                assertTrue(configuration.body().contains("\"humanTasks\""), configuration.body());
+                assertTrue(configuration.body().contains("\"commentMaxUtf8Bytes\":4096"),
+                        configuration.body());
+                assertTrue(service.supportsConfirmations());
+                assertFalse(service.supportsConfirmationAdmission());
+                HttpResponse<String> restored = rawGet(server, "tenant-a",
+                        "/v1/human-tasks/attention?taskId=" + taskId + "&generation=1&limit=20");
+                assertEquals(200, restored.statusCode(), restored.body());
+                assertTrue(restored.body().contains("\"commentMaxUtf8Bytes\":8192"), restored.body());
+                assertTrue(restored.body().contains("\"promptMaxUtf8Bytes\":8192"), restored.body());
+
+                String oldPinValidComment = "x".repeat(6_000);
+                var fixture = new Fixture(service, taskId, processInstanceId);
+                HttpResponse<String> applied = confirmation(server, fixture, "tenant-a", "approver", true,
+                        "resolve", 1, "{\"schemaVersion\":1,\"comment\":\""
+                                + oldPinValidComment + "\"}");
+                assertEquals(200, applied.statusCode(), applied.body());
+                assertEquals(oldPinValidComment, store.loadHumanTask("tenant-a", taskId)
+                        .toCompletableFuture().join().orElseThrow().decisionComment());
+            }
+        }
+    }
+
     private static Fixture request(ExecutionStore store, Clock clock) {
         return request(store, clock, HumanTaskPolicy.DEFAULTS, 4096);
     }
@@ -237,7 +388,64 @@ class HumanTaskRouteTest {
             throw new AssertionError(impossible);
         }
         assertEquals(HumanTaskResult.Code.CREATED, result.code());
-        return new Fixture(service, result.task().request().taskId());
+        return new Fixture(service, result.task().request().taskId(), key.processInstanceId());
+    }
+
+    private static Fixture requestEmbedded(ExecutionStore store, Clock clock,
+                                           HumanTaskCommentRequirement commentRequirement) {
+        return requestEmbedded(store, clock, commentRequirement, HumanTaskPolicy.DEFAULTS);
+    }
+
+    private static Fixture requestEmbedded(ExecutionStore store, Clock clock,
+                                           HumanTaskCommentRequirement commentRequirement,
+                                           HumanTaskPolicy policy) {
+        return requestEmbedded(store, clock, commentRequirement, policy,
+                List.of(HumanTaskConfirmationAction.CANCEL,
+                        HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY));
+    }
+
+    private static Fixture requestEmbedded(ExecutionStore store, Clock clock,
+                                           HumanTaskCommentRequirement commentRequirement,
+                                           HumanTaskPolicy policy,
+                                           List<HumanTaskConfirmationAction> actions) {
+        var key = new ExecutionKey("tenant-a", UUID.randomUUID());
+        UUID traversalId = UUID.randomUUID();
+        UUID invocationId = UUID.randomUUID();
+        UUID attemptId = UUID.randomUUID();
+        var attempt = new NodeAttempt(attemptId, 1, NodeAttemptStatus.RUNNING);
+        var invocation = new NodeInvocation(invocationId, "review", Set.of(),
+                NodeInvocationStatus.RUNNING, List.of(attempt));
+        var traversal = new Traversal(traversalId, "review", TraversalStatus.RUNNING,
+                Map.of(invocationId, invocation));
+        long revision = store.apply(ExecutionBatch.to(key).expecting(RevisionExpectation.notPresent())
+                .apply(new ExecutionTransition.ProcessCreated(new ProcessInstance(key.processInstanceId(),
+                        ProcessInstanceStatus.RUNNING, Map.of(traversalId, traversal)),
+                        new GraphVersionPin("graph-v1"))).build()).toCompletableFuture().join().revision();
+        var service = new HumanTaskService(store, clock, policy);
+        var requester = SecurityContext.of(new RequestContext("requester-request", "requester",
+                PrincipalType.USER, "urn:ravenroot:test", key.tenantId(), Set.of(), Set.of()));
+        var message = new NodeMessage(requester, key.processInstanceId(), traversalId, invocationId,
+                attemptId, "review", Map.of("secret", "private-input"), Map.of());
+        var presentation = new HumanTaskConfirmationPresentation(1, "Ship this release?",
+                commentRequirement, actions,
+                "Ship", "Reject", "Later");
+        var definition = new HumanTaskDefinition(new HumanTaskMetadata("Approve release", "Bounded facts only."),
+                new HumanTaskResponseSchema(HumanTaskService.CONFIRMATION_CONTENT_TYPE,
+                        HumanTaskService.CONFIRMATION_SCHEMA, HumanTaskService.CONFIRMATION_SCHEMA_VERSION,
+                        PayloadKind.SCALAR, policy.defaultResponseBytes()),
+                HandlerAuthorization.ofRoles(Role.APPROVER.name()), Optional.empty(), Duration.ofHours(1),
+                new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                policy.executionLimits(policy.defaultResponseBytes()),
+                presentation);
+        HumanTaskResult result;
+        try (var recorder = ExecutionRecorder.open(store, key, "embedded-route-fixture",
+                Duration.ofSeconds(30), revision); var ignored = service.bindLive(key, recorder)) {
+            result = service.suspend(message, definition);
+        } catch (Exception impossible) {
+            throw new AssertionError(impossible);
+        }
+        assertEquals(HumanTaskResult.Code.CREATED, result.code());
+        return new Fixture(service, result.task().request().taskId(), key.processInstanceId());
     }
 
     private static HttpResponse<String> get(RavenrootServer server, String tenant) throws Exception {
@@ -265,7 +473,28 @@ class HumanTaskRouteTest {
                 HttpResponse.BodyHandlers.ofString());
     }
 
-    private record Fixture(HumanTaskService service, UUID taskId) { }
+    private static HttpResponse<String> rawGet(RavenrootServer server, String tenant, String path)
+            throws Exception {
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(
+                        URI.create("http://127.0.0.1:" + server.port() + path))
+                        .header("X-Test-Tenant", tenant).GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static HttpResponse<String> confirmation(
+            RavenrootServer server, Fixture fixture, String tenant, String subject, boolean approver,
+            String action, long generation, String body) throws Exception {
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(URI.create("http://127.0.0.1:"
+                        + server.port() + "/v1/human-tasks/" + fixture.taskId()
+                        + "/confirmation/" + action + "?generation=" + generation))
+                        .header("X-Test-Tenant", tenant).header("X-Test-Subject", subject)
+                        .header("X-Test-Approver", Boolean.toString(approver))
+                        .header("Content-Type", "application/json; charset=utf-8")
+                        .POST(HttpRequest.BodyPublishers.ofString(body)).build(),
+                HttpResponse.BodyHandlers.ofString());
+    }
+
+    private record Fixture(HumanTaskService service, UUID taskId, UUID processInstanceId) { }
 
     private static HumanTaskPolicy policy(int maxResponse, int decisionBody, int depth,
                                           int writeAttempts) {
@@ -286,10 +515,33 @@ class HumanTaskRouteTest {
                 writeAttempts);
     }
 
+    private static HumanTaskPolicy confirmationPolicy(int textLimit) {
+        return confirmationPolicy(textLimit, HumanTaskPolicy.DEFAULTS.defaultResponseBytes());
+    }
+
+    private static HumanTaskPolicy confirmationPolicy(int textLimit, int defaultResponseBytes) {
+        HumanTaskPolicy d = HumanTaskPolicy.DEFAULTS;
+        var confirmation = new HumanTaskPolicy.Confirmation(textLimit,
+                d.confirmation().maxActionLabelUtf8Bytes(), textLimit,
+                d.confirmation().pollAfterMillis(), d.confirmation().pollBackoffMaxMillis(),
+                d.confirmation().attentionDefaultPageSize(), d.confirmation().attentionMaxPageSize());
+        return new HumanTaskPolicy(defaultResponseBytes, d.maxResponseBytes(),
+                d.defaultEscalationSeconds(), d.maxEscalationSeconds(), d.defaultExpirySeconds(),
+                d.maxExpirySeconds(), d.maxTitleUtf8Bytes(), d.maxDescriptionUtf8Bytes(),
+                d.maxResponseSchemaUtf8Bytes(), d.maxAuthorizationTokens(),
+                d.maxAuthorizationTokenUtf8Bytes(), d.decisionBodyMaxBytes(),
+                d.inboxDefaultPageSize(), d.inboxMaxPageSize(), d.responseMaxDepth(),
+                d.responseMaxCollectionSize(), d.responseMaxValueCount(), d.responseMaxTextLength(),
+                d.responseMaxKeyLength(), d.writeAttempts(), confirmation);
+    }
+
     private static final class TenantApproverAuthenticator implements RequestAuthenticator {
         @Override public AuthenticatedPrincipal authenticate(Headers headers) {
-            return new AuthenticatedPrincipal("approver", AuthenticatedPrincipal.Type.USER,
-                    "urn:ravenroot:test", headers.getFirst("X-Test-Tenant"), Set.of(Role.APPROVER),
+            String subject = Optional.ofNullable(headers.getFirst("X-Test-Subject")).orElse("approver");
+            boolean approver = !"false".equals(headers.getFirst("X-Test-Approver"));
+            return new AuthenticatedPrincipal(subject, AuthenticatedPrincipal.Type.USER,
+                    "urn:ravenroot:test", headers.getFirst("X-Test-Tenant"),
+                    approver ? Set.of(Role.APPROVER) : Set.of(),
                     Arrays.stream(AuthorizationAction.values()).filter(AuthorizationAction::available)
                             .map(AuthorizationAction::requiredScope)
                             .collect(java.util.stream.Collectors.toUnmodifiableSet()));

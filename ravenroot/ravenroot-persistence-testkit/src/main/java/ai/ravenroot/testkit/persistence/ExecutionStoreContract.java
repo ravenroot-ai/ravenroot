@@ -3353,13 +3353,17 @@ public abstract class ExecutionStoreContract {
                 UUID.randomUUID(), UUID.randomUUID(), "embedded-dedup", "embedded-correlation");
         HumanTaskRegistration embedded = new HumanTaskRegistration(source.taskId(), source.traversalId(),
                 source.invocationId(), source.attemptId(), source.nodeId(), source.correlationKey(),
-                source.deduplicationKey(), source.metadata(), source.responseSchema(),
+                source.deduplicationKey(), source.metadata(),
+                new HumanTaskResponseSchema(HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE,
+                        HumanTaskConfirmationPresentation.RESPONSE_SCHEMA,
+                        HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION,
+                        PayloadKind.SCALAR, 4096),
                 source.responderRequirements(), source.requester(), source.graphVersionPin(),
                 source.escalateAt(), source.expiresAt(), source.reentryMapping(), source.executionLimits(),
                 source.continuationVersion(), source.continuation(), source.continuationDigest(),
                 new HumanTaskConfirmationPresentation(1, "Confirm after review.",
                         HumanTaskCommentRequirement.OPTIONAL,
-                        Set.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY,
+                        List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY,
                                 HumanTaskConfirmationAction.CANCEL), "Confirm", "Deny", "Cancel"),
                 new HumanTaskConfirmationLimits(4096, 64, 4096));
         HumanTaskFixture fixture = runningHumanTaskFixture(key, embedded);

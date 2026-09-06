@@ -23,6 +23,32 @@ token grammar plus `._-:+/` and its 128-unit cap. The operator setting may narro
 budget but cannot widen it; schema version has the fixed protocol bound and no separate operator
 setting.
 
+An embedded simple confirmation is an opt-in versioned presentation of that same durable node. A
+host publishes the `embedded-confirmation-v1` catalog capability and the `confirmation*` authoring
+fields only when its store and current admission policy support the complete contract. Setting
+`confirmationPresentationVersion=1` through the generic editor materializes the complete classic
+placeholder response tuple:
+
+```text
+application/vnd.ravenroot.payload+json
+ravenroot.human-task.response
+1
+MAP
+<the active default maxResponseBytes>
+```
+
+At admission Ravenroot converts that exact tuple to the built-in response contract
+`application/json`, `ravenroot.human-task.confirmation`, version `1`, kind `SCALAR`. Authors may
+instead provide that built-in tuple explicitly. A partial tuple, custom schema, changed kind, or
+changed response limit is refused before traversal. Omitting `confirmationPresentationVersion`
+retains the classic raw-envelope behavior and its original defaults.
+
+`confirmationPrompt` is bounded plain text. `confirmationComment` is `DISALLOWED`, `OPTIONAL`, or
+`REQUIRED`. `confirmationActions` is an ordered comma-separated subset of `RESOLVE`, `DENY`, and
+`CANCEL`; Ravenroot pins that authored order and the corresponding label properties. The task also
+pins its prompt, action-label, and comment byte limits, so a tighter or looser policy after restart
+does not reinterpret an existing decision.
+
 The service applies this admission contract to every current task creation. Supported durable adapters
 apply the same check only after exact deduplication, so an exact replay of an already accepted request
 remains idempotent after a policy change. Pre-existing tasks with stored labels that do not satisfy the
@@ -66,6 +92,68 @@ unauthorized principal, late timer, and cross-tenant or unknown ID each produce 
 result. Unknown and cross-tenant IDs are indistinguishable. Only `resolve` accepts a body, using the
 task's declared media type and bounded payload envelope.
 
+Embedded confirmations have a separate attention projection. `GET /v1/configuration` advertises it
+as `humanTasks` schema version `1`, including supported presentation versions, current authoring
+limits, polling bounds, and the effective default and maximum attention page sizes. These values
+remain present while the durable store can query and decide already pinned confirmations, even when
+the current admission policy is too narrow to create another one. In that state the behavior catalog
+omits the embedded confirmation capability and its authoring controls.
+
+An aggregate attention query requires the exact `graphVersion` and exactly one of `deploymentId` or
+`processInstanceId`:
+
+```http
+GET /v1/human-tasks/attention?graphVersion=<sha256>&deploymentId=release&limit=20
+GET /v1/human-tasks/attention?graphVersion=<sha256>&processInstanceId=<uuid>&nodeId=approval&limit=20
+```
+
+Optional `traversalId`, `nodeId`, `taskId`, and `generation` fields narrow the selected durable
+context. The response is `{schemaVersion,items,nextCursor,counts,nodeCounts}`. Counts cover every
+authorized actionable match, independently of the current item page. Graph-level `nodeCounts` are
+complete and ordered by node ID; a node-filtered query returns an empty `nodeCounts` array. The opaque
+cursor carries its immutable `(createdAt,taskId)` boundary and is bound to the tenant, exact query,
+actor, roles, and scopes. Deleting or settling a row therefore does not invalidate later boundaries,
+while a context or authority change requires a fresh first page.
+
+Browser restart recovery can use the smaller exact locator without cached graph or process context:
+
+```http
+GET /v1/human-tasks/attention?taskId=<uuid>&generation=1
+```
+
+The server authenticates and authorizes before projecting the durable row and derives its graph,
+deployment, process, traversal, and node pins from storage. Unknown, cross-tenant, unauthorized,
+stale, and terminal locators all return an empty actionable page. Exact and node-filtered responses
+return `nodeCounts: []`, so they disclose no unrelated graph attention.
+
+Each attention item carries only task and durable context identities, lifecycle and timer values,
+the pinned presentation, its three pinned byte limits, and the actions currently available to the
+caller. It omits request payload and attributes, requester and responder authority, response schema
+and bytes, comments and actors, handler state, continuation bytes, and credentials.
+
+The embedded decision route is:
+
+```http
+POST /v1/human-tasks/<taskId>/confirmation/resolve?generation=1
+Content-Type: application/json; charset=utf-8
+
+{"schemaVersion":1,"comment":"Reviewed by release operations"}
+```
+
+`deny` and `cancel` use the same strict two-field JSON object. Ravenroot authorizes the task before
+applying its pinned body and comment limits. It trims the comment, rejects malformed Unicode and
+unknown JSON fields, enforces the pinned comment rule, and stores the comment as a separate
+attributable transition. `resolve` supplies a fixed server-authored boolean `true` payload envelope;
+caller JSON never becomes the graph response.
+
+A successful first decision returns HTTP 200 with
+`{"schemaVersion":1,"outcome":"APPLIED","task":...}`. An exact retry with the same generation,
+action, actor, and normalized comment returns HTTP 200 with `ALREADY_APPLIED`; changed action or
+comment and a stale or conflicting generation return HTTP 409. An authorized malformed request or
+presentation-rule violation returns HTTP 400. Unknown, cross-tenant, unauthorized, unsupported, and
+non-embedded task IDs share the nondisclosing HTTP 404 response. The returned terminal task uses the
+same safe projection and has no available actions.
+
 A terminal decision atomically completes the old waiting invocation and traversal, updates the
 first-class task, resolves its reserved `human-task` handler projection, cancels its timers, and
 creates one fresh accepted traversal. Recovery loads the exact immutable graph version pinned at
@@ -91,5 +179,6 @@ not replacement execution authority.
 - **Delay** is a bounded asynchronous in-process wait. It keeps no thread asleep, but it is not a
   durable external decision and does not provide an inbox, authorization, or response contract.
 
-The node is always discoverable in the core catalog. It fails closed at execution when the host did
-not compose a store with human-task, durable-handler, timer, and event-journal support.
+The classic node is always discoverable in the core catalog. A missing durable Human Task capability
+or a manually supplied embedded presentation on an incapable host fails catalog admission before a
+traversal, handler, timer, or task can be created.

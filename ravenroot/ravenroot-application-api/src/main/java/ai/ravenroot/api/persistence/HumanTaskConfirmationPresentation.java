@@ -1,5 +1,8 @@
 package ai.ravenroot.api.persistence;
 
+import ai.ravenroot.api.payload.PayloadEnvelope;
+import ai.ravenroot.api.payload.PayloadValue;
+
 import java.nio.charset.StandardCharsets;
 import java.util.HashSet;
 import java.util.List;
@@ -32,6 +35,12 @@ public record HumanTaskConfirmationPresentation(
 
     /** First and currently only embedded presentation wire version. */
     public static final int VERSION_1 = 1;
+    /** Exact content type of the server-authored confirmation response. */
+    public static final String RESPONSE_CONTENT_TYPE = "application/json";
+    /** Exact schema of the server-authored confirmation response. */
+    public static final String RESPONSE_SCHEMA = "ravenroot.human-task.confirmation";
+    /** Exact schema version of the server-authored confirmation response. */
+    public static final String RESPONSE_SCHEMA_VERSION = "1";
     /** Technical ceiling; the server policy normally configures a smaller bound. */
     public static final int HARD_MAX_PROMPT_UTF8_BYTES = 64 * 1024;
     /** Technical ceiling; the server policy normally configures a smaller bound. */
@@ -134,6 +143,15 @@ public record HumanTaskConfirmationPresentation(
      */
     public static HumanTaskConfirmationPresentation none() {
         return NONE;
+    }
+
+    /**
+     * Returns the canonical encoded bytes of the fixed boolean-true confirmation envelope.
+     * @return fresh canonical response bytes
+     */
+    public static byte[] responseBytes() {
+        return PayloadEnvelope.of(RESPONSE_SCHEMA, RESPONSE_SCHEMA_VERSION, PayloadValue.of(true))
+                .toJson().getBytes(StandardCharsets.UTF_8);
     }
 
     private static String requireText(String value, String name, int maximum, boolean required) {

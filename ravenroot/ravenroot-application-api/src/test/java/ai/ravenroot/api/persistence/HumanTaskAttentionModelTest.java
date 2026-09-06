@@ -3,6 +3,8 @@ package ai.ravenroot.api.persistence;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.nio.ByteBuffer;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
@@ -53,6 +55,36 @@ class HumanTaskAttentionModelTest {
         String changed = (cursor.value().startsWith("A") ? "B" : "A") + cursor.value().substring(1);
         assertThrows(IllegalArgumentException.class, () -> new HumanTaskAttentionCursor(changed)
                 .boundary("tenant-a", query, authorization));
+    }
+
+    @Test
+    void cursorRejectsUnrepresentableTimesAndFramesRoleAndScopeCollections() {
+        var query = HumanTaskAttentionQuery.forDeployment("graph-v1", "deployment-a", 20);
+        Instant createdAt = Instant.parse("2026-09-06T00:00:00Z");
+        UUID taskId = UUID.fromString("00000000-0000-0000-0000-000000000125");
+        var first = new HumanTaskAttentionAuthorization("issuer|USER|operator",
+                Set.of("a"), Set.of("roles-end", "z"));
+        var second = new HumanTaskAttentionAuthorization("issuer|USER|operator",
+                Set.of("a", "roles-end"), Set.of("z"));
+        HumanTaskAttentionCursor cursor = HumanTaskAttentionCursor.issue(
+                "tenant-a", query, first, createdAt, taskId);
+        assertThrows(IllegalArgumentException.class,
+                () -> cursor.boundary("tenant-a", query, second),
+                "moving an opaque token between role and scope axes must change the scope digest");
+
+        byte[] epoch = Base64.getUrlDecoder().decode(cursor.value());
+        ByteBuffer.wrap(epoch).putLong(33, Long.MAX_VALUE);
+        var invalidEpoch = new HumanTaskAttentionCursor(
+                Base64.getUrlEncoder().withoutPadding().encodeToString(epoch));
+        assertThrows(IllegalArgumentException.class,
+                () -> invalidEpoch.boundary("tenant-a", query, first));
+
+        byte[] nanos = Base64.getUrlDecoder().decode(cursor.value());
+        ByteBuffer.wrap(nanos).putInt(41, 1_000_000_000);
+        var invalidNanos = new HumanTaskAttentionCursor(
+                Base64.getUrlEncoder().withoutPadding().encodeToString(nanos));
+        assertThrows(IllegalArgumentException.class,
+                () -> invalidNanos.boundary("tenant-a", query, first));
     }
 
     @Test

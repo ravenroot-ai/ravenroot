@@ -75,6 +75,10 @@ class DeploymentLifecycleHttpTest {
             assertTrue(registered.body().contains("\"state\":\"REGISTERED\""), registered.body());
             assertTrue(registered.body().contains("\"scope\":\"LOCAL_PROCESS\""), registered.body());
             assertTrue(registered.body().contains("\"sourceCount\":0"), registered.body());
+            var graphVersionMatch = java.util.regex.Pattern.compile(
+                    "\\\"graphVersion\\\":\\\"([0-9a-f]{64})\\\"").matcher(registered.body());
+            assertTrue(graphVersionMatch.find(), registered.body());
+            String graphVersion = graphVersionMatch.group(1);
 
             HttpResponse<String> rejoined = fixture.request(
                     "POST", "/v1/deployments?id=batch-1", NO_SOURCE_GRAPH, "tenant-a");
@@ -90,8 +94,14 @@ class DeploymentLifecycleHttpTest {
             assertEquals(200, listed.statusCode(), listed.body());
             assertTrue(listed.body().contains("\"deploymentId\":\"batch-1\""), listed.body());
             assertTrue(listed.body().contains("\"scope\":\"LOCAL_PROCESS\""), listed.body());
+            assertTrue(listed.body().contains("\"graphVersion\":\"" + graphVersion + "\""),
+                    listed.body());
 
-            assertState(fixture.request("POST", "/v1/deployments/batch-1/start", "", "tenant-a"), "READY");
+            HttpResponse<String> started = fixture.request(
+                    "POST", "/v1/deployments/batch-1/start", "", "tenant-a");
+            assertState(started, "READY");
+            assertTrue(started.body().contains("\"graphVersion\":\"" + graphVersion + "\""),
+                    started.body());
             assertState(fixture.request("POST", "/v1/deployments/batch-1/start", "", "tenant-a"), "READY");
             assertState(fixture.request("POST", "/v1/deployments/batch-1/stop", "", "tenant-a"), "STOPPED");
             assertState(fixture.request("POST", "/v1/deployments/batch-1/stop", "", "tenant-a"), "STOPPED");

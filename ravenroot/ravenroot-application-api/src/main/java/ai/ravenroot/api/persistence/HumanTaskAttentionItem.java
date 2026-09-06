@@ -7,14 +7,15 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * Safe authorized projection of one actionable embedded Human Task.
+ * Safe authorized projection of one embedded Human Task.
  *
  * <p>The projection intentionally omits response schemas and bytes, decision comments and actors,
  * requester identity, continuation bytes, handler keys, scopes and roles.</p>
  *
  * @param taskId exact task identity.
  * @param generation current optimistic decision fence.
- * @param status current actionable lifecycle status.
+ * @param status current lifecycle status; attention pages contain only actionable values while a
+ *               decision response may carry the resulting terminal value.
  * @param graphVersion immutable graph-version pin.
  * @param deploymentId durable hosting deployment, absent for a transient process.
  * @param processInstanceId exact owning process instance.
@@ -51,9 +52,7 @@ public record HumanTaskAttentionItem(
     public HumanTaskAttentionItem {
         if (taskId == null) throw new IllegalArgumentException("taskId cannot be null");
         if (generation < 1) throw new IllegalArgumentException("generation must be positive");
-        if (status != HumanTaskStatus.WAITING && status != HumanTaskStatus.ESCALATED) {
-            throw new IllegalArgumentException("attention item must be actionable");
-        }
+        if (status == null) throw new IllegalArgumentException("status cannot be null");
         graphVersion = HandlerRegistration.requireBoundedKey(graphVersion, "graphVersion");
         deploymentId = deploymentId == null ? Optional.empty() : deploymentId;
         deploymentId.ifPresent(value -> HandlerRegistration.requireBoundedKey(value, "deploymentId"));
@@ -71,10 +70,15 @@ public record HumanTaskAttentionItem(
             throw new IllegalArgumentException("pinned confirmation limits must be positive");
         }
         availableActions = List.copyOf(availableActions == null ? List.of() : availableActions);
-        if (availableActions.isEmpty()
-                || new HashSet<>(availableActions).size() != availableActions.size()
+        if (new HashSet<>(availableActions).size() != availableActions.size()
                 || !presentation.actions().containsAll(availableActions)) {
-            throw new IllegalArgumentException("attention item requires authorized pinned actions");
+            throw new IllegalArgumentException("attention item has invalid authorized pinned actions");
+        }
+        if (status.terminal() && !availableActions.isEmpty()) {
+            throw new IllegalArgumentException("terminal task cannot have available actions");
+        }
+        if (!status.terminal() && availableActions.isEmpty()) {
+            throw new IllegalArgumentException("actionable task requires an authorized action");
         }
     }
 }

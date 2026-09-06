@@ -134,6 +134,8 @@ public final class DefaultGraphDeployment implements GraphDeployment {
      */
     private final ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
+    /** Durable Human Task coordinator bound for every deployment-hosted traversal. */
+    private final ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     /**
      * Records what each accepted traversal's dependencies resolved to, or {@code null} when nothing
      * records them.
@@ -424,6 +426,43 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 executionManifests);
     }
 
+    /**
+     * Full production composition including deployment-hosted durable Human Tasks.
+     * @param id deployment identity
+     * @param engine execution engine
+     * @param behaviors trusted behavior registry
+     * @param monitor execution monitor
+     * @param identitySource source of runtime identifiers
+     * @param graphMl immutable GraphML source
+     * @param ingressBufferCapacity bounded inbound queue capacity
+     * @param executionStore durable execution store
+     * @param inboxRetention request/reply inbox retention
+     * @param workerId durable lease owner
+     * @param executionLeaseTtl execution lease duration
+     * @param requestReplyLimits request/reply limits
+     * @param graphDefinitionStore durable graph-definition store
+     * @param graphExecutionLimits graph execution limits
+     * @param agentBudgets optional durable agent authority budgets
+     * @param humanTasks optional durable Human Task service
+     * @param executionManifests optional execution-manifest service
+     */
+    public DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                                  ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                                  byte[] graphMl, int ingressBufferCapacity,
+                                  ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                                  Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                                  RequestReplyLimits requestReplyLimits,
+                                  ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                  GraphExecutionLimits graphExecutionLimits,
+                                  ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                  ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                  ai.ravenroot.core.manifest.ExecutionManifestService executionManifests) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                Clock.systemUTC(), graphDefinitionStore, graphExecutionLimits, agentBudgets,
+                humanTasks, executionManifests);
+    }
+
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
     DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
                            ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
@@ -460,9 +499,26 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                            GraphExecutionLimits graphExecutionLimits,
                            ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
                            ai.ravenroot.core.manifest.ExecutionManifestService executionManifests) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
+                graphDefinitionStore, graphExecutionLimits, agentBudgets, null, executionManifests);
+    }
+
+    private DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits, Clock clock,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                           ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                           ai.ravenroot.core.manifest.ExecutionManifestService executionManifests) {
         this.executionManifests = executionManifests;
         this.graphDefinitionStore = graphDefinitionStore;
         this.agentBudgets = agentBudgets;
+        this.humanTasks = humanTasks;
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.executionLeaseTtl = Objects.requireNonNull(executionLeaseTtl, "executionLeaseTtl");
         this.requestReplyLimits = Objects.requireNonNull(requestReplyLimits, "requestReplyLimits");
@@ -1312,13 +1368,17 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         ai.ravenroot.api.persistence.ExecutionKey key = new ai.ravenroot.api.persistence.ExecutionKey(
                 security.tenantId(), processInstanceId);
         AutoCloseable budgetBinding = null;
+        AutoCloseable humanTaskBinding = null;
         try {
             budgetBinding = agentBudgets == null || recorder == null
                     ? null : agentBudgets.bindLive(key, recorder);
+            humanTaskBinding = humanTasks == null || recorder == null
+                    ? null : humanTasks.bindLive(key, recorder, activeRunner::continuationBudget);
             CompletionStage<GraphExecutionResult> execution = activeRunner.execute(security,
                     processInstanceId, traversalId, payload, graphVersion, id.value(),
                     traversalId.toString(), recorder);
             AutoCloseable finalBudgetBinding = budgetBinding;
+            AutoCloseable finalHumanTaskBinding = humanTaskBinding;
             return execution.whenComplete((result, failure) -> {
                 Throwable cause = unwrapFailure(failure);
                 try {
@@ -1329,11 +1389,13 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                     }
                 } finally {
                     closeQuietly(finalBudgetBinding);
+                    closeQuietly(finalHumanTaskBinding);
                     closeQuietly(recorder);
                 }
             });
         } catch (RuntimeException | Error failure) {
             closeQuietly(budgetBinding);
+            closeQuietly(humanTaskBinding);
             closeQuietly(recorder);
             throw failure;
         }

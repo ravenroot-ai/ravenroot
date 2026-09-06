@@ -8,6 +8,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
@@ -86,12 +87,15 @@ public record HumanTaskAttentionCursor(String value) {
                 byte[] storedDigest = input.readNBytes(DIGEST_BYTES);
                 if (!MessageDigest.isEqual(storedDigest,
                         scopeDigest(tenantId, query, authorization))) throw invalid();
-                Instant createdAt = Instant.ofEpochSecond(input.readLong(), input.readInt());
+                long epochSecond = input.readLong();
+                int nano = input.readInt();
+                if (nano < 0 || nano > 999_999_999) throw invalid();
+                Instant createdAt = Instant.ofEpochSecond(epochSecond, nano);
                 UUID taskId = new UUID(input.readLong(), input.readLong());
                 if (input.available() != 0) throw invalid();
                 return new Boundary(createdAt, taskId);
             }
-        } catch (IllegalArgumentException | IOException invalid) {
+        } catch (IllegalArgumentException | DateTimeException | IOException invalid) {
             throw invalid();
         }
     }
@@ -126,8 +130,9 @@ public record HumanTaskAttentionCursor(String value) {
             update(digest, query.taskId().map(UUID::toString).orElse(""));
             update(digest, query.generation().map(String::valueOf).orElse(""));
             update(digest, authorization.actor());
+            updateCount(digest, authorization.roles().size());
             authorization.roles().stream().sorted().forEach(role -> update(digest, role));
-            update(digest, "roles-end");
+            updateCount(digest, authorization.scopes().size());
             authorization.scopes().stream().sorted().forEach(scope -> update(digest, scope));
             return digest.digest();
         } catch (NoSuchAlgorithmException impossible) {
@@ -142,6 +147,13 @@ public record HumanTaskAttentionCursor(String value) {
         digest.update((byte) (bytes.length >>> 8));
         digest.update((byte) bytes.length);
         digest.update(bytes);
+    }
+
+    private static void updateCount(MessageDigest digest, int value) {
+        digest.update((byte) (value >>> 24));
+        digest.update((byte) (value >>> 16));
+        digest.update((byte) (value >>> 8));
+        digest.update((byte) value);
     }
 
     private static IllegalArgumentException invalid() {

@@ -285,7 +285,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
             GraphRunner runner;
             try {
                 runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                        GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
+                        GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits, task.request().nodeId());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
                 setupFailure = cleanup(setupFailure, manager::close);

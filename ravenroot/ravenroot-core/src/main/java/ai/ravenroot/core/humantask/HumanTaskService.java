@@ -8,6 +8,7 @@ import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.EventEnvelope;
@@ -26,6 +27,7 @@ import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
 import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
 import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
 import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
@@ -65,6 +67,12 @@ import java.util.stream.Collectors;
 /** Reference monitor and transport-neutral inbox for first-class durable human tasks. */
 public final class HumanTaskService {
     public static final String HANDLER_NAME = "human-task";
+    public static final String CONFIRMATION_CONTENT_TYPE =
+            ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE;
+    public static final String CONFIRMATION_SCHEMA =
+            ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_SCHEMA;
+    public static final String CONFIRMATION_SCHEMA_VERSION =
+            ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION;
     private static final String EVENT_CONTENT_TYPE = "application/vnd.ravenroot.human-task-event+json";
     private final ExecutionStore store;
     private final Clock clock;
@@ -244,12 +252,126 @@ public final class HumanTaskService {
         return await(store.findHumanTaskAttention(context.tenantId(), locator, authorization));
     }
 
+    /**
+     * Reports whether the connected store implements the complete embedded confirmation contract.
+     * @return {@code true} when persisted confirmation decisions can be queried and settled
+     */
+    public boolean supportsConfirmations() {
+        return store.supports(StoreCapability.HUMAN_TASK_CONFIRMATIONS)
+                && store.supports(StoreCapability.PROCESS_INVENTORY);
+    }
+
+    /**
+     * Reports whether current admission limits can create new embedded confirmations.
+     * @return {@code true} when the runtime and active policy can admit new confirmations
+     */
+    public boolean supportsConfirmationAdmission() {
+        return supportsConfirmations()
+                && policy.confirmation().maximumJsonBodyBytes() <= policy.decisionBodyMaxBytes()
+                && ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.responseBytes().length
+                <= policy.defaultResponseBytes();
+    }
+
+    /**
+     * Returns the body and comment budgets for one permitted embedded action, only after tenant and
+     * current-authority checks. Empty deliberately combines every unavailable case.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param action requested embedded action
+     * @return pinned parser limits when the task exists and the caller may attempt the action
+     */
+    public Optional<ConfirmationAuthority> confirmationAuthority(
+            RequestContext context, UUID taskId, HumanTaskConfirmationAction action) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(action, "action");
+        if (!supportsConfirmations()) return Optional.empty();
+        DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
+        if (task == null || !task.request().confirmationPresentation().embedded()) return Optional.empty();
+        String actor = SecurityContext.of(context).qualifiedIdentity();
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        boolean requesterCancellation = action == HumanTaskConfirmationAction.CANCEL
+                && actor.equals(task.request().requester().qualifiedIdentity());
+        if (!requesterCancellation
+                && !task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
+            return Optional.empty();
+        }
+        return Optional.of(new ConfirmationAuthority(
+                task.request().executionLimits().decisionBodyMaxBytes(),
+                task.request().confirmationLimits().maxCommentUtf8Bytes()));
+    }
+
+    /**
+     * Projects a completed embedded decision without response, comment, actor, schema, or continuation.
+     * The decision itself has already authorized the caller; this method rechecks that current
+     * authority still permits the same action before returning the terminal row.
+     * @param context authenticated caller
+     * @param result authoritative settlement result
+     * @param action action applied or exactly replayed
+     * @return terminal safe projection, or empty if its context or authority cannot be verified
+     */
+    public Optional<HumanTaskAttentionItem> confirmationProjection(
+            RequestContext context, HumanTaskResult result, HumanTaskConfirmationAction action) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(result, "result");
+        Objects.requireNonNull(action, "action");
+        if (!supportsConfirmations()) return Optional.empty();
+        DurableHumanTask task = result.task();
+        if (task == null || !task.status().terminal()
+                || !context.tenantId().equals(task.key().tenantId())
+                || !attentionAuthorization(context).permittedActions(task.request()).contains(action)) {
+            return Optional.empty();
+        }
+        var process = await(store.findProcessInstance(task.key())).orElse(null);
+        if (process == null) return Optional.empty();
+        var request = task.request();
+        var limits = request.confirmationLimits();
+        return Optional.of(new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
+                process.graphVersionPin().reference(), process.deploymentId(), task.key().processInstanceId(),
+                request.traversalId(), request.nodeId(), task.createdAt(), request.expiresAt(),
+                request.escalateAt(), request.confirmationPresentation(), limits.maxPromptUtf8Bytes(),
+                limits.maxActionLabelUtf8Bytes(), limits.maxCommentUtf8Bytes(), List.of()));
+    }
+
+    /**
+     * Fixed server-authored response carried by a successful embedded resolve action.
+     * @return canonical boolean-true response envelope
+     */
+    public static OpaquePayload confirmationResponse() {
+        return OpaquePayload.of(
+                ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.responseBytes(),
+                CONFIRMATION_CONTENT_TYPE);
+    }
+
+    /**
+     * Authorized parser budgets for one embedded confirmation request.
+     * @param decisionBodyMaxBytes pinned maximum request-body bytes
+     * @param commentMaxUtf8Bytes pinned maximum normalized comment bytes
+     */
+    public record ConfirmationAuthority(int decisionBodyMaxBytes, int commentMaxUtf8Bytes) {
+        /** Validates the immutable task-pinned limits. */
+        public ConfirmationAuthority {
+            if (decisionBodyMaxBytes < 1 || commentMaxUtf8Bytes < 1) {
+                throw new IllegalArgumentException("confirmation limits must be positive");
+            }
+        }
+    }
+
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response) {
         return resolve(context, taskId, expectedGeneration, response, "");
     }
 
-    /** Resolves a task while atomically persisting its separate decision comment. */
+    /**
+     * Resolves a task while atomically persisting its separate decision comment.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param expectedGeneration optimistic concurrency fence
+     * @param response schema-checked response envelope
+     * @param comment separate attributable decision comment
+     * @return authoritative settlement result
+     */
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response, String comment) {
         return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response, comment);
@@ -277,7 +399,14 @@ public final class HumanTaskService {
         return deny(context, taskId, expectedGeneration, "");
     }
 
-    /** Denies a task while atomically persisting its separate decision comment. */
+    /**
+     * Denies a task while atomically persisting its separate decision comment.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param expectedGeneration optimistic concurrency fence
+     * @param comment separate attributable decision comment
+     * @return authoritative settlement result
+     */
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration,
                                 String comment) {
         return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null, comment);
@@ -287,7 +416,14 @@ public final class HumanTaskService {
         return cancel(context, taskId, expectedGeneration, "");
     }
 
-    /** Cancels a task while atomically persisting its separate decision comment. */
+    /**
+     * Cancels a task while atomically persisting its separate decision comment.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param expectedGeneration optimistic concurrency fence
+     * @param comment separate attributable decision comment
+     * @return authoritative settlement result
+     */
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration,
                                   String comment) {
         return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null, comment);
@@ -411,6 +547,13 @@ public final class HumanTaskService {
         }
         return commitTerminal(task, expectedGeneration, target, actor, response, comment,
                 context.requestId(), null);
+    }
+
+    private static HumanTaskAttentionAuthorization attentionAuthorization(RequestContext context) {
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        return new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
     }
 
     private boolean validResponse(DurableHumanTask task, OpaquePayload response) {

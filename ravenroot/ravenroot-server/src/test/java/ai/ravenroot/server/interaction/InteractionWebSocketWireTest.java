@@ -64,8 +64,8 @@ class InteractionWebSocketWireTest {
             @TempDir java.nio.file.Path directory) throws Exception {
         int port = freePort();
         Clock clock = Clock.systemUTC();
-        try (var engine = new PekkoExecutionEngine("interaction-wire");
-             var store = new SqliteExecutionStore(directory.resolve("events.db"), clock)) {
+        try (var store = new SqliteExecutionStore(directory.resolve("events.db"), clock);
+             var engine = new PekkoExecutionEngine("interaction-wire")) {
             var delegate = new DefaultRavenrootApplication(engine, new ExecutionMonitor(), BehaviorRegistry.standard(),
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), store);

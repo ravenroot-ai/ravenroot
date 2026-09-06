@@ -222,6 +222,14 @@ public record HumanTaskPolicy(
         if (!expected.equals(registration.executionLimits())) {
             throw invalidRegistration("pinned execution limits do not match active policy");
         }
+        if (registration.confirmationPresentation().embedded()) {
+            confirmation.requirePresentation(registration.confirmationPresentation());
+            if (!confirmationLimits().equals(registration.confirmationLimits())) {
+                throw invalidRegistration("pinned confirmation limits do not match active policy");
+            }
+        } else if (!HumanTaskConfirmationLimits.CLASSIC.equals(registration.confirmationLimits())) {
+            throw invalidRegistration("classic registration carries embedded confirmation limits");
+        }
     }
 
     private void requireTokens(Set<String> tokens, String name) {
@@ -246,6 +254,12 @@ public record HumanTaskPolicy(
                 || remaining.compareTo(Duration.ofSeconds(maximumSeconds)) > 0) {
             throw invalidRegistration(name + " is outside active policy");
         }
+    }
+
+    /** Returns the immutable embedded-confirmation limits to pin with a newly admitted task. */
+    public HumanTaskConfirmationLimits confirmationLimits() {
+        return new HumanTaskConfirmationLimits(confirmation.maxPromptUtf8Bytes(),
+                confirmation.maxActionLabelUtf8Bytes(), confirmation.maxCommentUtf8Bytes());
     }
 
     private static IllegalArgumentException invalidRegistration(String reason) {

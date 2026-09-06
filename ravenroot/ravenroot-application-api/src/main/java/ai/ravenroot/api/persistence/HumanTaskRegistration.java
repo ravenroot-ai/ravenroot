@@ -30,6 +30,8 @@ import java.util.UUID;
  * @param continuationVersion version of the trusted graph continuation envelope.
  * @param continuation bounded opaque continuation bytes; never projected to responders.
  * @param continuationDigest content binding for the continuation bytes.
+ * @param confirmationPresentation immutable embedded presentation; classic when absent.
+ * @param confirmationLimits effective presentation and comment bounds pinned at registration.
  */
 public record HumanTaskRegistration(
         UUID taskId,
@@ -50,7 +52,25 @@ public record HumanTaskRegistration(
         HumanTaskExecutionLimits executionLimits,
         int continuationVersion,
         byte[] continuation,
-        String continuationDigest) {
+        String continuationDigest,
+        HumanTaskConfirmationPresentation confirmationPresentation,
+        HumanTaskConfirmationLimits confirmationLimits) {
+
+    /** Compatibility constructor retaining the registration shape before embedded confirmations. */
+    public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
+                                 String nodeId, String correlationKey, String deduplicationKey,
+                                 HumanTaskMetadata metadata, HumanTaskResponseSchema responseSchema,
+                                 HandlerAuthorization responderRequirements, SecurityContext requester,
+                                 GraphVersionPin graphVersionPin, Optional<Instant> escalateAt,
+                                 Instant expiresAt, HumanTaskReentryMapping reentryMapping,
+                                 HumanTaskExecutionLimits executionLimits, int continuationVersion,
+                                 byte[] continuation, String continuationDigest) {
+        this(taskId, traversalId, invocationId, attemptId, nodeId, correlationKey, deduplicationKey,
+                metadata, responseSchema, responderRequirements, requester, graphVersionPin,
+                escalateAt, expiresAt, reentryMapping, executionLimits, continuationVersion,
+                continuation, continuationDigest, HumanTaskConfirmationPresentation.none(),
+                HumanTaskConfirmationLimits.CLASSIC);
+    }
 
     /**
      * Creates a source-compatible legacy registration without a trusted continuation budget.
@@ -164,6 +184,13 @@ public record HumanTaskRegistration(
                 || !continuationDigest.equals(ToolApprovalRegistration.digest(continuation))) {
             throw new IllegalArgumentException("continuationDigest does not match continuation");
         }
+        confirmationPresentation = Objects.requireNonNull(confirmationPresentation,
+                "confirmationPresentation");
+        confirmationLimits = Objects.requireNonNull(confirmationLimits, "confirmationLimits");
+        if (!confirmationPresentation.embedded()
+                && !HumanTaskConfirmationLimits.CLASSIC.equals(confirmationLimits)) {
+            throw new IllegalArgumentException("classic human task cannot carry confirmation limits");
+        }
     }
 
     /**
@@ -188,14 +215,17 @@ public record HumanTaskRegistration(
                 && executionLimits.equals(other.executionLimits)
                 && continuationVersion == other.continuationVersion
                 && Arrays.equals(continuation, other.continuation)
-                && continuationDigest.equals(other.continuationDigest);
+                && continuationDigest.equals(other.continuationDigest)
+                && confirmationPresentation.equals(other.confirmationPresentation)
+                && confirmationLimits.equals(other.confirmationLimits);
     }
 
     @Override public int hashCode() {
         int result = Objects.hash(taskId, traversalId, invocationId, attemptId, nodeId,
                 correlationKey, deduplicationKey, metadata, responseSchema, responderRequirements,
                 requester, graphVersionPin, escalateAt, expiresAt, reentryMapping,
-                executionLimits, continuationVersion, continuationDigest);
+                executionLimits, continuationVersion, continuationDigest, confirmationPresentation,
+                confirmationLimits);
         return 31 * result + Arrays.hashCode(continuation);
     }
 
@@ -227,6 +257,8 @@ public record HumanTaskRegistration(
                 && continuationVersion == other.continuationVersion
                 && Arrays.equals(continuation, other.continuation)
                 && continuationDigest.equals(other.continuationDigest)
+                && confirmationPresentation.equals(other.confirmationPresentation)
+                && confirmationLimits.equals(other.confirmationLimits)
                 && escalateAt.isPresent() == other.escalateAt.isPresent();
     }
 }

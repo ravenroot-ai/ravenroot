@@ -58,6 +58,77 @@ describe('runtime configuration client', () => {
       cache: 'no-store',
     });
   });
+
+  it('retains the complete Human Task capability and rejects an incomplete one', () => {
+    const humanTasks = { schemaVersion: 1, confirmationPresentationVersions: [1],
+      confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
+      commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
+      attentionPageSize: 25, attentionPageSizeMax: 1000 };
+    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
+      humanTasks })).toMatchObject({ humanTasks });
+    expect(() => validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
+      humanTasks: { ...humanTasks, attentionPollMillis: undefined } })).toThrow(/poll interval/);
+  });
+});
+
+describe('embedded Human Task runtime client', () => {
+  const capability = { schemaVersion: 1, confirmationPresentationVersions: [1],
+    confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
+    commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
+    attentionPageSize: 25, attentionPageSizeMax: 1000 };
+  const task = { taskId: 'task-1', generation: 2, status: 'WAITING', graphVersion: 'graph-v1',
+    deploymentId: null, processInstanceId: 'process-1', traversalId: 'traversal-1', nodeId: 'review',
+    createdAt: '2026-09-06T08:00:00Z', expiresAt: '2026-09-07T08:00:00Z', escalateAt: null,
+    promptMaxUtf8Bytes: 4096, actionLabelMaxUtf8Bytes: 64, commentMaxUtf8Bytes: 1024,
+    presentation: { version: 1, prompt: 'Confirm?', commentRequirement: 'OPTIONAL',
+      actions: ['RESOLVE', 'DENY', 'CANCEL'], resolveLabel: 'Confirm', denyLabel: 'Deny',
+      cancelLabel: 'Cancel' }, availableActions: ['RESOLVE', 'DENY', 'CANCEL'] };
+
+  it('lists exact-context attention with the policy page size and opaque cursor', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({
+      schemaVersion: 1, items: [task], nextCursor: 'opaque', counts: { pending: 1, escalated: 0 },
+      nodeCounts: [{ nodeId: 'review', pending: 1, escalated: 0 }] }) });
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'token' });
+    await expect(client.humanTaskAttention({ graphVersion: 'graph-v1', processInstanceId: 'process-1' },
+      { capability })).resolves.toMatchObject({ nextCursor: 'opaque' });
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://runtime.example/v1/human-tasks/attention?'
+      + 'graphVersion=graph-v1&processInstanceId=process-1&limit=25');
+  });
+
+  it('rejects ambiguous context, partial task locators, and page limits outside server policy', async () => {
+    const client = new RavenrootRuntimeClient('', { fetchImpl: vi.fn(), accessToken: 'token' });
+    await expect(client.humanTaskAttention({ graphVersion: 'graph-v1' }, { capability }))
+      .rejects.toThrow(/exact task locator/);
+    await expect(client.humanTaskAttention({ graphVersion: 'graph-v1', processInstanceId: 'process-1',
+      deploymentId: 'deployment-1' }, { capability })).rejects.toThrow(/exact task locator/);
+    await expect(client.humanTaskAttention({ graphVersion: 'graph-v1', processInstanceId: 'process-1',
+      taskId: 'task-1' }, { capability })).rejects.toThrow(/exact task locator/);
+    await expect(client.humanTaskAttention({ graphVersion: 'graph-v1', processInstanceId: 'process-1',
+      limit: capability.attentionPageSizeMax + 1 }, { capability })).rejects.toThrow(/page size/);
+  });
+
+  it('refetches an exact durable task locator without browser-memory graph context', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({
+      schemaVersion: 1, items: [task], nextCursor: null, counts: { pending: 1, escalated: 0 },
+      nodeCounts: [] }) });
+    const client = new RavenrootRuntimeClient('https://runtime.example', { fetchImpl, accessToken: 'token' });
+    await expect(client.humanTaskAttention({ taskId: 'task-1', generation: 2 }, { capability }))
+      .resolves.toMatchObject({ items: [expect.objectContaining({ taskId: 'task-1', generation: 2 })] });
+    expect(fetchImpl.mock.calls[0][0]).toBe('https://runtime.example/v1/human-tasks/attention?'
+      + 'taskId=task-1&generation=2&limit=25');
+  });
+
+  it('posts a structured comment with exact generation and never a response payload envelope', async () => {
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: true, status: 200, text: async () => JSON.stringify({
+      schemaVersion: 1, outcome: 'APPLIED', task: { ...task, status: 'RESOLVED', availableActions: [] } }) });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, accessToken: 'token' });
+    await client.confirmHumanTask('task-1', 2, 'resolve', 'Reviewed', { capability });
+    const [url, request] = fetchImpl.mock.calls[0];
+    expect(url).toBe('/v1/human-tasks/task-1/confirmation/resolve?generation=2');
+    expect(JSON.parse(request.body)).toEqual({ schemaVersion: 1, comment: 'Reviewed' });
+    expect(request.body).not.toContain('payload');
+    expect(request.headers.Authorization).toBe('Bearer token');
+  });
 });
 
 describe('process-local source session client', () => {

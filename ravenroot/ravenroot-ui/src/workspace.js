@@ -21,6 +21,7 @@ import { retireExecutionOutcomeClaim } from './execution-reconciliation.js';
 
 // A submission that has been sent but whose execution id has not come back yet.
 export const PENDING_EXECUTION = 'pending';
+export const DOCUMENT_MODES = Object.freeze({ DRAFT: 'draft', TEST: 'test', DEPLOYED: 'deployed' });
 
 // ── The definition of "the active document" ──────────────────────────────────────────────────────
 //
@@ -39,14 +40,21 @@ export const PENDING_EXECUTION = 'pending';
 
 export function createDocumentRecord({
   id,
+  documentId = id,
   incarnation = createDocumentIncarnation(),
   name = 'untitled.graphml',
   displayName = name,
   graph = null,
   history = null,
+  tenantId = null,
+  mode = DOCUMENT_MODES.DRAFT,
+  provenance = null,
 }) {
+  const durableId = String(documentId || createDocumentIncarnation());
+  if (!Object.values(DOCUMENT_MODES).includes(mode)) throw new TypeError(`Unknown document mode: ${mode}`);
   return {
-    id: String(id),
+    id: durableId,
+    documentId: durableId,
     // Opaque identity of this exact open document incarnation. Filename, tab id and graph version
     // are all reusable; this value rotates whenever content replaces the record.
     incarnation: String(incarnation),
@@ -56,6 +64,14 @@ export function createDocumentRecord({
     displayName,
     graph,
     history,
+    tenantId,
+    mode,
+    provenance: {
+      originMode: provenance?.originMode || mode,
+      sourceDocumentId: provenance?.sourceDocumentId || null,
+      sourceGraphVersion: provenance?.sourceGraphVersion || null,
+      deploymentId: provenance?.deploymentId || null,
+    },
     // Owned by app.js, one per document. Held here so the record is the single home of the state.
     cy: null,
     // The pane is built BEFORE the canvas and the canvas is created inside it, because moving a
@@ -156,6 +172,28 @@ export function createDocumentRecord({
       pageSignature: '',
     },
   };
+}
+
+export function documentIsEditable(document_) {
+  return document_?.mode === DOCUMENT_MODES.DRAFT && document_?.graph?.format !== 'graphify';
+}
+
+export function forkDocumentRecord(source, { documentId = createDocumentIncarnation(), tenantId = source?.tenantId,
+  graph = null, history = null, name = source?.name } = {}) {
+  if (!source) throw new TypeError('A source document is required');
+  const forkGraph = graph || structuredClone(source.graph);
+  if (forkGraph?.nodes) forkGraph.nodeMap = Object.fromEntries(forkGraph.nodes.map(node => [node.id, node]));
+  return createDocumentRecord({
+    id: documentId, documentId, tenantId, graph: forkGraph, history, name,
+    displayName: `${source.displayName || source.name || 'workflow'} — fork`,
+    mode: DOCUMENT_MODES.DRAFT,
+    provenance: {
+      originMode: source.mode,
+      sourceDocumentId: source.documentId,
+      sourceGraphVersion: source.provenance?.sourceGraphVersion || null,
+      deploymentId: null,
+    },
+  });
 }
 
 export function createDocumentIncarnation() {

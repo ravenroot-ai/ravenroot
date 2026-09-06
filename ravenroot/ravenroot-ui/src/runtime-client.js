@@ -22,10 +22,20 @@ export function validateRuntimeConfiguration(value) {
       || value.graphDocumentMaxBytes > MAX_GRAPH_DOCUMENT_BYTES) {
     throw new Error('Runtime configuration is not a valid schema version 1 document');
   }
+  let workspace = null;
+  if (value.workspace !== undefined) {
+    if (!value.workspace || typeof value.workspace !== 'object' || Array.isArray(value.workspace)
+        || typeof value.workspace.tenantId !== 'string' || value.workspace.tenantId.length === 0
+        || Object.keys(value.workspace).some(key => key !== 'tenantId')) {
+      throw new Error('Runtime configuration workspace scope is malformed');
+    }
+    workspace = Object.freeze({ tenantId: value.workspace.tenantId });
+  }
   const humanTasks = value.humanTasks == null ? null : validateHumanTaskCapability(value.humanTasks);
   return {
     schemaVersion: 1,
     graphDocumentMaxBytes: value.graphDocumentMaxBytes,
+    workspace,
     ...(humanTasks ? { humanTasks } : {}),
   };
 }

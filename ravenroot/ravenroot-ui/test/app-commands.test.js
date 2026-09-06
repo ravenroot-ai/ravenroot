@@ -26,7 +26,8 @@ describe('application command catalog', () => {
   it('expresses document, editing, layout, runtime and selection state without DOM access', () => {
     const byId = Object.fromEntries(commands.map(command => [command.id, command]));
     const context = {
-      hasDocument: true, editable: true, canModify: true, modifyEnabled: true,
+      hasDocument: true, editable: true, documentEditable: true, canModify: true, modifyEnabled: true,
+      documentMode: 'draft',
       layoutBusy: false,
       connectArmed: true, hasSelection: true, layoutMode: 'cyto', renderMode: 'design', running: false,
       canUndo: true, canRedo: false, hasToken: true, leftCollapsed: false, rightCollapsed: true,
@@ -36,6 +37,12 @@ describe('application command catalog', () => {
       canDuplicateSelectedNode: true,
     };
     expect(byId['file.replaceActive'].isEnabled(context)).toBe(true);
+    expect(byId['file.fork'].isEnabled(context)).toBe(false);
+    expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false, documentMode: 'test' })).toBe(true);
+    expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false, documentMode: 'deployed' }))
+      .toBe(false);
+    expect(byId['file.save'].isEnabled({ ...context, documentEditable: false })).toBe(true);
+    expect(byId['run.play'].isEnabled({ ...context, documentEditable: false })).toBe(true);
     expect(byId['edit.undo'].isEnabled(context)).toBe(true);
     expect(byId['edit.redo'].isEnabled(context)).toBe(false);
     expect(byId['edit.connect'].isChecked(context)).toBe(true);

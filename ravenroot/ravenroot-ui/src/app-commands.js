@@ -38,6 +38,7 @@ function localizeCommand(command, t) {
 export function createAppCommands(actions, { t = uiText } = {}) {
   const active = context => context.hasDocument;
   const editable = context => context.editable;
+  const documentEditable = context => context.documentEditable;
   const modifiable = context => context.canModify;
   const modifying = context => context.modifyEnabled;
   const authoring = context => context.modifyEnabled && context.canModify;
@@ -68,7 +69,10 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'file.open', group: 'document', order: 20,
       placements: ['menu.file', 'toolbar.file'], execute: actions.openFile },
     { id: 'file.replaceActive', group: 'document', order: 30,
-      placements: ['menu.file'], execute: actions.replaceActive, isEnabled: active },
+      placements: ['menu.file'], execute: actions.replaceActive, isEnabled: documentEditable },
+    { id: 'file.fork', group: 'document', order: 35,
+      placements: ['menu.file'], execute: actions.forkDocument,
+      isEnabled: context => active(context) && context.documentMode !== 'draft' },
     { id: 'file.save', group: 'save', order: 40,
       placements: ['menu.file', 'toolbar.editor', 'help'], execute: actions.save,
       isEnabled: context => editable(context) && !context.layoutBusy,
@@ -79,11 +83,12 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     { id: 'edit.undo', group: 'history', order: 10,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.undo,
-      isEnabled: context => context.canUndo, shortcuts: [global({ key: 'z', primary: true })],
+      isEnabled: context => context.documentEditable && context.canUndo,
+      shortcuts: [global({ key: 'z', primary: true })],
     },
     { id: 'edit.redo', group: 'history', order: 20,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.redo,
-      isEnabled: context => context.canRedo,
+      isEnabled: context => context.documentEditable && context.canRedo,
       shortcuts: [global({ key: 'z', primary: true, shift: true }), global({ key: 'y', ctrl: true })],
     },
     { id: 'edit.modify', group: 'mode', order: 30, kind: 'checkbox',

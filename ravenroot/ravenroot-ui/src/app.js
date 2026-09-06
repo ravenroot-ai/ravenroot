@@ -187,14 +187,22 @@ import {
   describedById,
 } from './assistant-disclosure.js';
 import {
+  DOCUMENT_MODES,
   PENDING_EXECUTION,
   createDocumentIncarnation,
   createDocumentRecord,
   createWorkspace,
+  documentIsEditable,
   detachExecution,
   documentForRuntimeEvent,
+  forkDocumentRecord,
   hasUnsavedWork,
 } from './workspace.js';
+import {
+  readWorkspaceSnapshot,
+  workspaceScope,
+  writeWorkspaceSnapshot,
+} from './workspace-persistence.js';
 import {
   captureDocumentCloseSnapshot,
   classifyDocumentCloseTargets,
@@ -246,7 +254,7 @@ import {
   addConnectedNodeAt,
   addNodeAt,
   canDuplicateNode,
-  canModifyGraph,
+  canModifyGraph as graphCanModify,
   connectNodes,
   deleteElements,
   duplicateNode,
@@ -696,6 +704,131 @@ const DEFAULT_FONT_SIZE = 20;
 // therefore means "the document the user is working on", which is what every one of the ~300 call
 // sites already meant when there could only ever be one.
 const workspace = createWorkspace();
+let activeWorkspaceScope = null;
+let workspacePersistenceWritable = false;
+let workspacePersistenceReason = 'Connect to a workspace-aware Ravenroot service to persist documents.';
+let workspacePersistenceGeneration = 0;
+let workspacePersistenceTimer = null;
+let workspaceWriteChain = Promise.resolve();
+let workspaceRestoreInProgress = false;
+
+function normalizedWorkspaceServiceUrl(client) {
+  return new URL(client?.baseUrl || globalThis.location.origin, globalThis.location.origin).href.replace(/\/$/, '');
+}
+
+function scheduleWorkspacePersistence() {
+  if (!activeWorkspaceScope || !workspacePersistenceWritable || workspaceRestoreInProgress) return;
+  if (workspacePersistenceTimer !== null) clearTimeout(workspacePersistenceTimer);
+  workspacePersistenceTimer = setTimeout(() => {
+    workspacePersistenceTimer = null;
+    void flushWorkspacePersistence();
+  }, 40);
+}
+
+function flushWorkspacePersistence() {
+  if (!activeWorkspaceScope || !workspacePersistenceWritable) return workspaceWriteChain;
+  captureActiveDocument();
+  const scope = activeWorkspaceScope;
+  const generation = workspacePersistenceGeneration;
+  const documents = [...workspace.documents];
+  const activeId = workspace.activeId;
+  workspaceWriteChain = workspaceWriteChain.then(async () => {
+    if (generation !== workspacePersistenceGeneration || scope !== activeWorkspaceScope
+        || !workspacePersistenceWritable) return;
+    await writeWorkspaceSnapshot(scope, documents, activeId);
+  }).catch(error => {
+    if (generation === workspacePersistenceGeneration && scope === activeWorkspaceScope) {
+      workspacePersistenceWritable = false;
+      workspacePersistenceReason = `Workspace persistence is unavailable: ${error.message}`;
+      syncPaneHeaders();
+    }
+  });
+  return workspaceWriteChain;
+}
+
+function removeAllWorkspaceDocuments() {
+  captureActiveDocument();
+  const targets = [...workspace.documents];
+  targets.forEach(teardownDocument);
+  workspace.closeMany(targets.map(target => target.id));
+  projectWorkspaceAfterDocumentClose();
+}
+
+async function switchWorkspacePersistence(configuration, client) {
+  const nextScope = configuration?.workspace
+    ? workspaceScope(normalizedWorkspaceServiceUrl(client), configuration.workspace.tenantId) : null;
+  // Every completed authority check invalidates an older asynchronous restore, even when this
+  // check resolves back to the scope already on screen. Otherwise a slow B restore can land after
+  // a newer authentication has reaffirmed A and silently replace A's documents.
+  const transition = ++workspacePersistenceGeneration;
+  if (!activeWorkspaceScope && !nextScope) return;
+  if (activeWorkspaceScope?.key === nextScope?.key && workspacePersistenceWritable) {
+    scheduleWorkspacePersistence();
+    return;
+  }
+  if (!activeWorkspaceScope && nextScope && workspace.documents.length
+      && !(workspace.documents.length === 1 && graphName === 'untitled.graphml'
+        && !editHistory.isDirty())) {
+    workspacePersistenceReason = 'Session-only documents remain open and exportable. Close or export them before reconnecting to restore the authenticated workspace.';
+    syncPaneHeaders();
+    return;
+  }
+  if (activeWorkspaceScope) {
+    if (!workspacePersistenceWritable) {
+      workspacePersistenceReason = 'This workspace could not be saved, so it remains open to prevent data loss.';
+      syncPaneHeaders();
+      return;
+    }
+    await flushWorkspacePersistence();
+    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return;
+  }
+  if (!nextScope) {
+    removeAllWorkspaceDocuments();
+    activeWorkspaceScope = null;
+    workspacePersistenceWritable = false;
+    workspacePersistenceReason = 'Session only: no authenticated workspace scope is available.';
+    openDocument({ tenantId: null });
+    return;
+  }
+  workspaceRestoreInProgress = true;
+  try {
+    const restored = await readWorkspaceSnapshot(nextScope);
+    if (transition !== workspacePersistenceGeneration) return;
+    if (activeWorkspaceScope) {
+      await flushWorkspacePersistence();
+      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return;
+    }
+    removeAllWorkspaceDocuments();
+    activeWorkspaceScope = nextScope;
+    workspacePersistenceReason = 'Stored for this authenticated Ravenroot workspace.';
+    if (restored?.documents.length) {
+      for (const stored of restored.documents) {
+        openDocument({
+          name: stored.name, displayName: stored.displayName, graph: stored.graph,
+          documentId: stored.documentId, tenantId: stored.tenantId, mode: stored.mode,
+          provenance: stored.provenance, presentation: stored.presentation,
+        });
+      }
+      if (restored.activeDocumentId && workspace.activeId !== restored.activeDocumentId) {
+        activateDocument(restored.activeDocumentId);
+      }
+      if (restored.recoveredStaleSelection) workspacePersistenceReason += ' The stale selection was repaired.';
+    } else {
+      openDocument({ tenantId: nextScope.tenantId });
+    }
+    workspacePersistenceWritable = true;
+  } catch (error) {
+    if (transition !== workspacePersistenceGeneration) return;
+    // Keep both the unreadable snapshot and current visible workspace untouched. Writes never open
+    // for the failed scope, so a recovery view cannot overwrite recoverable stored documents.
+    workspacePersistenceReason = `Stored documents could not be restored: ${error.message}`;
+  } finally {
+    if (transition === workspacePersistenceGeneration) {
+      workspaceRestoreInProgress = false;
+      syncActiveDocumentChrome();
+    }
+  }
+}
 const layoutSessions = createLayoutSessions();
 const rendererSessions = createRendererSessions();
 const themePreference = createThemePreferenceController({
@@ -1019,6 +1152,11 @@ let connectSourceId = null;
 // document until the gesture is committed through the command model.
 let edgeGestureSession = null;
 let graphCursorId = null;
+
+function canModifyGraph(graph, layout) {
+  const owner = workspace.documents.find(document_ => document_.graph === graph) || workspace.active;
+  return documentIsEditable(owner) && graphCanModify(graph, layout);
+}
 // Cytoscape emits `tap` after `tapend`, so a drag that just committed an edge would otherwise be
 // followed by a tap that reopens or refuses one on the same element.
 const suppressedEdgeTaps = new WeakSet();
@@ -1911,6 +2049,7 @@ function syncSourceSessionChrome(owner = workspace.active) {
 window.ravenroot = {
   workspace,
   openDocument,
+  forkDocument: forkActiveDocument,
   replaceActiveDocumentFromText,
   activateDocument,
   closeDocument,
@@ -1929,6 +2068,13 @@ window.ravenroot = {
   workspaceLayout: () => ({ ...workspaceLayout, plan: workspacePlan }),
   minimapSnapshot: () => minimapLastSnapshot ? JSON.parse(JSON.stringify(minimapLastSnapshot)) : null,
   graphDocumentByteLimit: currentGraphDocumentByteLimit,
+  flushWorkspacePersistence,
+  workspacePersistence: () => ({
+    scope: activeWorkspaceScope ? { serviceUrl: activeWorkspaceScope.serviceUrl,
+      tenantId: activeWorkspaceScope.tenantId } : null,
+    writable: workspacePersistenceWritable,
+    reason: workspacePersistenceReason,
+  }),
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
 };
@@ -2010,6 +2156,13 @@ function paneIsDirty(document_) {
   return workspace.activeId === document_.id
     ? Boolean(editHistory.state().dirty)
     : Boolean(document_.history?.isDirty());
+}
+
+function documentModeLabel(document_) {
+  if (!document_) return 'No document';
+  const label = document_.mode === DOCUMENT_MODES.DEPLOYED ? 'Deployed'
+    : document_.mode === DOCUMENT_MODES.TEST ? 'Test' : 'Draft';
+  return document_.tenantId === null ? `${label} · session only` : label;
 }
 
 function documentPane(document_) {
@@ -2108,6 +2261,15 @@ function syncPaneHeaders() {
     label.textContent = name;
     // The name is ellipsised when the pane is tight, so the full one stays reachable.
     label.title = name;
+    let origin = header.querySelector('.doc-pane-origin');
+    if (!origin) {
+      origin = window.document.createElement('span');
+      origin.className = 'doc-pane-origin';
+      label.after(origin);
+    }
+    origin.textContent = documentModeLabel(document_);
+    origin.title = document_.tenantId === null ? workspacePersistenceReason
+      : `${documentModeLabel(document_)} document. ${workspacePersistenceReason}`;
     const close = header.querySelector('.doc-pane-close');
     close.title = `Close ${name}`;
     close.setAttribute('aria-label', `Close ${name}`);
@@ -2125,13 +2287,14 @@ function syncPaneHeaders() {
     }
 
     header.querySelector('.doc-pane-state').textContent =
-      [active ? 'active document' : '', dirty ? 'modified' : '', document_.layoutBusy ? 'layout in progress' : '']
+      [active ? 'active document' : '', documentModeLabel(document_), dirty ? 'modified' : '',
+        document_.layoutBusy ? 'layout in progress' : '']
         .filter(Boolean).join(', ');
 
     pane.classList.toggle('doc-pane--active', active);
     if (active) pane.setAttribute('aria-current', 'true');
     else pane.removeAttribute('aria-current');
-    pane.setAttribute('aria-label', `${name}${dirty ? ', modified' : ''}`
+    pane.setAttribute('aria-label', `${name}, ${documentModeLabel(document_)}${dirty ? ', modified' : ''}`
       + `${document_.layoutBusy ? ', layout in progress' : ''}`);
   });
 }
@@ -2536,7 +2699,7 @@ function onSeparatorPointerDown(event, separator) {
 
 // Adds an empty record and makes it active, without rendering anything. Boot uses it so that a
 // document exists before the first `initCy`, which now needs one to know where to draw.
-function addDocumentRecord(name = defaultDocumentName(), displayName = allocateDocumentDisplayName(name)) {
+function addDocumentRecord(name = defaultDocumentName(), displayName = allocateDocumentDisplayName(name), options = {}) {
   // Guarded like every other call site this function's sibling added: an unconditional call
   // here also fires at boot, before any document or gesture exists, and `cancelEdgeGesture` always
   // stamps `#cy-wrap`'s `data-edge-gesture-state` to `idle` regardless of whether there was anything
@@ -2554,11 +2717,16 @@ function addDocumentRecord(name = defaultDocumentName(), displayName = allocateD
       .concat(1 / (current.length + 1));
   }
   const document_ = workspace.add(createDocumentRecord({
-    id: `doc-${nextDocumentId += 1}`,
+    id: options.documentId || createDocumentIncarnation(),
     name,
     displayName,
     history: createCommandHistory(),
+    tenantId: options.tenantId ?? activeWorkspaceScope?.tenantId ?? null,
+    mode: options.mode || DOCUMENT_MODES.DRAFT,
+    provenance: options.provenance,
   }));
+  nextDocumentId += 1;
+  if (options.presentation) Object.assign(document_, options.presentation);
   applyActiveDocument();
   documentContainer(document_);
   syncPaneLayout();
@@ -2584,8 +2752,11 @@ function initLoadedGraph(graph, currentStyle) {
   });
 }
 
-function openDocument({ name = defaultDocumentName(), graph = null } = {}) {
-  const document_ = addDocumentRecord(name);
+function openDocument({ name = defaultDocumentName(), displayName, graph = null, documentId, tenantId,
+  mode = DOCUMENT_MODES.DRAFT, provenance = null, presentation = null } = {}) {
+  const document_ = addDocumentRecord(name, displayName || allocateDocumentDisplayName(name), {
+    documentId, tenantId, mode, provenance, presentation,
+  });
   if (graph) {
     graphName = name;
     graphDisplayName = document_.displayName;
@@ -2601,7 +2772,34 @@ function openDocument({ name = defaultDocumentName(), graph = null } = {}) {
   }
   syncActiveDocumentChrome();
   scheduleProgramGraphReadiness(document_);
+  scheduleWorkspacePersistence();
   return document_.id;
+}
+
+function forkActiveDocument() {
+  captureActiveDocument();
+  const source = workspace.active;
+  if (!source || source.mode === DOCUMENT_MODES.DRAFT || !source.graph) return false;
+  const graph = structuredClone(source.graph);
+  graph.nodeMap = Object.fromEntries(graph.nodes.map(node => [node.id, node]));
+  const fork = forkDocumentRecord(source, {
+    graph,
+    history: createCommandHistory(),
+    name: source.name,
+    tenantId: source.tenantId,
+  });
+  const id = openDocument({
+    name: fork.name,
+    displayName: allocateDocumentDisplayName(fork.name),
+    graph: fork.graph,
+    documentId: fork.documentId,
+    tenantId: fork.tenantId,
+    mode: fork.mode,
+    provenance: fork.provenance,
+  });
+  addActivityMessage('editor', `Forked immutable ${source.mode} snapshot as an editable draft`, 'completed');
+  scheduleWorkspacePersistence();
+  return id;
 }
 
 // Installs the semantic projection on both homes of the active view before a renderer observes it.
@@ -2664,6 +2862,10 @@ function completeReplaceActiveDocument(target, graph, name) {
 function requestReplaceActiveDocument(graph, name, origin = document.activeElement) {
   captureActiveDocument();
   const target = workspace.active;
+  if (target && !documentIsEditable(target)) {
+    showInspectorMessage('Test and deployed snapshots are read-only. Fork this document to edit it.');
+    return false;
+  }
   if (!target || !target.history?.isDirty()) return completeReplaceActiveDocument(target, graph, name);
   return openUnsavedDocumentDialog({
     documentId: target.id,
@@ -2698,6 +2900,7 @@ function activateDocument(id) {
   syncPaneLayout();
   reconcileActiveRenderModeRenderer();
   syncActiveDocumentChrome();
+  scheduleWorkspacePersistence();
   return workspace.activeId;
 }
 
@@ -2753,6 +2956,7 @@ function closeDocument(id) {
   teardownDocument(target);
   workspace.close(id);
   projectWorkspaceAfterDocumentClose();
+  scheduleWorkspacePersistence();
   return true;
 }
 
@@ -2764,6 +2968,7 @@ function closeDocumentSnapshot(snapshot) {
   targets.forEach(teardownDocument);
   workspace.closeMany(targets.map(target => target.id));
   projectWorkspaceAfterDocumentClose();
+  scheduleWorkspacePersistence();
   return true;
 }
 
@@ -2814,6 +3019,9 @@ function syncActiveDocumentChrome() {
   const hasDocument = Boolean(workspace.active);
   window.document.getElementById('graph-title').textContent = hasDocument ? graphDisplayName : 'No graph loaded';
   window.document.title = hasDocument ? `${graphDisplayName} — Ravenroot UI` : 'Ravenroot UI';
+  const modeLabel = window.document.getElementById('graph-mode-label');
+  if (modeLabel) modeLabel.textContent = hasDocument
+    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
   // Play is shared chrome and has to describe the document in front of the user: with one button and
   // several documents, a run still in flight in one of them must not lock the others out.
   //
@@ -4710,6 +4918,7 @@ function setRenderMode(name, { skipDraftGuard = false } = {}) {
   const layout = semanticMode === 'design' ? 'cyto' : 'elastic';
   target.batch(() => applyVisualStyle(style, target, owner));
   setLayout(layout);
+  scheduleWorkspacePersistence();
 }
 
 function arrangeDesign(name, { skipDraftGuard = false } = {}) {
@@ -5423,6 +5632,7 @@ function commitEdgeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
 }
 
 function commitInspectorDraft(draft = inspectorDraft, options = {}) {
+  if (!documentIsEditable(workspace.active)) return false;
   return draft?.elementType === 'edge'
     ? commitEdgeDraft(draft, options) : commitNodeDraft(draft, options);
 }
@@ -8487,12 +8697,14 @@ function rebuildGraph(options = {}) {
 // ═══════════════════════════════════════════════════════════════
 
 function undoEdit() {
-  if (!graphData || !editHistory.canUndo() || !finalizeInspectorBeforeHistory()) return;
+  if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canUndo()
+      || !finalizeInspectorBeforeHistory()) return;
   applyHistoryStep(editHistory.undo(graphData), 'Undo');
 }
 
 function redoEdit() {
-  if (!graphData || !editHistory.canRedo() || !finalizeInspectorBeforeHistory()) return;
+  if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canRedo()
+      || !finalizeInspectorBeforeHistory()) return;
   applyHistoryStep(editHistory.redo(graphData), 'Redo');
 }
 
@@ -8577,6 +8789,7 @@ function updateHistoryUi() {
   syncPaneHeaders();
   syncDocumentSwitcher();
   refreshCommands();
+  scheduleWorkspacePersistence();
 }
 
 function setEditorAvailability() {
@@ -8617,7 +8830,8 @@ function setModifyMode(enabled) {
     button.setAttribute('aria-label', modifyEnabled ? 'Editing mode active' : 'Switch to Editing mode');
   }
   const mode = document.getElementById('graph-mode-label');
-  if (mode) mode.textContent = modifyEnabled ? 'Editing' : 'Viewer';
+  if (mode) mode.textContent = workspace.active
+    ? `${documentModeLabel(workspace.active)} · ${modifyEnabled ? 'Editing' : 'Read-only'}` : 'No document';
   document.getElementById('cy-wrap')?.classList.toggle('modify-on', modifyEnabled);
   applyCanvasInteraction();
   updateConnectButton();
@@ -9899,12 +10113,14 @@ function connectRuntime(atBoot = false) {
     const result = { client: connectedClient, configuration, error: null };
     if (runtimeClient === connectedClient) {
       runtimeConfiguration = result;
+      void switchWorkspacePersistence(configuration, connectedClient);
       void configureHumanTasks();
     }
     return result;
   }).catch(error => {
     if (runtimeClient === connectedClient) {
       runtimeConfiguration = null;
+      void switchWorkspacePersistence(null, connectedClient);
       void configureHumanTasks();
     }
     return { client: connectedClient, configuration: null, error };
@@ -9970,6 +10186,7 @@ function revokeRuntimeAccess() {
   runtimeClient = null;
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
+  void switchWorkspacePersistence(null, null);
   humanTaskDecisionDialog?.suspend();
   void configureHumanTasks();
   document.getElementById('access-token').value = '';
@@ -10364,6 +10581,7 @@ async function playGraph(mode = 'test') {
   // now, not read from whichever document may become active while a delayed terminal GET is pending.
   syncGraphPositions();
   const graphMl = serializeGraphML(ownerGraph);
+  const testProjectionGraph = mode === 'test' ? structuredClone(ownerGraph) : null;
   const payload = document.getElementById('execution-payload').value;
   const displayName = graphDisplayName;
   const ownerCy = cy;
@@ -10452,14 +10670,35 @@ async function playGraph(mode = 'test') {
       graphMl, payload);
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
         || owner.execution.reconciliationClient !== executionClient) return;
-    setDocumentExecution(owner, submission.executionId, submission.graphVersion, executionClient,
+    let executionOwner = owner;
+    if (mode === 'test' && owner.mode !== DOCUMENT_MODES.TEST) {
+      setDocumentExecution(owner, null, null);
+      testProjectionGraph.nodeMap = Object.fromEntries(
+        testProjectionGraph.nodes.map(node => [node.id, node]));
+      const projectionId = openDocument({
+        name: owner.name,
+        displayName: allocateDocumentDisplayName(`${owner.displayName} · test`),
+        graph: testProjectionGraph,
+        tenantId: owner.tenantId,
+        mode: DOCUMENT_MODES.TEST,
+        provenance: {
+          originMode: owner.mode,
+          sourceDocumentId: owner.documentId,
+          sourceGraphVersion: submission.graphVersion,
+          deploymentId: null,
+        },
+      });
+      executionOwner = workspace.find(projectionId);
+    }
+    setDocumentExecution(executionOwner, submission.executionId, submission.graphVersion, executionClient,
       submission.processInstanceId ?? null);
-    void reconcileTestCompletion(owner, submission.executionId, executionClient);
-    if (workspace.activeId !== owner.id) return;
+    void reconcileTestCompletion(executionOwner, submission.executionId, executionClient);
+    if (workspace.activeId !== executionOwner.id) return;
     addActivityMessage('accepted',
       `${submission.executionPolicy || 'policy unreported'} · execution ${shortId(submission.executionId)} · graph ${shortId(submission.graphVersion)}`,
       'completed');
-    if (owner.execution.finished.has(submission.executionId)) refreshCommands();
+    if (executionOwner.execution.finished.has(submission.executionId)) refreshCommands();
+    scheduleWorkspacePersistence();
   } catch (error) {
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
         || owner.execution.reconciliationClient !== executionClient) return;
@@ -11428,6 +11667,10 @@ function renderAssistantProposal(proposal) {
 function confirmAssistantProposal(proposalId) {
   const pending = assistantProposals.get(proposalId);
   if (!pending || pending.state !== 'pending') return;
+  if (!documentIsEditable(workspace.active)) {
+    pending.status.textContent = 'This snapshot is read-only. Fork it before applying a proposal.';
+    return;
+  }
   const result = applyAssistantGraphProposal(pending.proposal, liveAssistantProposalContext());
   if (!result.ok) {
     pending.state = 'invalid';
@@ -12901,6 +13144,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   newDocument: () => runAfterInspectorDraft(() => openDocument()),
   openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
   replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
+  forkDocument: () => runAfterInspectorDraft(() => forkActiveDocument()),
   save: () => runAfterInspectorDraft(() => exportGraphML()),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
@@ -12954,6 +13198,8 @@ function commandContext() {
     hasDocument: Boolean(workspace.active && graphData),
     hasOpenDocuments: workspace.size > 0,
     editable: Boolean(graphData && graphData.format !== 'graphify'),
+    documentEditable: Boolean(documentIsEditable(workspace.active)),
+    documentMode: workspace.find(workspace.activeId)?.mode ?? null,
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
     modifyEnabled,
@@ -12971,8 +13217,8 @@ function commandContext() {
     renderMode,
     workspaceLayoutMode: workspaceLayout.mode,
     workspaceLayoutDefault: workspaceLayoutIsDefault(),
-    canUndo: history.canUndo && !layoutBusy,
-    canRedo: history.canRedo && !layoutBusy,
+    canUndo: documentIsEditable(workspace.active) && history.canUndo && !layoutBusy,
+    canRedo: documentIsEditable(workspace.active) && history.canRedo && !layoutBusy,
     running,
     transientRunning,
     sourceSessionActive,
@@ -13542,14 +13788,34 @@ deploymentsWindow = createDeploymentsWindow({
     if (!workspace.active || !graphData) return null;
     syncGraphPositions();
     return { documentId: workspace.activeId, displayName: graphDisplayName,
-      graphMl: serializeGraphML(graphData) };
+      incarnation: activeDocumentIncarnation,
+      graphMl: serializeGraphML(graphData), graph: structuredClone(graphData), name: graphName };
   },
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
-    if (!owner || !deployment.graphVersion) return;
+    if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion
+        || owner.tenantId !== (activeWorkspaceScope?.tenantId ?? null)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
     owner.humanTasks.graphVersion = deployment.graphVersion;
-    if (owner === workspace.active) void configureHumanTasks(owner);
+    source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
+    const deployedId = openDocument({
+      name: source.name,
+      displayName: allocateDocumentDisplayName(`${source.displayName} · deployed`),
+      graph: source.graph,
+      tenantId: owner.tenantId,
+      mode: DOCUMENT_MODES.DEPLOYED,
+      provenance: {
+        originMode: owner.mode,
+        sourceDocumentId: owner.documentId,
+        sourceGraphVersion: deployment.graphVersion,
+        deploymentId: deployment.deploymentId,
+      },
+    });
+    const deployed = workspace.find(deployedId);
+    deployed.humanTasks.deploymentId = deployment.deploymentId;
+    deployed.humanTasks.graphVersion = deployment.graphVersion;
+    void configureHumanTasks(deployed);
+    scheduleWorkspacePersistence();
   },
   onDeploymentSelected: deployment => {
     const owner = workspace.active;

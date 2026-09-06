@@ -48,9 +48,10 @@ public final class DeploymentSingleFlight {
     /**
      * Runs {@code work} with no other caller of this instance running for the same deployment.
      *
-     * <p>Re-entrant for the same thread, because the coordinator legitimately reaches the reconciler's
-     * convergence helper while already holding the deployment: a non-re-entrant lock would deadlock a
-     * thread against itself for doing exactly what the design asks of it.</p>
+     * <p>Re-entrant for the same thread. Nothing nests today; a re-entrant lock is chosen because it
+     * costs nothing over a plain mutex here and removes a deadlock a later nesting would introduce
+     * silently — a coordinator that came to drive a convergence helper while already holding the
+     * deployment would hang against itself, with no error and no obvious cause.</p>
      *
      * @param tenantId tenant owning the deployment.
      * @param deploymentId deployment to serialize on.

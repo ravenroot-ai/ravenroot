@@ -349,6 +349,14 @@ class DeploymentCoordinatorTest {
                         + "safely assume a durable removal intent was not busy");
         assertEquals(1, fixture.record(TENANT, id).generation(), "the refusal recorded nothing");
 
+        fixture.unhost(id);
+        assertEquals(new DeploymentCommandOutcome.Refused(DeploymentCommandOutcome.Reason.IncompatibleState),
+                coordinator.submit(TENANT, id, new LifecycleCommand.Undeploy("unobservable",
+                        LifecycleCommand.Undeploy.Disposition.REFUSE_IF_BUSY, "only if idle"),
+                        GenerationExpectation.any()),
+                "a process that cannot see the runtime cannot establish that nothing is in flight, and "
+                        + "must not read that as 'nothing is in flight'");
+
         fixture.shutDown();
         assertEquals(new DeploymentCommandOutcome.Refused(DeploymentCommandOutcome.Reason.ShuttingDown),
                 coordinator.submit(TENANT, id, new LifecycleCommand.Pause("p", "too late"),

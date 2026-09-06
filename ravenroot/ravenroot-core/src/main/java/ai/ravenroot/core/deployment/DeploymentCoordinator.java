@@ -243,9 +243,16 @@ public final class DeploymentCoordinator {
         }
         if (command instanceof LifecycleCommand.Undeploy undeploy
                 && undeploy.disposition() == LifecycleCommand.Undeploy.Disposition.REFUSE_IF_BUSY) {
+            // "Remove only if nothing is in flight" is a condition, and a process that cannot see the
+            // runtime cannot establish it. Not being able to tell is refused rather than read as
+            // "nothing is in flight": the whole point of this disposition is that the operator does
+            // not want a removal to proceed on an assumption, and treating an unobservable deployment
+            // as idle would remove a busy one under a command that promised the opposite. It is also
+            // what lets recovery converge a durable REMOVED intent without re-checking, because such
+            // an intent now exists only where the condition was actually evaluated.
             Optional<DeploymentLifecycleTarget> target =
                     targets.resolve(record.tenantId(), record.deploymentId());
-            if (target.isPresent() && await(target.get().observe()).inFlight() > 0) {
+            if (target.isEmpty() || await(target.get().observe()).inFlight() > 0) {
                 return Optional.of(new DeploymentCommandOutcome.Refused(
                         DeploymentCommandOutcome.Reason.IncompatibleState));
             }

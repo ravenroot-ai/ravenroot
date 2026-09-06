@@ -147,13 +147,17 @@ public sealed interface DeploymentCommandOutcome {
      * will not apply as asked, while supersession says a different, ranking decision applied instead
      * and names it, so the caller can go and look at what actually happened rather than retrying into
      * a decision that has already been made for it (ADR 0038 D7).</p>
-     * @param byCommandId identity of the command that took precedence.
+     * @param bySupersedingLevel the level (formatted {@code "g<generation>/<DesiredKind>"}) the
+     *     superseding decision left the deployment at. This is a level, not an identity: the record
+     *     durably carries the desired level, not the kind or identity of the command that set it, so
+     *     that is what a coordinator has on hand to name here (see the known limit documented on
+     *     {@code DeploymentCoordinator.supersession}).
      * @param generation generation at which the superseding command applied.
      */
-    record Superseded(String byCommandId, long generation) implements DeploymentCommandOutcome {
-        /** Requires the superseding identity and a non-negative generation. */
+    record Superseded(String bySupersedingLevel, long generation) implements DeploymentCommandOutcome {
+        /** Requires the superseding level and a non-negative generation. */
         public Superseded {
-            identity(byCommandId);
+            identity(bySupersedingLevel);
             if (generation < 0) throw new IllegalArgumentException("generation cannot be negative");
         }
         @Override public String commandId() { return null; }

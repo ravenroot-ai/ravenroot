@@ -96,7 +96,7 @@ sharing a name is a defect that surfaces only after someone has joined on it.
 **D4 — A command's outcome is a sealed value, returned, never thrown.** Nine members:
 `Accepted(commandId, fromGeneration, toGeneration)`, `Converged(commandId, generation, observed)`,
 `Replayed(original)`, `IdempotencyConflict(key)`, `StaleGeneration(expected, current)`,
-`Superseded(byCommandId, generation)`, `Refused(reason)` over the closed enum
+`Superseded(bySupersedingLevel, generation)`, `Refused(reason)` over the closed enum
 `{IncompatibleState, MissingDisposition, ShuttingDown, CapacityExceeded, Tombstoned}`,
 `Failed(classifiedCause)`, and `Terminal`. Eight of the nine are answers a correct caller must plan
 for; throwing them would move the ordinary answers of this contract onto the path reserved for the
@@ -260,3 +260,19 @@ and release notes. The divergence between the three lifecycle vocabularies is cl
   citation — sections 2, 3, 6, 8, 10, 11 and 12, on batches, idempotency records, payloads, timers,
   capabilities and the failure taxonomy — is unaffected and still points at a record a reader cannot
   open. Publishing it, or absorbing the rest of it, is a separate piece of work.
+- **`start` carries no principal, per project, and `DefaultGraphDeployment` answers for one only
+  because a local `start(SecurityContext)` already ran.** `DeploymentLifecycleTarget.start(long,
+  long)` is a port for effects, not an authorization boundary, so — unlike `GraphDeployment.start`,
+  which requires a `SecurityContext` — it carries none. `DefaultGraphDeployment` bridges the two by
+  retaining the identity its own most recent `start(SecurityContext)` captured, in the one place that
+  assigns `lifecycleIdentity`. A process that hosts a deployment but has never started it locally in
+  this process therefore has no such identity on hand, and an authority-driven start then fails the
+  stage with an `IllegalStateException` instead of minting one on the caller's behalf. Closing that
+  gap is issue 109's, together with the external surface that would have to supply the principal.
+- **The crash-recovery conformance for criterion 2 demonstrates this against `MarkerLifecycleTarget`,
+  a test double, using `start-1-g1`.** `DeploymentCrashRecoveryCrossProcessTest` shows the protocol
+  resumes an interrupted `Start` exactly once across a simulated process crash — but `Start` is
+  precisely the one command whose production implementation, `DefaultGraphDeployment`, cannot be
+  resumed this way without the identity the previous point describes, and the test double's own
+  implementation does not need one. The protocol is proven; the production path for `Start` is not,
+  and choosing that command for the conformance test is what leaves the gap looking closed.

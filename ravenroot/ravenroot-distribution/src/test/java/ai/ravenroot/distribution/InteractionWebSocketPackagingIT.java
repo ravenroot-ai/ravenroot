@@ -16,6 +16,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -25,6 +27,7 @@ import java.util.jar.JarFile;
 import java.util.zip.ZipFile;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.fail;
 
 /** Proves the optional listener survives both shipped launch forms and shading boundaries. */
@@ -36,6 +39,18 @@ class InteractionWebSocketPackagingIT {
             "META-INF/services/org.eclipse.jetty.websocket.api.ExtensionConfig$Parser",
             "META-INF/services/org.eclipse.jetty.websocket.core.Extension",
             "META-INF/services/org.eclipse.jetty.http.HttpFieldPreEncoder");
+    private static final Map<String, Set<String>> REQUIRED_PROVIDERS = Map.of(
+            "META-INF/services/org.eclipse.jetty.websocket.api.ExtensionConfig$Parser",
+            Set.of("org.eclipse.jetty.websocket.common.ExtensionConfigParser"),
+            "META-INF/services/org.eclipse.jetty.websocket.core.Extension",
+            Set.of("org.eclipse.jetty.websocket.core.internal.FragmentExtension",
+                    "org.eclipse.jetty.websocket.core.internal.FrameCaptureExtension",
+                    "org.eclipse.jetty.websocket.core.internal.IdentityExtension",
+                    "org.eclipse.jetty.websocket.core.internal.PerMessageDeflateExtension",
+                    "org.eclipse.jetty.websocket.core.internal.ValidationExtension"),
+            "META-INF/services/org.eclipse.jetty.http.HttpFieldPreEncoder",
+            Set.of("org.eclipse.jetty.http.Http10FieldPreEncoder",
+                    "org.eclipse.jetty.http.Http11FieldPreEncoder"));
     private static final Set<String> REQUIRED_LICENSES = Set.of(
             "META-INF/licenses/jetty-12.1.12-LICENSE.txt",
             "META-INF/licenses/jetty-12.1.12-NOTICE.txt",
@@ -46,17 +61,22 @@ class InteractionWebSocketPackagingIT {
         assertTrue(Files.isRegularFile(SHADED_JAR));
         assertTrue(Files.isRegularFile(BINARY_ZIP));
         try (var jar = new JarFile(SHADED_JAR.toFile())) {
-            REQUIRED_SERVICES.forEach(name -> assertTrue(jar.getEntry(name) != null, name));
+            assertEquals("true", jar.getManifest().getMainAttributes().getValue("Multi-Release"));
+            assertServiceInventory(jar, "shaded jar");
             REQUIRED_LICENSES.forEach(name -> assertTrue(jar.getEntry(name) != null, name));
         }
         try (var zip = new ZipFile(BINARY_ZIP.toFile())) {
             REQUIRED_LICENSES.forEach(name -> assertTrue(zip.stream().anyMatch(entry ->
                     entry.getName().endsWith("/licenses/" + name.substring(name.lastIndexOf('/') + 1))), name));
-            Set<String> nestedServices = new HashSet<>();
+            var nestedProviders = new HashMap<String, Set<String>>();
+            Set<String> nestedClasses = new HashSet<>();
             zip.stream().filter(entry -> entry.getName().contains("/lib/") && entry.getName().endsWith(".jar"))
-                    .forEach(entry -> collectNestedServices(zip, entry.getName(), nestedServices, directory));
-            assertTrue(nestedServices.containsAll(REQUIRED_SERVICES), () -> "missing: "
-                    + difference(REQUIRED_SERVICES, nestedServices));
+                    .forEach(entry -> collectNestedServices(zip, entry.getName(), nestedProviders,
+                            nestedClasses, directory));
+            REQUIRED_PROVIDERS.forEach((service, expected) ->
+                    assertEquals(expected, nestedProviders.get(service), service));
+            REQUIRED_PROVIDERS.values().stream().flatMap(Set::stream).forEach(provider ->
+                    assertTrue(nestedClasses.contains(providerClass(provider)), provider));
         }
 
         runPackaged("shaded jar", directory.resolve("jar"),
@@ -69,27 +89,59 @@ class InteractionWebSocketPackagingIT {
             launcher = paths.filter(path -> path.endsWith(Path.of("bin", "ravenroot-server")))
                     .findFirst().orElseThrow();
         }
-        runPackaged("binary zip", directory.resolve("zip-run"), "sh", launcher.toString());
+        runPackaged("binary zip", directory.resolve("zip-run"), "/bin/sh", launcher.toString());
     }
 
-    private static void collectNestedServices(ZipFile zip, String entryName, Set<String> found, Path directory) {
+    private static void assertServiceInventory(JarFile jar, String label) throws IOException {
+        for (var required : REQUIRED_PROVIDERS.entrySet()) {
+            var entry = jar.getJarEntry(required.getKey());
+            assertTrue(entry != null, required.getKey());
+            try (var input = jar.getInputStream(entry)) {
+                assertEquals(required.getValue(), providers(input.readAllBytes()), label + ": " + required.getKey());
+            }
+            required.getValue().forEach(provider ->
+                    assertTrue(jar.getEntry(providerClass(provider)) != null, label + ": " + provider));
+        }
+    }
+
+    private static void collectNestedServices(ZipFile zip, String entryName,
+                                              Map<String, Set<String>> foundProviders,
+                                              Set<String> foundClasses, Path directory) {
         try {
             Path nested = Files.createTempFile(directory, "dependency-", ".jar");
             try (var input = zip.getInputStream(zip.getEntry(entryName))) {
                 Files.copy(input, nested, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
             }
             try (var jar = new JarFile(nested.toFile())) {
-                REQUIRED_SERVICES.stream().filter(name -> jar.getEntry(name) != null).forEach(found::add);
+                for (String service : REQUIRED_SERVICES) {
+                    var entry = jar.getJarEntry(service);
+                    if (entry != null) {
+                        try (var input = jar.getInputStream(entry)) {
+                            foundProviders.merge(service, providers(input.readAllBytes()), (left, right) -> {
+                                var combined = new HashSet<>(left);
+                                combined.addAll(right);
+                                return Set.copyOf(combined);
+                            });
+                        }
+                    }
+                }
+                REQUIRED_PROVIDERS.values().stream().flatMap(Set::stream).map(InteractionWebSocketPackagingIT::providerClass)
+                        .filter(name -> jar.getEntry(name) != null).forEach(foundClasses::add);
             }
+            Files.deleteIfExists(nested);
         } catch (IOException failure) {
             throw new java.io.UncheckedIOException(failure);
         }
     }
 
-    private static Set<String> difference(Set<String> expected, Set<String> actual) {
-        var missing = new HashSet<>(expected);
-        missing.removeAll(actual);
-        return missing;
+    private static Set<String> providers(byte[] bytes) {
+        return java.util.Arrays.stream(new String(bytes, StandardCharsets.UTF_8).split("\\R"))
+                .map(String::trim).filter(line -> !line.isEmpty() && !line.startsWith("#"))
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
+    }
+
+    private static String providerClass(String provider) {
+        return provider.replace('.', '/') + ".class";
     }
 
     private static void runPackaged(String label, Path state, String... command) throws Exception {
@@ -99,6 +151,9 @@ class InteractionWebSocketPackagingIT {
         Path log = state.resolve("server.log");
         var builder = new ProcessBuilder(command);
         builder.directory(state.toFile());
+        String inheritedPath = builder.environment().getOrDefault("PATH", "");
+        builder.environment().put("PATH", Path.of(System.getProperty("java.home"), "bin")
+                + java.io.File.pathSeparator + inheritedPath);
         builder.environment().put("RAVENROOT_AUTH_MODE", "local-token");
         builder.environment().put("RAVENROOT_AUTH_LOCAL_TOKEN", TOKEN);
         builder.environment().put("RAVENROOT_BIND_ADDRESS", "127.0.0.1");
@@ -121,21 +176,78 @@ class InteractionWebSocketPackagingIT {
             socket.sendText("{\"version\":1,\"type\":\"authenticate\",\"bearer\":\"" + TOKEN + "\"}", true)
                     .get(5, TimeUnit.SECONDS);
             assertTrue(listener.messages.poll(5, TimeUnit.SECONDS).contains("\"type\":\"authenticated\""));
+            Task task = createHumanTask(httpPort);
             socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"package-smoke\","
-                    + "\"command\":\"human-task.cancel\",\"taskId\":\"" + UUID.randomUUID()
-                    + "\",\"generation\":1}", true).get(5, TimeUnit.SECONDS);
-            assertTrue(listener.messages.poll(5, TimeUnit.SECONDS).contains("\"code\":\"RESOURCE_REFUSED\""));
+                    + "\"command\":\"human-task.cancel\",\"taskId\":\"" + task.taskId()
+                    + "\",\"generation\":" + task.generation() + "}", true).get(5, TimeUnit.SECONDS);
+            String result = listener.messages.poll(5, TimeUnit.SECONDS);
+            assertTrue(result.contains("\"type\":\"command.result\""), result);
+            assertTrue(result.contains("\"inReplyTo\":\"package-smoke\""), result);
+            assertTrue(result.contains("\"taskId\":\"" + task.taskId() + "\""), result);
+            assertTrue(result.contains("\"outcome\":\"cancelled\""), result);
             socket.sendClose(WebSocket.NORMAL_CLOSURE, "done").get(5, TimeUnit.SECONDS);
+            assertEquals(WebSocket.NORMAL_CLOSURE, listener.closeCode.get(5, TimeUnit.SECONDS));
         } finally {
             process.destroy();
             if (!process.waitFor(10, TimeUnit.SECONDS)) {
                 process.destroyForcibly();
-                process.waitFor(10, TimeUnit.SECONDS);
+                assertTrue(process.waitFor(10, TimeUnit.SECONDS), label + " resisted forced termination");
+                fail(label + " required forced termination");
             }
         }
         assertTrue(!Files.readString(log, StandardCharsets.UTF_8).contains(TOKEN),
                 () -> label + " leaked the bearer into its log");
     }
+
+    private static Task createHumanTask(int httpPort) throws Exception {
+        var client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2)).build();
+        var submitted = client.send(HttpRequest.newBuilder(URI.create(
+                        "http://127.0.0.1:" + httpPort + "/v1/executions?mode=run&payload=package-smoke"))
+                .header("Authorization", "Bearer " + TOKEN)
+                .header("Content-Type", "application/graphml+xml")
+                .POST(HttpRequest.BodyPublishers.ofString(HUMAN_TASK_GRAPH)).build(),
+                HttpResponse.BodyHandlers.ofString());
+        assertEquals(202, submitted.statusCode(), submitted.body());
+        Instant deadline = Instant.now().plusSeconds(20);
+        var taskPattern = java.util.regex.Pattern.compile("\\\"taskId\\\":\\\"([^\\\"]+)\\\".*?"
+                + "\\\"generation\\\":(\\d+)");
+        while (Instant.now().isBefore(deadline)) {
+            var inbox = client.send(HttpRequest.newBuilder(URI.create(
+                            "http://127.0.0.1:" + httpPort + "/v1/human-tasks?limit=20"))
+                    .header("Authorization", "Bearer " + TOKEN).GET().build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, inbox.statusCode(), inbox.body());
+            var match = taskPattern.matcher(inbox.body());
+            if (match.find()) return new Task(UUID.fromString(match.group(1)), Long.parseLong(match.group(2)));
+            Thread.sleep(200);
+        }
+        fail("packaged server did not expose the submitted durable Human Task");
+        throw new AssertionError("unreachable");
+    }
+
+    private record Task(UUID taskId, long generation) { }
+
+    private static final String HUMAN_TASK_GRAPH = """
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <key id="property-title" for="node" attr.name="title" attr.type="string"/>
+              <graph id="package-human-task" edgedefault="directed">
+                <node id="start"><data key="kind">START</data></node>
+                <node id="action"><data key="kind">BEHAVIOR</data><data key="behavior">human-task</data>
+                  <data key="property-title">Package smoke review</data></node>
+                <node id="end"><data key="kind">END</data></node>
+                <node id="error"><data key="kind">ERROR</data></node>
+                <edge id="start-action" source="start" target="action"><data key="outcome">continue</data></edge>
+                <edge id="resolved" source="action" target="end"><data key="outcome">resolved</data></edge>
+                <edge id="denied" source="action" target="end"><data key="outcome">denied</data></edge>
+                <edge id="expired" source="action" target="end"><data key="outcome">expired</data></edge>
+                <edge id="cancelled" source="action" target="end"><data key="outcome">cancelled</data></edge>
+                <edge id="failure" source="action" target="error"/>
+              </graph>
+            </graphml>
+            """;
 
     private static void waitForHealth(String label, Process process, int port, Path log) throws Exception {
         Instant deadline = Instant.now().plusSeconds(30);
@@ -175,6 +287,7 @@ class InteractionWebSocketPackagingIT {
 
     private static final class Listener implements WebSocket.Listener {
         private final LinkedBlockingQueue<String> messages = new LinkedBlockingQueue<>();
+        private final CompletableFuture<Integer> closeCode = new CompletableFuture<>();
         private final StringBuilder current = new StringBuilder();
         @Override public void onOpen(WebSocket socket) { socket.request(1); }
         @Override public java.util.concurrent.CompletionStage<?> onText(WebSocket socket, CharSequence data,
@@ -185,6 +298,11 @@ class InteractionWebSocketPackagingIT {
                 current.setLength(0);
             }
             socket.request(1);
+            return CompletableFuture.completedFuture(null);
+        }
+        @Override public java.util.concurrent.CompletionStage<?> onClose(WebSocket socket, int statusCode,
+                                                                         String reason) {
+            closeCode.complete(statusCode);
             return CompletableFuture.completedFuture(null);
         }
     }

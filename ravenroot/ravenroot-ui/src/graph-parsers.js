@@ -4,6 +4,7 @@
 // Reading the one list instead of maintaining two removes the class of bug, not just this instance
 // of it. graph-document.js has no imports of its own, so this does not create a cycle.
 import { assertStableEdgeId } from './stable-edge-id.js';
+import { VISUAL_GROUPS_PROPERTY, readVisualGroupMetadataElement } from './visual-groups.js';
 import { authoredNodeType, classifyFailureRoutes, kindOwnsNodeType, kindToNodeType, NODE_KINDS }
   from './graph-document.js';
 
@@ -635,6 +636,8 @@ export function parseGraphML(xmlText) {
       defaultValue: defaultElement && defaultElement.children.length === 0
         ? defaultElement.textContent
         : null,
+      ...(name === VISUAL_GROUPS_PROPERTY && scope === 'graph' && defaultElement?.children.length
+        ? { defaultComplex: true } : {}),
     };
     if (definition.defaultValue !== null) {
       validateScalar(definition, definition.defaultValue, 'default');
@@ -724,6 +727,7 @@ export function parseGraphML(xmlText) {
       if (definition.scope !== 'all' && definition.scope !== el.localName) {
         throw new Error(`GraphML key '${keyId}' cannot be used on ${el.localName} '${el.id}'`);
       }
+      if (el.localName === 'graph' && definition.name === VISUAL_GROUPS_PROPERTY) continue;
       if (seen.has(keyId)) throw new Error(`Duplicate GraphML data key '${keyId}' on ${el.localName} '${el.id}'`);
       seen.add(keyId);
       // Complex extension XML remains in sourceXml and is deliberately not flattened.
@@ -1048,6 +1052,8 @@ export function parseGraphML(xmlText) {
   // validation (declared, unambiguous, scalar-typed) as everything else in this file -- no
   // graph-scope-specific parsing invented here.
   const graphProperties = simpleProperties(graphElement).properties;
+  const visualGroupsMetadata = readVisualGroupMetadataElement(graphElement, keyDefinitions, GRAPHML_NS);
+  if (visualGroupsMetadata) graphProperties[VISUAL_GROUPS_PROPERTY] = visualGroupsMetadata.raw;
 
   // Classified here, where the nodes an edge's classification depends on finally exist.
   // Done at parse as well as at render so that a caller reading the parsed document directly -- the
@@ -1056,7 +1062,8 @@ export function parseGraphML(xmlText) {
   // and returns the same object it is given, so `graphProperties` rides through untouched --
   // it must, since this is exactly the field a distracted conflict resolution here would drop.
   return classifyFailureRoutes(
-    { nodes, edges, nodeMap, format: 'graphml', sourceXml: xmlText, keyDefinitions, graphProperties });
+    { nodes, edges, nodeMap, format: 'graphml', sourceXml: xmlText, keyDefinitions, graphProperties,
+      ...(visualGroupsMetadata?.invalid ? { _visualGroupsMetadata: visualGroupsMetadata } : {}) });
 }
 
 // ═══════════════════════════════════════════════════════════════

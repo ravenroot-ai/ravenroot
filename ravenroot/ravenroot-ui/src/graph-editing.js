@@ -21,6 +21,23 @@ import {
 import { validateEdgeConnection, validateEdgeId } from './edge-gestures.js';
 import { resolveDescriptorNodeType } from './catalog-node-icon.js';
 import { catalogPropertyHasDeclaredDefault } from './adapter-binding.js';
+import { VISUAL_GROUPS_PROPERTY, readVisualGroups, visualGroupsValue } from './visual-groups.js';
+
+export function editVisualGroups(graph, groups, history = null, label = 'Edit visual groups') {
+  if (!canModifyGraph(graph)) return null;
+  return run(graph, updateGraphPropertiesCommand({
+    [VISUAL_GROUPS_PROPERTY]: visualGroupsValue(groups, graph),
+  }, label), history);
+}
+
+export function createVisualGroup(graph, memberNodeIds, name, anchorNodeId, history = null) {
+  const metadata = readVisualGroups(graph);
+  if (!['valid', 'none'].includes(metadata.status)) throw new Error('Remove unsupported visual group metadata before creating groups');
+  const group = { id: uniqueElementId('group', metadata.groups), name,
+    memberNodeIds: [...new Set(memberNodeIds)], anchorNodeId, collapsed: true };
+  editVisualGroups(graph, [...metadata.groups, group], history, `Create visual group ${name}`);
+  return group;
+}
 
 export function canModifyGraph(graph, layoutMode = '') {
   return Boolean(graph && graph.format === 'graphml' && layoutMode !== 'elastic');

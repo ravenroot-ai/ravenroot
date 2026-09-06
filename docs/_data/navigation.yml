@@ -21,6 +21,8 @@
       url: /user-guide/payload-routing.html
     - title: Test, Run, and execution control
       url: /user-guide/test-run-observe.html
+    - title: Human Task confirmations
+      url: /user-guide/human-task-confirmations.html
     - title: Credentials, providers, and artifacts
       url: /user-guide/integrations-artifacts.html
     - title: Embedded viewing and accessibility

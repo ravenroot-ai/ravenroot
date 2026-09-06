@@ -30,6 +30,15 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCursor;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
@@ -290,6 +299,16 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public int maxHumanTaskAttentionPageSize() {
+        return humanTaskPolicy.confirmation().attentionMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionNodeCounts() {
+        return HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_NODE_COUNTS;
+    }
+
+    @Override
     public Set<StoreCapability> capabilities() {
         // EVENT_JOURNAL and JOURNAL_COMPACTION are declared here as well as by the SQLite adapter,
         // deliberately. ADR 0010 section 11.1 rules that a capability-gated assertion no in-tree
@@ -310,6 +329,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 StoreCapability.DURABLE_HANDLERS,
                 StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
                 StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
+                StoreCapability.HUMAN_TASK_CONFIRMATIONS,
                 StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
                 // EXECUTION_RESULTS joins them on the same rule and makes no durability
                 // claim: idempotent refusal, tenant scoping, the four read states and
@@ -1865,6 +1885,152 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
+    @Override
+    public CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            Objects.requireNonNull(authorization, "authorization");
+            if (query.limit() > maxHumanTaskAttentionPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskAttentionPageSize()));
+            }
+            HumanTaskAttentionCursor.Boundary boundary;
+            try {
+                boundary = query.cursor().map(cursor -> cursor.boundary(
+                        tenantId, query, authorization)).orElse(null);
+            } catch (IllegalArgumentException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+            synchronized (monitor) {
+                var pageWindow = new java.util.PriorityQueue<AuthorizedHumanTask>(
+                        query.limit() + 1, AUTHORIZED_HUMAN_TASK_ORDER.reversed());
+                var perNode = new java.util.TreeMap<String, long[]>();
+                long pending = 0;
+                long escalated = 0;
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)
+                            || !query.graphVersion().equals(entry.graphVersionPin.reference())
+                            || query.processInstanceId().isPresent()
+                            && !query.processInstanceId().orElseThrow()
+                                    .equals(entry.state.processInstanceId())
+                            || query.deploymentId().isPresent()
+                            && !query.deploymentId().equals(entry.origin.deploymentId())) {
+                        continue;
+                    }
+                    for (DurableHumanTask task : entry.humanTasks.values()) {
+                        if ((task.status() != HumanTaskStatus.WAITING
+                                && task.status() != HumanTaskStatus.ESCALATED)
+                                || !query.graphVersion().equals(
+                                        task.request().graphVersionPin().reference())
+                                || query.traversalId().isPresent()
+                                && !query.traversalId().orElseThrow()
+                                        .equals(task.request().traversalId())
+                                || query.nodeId().isPresent()
+                                && !query.nodeId().orElseThrow().equals(task.request().nodeId())
+                                || query.taskId().isPresent()
+                                && !query.taskId().orElseThrow().equals(task.request().taskId())
+                                || query.generation().isPresent()
+                                && query.generation().orElseThrow() != task.generation()) {
+                            continue;
+                        }
+                        List<HumanTaskConfirmationAction> actions = authorization
+                                .permittedActions(task.request());
+                        if (actions.isEmpty()) continue;
+                        pending++;
+                        if (task.status() == HumanTaskStatus.ESCALATED) escalated++;
+                        if (query.nodeId().isEmpty()) {
+                            long[] node = perNode.get(task.request().nodeId());
+                            if (node == null) {
+                                if (perNode.size() == maxHumanTaskAttentionNodeCounts()) {
+                                    throw failure(new ExecutionStoreFailure.HumanTaskAttentionTooLarge(
+                                            (long) perNode.size() + 1,
+                                            maxHumanTaskAttentionNodeCounts()));
+                                }
+                                node = new long[2];
+                                perNode.put(task.request().nodeId(), node);
+                            }
+                            node[0]++;
+                            if (task.status() == HumanTaskStatus.ESCALATED) node[1]++;
+                        }
+                        if (boundary == null || after(task, boundary)) {
+                            pageWindow.add(new AuthorizedHumanTask(
+                                    task, entry.origin.deploymentId(), actions));
+                            if (pageWindow.size() > query.limit() + 1) pageWindow.poll();
+                        }
+                    }
+                }
+                var orderedWindow = new ArrayList<>(pageWindow);
+                orderedWindow.sort(AUTHORIZED_HUMAN_TASK_ORDER);
+                int end = Math.min(query.limit(), orderedWindow.size());
+                List<HumanTaskAttentionItem> page = orderedWindow.subList(0, end).stream()
+                        .map(InMemoryExecutionStore::attentionItem).toList();
+                Optional<HumanTaskAttentionCursor> next = orderedWindow.size() > end
+                        ? Optional.of(HumanTaskAttentionCursor.issue(tenantId, query, authorization,
+                                page.getLast().createdAt(), page.getLast().taskId()))
+                        : Optional.empty();
+                List<HumanTaskNodeAttentionCounts> nodeCounts = perNode.entrySet().stream()
+                        .map(entry -> new HumanTaskNodeAttentionCounts(
+                                entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+                        .toList();
+                return new HumanTaskAttentionPage(page, next,
+                        new HumanTaskAttentionCounts(pending, escalated), nodeCounts);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(locator, "locator");
+            Objects.requireNonNull(authorization, "authorization");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    DurableHumanTask task = entry.humanTasks.get(locator.taskId());
+                    if (task == null || task.generation() != locator.generation()
+                            || task.status() != HumanTaskStatus.WAITING
+                            && task.status() != HumanTaskStatus.ESCALATED) continue;
+                    List<HumanTaskConfirmationAction> actions = authorization
+                            .permittedActions(task.request());
+                    if (actions.isEmpty()) return Optional.empty();
+                    return Optional.of(attentionItem(new AuthorizedHumanTask(
+                            task, entry.origin.deploymentId(), actions)));
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    private static final Comparator<AuthorizedHumanTask> AUTHORIZED_HUMAN_TASK_ORDER =
+            Comparator.comparing((AuthorizedHumanTask row) -> row.task().createdAt())
+                    .thenComparing(row -> row.task().request().taskId().toString());
+
+    private static boolean after(DurableHumanTask task, HumanTaskAttentionCursor.Boundary boundary) {
+        int time = task.createdAt().compareTo(boundary.createdAt());
+        return time > 0 || time == 0
+                && task.request().taskId().toString().compareTo(boundary.taskId().toString()) > 0;
+    }
+
+    private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row) {
+        DurableHumanTask task = row.task();
+        HumanTaskRegistration request = task.request();
+        return new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
+                request.graphVersionPin().reference(), row.deploymentId(),
+                task.key().processInstanceId(), request.traversalId(), request.nodeId(),
+                task.createdAt(), request.expiresAt(), request.escalateAt(),
+                request.confirmationPresentation(), request.confirmationLimits().maxPromptUtf8Bytes(),
+                request.confirmationLimits().maxActionLabelUtf8Bytes(),
+                request.confirmationLimits().maxCommentUtf8Bytes(),
+                row.actions());
+    }
+
+
     private void applyHumanTaskWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
                                       GraphVersionPin pin,
                                       Map<UUID, DurableHumanTask> tasks, long revision, Instant now) {
@@ -1916,7 +2082,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 throw failure(ExecutionStoreFailure.invalid("correlation key "
                         + registration.correlationKey() + " already identifies a live human task"));
             }
-            tasks.put(registration.taskId(), DurableHumanTask.waiting(key, registration, revision));
+            tasks.put(registration.taskId(), DurableHumanTask.waiting(key, registration, revision, now));
         }
         for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
             DurableHumanTask current = tasks.get(transition.taskId());
@@ -2762,6 +2928,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private record WorkClaim(int deliveryAttempt, Instant visibleAgainAt) {
+    }
+
+    private record AuthorizedHumanTask(DurableHumanTask task, Optional<String> deploymentId,
+                                       List<HumanTaskConfirmationAction> actions) {
     }
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, NodeAttempt attempt,

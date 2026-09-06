@@ -22,7 +22,11 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
 import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
@@ -125,6 +129,42 @@ class HumanTaskServiceTest {
             assertFalse(journal.stream().anyMatch(row -> new String(row.envelope().payload().bytes(),
                     StandardCharsets.UTF_8).contains("approved")),
                     "response values must never enter durable audit event payloads");
+        }
+    }
+
+    @Test
+    void ambiguousActiveLabelsAreRejectedBeforeTaskOrTraversalMutation() throws Exception {
+        try (var store = sqlite("ambiguous-labels", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var presentation = new HumanTaskConfirmationPresentation(1, "Confirm this task.",
+                    HumanTaskCommentRequirement.OPTIONAL,
+                    List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY),
+                    "Proceed now", " ＰＲＯＣＥＥＤ\u00a0 NOW ", "");
+            var definition = new HumanTaskDefinition(
+                    new HumanTaskMetadata("Review release", "Check the bounded facts."),
+                    new HumanTaskResponseSchema(HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE,
+                            HumanTaskConfirmationPresentation.RESPONSE_SCHEMA,
+                            HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION,
+                            PayloadKind.SCALAR, 4096),
+                    HandlerAuthorization.ofRoles(Role.APPROVER.name()),
+                    Optional.of(Duration.ofMinutes(5)), Duration.ofHours(1),
+                    new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                    HumanTaskPolicy.DEFAULTS.executionLimits(4096), presentation);
+
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1);
+                 var binding = service.bindLive(fixture.key, recorder)) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> service.suspend(fixture.message(), definition));
+            }
+
+            assertTrue(service.inbox(requester(), HumanTaskQuery.everything(10)).items().isEmpty(),
+                    "admission refusal must precede durable task creation");
+            assertEquals(TraversalStatus.RUNNING,
+                    store.load(fixture.key).toCompletableFuture().join().state()
+                            .traversals().get(fixture.traversalId).status(),
+                    "admission refusal must precede traversal suspension");
         }
     }
 
@@ -300,6 +340,38 @@ class HumanTaskServiceTest {
                     service.cancel(requester(), schemaTask.taskId(), 1).code());
             assertEquals(HumanTaskResult.Code.CANCELLED,
                     service.cancel(requester(), versionTask.taskId(), 1).code());
+        }
+    }
+
+    @Test
+    void historicalAmbiguousPresentationRemainsReadableAndCancellableAfterReopen()
+            throws Exception {
+        Path database = directory.resolve("historical-confirmation-labels.db");
+        HistoricalTask task;
+        try (var store = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            task = historicalTaskSkeleton(store);
+        }
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
+            insertHistoricalTask(connection, task, HumanTaskConfirmationPresentation.RESPONSE_SCHEMA,
+                    HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION);
+            makeHistoricalEmbeddedConfirmation(connection, task);
+        }
+        try (var reopened = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(reopened, Clock.fixed(NOW, ZoneOffset.UTC));
+            var stored = reopened.loadHumanTask(TENANT, task.taskId())
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals("\u00a0", stored.request().confirmationPresentation().prompt());
+            assertEquals("Proceed", stored.request().confirmationPresentation().resolveLabel());
+            assertEquals("proceed", stored.request().confirmationPresentation().cancelLabel());
+
+            var attention = service.attention(requester(),
+                    new HumanTaskAttentionLocator(task.taskId(), 1)).orElseThrow();
+            assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), attention.availableActions());
+            assertEquals("Proceed", attention.presentation().resolveLabel());
+            assertEquals("proceed", attention.presentation().cancelLabel());
+            assertEquals(HumanTaskResult.Code.CANCELLED,
+                    service.cancel(requester(), task.taskId(), 1).code(),
+                    "current admission must not be reapplied to a historical task's cancellation path");
         }
     }
 
@@ -540,6 +612,33 @@ class HumanTaskServiceTest {
             statement.setLong(index, task.revision());
             assertEquals(1, statement.executeUpdate(),
                     "the historical row must be inserted without current HumanTask admission");
+        }
+    }
+
+    private static void makeHistoricalEmbeddedConfirmation(
+            java.sql.Connection connection, HistoricalTask task) throws Exception {
+        try (var statement = connection.prepareStatement("""
+                UPDATE human_task
+                   SET response_content_type = ?, response_schema = ?, response_schema_version = ?,
+                       response_kind = 'SCALAR', confirmation_version = 1,
+                       confirmation_prompt = ?, confirmation_comment_requirement = 'OPTIONAL',
+                       confirmation_actions = 'RESOLVE,CANCEL', confirmation_resolve_label = ?,
+                       confirmation_deny_label = '', confirmation_cancel_label = ?,
+                       confirmation_max_prompt_bytes = 64,
+                       confirmation_max_action_label_bytes = 64,
+                       confirmation_max_comment_bytes = 4096
+                 WHERE tenant_id = ? AND task_id = ?
+                """)) {
+            statement.setString(1, HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE);
+            statement.setString(2, HumanTaskConfirmationPresentation.RESPONSE_SCHEMA);
+            statement.setString(3, HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION);
+            statement.setString(4, "\u00a0");
+            statement.setString(5, "Proceed");
+            statement.setString(6, "proceed");
+            statement.setString(7, task.key().tenantId());
+            statement.setString(8, task.taskId().toString());
+            assertEquals(1, statement.executeUpdate(),
+                    "the historical fixture must bypass only current admission");
         }
     }
 

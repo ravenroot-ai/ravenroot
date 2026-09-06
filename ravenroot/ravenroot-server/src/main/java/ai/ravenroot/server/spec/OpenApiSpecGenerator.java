@@ -1,5 +1,6 @@
 package ai.ravenroot.server.spec;
 
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.server.audit.JsonStrings;
 
 import java.util.List;
@@ -91,6 +92,11 @@ public final class OpenApiSpecGenerator {
                     + "\"content\": {\"application/vnd.ravenroot.payload+json\": {\"schema\": "
                     + "{\"$ref\": \"#/components/schemas/PayloadEnvelope\"}}}},\n");
         }
+        if (isHumanTaskConfirmation(route, method)) {
+            entry.append("        \"requestBody\": {\"required\": true, \"content\": "
+                    + "{\"application/json\": {\"schema\": {\"$ref\": "
+                    + "\"#/components/schemas/HumanTaskConfirmationRequest\"}}}},\n");
+        }
         entry.append("        \"responses\": {\n");
         var responses = new java.util.ArrayList<String>();
         route.successStatuses().stream().sorted().forEach(status ->
@@ -137,7 +143,26 @@ public final class OpenApiSpecGenerator {
                     + "\"schema\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": 100, "
                     + "\"default\": 50}}");
         }
-        if (isHumanTaskDecision(route, method)) {
+        if (isHumanTaskAttention(route, method)) {
+            parameters.add(queryParameter("graphVersion", "string",
+                    "Required for aggregate mode; exact durable graph version."));
+            parameters.add(queryParameter("deploymentId", "string",
+                    "Aggregate mode requires exactly one of deploymentId and processInstanceId."));
+            parameters.add(queryParameter("processInstanceId", "string",
+                    "Aggregate mode requires exactly one of processInstanceId and deploymentId."));
+            parameters.add(queryParameter("traversalId", "string", "Optional aggregate traversal filter."));
+            parameters.add(queryParameter("nodeId", "string", "Optional aggregate node filter."));
+            parameters.add(queryParameter("taskId", "string",
+                    "With generation and no graph context, selects the exact recovery locator."));
+            parameters.add(queryParameter("generation", "integer",
+                    "Required with taskId in exact-locator mode."));
+            parameters.add(queryParameter("cursor", "string", "Opaque aggregate page cursor."));
+            parameters.add("          {\"name\": \"limit\", \"in\": \"query\", \"required\": false, "
+                    + "\"schema\": {\"type\": \"integer\", \"minimum\": 1, \"maximum\": "
+                    + HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_PAGE_SIZE + ", \"default\": "
+                    + HumanTaskPolicy.Confirmation.DEFAULTS.attentionDefaultPageSize() + "}}");
+        }
+        if (isHumanTaskDecision(route, method) || isHumanTaskConfirmation(route, method)) {
             parameters.add("          {\"name\": \"generation\", \"in\": \"query\", \"required\": true, "
                     + "\"schema\": {\"type\": \"integer\", \"format\": \"int64\", \"minimum\": 1}}");
         }
@@ -149,12 +174,31 @@ public final class OpenApiSpecGenerator {
         return "/v1/human-tasks/{taskId}/{decision}".equals(route.path()) && "POST".equals(method);
     }
 
+    private static boolean isHumanTaskAttention(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/attention".equals(route.path()) && "GET".equals(method);
+    }
+
+    private static boolean isHumanTaskConfirmation(RouteDescriptor route, String method) {
+        return "/v1/human-tasks/{taskId}/confirmation/{action}".equals(route.path())
+                && "POST".equals(method);
+    }
+
+    private static String queryParameter(String name, String type, String description) {
+        return "          {\"name\": \"" + name + "\", \"in\": \"query\", \"required\": false, "
+                + "\"description\": \"" + JsonStrings.escape(description) + "\", \"schema\": {\"type\": \""
+                + type + "\"}}";
+    }
+
     private static String successResponse(RouteDescriptor route, String method, int status) {
         String schema = null;
         if ("/v1/human-tasks".equals(route.path()) && "GET".equals(method)) {
             schema = "HumanTaskInboxPage";
         } else if (isHumanTaskDecision(route, method)) {
             schema = "HumanTaskDecisionResult";
+        } else if (isHumanTaskAttention(route, method)) {
+            schema = "HumanTaskAttentionPage";
+        } else if (isHumanTaskConfirmation(route, method)) {
+            schema = "HumanTaskConfirmationResult";
         }
         return "          \"" + status + "\": {\"description\": \"success\""
                 + (schema == null ? "}" : ", \"content\": {\"application/json\": "
@@ -187,6 +231,44 @@ public final class OpenApiSpecGenerator {
                 + "\"nextCursor\"], \"properties\": {\"items\": {\"type\": \"array\", \"items\": "
                 + "{\"$ref\": \"#/components/schemas/HumanTaskInboxItem\"}}, \"nextCursor\": "
                 + "{\"type\": \"string\", \"format\": \"uuid\", \"nullable\": true}}},\n"
+                + "      \"HumanTaskConfirmationRequest\": {\"type\": \"object\", "
+                + "\"additionalProperties\": false, \"required\": [\"schemaVersion\", \"comment\"], "
+                + "\"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, "
+                + "\"comment\": {\"type\": \"string\"}}},\n"
+                + "      \"HumanTaskConfirmationPresentation\": {\"type\": \"object\", "
+                + "\"required\": [\"version\", \"prompt\", \"commentRequirement\", \"actions\", "
+                + "\"resolveLabel\", \"denyLabel\", \"cancelLabel\"], \"properties\": {"
+                + "\"version\": {\"type\": \"integer\", \"enum\": [1]}, \"prompt\": {\"type\": \"string\"}, "
+                + "\"commentRequirement\": {\"type\": \"string\", \"enum\": [\"DISALLOWED\", \"OPTIONAL\", \"REQUIRED\"]}, "
+                + "\"actions\": {\"type\": \"array\", \"items\": {\"type\": \"string\", "
+                + "\"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}}, \"resolveLabel\": {\"type\": \"string\"}, "
+                + "\"denyLabel\": {\"type\": \"string\"}, \"cancelLabel\": {\"type\": \"string\"}}},\n"
+                + "      \"HumanTaskAttentionItem\": {\"type\": \"object\", \"required\": [\"taskId\", "
+                + "\"generation\", \"status\", \"graphVersion\", \"deploymentId\", \"processInstanceId\", "
+                + "\"traversalId\", \"nodeId\", \"createdAt\", \"expiresAt\", \"escalateAt\", "
+                + "\"promptMaxUtf8Bytes\", \"actionLabelMaxUtf8Bytes\", \"commentMaxUtf8Bytes\", "
+                + "\"presentation\", \"availableActions\"], \"properties\": {"
+                + "\"taskId\": {\"type\": \"string\", \"format\": \"uuid\"}, \"generation\": {\"type\": \"integer\", \"format\": \"int64\"}, "
+                + "\"status\": {\"type\": \"string\"}, \"graphVersion\": {\"type\": \"string\"}, "
+                + "\"deploymentId\": {\"type\": \"string\", \"nullable\": true}, \"processInstanceId\": {\"type\": \"string\", \"format\": \"uuid\"}, "
+                + "\"traversalId\": {\"type\": \"string\", \"format\": \"uuid\"}, \"nodeId\": {\"type\": \"string\"}, "
+                + "\"createdAt\": {\"type\": \"string\", \"format\": \"date-time\"}, \"expiresAt\": {\"type\": \"string\", \"format\": \"date-time\"}, "
+                + "\"escalateAt\": {\"type\": \"string\", \"format\": \"date-time\", \"nullable\": true}, "
+                + "\"promptMaxUtf8Bytes\": {\"type\": \"integer\"}, \"actionLabelMaxUtf8Bytes\": {\"type\": \"integer\"}, "
+                + "\"commentMaxUtf8Bytes\": {\"type\": \"integer\"}, \"presentation\": {\"$ref\": \"#/components/schemas/HumanTaskConfirmationPresentation\"}, "
+                + "\"availableActions\": {\"type\": \"array\", \"items\": {\"type\": \"string\", \"enum\": [\"RESOLVE\", \"DENY\", \"CANCEL\"]}}}},\n"
+                + "      \"HumanTaskAttentionCounts\": {\"type\": \"object\", \"required\": [\"pending\", \"escalated\"], "
+                + "\"properties\": {\"pending\": {\"type\": \"integer\"}, \"escalated\": {\"type\": \"integer\"}}},\n"
+                + "      \"HumanTaskNodeCount\": {\"allOf\": [{\"$ref\": \"#/components/schemas/HumanTaskAttentionCounts\"}, "
+                + "{\"type\": \"object\", \"required\": [\"nodeId\"], \"properties\": {\"nodeId\": {\"type\": \"string\"}}}]},\n"
+                + "      \"HumanTaskAttentionPage\": {\"type\": \"object\", \"required\": [\"schemaVersion\", \"items\", \"nextCursor\", \"counts\", \"nodeCounts\"], "
+                + "\"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, \"items\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/components/schemas/HumanTaskAttentionItem\"}}, "
+                + "\"nextCursor\": {\"type\": \"string\", \"nullable\": true}, \"counts\": {\"$ref\": \"#/components/schemas/HumanTaskAttentionCounts\"}, "
+                + "\"nodeCounts\": {\"type\": \"array\", \"items\": {\"$ref\": \"#/components/schemas/HumanTaskNodeCount\"}}}},\n"
+                + "      \"HumanTaskConfirmationResult\": {\"type\": \"object\", \"required\": [\"schemaVersion\", \"outcome\", \"task\"], "
+                + "\"properties\": {\"schemaVersion\": {\"type\": \"integer\", \"enum\": [1]}, "
+                + "\"outcome\": {\"type\": \"string\", \"enum\": [\"APPLIED\", \"ALREADY_APPLIED\"]}, "
+                + "\"task\": {\"$ref\": \"#/components/schemas/HumanTaskAttentionItem\"}}},\n"
                 + "      \"HumanTaskDecisionResult\": {\"type\": \"object\", \"required\": [\"outcome\", "
                 + "\"taskId\", \"generation\"], \"properties\": {\"outcome\": {\"type\": \"string\"}, "
                 + "\"taskId\": {\"type\": \"string\", \"format\": \"uuid\"}, \"generation\": "

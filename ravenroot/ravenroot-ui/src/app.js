@@ -77,6 +77,9 @@ import { createCredentialsWindow } from './credential-panel.js';
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
 // part of `RavenrootRuntimeClient`. The Deployments window owns registration and control.
 import { createDeploymentsWindow } from './deployment-panel.js';
+import { humanTaskContext, humanTaskServiceOrigin } from './human-task-attention.js';
+import { createHumanTaskController } from './human-task-controller.js';
+import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from './human-task-ui.js';
 import {
   rendererEdgePath,
   rendererEdgeRouteToRendered,
@@ -367,6 +370,13 @@ function bypassedNodeName(name, bypassed) {
   return bypassed ? `${name} · bypassed` : name;
 }
 
+function humanTaskNodeLabel(label, attention) {
+  if (!attention?.pending) return label;
+  // Keep the canvas carrier compact enough for the fixed node card. The Inspector and live region
+  // spell the counts out; here the flag and triangle remain legible in screenshots and greyscale.
+  return `${label}\n⚑ ${attention.pending}${attention.escalated ? ` · ▲ ${attention.escalated}` : ''}`;
+}
+
 function buildElements(gd) {
   // Reclassified on EVERY render, not once at parse, because whether an edge is a failure
   // route depends on its target node's kind: making a node an `ERROR` node, or dragging an
@@ -387,6 +397,7 @@ function buildElements(gd) {
   // hardcoded one, which is precisely the case this flag exists for.
   const bypassProperty = bypassPropertyName(null, nodeTypeCatalog);
 
+  const renderOwner = workspace.documents.find(document_ => document_.graph === gd);
   const cyNodes = nodes.map(n => {
     const [w, h] = nodeSize(n);
     const icon = NODE_ICONS[n.nodeType] || '• ';
@@ -402,11 +413,15 @@ function buildElements(gd) {
     // graph the runtime refuses to load, so drawing that node as switched off would announce a
     // behaviour it will never get to have.
     const bypassed = nodeAcceptsBypass(n.kind) && isNodeBypassed(n.properties, bypassProperty);
+    const attention = renderOwner?.humanTasks?.projection?.nodeCounts?.get(n.id);
+    const baseLabel = icon + bypassedNodeName(n.name, bypassed);
     return {
       data: {
-        id: n.id, label: icon + bypassedNodeName(n.name, bypassed),
+        id: n.id, label: humanTaskNodeLabel(baseLabel, attention), baseLabel,
         name: n.name, nodeType: n.nodeType,
         bypassed,
+        humanTaskPending: attention?.pending || 0,
+        humanTaskEscalated: attention?.escalated || 0,
         classname: n.classname,
         description: n.description || '',
         fillColor: n.fillColor,
@@ -522,6 +537,17 @@ function createStylesheet(palette = rendererPalette) {
     shape: 'rectangle',
     'background-color': surface.system,
     'border-color': node.system, 'border-width': 1.5,
+  }},
+  { selector: 'node[humanTaskPending > 0]', style: {
+    'underlay-color': palette.focus, 'underlay-opacity': 0.22, 'underlay-padding': 9,
+    'border-style': 'double', 'border-width': 4,
+  }},
+  { selector: 'node[humanTaskEscalated > 0]', style: {
+    'underlay-color': node.error, 'underlay-opacity': 0.32, 'underlay-padding': 11,
+    'border-style': 'double', 'border-width': 5,
+  }},
+  { selector: 'node.human-task-pulse[humanTaskPending > 0]', style: {
+    'underlay-opacity': 0.45, 'underlay-padding': 15,
   }},
   // The node the author switched off. Last of the node-type rules on purpose — it has to beat
   // every `node[nodeType=…]` border above it, because "this does not run" outranks "this is an agent"
@@ -717,6 +743,210 @@ let nodeCatalogLoaded = false;
 // True from the moment a catalog request departs until it is answered or fails.
 let nodeCatalogPending = false;
 let finishedExecutions = new Set();
+let humanTaskController = null;
+let humanTaskControllerOwner = null;
+let humanTaskDecisionDialog = null;
+let humanTaskPulseTimer = null;
+const HUMAN_TASK_SELECTION_KEY = 'ravenroot.human-task.selection.v1';
+
+function clearHumanTaskSelection() {
+  try { localStorage.removeItem(HUMAN_TASK_SELECTION_KEY); } catch {
+    // Storage is an optional recovery aid. A disabled/quota-failed store must not block decisions.
+  }
+}
+
+function currentHumanTaskServiceOrigin(client = runtimeClient) {
+  return humanTaskServiceOrigin(client?.baseUrl, globalThis.location?.origin);
+}
+
+function rememberHumanTaskSelection(task) {
+  try {
+    localStorage.setItem(HUMAN_TASK_SELECTION_KEY, JSON.stringify({
+      serviceOrigin: currentHumanTaskServiceOrigin(), taskId: task.taskId, generation: task.generation,
+    }));
+  } catch {
+    // The durable service remains authoritative; this only forfeits browser-reload convenience.
+  }
+}
+
+function readHumanTaskSelection() {
+  try { return JSON.parse(localStorage.getItem(HUMAN_TASK_SELECTION_KEY) || 'null'); } catch {
+    clearHumanTaskSelection();
+    return null;
+  }
+}
+
+function restoreHumanTaskServiceOrigin() {
+  const locator = readHumanTaskSelection();
+  if (!locator || typeof locator.serviceOrigin !== 'string' || !locator.serviceOrigin) return;
+  try {
+    const target = new URL(locator.serviceOrigin);
+    if (!['http:', 'https:'].includes(target.protocol)) throw new Error('unsupported protocol');
+    document.getElementById('service-url').value = locator.serviceOrigin;
+  } catch {
+    clearHumanTaskSelection();
+  }
+}
+
+function focusHumanTaskInspector() {
+  const target = document.querySelector('[data-human-task-inspector] [data-human-task-id]')
+    || document.querySelector('[data-human-task-inspector] .human-task-status');
+  if (!target) return;
+  if (!target.matches('button, input, select, textarea, a[href], [tabindex]')) target.tabIndex = -1;
+  target.focus();
+}
+
+function currentHumanTaskCapability() {
+  return runtimeConfiguration?.configuration?.humanTasks || null;
+}
+
+function stopHumanTaskPulse() {
+  if (humanTaskPulseTimer != null) clearInterval(humanTaskPulseTimer);
+  humanTaskPulseTimer = null;
+  cy?.nodes('.human-task-pulse').removeClass('human-task-pulse');
+  elasticRendererFor(workspace.active)?.nodeSelection?.classed('human-task-pulse', false);
+}
+
+function syncHumanTaskPulse(owner) {
+  stopHumanTaskPulse();
+  if (owner !== workspace.active || !owner?.cy?.nodes('[humanTaskPending > 0]').length
+      || globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
+  const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
+  let on = true;
+  owner.cy.nodes('[humanTaskPending > 0]').addClass('human-task-pulse');
+  elasticRendererFor(owner)?.nodeSelection
+    ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+    .classed('human-task-pulse', true);
+  humanTaskPulseTimer = setInterval(() => {
+    if (workspace.active !== owner || owner.cy?.destroyed()) return stopHumanTaskPulse();
+    on = !on;
+    owner.cy.nodes('[humanTaskPending > 0]').toggleClass('human-task-pulse', on);
+    elasticRendererFor(owner)?.nodeSelection
+      ?.filter(item => (counts.get(item.id)?.pending || 0) > 0)
+      .classed('human-task-pulse', on);
+  }, 900);
+}
+
+function applyHumanTaskProjection(owner) {
+  if (!owner?.cy || owner.cy.destroyed()) return;
+  const counts = owner.humanTasks?.projection?.nodeCounts || new Map();
+  owner.cy.batch(() => owner.cy.nodes().forEach(node => {
+    const attention = counts.get(node.id()) || { pending: 0, escalated: 0 };
+    node.data('humanTaskPending', attention.pending);
+    node.data('humanTaskEscalated', attention.escalated);
+    node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
+    if (isN8nFamilyLayout(owner.visualStyle)) {
+      node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
+        'text-max-width': attention.pending ? '180px' : '240px' });
+    } else if (owner.visualStyle === 'elastic') {
+      node.style({ label: runtimeNodeLabel(node), 'text-wrap': attention.pending ? 'wrap' : 'none',
+        'text-max-width': attention.pending ? '180px' : '240px' });
+    }
+    if (!attention.pending) node.removeClass('human-task-pulse');
+  }));
+  const renderer = elasticRendererFor(owner);
+  if (renderer?.nodeLabelSelection && rendererSessions.isLive(renderer.token)) {
+    renderer.nodeLabelSelection.text(item => {
+      const node = owner.cy.getElementById(item.id);
+      return node.length ? runtimeNodeLabel(node) : item.label;
+    });
+    renderer.nodeSelection
+      .classed('human-task-attention', item => (counts.get(item.id)?.pending || 0) > 0)
+      .classed('is-escalated', item => (counts.get(item.id)?.escalated || 0) > 0);
+  }
+  syncHumanTaskPulse(owner);
+}
+
+function renderSelectedHumanTasks(owner = workspace.active) {
+  if (owner !== workspace.active || graphData?.format !== 'graphml') return;
+  const selected = cy?.nodes(':selected');
+  if (!selected || selected.length !== 1) return;
+  const nodeId = selected.first().id();
+  const model = graphData?.nodeMap?.[nodeId];
+  if (model?.behavior !== 'human-task') return;
+  const state = owner.humanTasks?.projection?.page || { kind: 'loading', items: [], counts: {
+    pending: 0, escalated: 0 } };
+  renderHumanTaskInspector(document.getElementById('info-body'), state, nodeId, {
+    onSelect: task => {
+      const capability = currentHumanTaskCapability();
+      if (!capability) return;
+      rememberHumanTaskSelection(task);
+      humanTaskDecisionDialog.open(task, capability);
+    },
+    onNext: () => humanTaskController?.nextPage(),
+    onPrevious: () => humanTaskController?.previousPage(),
+    onRefresh: () => humanTaskController?.refresh(),
+  });
+}
+
+function humanTaskPageSignature(page) {
+  if (!page) return '';
+  if (page.kind !== 'ready') return `${page.kind}:${page.message || ''}`;
+  return JSON.stringify({ counts: page.counts, nextCursor: page.nextCursor,
+    hasPrevious: page.hasPrevious, pageNumber: page.pageNumber, items: page.items });
+}
+
+function receiveHumanTaskProjection(state) {
+  const owner = humanTaskControllerOwner;
+  if (!owner) return;
+  if (state.kind === 'error' && humanTaskDecisionDialog?.selected()) {
+    // A failed authoritative refresh makes every displayed task detail stale. Close the modal so
+    // the normal reconnect controls remain reachable, retaining only the opaque locator. A later
+    // successful poll or authentication rebuilds the form through the exact authorized lookup.
+    humanTaskDecisionDialog.suspend();
+  }
+  const signature = state.kind === 'ready' ? [...state.nodeCounts.entries()]
+    .map(([nodeId, count]) => `${nodeId}:${count.pending}:${count.escalated}`).sort().join('|') : state.kind;
+  const changed = owner.humanTasks.attentionSignature !== signature;
+  const pageSignature = humanTaskPageSignature(state.page);
+  const pageChanged = owner.humanTasks.pageSignature !== pageSignature;
+  owner.humanTasks.attentionSignature = signature;
+  owner.humanTasks.pageSignature = pageSignature;
+  owner.humanTasks.projection = state;
+  if (changed) applyHumanTaskProjection(owner);
+  if (pageChanged) renderSelectedHumanTasks(owner);
+  if (changed && owner === workspace.active && state.kind === 'ready') {
+    const total = [...state.nodeCounts.values()].reduce((sum, count) => sum + count.pending, 0);
+    const escalated = [...state.nodeCounts.values()].reduce((sum, count) => sum + count.escalated, 0);
+    announceGraph(total ? `${total} Human Task${total === 1 ? '' : 's'} need attention`
+      + `${escalated ? `; ${escalated} escalated` : ''}.` : 'No Human Tasks need attention.');
+  }
+  if (state.kind === 'ready' && !humanTaskDecisionDialog?.selected()) {
+    void recoverHumanTaskSelection(owner);
+  }
+}
+
+function configureHumanTasks(owner = workspace.active) {
+  humanTaskControllerOwner = owner;
+  const configured = humanTaskController?.configure(runtimeClient, currentHumanTaskCapability(), owner);
+  void recoverHumanTaskSelection(owner);
+  return configured;
+}
+
+async function recoverHumanTaskSelection(owner) {
+  const client = runtimeClient;
+  const capability = currentHumanTaskCapability();
+  if (!client || !capability) return;
+  const locator = readHumanTaskSelection();
+  if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
+      || typeof locator.taskId !== 'string'
+      || !Number.isSafeInteger(locator.generation) || locator.generation < 1) return;
+  try {
+    // The locator deliberately carries no graph, deployment, process, presentation, or auth data.
+    // The authenticated exact-task projection reconstructs those durable details after reload,
+    // including when a process-local deployment registration no longer exists.
+    const page = await client.humanTaskAttention({ taskId: locator.taskId,
+      generation: locator.generation }, { capability });
+    if (runtimeClient !== client || workspace.active !== owner) return;
+    const task = page.items.find(item => item.taskId === locator.taskId
+      && item.generation === locator.generation);
+    if (!task) { clearHumanTaskSelection(); return; }
+    if (!humanTaskDecisionDialog.selected()) humanTaskDecisionDialog.open(task, capability);
+  } catch {
+    // A rejected or unreachable lookup carries no proof that the durable task disappeared. Keep
+    // only the locator and let the next authenticated reconnect try again; never cache the row.
+  }
+}
 
 // ── AUTHORING ASSISTANT STATE (ADR 0025) ───────────────────────────────────────────────────
 // `assistantAvailability` starts UNREACHABLE rather than unknown. A panel that assumed it was ready
@@ -1652,6 +1882,7 @@ function applyActiveDocument() {
   // A legacy or invalid record still takes the canonical normalized style as a complete repaint.
   if (cy && document_) cy.batch(() =>
     applyVisualStyle(visualStyle, cy, document_, { preserveEdgeGeometry: retainRouteGeometry }));
+  if (humanTaskController) void configureHumanTasks(document_);
 }
 
 function syncSourceSessionChrome(owner = workspace.active) {
@@ -2563,6 +2794,7 @@ function setDocumentExecution(document_, executionId, graphVersion, reconciliati
     activeExecutionId = executionId;
     activeGraphVersion = graphVersion;
     activeExecutionReconciliation = 'known';
+    if (humanTaskController) void configureHumanTasks(document_);
   }
   refreshCommands();
 }
@@ -3510,6 +3742,9 @@ function startD3Elastic(owner = workspace.active, target = cy, token = owner?.la
   });
   renderer.elasticMount = elasticMount;
   Object.assign(renderer, elasticMount);
+  // The attention projection belongs to the document, so a renderer switch must paint the already
+  // known counts immediately instead of waiting for the next server poll to change them.
+  applyHumanTaskProjection(owner);
 }
 
 function isN8nFamilyLayout(name = visualStyle) {
@@ -3564,7 +3799,7 @@ function applyElasticVisualStyle() {
       'border-width': node.data('bypassed') ? 2.5 : 1.5,
       'border-color': node.data('bypassed') ? rendererPalette.nodeType.system : rendererPalette.canvas,
       'border-opacity': 0.9,
-      label: bypassedNodeName(node.data('name'), node.data('bypassed')),
+      label: runtimeNodeLabel(node),
       color: rendererPalette.nodeText,
       'font-size': Math.max(10, Math.min(fontPx, 14)) + 'px',
       'font-weight': '500',
@@ -4725,6 +4960,7 @@ function showSelectionInfo({ skipDraftGuard = false } = {}) {
 
 function showMultiNodeInfo(nodeIds) {
   contextualHelp.dismiss();
+  humanTaskController?.selectNode(null);
   revealInspector();
   const nodes = nodeIds.map(id => graphData?.nodeMap?.[id]).filter(Boolean);
   if (nodes.length < 2) return;
@@ -4895,6 +5131,7 @@ function showNodeInfo(node) {
   document.getElementById('info-title').textContent = model.name || model.id;
   if (graphData.format === 'graphify') {
     showReadOnlyElement(model, 'Graphify node');
+    humanTaskController?.selectNode(null);
     return;
   }
   if (!modifyEnabled) {
@@ -4904,12 +5141,19 @@ function showNodeInfo(node) {
       : null;
     if (readiness && (readiness.phase === 'FAILED' || readiness.phase === 'RETIRED')) {
       showReadOnlyProgramReadiness(model, readiness);
+      humanTaskController?.selectNode(null);
       return;
     }
     showReadOnlyElement(model, 'Workflow node');
+    if (model.behavior === 'human-task') {
+      void humanTaskController?.selectNode(model.id);
+    } else humanTaskController?.selectNode(null);
     return;
   }
   renderNodeForm(model, false);
+  if (model.behavior === 'human-task') {
+    void humanTaskController?.selectNode(model.id);
+  } else humanTaskController?.selectNode(null);
 }
 
 function edgeEndpointLabel(edge) {
@@ -4928,6 +5172,7 @@ function selectionBadgeLabel(instance) {
 }
 
 function showEdgeInfo(edge) {
+  humanTaskController?.selectNode(null);
   // Selecting or authoring reveals the Inspector: a selection that silently does nothing
   // because a panel is closed is worse than a panel reappearing.
   revealInspector();
@@ -4952,6 +5197,7 @@ function showEdgeInfo(edge) {
 
 function resetInfoContents() {
   contextualHelp.dismiss();
+  humanTaskController?.selectNode(null);
   document.getElementById('info-title').textContent = 'Inspector';
   document.getElementById('info-body').innerHTML =
     '<div class="info-empty">Select a node or edge, or create a new one.</div>';
@@ -9620,6 +9866,7 @@ function connectRuntime(atBoot = false) {
         runtimeClient = null;
         runtimeConfigurationRequest = null;
         runtimeConfiguration = null;
+        void configureHumanTasks();
         return setRuntimeConnectionState('authentication-required', 'External service connection cancelled');
       }
       confirmedServiceOrigin = target.origin;
@@ -9650,10 +9897,16 @@ function connectRuntime(atBoot = false) {
   runtimeConfiguration = null;
   runtimeConfigurationRequest = connectedClient.configuration().then(configuration => {
     const result = { client: connectedClient, configuration, error: null };
-    if (runtimeClient === connectedClient) runtimeConfiguration = result;
+    if (runtimeClient === connectedClient) {
+      runtimeConfiguration = result;
+      void configureHumanTasks();
+    }
     return result;
   }).catch(error => {
-    if (runtimeClient === connectedClient) runtimeConfiguration = null;
+    if (runtimeClient === connectedClient) {
+      runtimeConfiguration = null;
+      void configureHumanTasks();
+    }
     return { client: connectedClient, configuration: null, error };
   });
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
@@ -9664,6 +9917,7 @@ function connectRuntime(atBoot = false) {
   try {
     runtimeDisconnect = runtimeClient.connect(handleRuntimeEvent, (status, message) => {
       setRuntimeConnectionState(status, message);
+      if (status === 'connected') void configureHumanTasks();
     });
     connectedClient.nodeTypes().then(catalog => {
       if (runtimeClient !== connectedClient) return;
@@ -9701,6 +9955,9 @@ function authenticateRuntime() {
   }
   runtimeTokenProvider.setAccessToken(token);
   hasRuntimeToken = true;
+  // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
+  // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
+  humanTaskDecisionDialog?.suspend();
   refreshCommands();
   connectRuntime();
 }
@@ -9713,6 +9970,8 @@ function revokeRuntimeAccess() {
   runtimeClient = null;
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
+  humanTaskDecisionDialog?.suspend();
+  void configureHumanTasks();
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
   // listing AND republishes `{loaded: false}`, so the node inspector's SECRET_REFERENCE control goes
@@ -10334,8 +10593,7 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     // where `node[?bypassed]` still applies -- the flag is a property of the DOCUMENT, not of the
     // run, so clearing run state must not clear it. The label is rebuilt through the same helper for
     // the same reason: the marker belongs to the idle node too.
-    node.data('label',
-      `${NODE_ICONS[node.data('nodeType')] || '• '}${bypassedNodeName(node.data('name'), node.data('bypassed'))}`);
+    node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
     const model = targetGraph.nodeMap[node.id()];
     if (model) {
       model.instances = 0;
@@ -10386,18 +10644,20 @@ function runtimeCountLabel(name, instances, arrivals = 0) {
 function runtimeNodeLabel(node) {
   const instances = Number(node.data('instances')) || 0;
   const arrivals = Number(node.data('arrivals')) || 0;
+  const attention = { pending: Number(node.data('humanTaskPending')) || 0,
+    escalated: Number(node.data('humanTaskEscalated')) || 0 };
   // The switched-off marker rides on the node's name, so it survives a run painting over the
   // label. A bypassed node can still report instances -- a run that crosses it emits NODE_BYPASSED
   // with a count -- and the two facts belong on the same label, not one replacing the other.
   const name = bypassedNodeName(node.data('name'), node.data('bypassed'));
-  if (!(instances > 0)) return name;
+  if (!(instances > 0)) return humanTaskNodeLabel(name, attention);
   // Same text as the elastic caption, on the line break this renderer uses. Composed against the RAW
   // name and recombined with the display name afterwards, so the `.replace` below keeps operating on
   // the one separator pinned it to: the bypass marker uses the same ` · `, and a first-match
   // replace over the display name would put the line break INSIDE the name instead of after it.
   const [, stats] = runtimeCountLabel(node.data('name'), instances, arrivals)
     .replace(' · ', '\n').split('\n');
-  return `${name}\n${stats}`;
+  return humanTaskNodeLabel(`${name}\n${stats}`, attention);
 }
 
 function applyRuntimeVisual(node) {
@@ -10440,7 +10700,7 @@ function updateD3RuntimeNode(owner, nodeId, activeInstances, state, inFlightArri
     .attr('stroke-width', state === 'active' ? 5 : 3);
   if (renderer.nodeLabelSelection) {
     renderer.nodeLabelSelection.filter(node => node.id === nodeId)
-      .text(node => runtimeCountLabel(node.label, activeInstances, inFlightArrivals));
+      .text(() => runtimeNodeLabel(owner.cy.getElementById(nodeId)));
   }
   if (renderer.simulation && rendererSessions.isLive(renderer.token)) {
     renderer.simulation.force('collision', d3.forceCollide().radius(node => node.r + 8));
@@ -13224,6 +13484,37 @@ document.querySelectorAll('[data-splitter-kind="workspace"]').forEach(splitter =
 // after boot would make the first pane plan wrong.
 applyPanelLayout();
 
+humanTaskController = createHumanTaskController({ onChange: receiveHumanTaskProjection });
+humanTaskDecisionDialog = createHumanTaskDecisionDialog({
+  dialog: document.getElementById('human-task-dialog'),
+  onClose: () => {
+    clearHumanTaskSelection();
+    // Native dialog focus restoration runs as close completes. The actionable list may have been
+    // replaced by reconciliation while the dialog was open, so focus the current row/status after
+    // that browser step instead of returning to a detached opener.
+    requestAnimationFrame(focusHumanTaskInspector);
+  },
+  onSubmit: async ({ task, action, comment }) => {
+    const client = runtimeClient;
+    const capability = currentHumanTaskCapability();
+    if (!client || !capability) throw new Error('Reconnect to the service before deciding this task.');
+    try {
+      const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
+        { capability });
+      clearHumanTaskSelection();
+      addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
+        'completed');
+      await humanTaskController.refresh();
+      return result;
+    } catch (error) {
+      // Fetch rejection cannot prove whether the CAS committed. Refresh, but never retry the
+      // decision automatically. The dialog remains open with the exact original generation.
+      void humanTaskController.refresh();
+      throw error;
+    }
+  },
+});
+
 // Constructed BEFORE `connectRuntime(true)` at the bottom of this file so the page's own first
 // connection hands it a client. The window binds itself to its own container and owns its own
 // listeners, so nothing about it reaches this file's delegated `click`/`input` handlers or the
@@ -13250,7 +13541,22 @@ deploymentsWindow = createDeploymentsWindow({
   currentDocument: () => {
     if (!workspace.active || !graphData) return null;
     syncGraphPositions();
-    return { displayName: graphDisplayName, graphMl: serializeGraphML(graphData) };
+    return { documentId: workspace.activeId, displayName: graphDisplayName,
+      graphMl: serializeGraphML(graphData) };
+  },
+  onRegistered: (deployment, source) => {
+    const owner = workspace.find(source.documentId);
+    if (!owner || !deployment.graphVersion) return;
+    owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.graphVersion = deployment.graphVersion;
+    if (owner === workspace.active) void configureHumanTasks(owner);
+  },
+  onDeploymentSelected: deployment => {
+    const owner = workspace.active;
+    if (!owner) return;
+    owner.humanTasks.deploymentId = deployment.deploymentId;
+    owner.humanTasks.graphVersion = deployment.graphVersion;
+    void configureHumanTasks(owner);
   },
 });
 
@@ -13450,6 +13756,10 @@ window.addEventListener('load', () => {
   // The attempt is unconditional: a build flag or an environment variable here would be the same
   // assumption behind a switch. It runs before the graph loads so the request departs immediately,
   // and a failure only fills the palette with a reason — the editor stays usable offline.
+  // A durable-task locator is the only browser state retained for recovery. Restore its service
+  // origin before boot connection; the existing cross-origin gate still refuses to send a token
+  // until the user explicitly confirms that origin again.
+  restoreHumanTaskServiceOrigin();
   connectRuntime(true);
   // Composed once at boot so the chips are truthful from the first paint rather than blank
   // until something happens. `connectRuntime` above has already asked the service what it offers.

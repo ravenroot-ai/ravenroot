@@ -6,6 +6,7 @@ import ai.ravenroot.api.payload.PayloadLimits;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 
@@ -33,6 +34,7 @@ import java.util.Set;
  * @param responseMaxTextLength inclusive maximum UTF-16 code units in a response text value
  * @param responseMaxKeyLength inclusive maximum UTF-16 code units in a response object key
  * @param writeAttempts inclusive maximum optimistic persistence attempts for one task transition
+ * @param confirmation embedded confirmation presentation and attention controls
  */
 public record HumanTaskPolicy(
         int defaultResponseBytes,
@@ -54,7 +56,8 @@ public record HumanTaskPolicy(
         int responseMaxValueCount,
         int responseMaxTextLength,
         int responseMaxKeyLength,
-        int writeAttempts) {
+        int writeAttempts,
+        Confirmation confirmation) {
 
     public static final int HARD_MAX_RESPONSE_BYTES = PayloadLimits.HARD_MAX_ENCODED_BYTES;
     /** Timer seconds stay in the positive signed 32-bit range used by catalog and deployment tooling. */
@@ -84,7 +87,52 @@ public record HumanTaskPolicy(
             256, 4 * 1_024, HARD_MAX_RESPONSE_SCHEMA_UTF8_BYTES,
             16, HandlerRegistration.MAX_KEY_UTF8_BYTES,
             256 * 1_024, 50, 100,
-            32, 1_024, 4_096, 16 * 1_024, 256, 3);
+            32, 1_024, 4_096, 16 * 1_024, 256, 3, Confirmation.DEFAULTS);
+
+    /**
+     * Compatibility constructor retaining the established operational-policy shape.
+     *
+     * <p>Embedded confirmation controls default to {@link Confirmation#DEFAULTS}; callers that
+     * need an operator-specific value use the canonical constructor.</p>
+     *
+     * @param defaultResponseBytes default encoded response bytes
+     * @param maxResponseBytes maximum encoded response bytes
+     * @param defaultEscalationSeconds default escalation delay
+     * @param maxEscalationSeconds maximum escalation delay
+     * @param defaultExpirySeconds default expiry delay
+     * @param maxExpirySeconds maximum expiry delay
+     * @param maxTitleUtf8Bytes maximum title bytes
+     * @param maxDescriptionUtf8Bytes maximum description bytes
+     * @param maxResponseSchemaUtf8Bytes maximum response-schema bytes
+     * @param maxAuthorizationTokens maximum roles or scopes
+     * @param maxAuthorizationTokenUtf8Bytes maximum bytes in one role or scope
+     * @param decisionBodyMaxBytes maximum raw decision-body bytes
+     * @param inboxDefaultPageSize default classic inbox page size
+     * @param inboxMaxPageSize maximum classic inbox page size
+     * @param responseMaxDepth maximum structured-response depth
+     * @param responseMaxCollectionSize maximum collection members
+     * @param responseMaxValueCount maximum total structured values
+     * @param responseMaxTextLength maximum response text length
+     * @param responseMaxKeyLength maximum response key length
+     * @param writeAttempts maximum optimistic write attempts
+     */
+    public HumanTaskPolicy(int defaultResponseBytes, int maxResponseBytes,
+                           long defaultEscalationSeconds, long maxEscalationSeconds,
+                           long defaultExpirySeconds, long maxExpirySeconds,
+                           int maxTitleUtf8Bytes, int maxDescriptionUtf8Bytes,
+                           int maxResponseSchemaUtf8Bytes, int maxAuthorizationTokens,
+                           int maxAuthorizationTokenUtf8Bytes, int decisionBodyMaxBytes,
+                           int inboxDefaultPageSize, int inboxMaxPageSize, int responseMaxDepth,
+                           int responseMaxCollectionSize, int responseMaxValueCount,
+                           int responseMaxTextLength, int responseMaxKeyLength, int writeAttempts) {
+        this(defaultResponseBytes, maxResponseBytes, defaultEscalationSeconds,
+                maxEscalationSeconds, defaultExpirySeconds, maxExpirySeconds, maxTitleUtf8Bytes,
+                maxDescriptionUtf8Bytes, maxResponseSchemaUtf8Bytes, maxAuthorizationTokens,
+                maxAuthorizationTokenUtf8Bytes, decisionBodyMaxBytes, inboxDefaultPageSize,
+                inboxMaxPageSize, responseMaxDepth, responseMaxCollectionSize,
+                responseMaxValueCount, responseMaxTextLength, responseMaxKeyLength, writeAttempts,
+                Confirmation.DEFAULTS);
+    }
 
     /**
      * Validates individual inclusive bounds and the relationships between defaults, maxima,
@@ -142,6 +190,7 @@ public record HumanTaskPolicy(
         new PayloadLimits(maxResponseBytes, responseMaxDepth, responseMaxCollectionSize,
                 responseMaxValueCount, responseMaxTextLength, responseMaxKeyLength);
         bounded(writeAttempts, 1, HARD_MAX_WRITE_ATTEMPTS, "writeAttempts");
+        confirmation = Objects.requireNonNull(confirmation, "confirmation");
     }
 
     /**
@@ -196,6 +245,24 @@ public record HumanTaskPolicy(
         if (!expected.equals(registration.executionLimits())) {
             throw invalidRegistration("pinned execution limits do not match active policy");
         }
+        if (registration.confirmationPresentation().embedded()) {
+            confirmation.requirePresentation(registration.confirmationPresentation());
+            HumanTaskResponseSchema response = registration.responseSchema();
+            if (!HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE.equals(response.contentType())
+                    || !HumanTaskConfirmationPresentation.RESPONSE_SCHEMA.equals(response.schema())
+                    || !HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION.equals(response.schemaVersion())
+                    || response.kind() != ai.ravenroot.api.payload.PayloadKind.SCALAR
+                    || response.maxBytes() < HumanTaskConfirmationPresentation.responseBytes().length
+                    || confirmation.maximumJsonBodyBytes() > registration.executionLimits()
+                    .decisionBodyMaxBytes()) {
+                throw invalidRegistration("embedded confirmation contract exceeds its pinned transport budgets");
+            }
+            if (!confirmationLimits().equals(registration.confirmationLimits())) {
+                throw invalidRegistration("pinned confirmation limits do not match active policy");
+            }
+        } else if (!HumanTaskConfirmationLimits.CLASSIC.equals(registration.confirmationLimits())) {
+            throw invalidRegistration("classic registration carries embedded confirmation limits");
+        }
     }
 
     private void requireTokens(Set<String> tokens, String name) {
@@ -222,6 +289,16 @@ public record HumanTaskPolicy(
         }
     }
 
+    /**
+     * Returns the immutable embedded-confirmation limits to pin with a newly admitted task.
+     *
+     * @return current presentation and comment limits.
+     */
+    public HumanTaskConfirmationLimits confirmationLimits() {
+        return new HumanTaskConfirmationLimits(confirmation.maxPromptUtf8Bytes(),
+                confirmation.maxActionLabelUtf8Bytes(), confirmation.maxCommentUtf8Bytes());
+    }
+
     private static IllegalArgumentException invalidRegistration(String reason) {
         return new IllegalArgumentException("human-task registration refused: " + reason);
     }
@@ -233,6 +310,209 @@ public record HumanTaskPolicy(
     private static void bounded(long value, long minimum, long maximum, String name) {
         if (value < minimum || value > maximum) {
             throw new IllegalArgumentException(name + " must be between " + minimum + " and " + maximum);
+        }
+    }
+
+    /**
+     * Immutable operator-owned controls for embedded Human Task confirmations.
+     *
+     * @param maxPromptUtf8Bytes maximum prompt bytes.
+     * @param maxActionLabelUtf8Bytes maximum bytes in one action label.
+     * @param maxCommentUtf8Bytes maximum decision-comment bytes.
+     * @param pollAfterMillis initial attention refresh delay.
+     * @param pollBackoffMaxMillis maximum attention refresh delay.
+     * @param attentionDefaultPageSize default attention page size.
+     * @param attentionMaxPageSize maximum attention page size.
+     */
+    public record Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
+                               int maxCommentUtf8Bytes, int pollAfterMillis,
+                               int pollBackoffMaxMillis, int attentionDefaultPageSize,
+                               int attentionMaxPageSize) {
+        public static final int HARD_MAX_PROMPT_UTF8_BYTES =
+                HumanTaskConfirmationPresentation.HARD_MAX_PROMPT_UTF8_BYTES;
+        public static final int HARD_MAX_ACTION_LABEL_UTF8_BYTES =
+                HumanTaskConfirmationPresentation.HARD_MAX_ACTION_LABEL_UTF8_BYTES;
+        /** Comments are never projected in inbox rows; this bounds one durable decision record. */
+        public static final int HARD_MAX_COMMENT_UTF8_BYTES = 16 * 1024;
+        public static final int MIN_POLL_MILLIS = 250;
+        public static final int HARD_MAX_POLL_MILLIS = 300_000;
+        /** A selected-node page carries presentation copy; cap it at 100 rows for a 6.4 MiB prompt bound. */
+        public static final int HARD_MAX_ATTENTION_PAGE_SIZE = 100;
+        /** Matches the GraphML parser's supported node ceiling. */
+        public static final int HARD_MAX_ATTENTION_NODE_COUNTS = 1_000_000;
+        /** Conservative bytes outside the comment in {@code {"schemaVersion":1,"comment":""}}. */
+        public static final int JSON_BODY_OVERHEAD_BYTES = 32;
+        /** Static default rendered when a graph opts into presentation version one. */
+        public static final String DEFAULT_PROMPT = "Confirm this task.";
+        /** Default decision metadata rule for the built-in presentation. */
+        public static final HumanTaskCommentRequirement DEFAULT_COMMENT_REQUIREMENT =
+                HumanTaskCommentRequirement.OPTIONAL;
+        /** Ordered built-in actions for presentation version one. */
+        public static final java.util.List<HumanTaskConfirmationAction> DEFAULT_ACTIONS =
+                java.util.List.of(HumanTaskConfirmationAction.values());
+        public static final String DEFAULT_RESOLVE_LABEL = "Confirm";
+        public static final String DEFAULT_DENY_LABEL = "Deny";
+        public static final String DEFAULT_CANCEL_LABEL = "Cancel";
+        public static final Confirmation DEFAULTS = new Confirmation(4 * 1024, 64,
+                4 * 1024, 1_000, 10_000, 20, 100);
+
+        /**
+         * Compatibility constructor for the initial five confirmation controls.
+         *
+         * @param maxPromptUtf8Bytes maximum prompt bytes.
+         * @param maxActionLabelUtf8Bytes maximum bytes in one action label.
+         * @param maxCommentUtf8Bytes maximum decision-comment bytes.
+         * @param pollAfterMillis initial attention refresh delay.
+         * @param pollBackoffMaxMillis maximum attention refresh delay.
+         */
+        public Confirmation(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
+                            int maxCommentUtf8Bytes, int pollAfterMillis,
+                            int pollBackoffMaxMillis) {
+            this(maxPromptUtf8Bytes, maxActionLabelUtf8Bytes, maxCommentUtf8Bytes,
+                    pollAfterMillis, pollBackoffMaxMillis, DEFAULTS.attentionDefaultPageSize(),
+                    DEFAULTS.attentionMaxPageSize());
+        }
+
+        /** Validates technical ceilings and relationships between defaults and maxima. */
+        public Confirmation {
+            confirmationBounded(maxPromptUtf8Bytes, 1, HARD_MAX_PROMPT_UTF8_BYTES, "maxPromptUtf8Bytes");
+            confirmationBounded(maxActionLabelUtf8Bytes, 1, HARD_MAX_ACTION_LABEL_UTF8_BYTES,
+                    "maxActionLabelUtf8Bytes");
+            confirmationBounded(maxCommentUtf8Bytes, 1, HARD_MAX_COMMENT_UTF8_BYTES, "maxCommentUtf8Bytes");
+            confirmationBounded(pollAfterMillis, MIN_POLL_MILLIS, HARD_MAX_POLL_MILLIS, "pollAfterMillis");
+            confirmationBounded(pollBackoffMaxMillis, pollAfterMillis, HARD_MAX_POLL_MILLIS,
+                    "pollBackoffMaxMillis");
+            confirmationBounded(attentionDefaultPageSize, 1, HARD_MAX_ATTENTION_PAGE_SIZE,
+                    "attentionDefaultPageSize");
+            confirmationBounded(attentionMaxPageSize, 1, HARD_MAX_ATTENTION_PAGE_SIZE,
+                    "attentionMaxPageSize");
+            if (attentionDefaultPageSize > attentionMaxPageSize) {
+                throw new IllegalArgumentException(
+                        "attentionDefaultPageSize cannot exceed attentionMaxPageSize");
+            }
+        }
+
+        /**
+         * Validates the graph-authored display contract against this deployment policy.
+         *
+         * @param presentation graph-authored presentation to validate.
+         */
+        public void requirePresentation(HumanTaskConfirmationPresentation presentation) {
+            presentation = Objects.requireNonNull(presentation, "presentation");
+            if (!presentation.embedded()) return;
+            requireBytes(presentation.prompt(), maxPromptUtf8Bytes, "confirmation prompt");
+            if (stableVisibleTextKey(presentation.prompt()).isEmpty()) {
+                throw new IllegalArgumentException("confirmation prompt must have a visible name");
+            }
+            requireBytes(presentation.resolveLabel(), maxActionLabelUtf8Bytes,
+                    "confirmation resolve label");
+            requireBytes(presentation.denyLabel(), maxActionLabelUtf8Bytes,
+                    "confirmation deny label");
+            requireBytes(presentation.cancelLabel(), maxActionLabelUtf8Bytes,
+                    "confirmation cancel label");
+            var visibleLabels = new HashSet<String>();
+            for (HumanTaskConfirmationAction action : presentation.actions()) {
+                String visible = stableVisibleTextKey(presentation.label(action));
+                if (visible.isEmpty() || !visibleLabels.add(visible)) {
+                    throw new IllegalArgumentException(
+                            "active confirmation action labels must have distinct visible names");
+                }
+            }
+        }
+
+        /**
+         * Produces a version-stable comparison key for visible confirmation text.
+         * Full-width ASCII and ASCII case are folded arithmetically. A fixed separator repertoire
+         * collapses to one interior ASCII space and is omitted at the edges. Every other code point
+         * remains exact, so this contract does not depend on the host's Unicode tables.
+         */
+        private static String stableVisibleTextKey(String text) {
+            var visible = new StringBuilder(text.length());
+            boolean pendingSpace = false;
+            for (int offset = 0; offset < text.length();) {
+                int codePoint = text.codePointAt(offset);
+                offset += Character.charCount(codePoint);
+                if (codePoint >= 0xff01 && codePoint <= 0xff5e) {
+                    codePoint -= 0xfee0;
+                }
+                if (codePoint >= 'A' && codePoint <= 'Z') {
+                    codePoint += 'a' - 'A';
+                }
+                if (isStableSeparator(codePoint)) {
+                    pendingSpace = visible.length() != 0;
+                } else {
+                    if (pendingSpace) visible.append(' ');
+                    visible.appendCodePoint(codePoint);
+                    pendingSpace = false;
+                }
+            }
+            return visible.toString();
+        }
+
+        private static boolean isStableSeparator(int codePoint) {
+            return switch (codePoint) {
+                case 0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x0085, 0x00a0,
+                        0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 -> true;
+                default -> codePoint >= 0x2000 && codePoint <= 0x200a;
+            };
+        }
+
+        /**
+         * Normalizes bounded decision metadata, deliberately separate from execution payload.
+         *
+         * @param comment untrusted decision comment.
+         * @param requirement pinned decision-comment rule.
+         * @return stripped, validated comment.
+         */
+        public String normalizeComment(String comment, HumanTaskCommentRequirement requirement) {
+            requirement = Objects.requireNonNull(requirement, "requirement");
+            comment = comment == null ? "" : comment.strip();
+            if (requirement == HumanTaskCommentRequirement.DISALLOWED && !comment.isEmpty()) {
+                throw new IllegalArgumentException("decision comment is not allowed by this presentation");
+            }
+            if (requirement == HumanTaskCommentRequirement.REQUIRED && comment.isEmpty()) {
+                throw new IllegalArgumentException("decision comment is required by this presentation");
+            }
+            for (int index = 0; index < comment.length(); index++) {
+                char unit = comment.charAt(index);
+                if (Character.isHighSurrogate(unit)) {
+                    if (index + 1 == comment.length()
+                            || !Character.isLowSurrogate(comment.charAt(index + 1))) {
+                        throw new IllegalArgumentException("decision comment contains malformed Unicode");
+                    }
+                    index++;
+                    continue;
+                }
+                if (Character.isLowSurrogate(unit)) {
+                    throw new IllegalArgumentException("decision comment contains malformed Unicode");
+                }
+                if (Character.isISOControl(unit) && unit != '\n' && unit != '\t') {
+                    throw new IllegalArgumentException("decision comment contains a control character");
+                }
+            }
+            requireBytes(comment, maxCommentUtf8Bytes, "decision comment");
+            return comment;
+        }
+
+        /**
+         * Maximum JSON request bytes needed to carry any accepted comment, including six-byte
+         * Unicode escapes for every single-byte character.
+         * @return inclusive worst-case request size
+         */
+        public long maximumJsonBodyBytes() {
+            return JSON_BODY_OVERHEAD_BYTES + 6L * maxCommentUtf8Bytes;
+        }
+
+        private static void requireBytes(String value, int maximum, String name) {
+            if (value.getBytes(StandardCharsets.UTF_8).length > maximum) {
+                throw new IllegalArgumentException(name + " exceeds active policy byte limit");
+            }
+        }
+
+        private static void confirmationBounded(long value, long minimum, long maximum, String name) {
+            if (value < minimum || value > maximum) {
+                throw new IllegalArgumentException(name + " must be between " + minimum + " and " + maximum);
+            }
         }
     }
 }

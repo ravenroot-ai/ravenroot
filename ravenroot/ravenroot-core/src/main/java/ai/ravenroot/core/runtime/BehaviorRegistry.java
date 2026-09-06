@@ -246,6 +246,13 @@ public final class BehaviorRegistry {
         return factory == null ? Optional.empty() : Optional.of(factory.create(node));
     }
 
+    /** Runs the registered factory's side-effect-free admission check for one configured node. */
+    public void validate(GraphNode node) {
+        if (node == null || node.behavior() == null) return;
+        var factory = factories.get(node.behavior());
+        if (factory != null) factory.validate(node);
+    }
+
     /** Resolves durable re-entry only through the already registered trusted behavior factory. */
     public Optional<ai.ravenroot.api.node.ToolCallContinuationAction> createToolCallContinuation(GraphNode node) {
         if (node == null || node.behavior() == null) return Optional.empty();

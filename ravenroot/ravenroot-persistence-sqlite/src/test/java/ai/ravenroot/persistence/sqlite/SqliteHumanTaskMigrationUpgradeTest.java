@@ -28,6 +28,10 @@ class SqliteHumanTaskMigrationUpgradeTest {
                 .filter(migration -> migration.statements().stream()
                         .anyMatch(sql -> sql.contains("CREATE TABLE human_task")))
                 .mapToInt(SchemaMigration::version).findFirst().orElseThrow();
+        int attentionVersion = SqliteSchema.migrations().stream()
+                .filter(migration -> migration.statements().stream()
+                        .anyMatch(sql -> sql.contains("human_task_context_attention")))
+                .mapToInt(SchemaMigration::version).findFirst().orElseThrow();
         List<SchemaMigration> previous = SqliteSchema.migrations().stream()
                 .filter(migration -> migration.version() < humanTaskVersion).toList();
 
@@ -48,10 +52,31 @@ class SqliteHumanTaskMigrationUpgradeTest {
             assertTrue(columnExists(connection, "human_task", "response_max_text_length"));
             assertTrue(columnExists(connection, "human_task", "response_max_key_length"));
             assertTrue(columnExists(connection, "human_task", "write_attempts"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_version"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_prompt"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_comment_requirement"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_actions"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_resolve_label"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_deny_label"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_cancel_label"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_max_prompt_bytes"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_max_action_label_bytes"));
+            assertTrue(columnExists(connection, "human_task", "confirmation_max_comment_bytes"));
+            assertTrue(columnExists(connection, "human_task", "decision_comment"));
+            assertTrue(columnExists(connection, "human_task", "created_at_epoch_second"));
+            assertTrue(columnExists(connection, "human_task", "created_at_nano"));
             assertEquals(1, indexCount(connection, "human_task_live_correlation"));
+            assertEquals(1, indexCount(connection, "human_task_process_attention"));
+            assertEquals(1, indexCount(connection, "human_task_context_attention"));
             assertEquals(1, historyRows(connection, humanTaskVersion));
+            assertEquals(1, historyRows(connection, attentionVersion));
+            String attentionPlan = attentionQueryPlan(connection);
+            assertTrue(attentionPlan.contains("human_task_context_attention"), attentionPlan);
             assertEquals(SqliteSchema.currentVersion(), SqliteSchema.migrate(connection, CLOCK));
             assertEquals(1, indexCount(connection, "human_task_live_correlation"));
+            assertEquals(1, indexCount(connection, "human_task_process_attention"));
+            assertEquals(1, indexCount(connection, "human_task_context_attention"));
+            assertEquals(1, historyRows(connection, attentionVersion));
         }
     }
 
@@ -71,6 +96,26 @@ class SqliteHumanTaskMigrationUpgradeTest {
             statement.setString(1, index);
             try (ResultSet rows = statement.executeQuery()) {
                 return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private static String attentionQueryPlan(Connection connection) throws Exception {
+        try (var statement = connection.prepareStatement(
+                "EXPLAIN QUERY PLAN SELECT t.task_id FROM human_task t "
+                        + "JOIN process_instance p ON p.tenant_id = t.tenant_id "
+                        + "AND p.process_instance_id = t.process_instance_id "
+                        + "AND p.graph_version_pin = t.graph_version_pin "
+                        + "WHERE t.tenant_id = ? AND t.graph_version_pin = ? "
+                        + "AND t.status IN ('WAITING', 'ESCALATED') "
+                        + "AND t.confirmation_version > 0 "
+                        + "ORDER BY t.created_at_epoch_second, t.created_at_nano, t.task_id")) {
+            statement.setString(1, "tenant");
+            statement.setString(2, "graph");
+            try (ResultSet rows = statement.executeQuery()) {
+                var plan = new StringBuilder();
+                while (rows.next()) plan.append(rows.getString("detail")).append('\n');
+                return plan.toString();
             }
         }
     }

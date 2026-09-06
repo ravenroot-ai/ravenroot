@@ -58,6 +58,7 @@ function loadRuntimeNodeLabel() {
   // eslint-disable-next-line no-new-func
   return new Function(`
     ${extractFunctionSource(source, 'bypassedNodeName')}
+    ${extractFunctionSource(source, 'humanTaskNodeLabel')}
     ${extractFunctionSource(source, 'runtimeCountLabel')}
     ${extractFunctionSource(source, 'runtimeNodeLabel')}
     return runtimeNodeLabel;
@@ -155,5 +156,19 @@ describe('the switched-off marker rides on the name, not on the run state', () =
   it('still keeps the second separator inline when both numbers and the marker are present', () => {
     expect(nodeLabel(fakeNode({ name: 'source', instances: 1, arrivals: 10, bypassed: true })))
       .toBe('source · bypassed\n1 instance · 10 in flight');
+  });
+});
+
+describe('Human Task attention remains in the canvas label across runtime painting', () => {
+  const nodeLabel = loadRuntimeNodeLabel();
+
+  it('shows pending and escalated counts while idle', () => {
+    expect(nodeLabel(fakeNode({ name: 'approval', instances: 0, arrivals: 0,
+      humanTaskPending: 2, humanTaskEscalated: 1 }))).toBe('approval\n⚑ 2 · ▲ 1');
+  });
+
+  it('retains attention below the runtime instance line', () => {
+    expect(nodeLabel(fakeNode({ name: 'approval', instances: 1, arrivals: 1,
+      humanTaskPending: 2, humanTaskEscalated: 0 }))).toBe('approval\n1 instance\n⚑ 2');
   });
 });

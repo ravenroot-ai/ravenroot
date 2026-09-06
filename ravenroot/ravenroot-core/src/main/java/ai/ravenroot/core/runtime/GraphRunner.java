@@ -256,6 +256,14 @@ public final class GraphRunner implements AutoCloseable {
     private final Set<String> operationallyReachableNodes;
 
     /**
+     * Exact already-completed Human Task node for pinned continuation recovery, or {@code null}.
+     * Its configuration was admitted when the durable task was created and its graph bytes are
+     * content-addressed by the verified snapshot. Its factory is materialized lazily if a cycle
+     * reaches it again, so that new work is admitted against the current policy.
+     */
+    private final String completedHumanTaskNode;
+
+    /**
      * Nodes this runner composed as the unknown-behavior pass-through, decided here and never read
      * back from a node's own result (SEC-09).
      *
@@ -696,6 +704,36 @@ public final class GraphRunner implements AutoCloseable {
                 NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits);
     }
 
+    /**
+     * Composes a pinned Human Task continuation after {@code completedHumanTaskNode} has already
+     * durably completed. The exact node is not re-admitted against today's authoring policy and is
+     * not materialized before re-entry, because the durable task proves it was admitted with this
+     * verified graph version and {@link #executeAfterHumanTask} starts at its successors. Every
+     * other node receives the ordinary property, capability, nature, command, and complexity checks.
+     * If a cycle later revisits the completed node, ordinary factory creation applies today's policy
+     * before that visit can create a new task.
+     *
+     * @param graphManager graph containing the pinned Human Task
+     * @param snapshot verified content-addressed graph snapshot
+     * @param engine execution engine used for continuation dispatch
+     * @param behaviors current trusted behavior registry
+     * @param monitor execution monitor
+     * @param identitySource source of fresh continuation identifiers
+     * @param shutdownBound bounded node teardown duration
+     * @param executionLimits current execution resource limits
+     * @param completedHumanTaskNode exact durable task node already completed by the decision
+     */
+    public GraphRunner(GraphManager graphManager, GraphVersionSnapshot snapshot, ExecutionEngine engine,
+                       BehaviorRegistry behaviors, ExecutionMonitor monitor,
+                       ExecutionIdentitySource identitySource, Duration shutdownBound,
+                       GraphExecutionLimits executionLimits, String completedHumanTaskNode) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
+                UnknownBehaviorPolicy.passThrough(), null,
+                java.util.Objects.requireNonNull(snapshot, "snapshot"), ExecutionPolicy.STANDARD,
+                NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits,
+                requireCompletedHumanTaskNode(completedHumanTaskNode));
+    }
+
     private GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
                        ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
                        JoinStore joinStore, Clock clock, Duration shutdownBound,
@@ -713,6 +751,18 @@ public final class GraphRunner implements AutoCloseable {
                        UnknownBehaviorPolicy unknownBehaviors, ExecutionDomain domain,
                        GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy,
                        Runnable timeoutRelinquishedObserver, GraphExecutionLimits executionLimits) {
+        this(graphManager, engine, behaviors, monitor, identitySource, joinStore, clock, shutdownBound,
+                unknownBehaviors, domain, snapshot, executionPolicy, timeoutRelinquishedObserver,
+                executionLimits, null);
+    }
+
+    private GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                       ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                       JoinStore joinStore, Clock clock, Duration shutdownBound,
+                       UnknownBehaviorPolicy unknownBehaviors, ExecutionDomain domain,
+                       GraphVersionSnapshot snapshot, ExecutionPolicy executionPolicy,
+                       Runnable timeoutRelinquishedObserver, GraphExecutionLimits executionLimits,
+                       String completedHumanTaskNode) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.executionPolicy = java.util.Objects.requireNonNull(executionPolicy, "executionPolicy");
         this.executionLimits = java.util.Objects.requireNonNull(executionLimits, "executionLimits");
@@ -725,6 +775,7 @@ public final class GraphRunner implements AutoCloseable {
                 : requireDescribes(snapshot, submitted);
         this.graph = pinned.definition();
         this.behaviors = java.util.Objects.requireNonNull(behaviors, "behaviors");
+        this.completedHumanTaskNode = validateCompletedHumanTaskNode(this.graph, completedHumanTaskNode);
         validateAdmittedCommands(this.graph, this.behaviors, executionPolicy);
         this.operationallyReachableNodes = operationallyReachableNodes(this.graph, executionPolicy);
         this.pin = GraphExecutionPin.from(pinned);
@@ -745,7 +796,10 @@ public final class GraphRunner implements AutoCloseable {
         // spawned. Validating later would let a graph with a malformed operative property be
         // accepted, hashed, recorded and partly executed before the faulty node was reached, so the
         // failure would arrive after upstream nodes had already produced their effects.
-        new BehaviorPropertySchema(behaviors).validate(graph);
+        java.util.function.Predicate<GraphNode> requiresCurrentAdmission =
+                node -> !node.id().equals(this.completedHumanTaskNode);
+        new BehaviorPropertySchema(behaviors).validate(graph, requiresCurrentAdmission);
+        new BehaviorCapabilityPreflight(behaviors).validate(graph, requiresCurrentAdmission);
         // ADR 0024 §2: the declared runtime nature is checked on the same fail-first path and
         // for a stronger reason -- a nature is a privilege, so a graph that claims one the catalog
         // withheld must be refused before anything it could affect exists. Deliberately a separate
@@ -3870,6 +3924,7 @@ public final class GraphRunner implements AutoCloseable {
         // Preserve composition-time snapshots for operational graphs while never creating a factory
         // for a node whose every possible arrival is under the sticky passthrough ceiling.
         NodeHandler composed = node.kind() == NodeKind.BEHAVIOR && !authoredBypass
+                && !node.id().equals(completedHumanTaskNode)
                 && operationallyReachableNodes.contains(node.id())
                 ? behaviors.create(node).orElseGet(() -> fallback(node))
                 : null;
@@ -3929,6 +3984,26 @@ public final class GraphRunner implements AutoCloseable {
                 }
             }
         };
+    }
+
+    private static String requireCompletedHumanTaskNode(String nodeId) {
+        if (nodeId == null || nodeId.isBlank()) {
+            throw new IllegalArgumentException("completedHumanTaskNode cannot be blank");
+        }
+        return nodeId;
+    }
+
+    private static String validateCompletedHumanTaskNode(GraphDefinition graph, String nodeId) {
+        if (nodeId == null) return null;
+        GraphNode node = graph.nodes().stream()
+                .filter(candidate -> candidate.id().equals(nodeId))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "completed Human Task node is absent from pinned graph"));
+        if (node.kind() != NodeKind.BEHAVIOR) {
+            throw new IllegalArgumentException("completed Human Task continuation node is not a behavior");
+        }
+        return nodeId;
     }
 
     /**

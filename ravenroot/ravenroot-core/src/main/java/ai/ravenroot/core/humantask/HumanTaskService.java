@@ -8,6 +8,7 @@ import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeMessage;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadJson;
+import ai.ravenroot.api.payload.PayloadValue;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.EventEnvelope;
@@ -21,6 +22,12 @@ import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
@@ -48,6 +55,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.Set;
 import java.util.UUID;
@@ -59,6 +67,12 @@ import java.util.stream.Collectors;
 /** Reference monitor and transport-neutral inbox for first-class durable human tasks. */
 public final class HumanTaskService {
     public static final String HANDLER_NAME = "human-task";
+    public static final String CONFIRMATION_CONTENT_TYPE =
+            ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE;
+    public static final String CONFIRMATION_SCHEMA =
+            ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_SCHEMA;
+    public static final String CONFIRMATION_SCHEMA_VERSION =
+            ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION;
     private static final String EVENT_CONTENT_TYPE = "application/vnd.ravenroot.human-task-event+json";
     private final ExecutionStore store;
     private final Clock clock;
@@ -146,7 +160,10 @@ public final class HumanTaskService {
                 definition.escalationDelay().map(delay -> deadline(now, delay, "escalation")),
                 deadline(now, definition.expiryDelay(), "expiry"),
                 definition.reentryMapping(), definition.executionLimits(), continuationVersion, continuation,
-                ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation));
+                ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation),
+                definition.confirmationPresentation(), definition.confirmationPresentation().embedded()
+                        ? policy.confirmationLimits()
+                        : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC);
         DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         if (existing != null) {
             return new HumanTaskResult(existing.request().sameRequest(registration)
@@ -196,9 +213,168 @@ public final class HumanTaskService {
         return await(store.listHumanTasks(context.tenantId(), query));
     }
 
+    /**
+     * Reads authorized actionable embedded tasks in one exact durable runtime context.
+     *
+     * @param context authenticated caller identity and current authority.
+     * @param query exact bounded attention query.
+     * @return safe attention page with authoritative counts.
+     */
+    public HumanTaskAttentionPage attention(RequestContext context, HumanTaskAttentionQuery query) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(query, "query");
+        if (query.limit() > policy.confirmation().attentionMaxPageSize()) {
+            throw new IllegalArgumentException("human-task page limit must be between 1 and "
+                    + policy.confirmation().attentionMaxPageSize());
+        }
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        var authorization = new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+        return await(store.listHumanTaskAttention(context.tenantId(), query, authorization));
+    }
+
+    /**
+     * Recovers one authorized actionable embedded task without browser-held runtime context.
+     *
+     * @param context authenticated caller identity and current authority.
+     * @param locator durable task identity and exact generation.
+     * @return safe task projection, or empty for every unavailable state.
+     */
+    public Optional<HumanTaskAttentionItem> attention(
+            RequestContext context, HumanTaskAttentionLocator locator) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(locator, "locator");
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        var authorization = new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
+        return await(store.findHumanTaskAttention(context.tenantId(), locator, authorization));
+    }
+
+    /**
+     * Reports whether the connected store implements the complete embedded confirmation contract.
+     * @return {@code true} when persisted confirmation decisions can be queried and settled
+     */
+    public boolean supportsConfirmations() {
+        return store.supports(StoreCapability.HUMAN_TASK_CONFIRMATIONS)
+                && store.supports(StoreCapability.PROCESS_INVENTORY);
+    }
+
+    /**
+     * Reports whether current admission limits can create new embedded confirmations.
+     * @return {@code true} when the runtime and active policy can admit new confirmations
+     */
+    public boolean supportsConfirmationAdmission() {
+        return supportsConfirmations()
+                && policy.confirmation().maximumJsonBodyBytes() <= policy.decisionBodyMaxBytes()
+                && ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.responseBytes().length
+                <= policy.defaultResponseBytes();
+    }
+
+    /**
+     * Returns the body and comment budgets for one permitted embedded action, only after tenant and
+     * current-authority checks. Empty deliberately combines every unavailable case.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param action requested embedded action
+     * @return pinned parser limits when the task exists and the caller may attempt the action
+     */
+    public Optional<ConfirmationAuthority> confirmationAuthority(
+            RequestContext context, UUID taskId, HumanTaskConfirmationAction action) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(taskId, "taskId");
+        Objects.requireNonNull(action, "action");
+        if (!supportsConfirmations()) return Optional.empty();
+        DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
+        if (task == null || !task.request().confirmationPresentation().embedded()) return Optional.empty();
+        String actor = SecurityContext.of(context).qualifiedIdentity();
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        boolean requesterCancellation = action == HumanTaskConfirmationAction.CANCEL
+                && actor.equals(task.request().requester().qualifiedIdentity());
+        if (!requesterCancellation
+                && !task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
+            return Optional.empty();
+        }
+        return Optional.of(new ConfirmationAuthority(
+                task.request().executionLimits().decisionBodyMaxBytes(),
+                task.request().confirmationLimits().maxCommentUtf8Bytes()));
+    }
+
+    /**
+     * Projects a completed embedded decision without response, comment, actor, schema, or continuation.
+     * The decision itself has already authorized the caller; this method rechecks that current
+     * authority still permits the same action before returning the terminal row.
+     * @param context authenticated caller
+     * @param result authoritative settlement result
+     * @param action action applied or exactly replayed
+     * @return terminal safe projection, or empty if its context or authority cannot be verified
+     */
+    public Optional<HumanTaskAttentionItem> confirmationProjection(
+            RequestContext context, HumanTaskResult result, HumanTaskConfirmationAction action) {
+        Objects.requireNonNull(context, "context");
+        Objects.requireNonNull(result, "result");
+        Objects.requireNonNull(action, "action");
+        if (!supportsConfirmations()) return Optional.empty();
+        DurableHumanTask task = result.task();
+        if (task == null || !task.status().terminal()
+                || !context.tenantId().equals(task.key().tenantId())
+                || !attentionAuthorization(context).permittedActions(task.request()).contains(action)) {
+            return Optional.empty();
+        }
+        var process = await(store.findProcessInstance(task.key())).orElse(null);
+        if (process == null) return Optional.empty();
+        var request = task.request();
+        var limits = request.confirmationLimits();
+        return Optional.of(new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
+                process.graphVersionPin().reference(), process.deploymentId(), task.key().processInstanceId(),
+                request.traversalId(), request.nodeId(), task.createdAt(), request.expiresAt(),
+                request.escalateAt(), request.confirmationPresentation(), limits.maxPromptUtf8Bytes(),
+                limits.maxActionLabelUtf8Bytes(), limits.maxCommentUtf8Bytes(), List.of()));
+    }
+
+    /**
+     * Fixed server-authored response carried by a successful embedded resolve action.
+     * @return canonical boolean-true response envelope
+     */
+    public static OpaquePayload confirmationResponse() {
+        return OpaquePayload.of(
+                ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation.responseBytes(),
+                CONFIRMATION_CONTENT_TYPE);
+    }
+
+    /**
+     * Authorized parser budgets for one embedded confirmation request.
+     * @param decisionBodyMaxBytes pinned maximum request-body bytes
+     * @param commentMaxUtf8Bytes pinned maximum normalized comment bytes
+     */
+    public record ConfirmationAuthority(int decisionBodyMaxBytes, int commentMaxUtf8Bytes) {
+        /** Validates the immutable task-pinned limits. */
+        public ConfirmationAuthority {
+            if (decisionBodyMaxBytes < 1 || commentMaxUtf8Bytes < 1) {
+                throw new IllegalArgumentException("confirmation limits must be positive");
+            }
+        }
+    }
+
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response);
+        return resolve(context, taskId, expectedGeneration, response, "");
+    }
+
+    /**
+     * Resolves a task while atomically persisting its separate decision comment.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param expectedGeneration optimistic concurrency fence
+     * @param response schema-checked response envelope
+     * @param comment separate attributable decision comment
+     * @return authoritative settlement result
+     */
+    public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
+                                   OpaquePayload response, String comment) {
+        return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response, comment);
     }
 
     /**
@@ -220,11 +396,37 @@ public final class HumanTaskService {
     }
 
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null);
+        return deny(context, taskId, expectedGeneration, "");
+    }
+
+    /**
+     * Denies a task while atomically persisting its separate decision comment.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param expectedGeneration optimistic concurrency fence
+     * @param comment separate attributable decision comment
+     * @return authoritative settlement result
+     */
+    public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration,
+                                String comment) {
+        return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null, comment);
     }
 
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null);
+        return cancel(context, taskId, expectedGeneration, "");
+    }
+
+    /**
+     * Cancels a task while atomically persisting its separate decision comment.
+     * @param context authenticated caller
+     * @param taskId exact durable task identity
+     * @param expectedGeneration optimistic concurrency fence
+     * @param comment separate attributable decision comment
+     * @return authoritative settlement result
+     */
+    public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration,
+                                  String comment) {
+        return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null, comment);
     }
 
     public HumanTaskResult escalate(ExecutionKey key, UUID taskId, long expectedGeneration,
@@ -237,7 +439,8 @@ public final class HumanTaskService {
         DurableHumanTask task = await(store.loadHumanTask(key.tenantId(), taskId))
                 .filter(candidate -> candidate.key().equals(key)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
-        return commitTerminal(task, expectedGeneration, HumanTaskStatus.EXPIRED, "", null, correlationId, null);
+        return commitTerminal(task, expectedGeneration, HumanTaskStatus.EXPIRED, "", null, "",
+                correlationId, null);
     }
 
     public boolean ownsTimer(PendingWork.TimerDue timer) {
@@ -262,7 +465,7 @@ public final class HumanTaskService {
             if (task.status() == HumanTaskStatus.ESCALATED || task.status().terminal()) return true;
             if (!clock.instant().isBefore(task.request().expiresAt())) {
                 HumanTaskResult.Code code = commitTerminal(task, task.generation(), HumanTaskStatus.EXPIRED,
-                        "", null, correlationId, timer.fencingToken()).code();
+                        "", null, "", correlationId, timer.fencingToken()).code();
                 return code == HumanTaskResult.Code.EXPIRED
                         || code == HumanTaskResult.Code.ALREADY_APPLIED;
             }
@@ -273,7 +476,7 @@ public final class HumanTaskService {
         if (timer.workItemId().equals(expiryTimerId(task.request().taskId()))) {
             if (task.status().terminal()) return true;
             HumanTaskResult.Code code = commitTerminal(task, task.generation(), HumanTaskStatus.EXPIRED,
-                    "", null, correlationId, timer.fencingToken()).code();
+                    "", null, "", correlationId, timer.fencingToken()).code();
             return code == HumanTaskResult.Code.EXPIRED || code == HumanTaskResult.Code.ALREADY_APPLIED;
         }
         return false;
@@ -294,7 +497,7 @@ public final class HumanTaskService {
     }
 
     private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
-                                   HumanTaskStatus target, OpaquePayload response) {
+                                   HumanTaskStatus target, OpaquePayload response, String comment) {
         Objects.requireNonNull(context, "context");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
@@ -307,6 +510,16 @@ public final class HumanTaskService {
             auditOnly(task, "HUMAN_TASK_UNAUTHORIZED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
         }
+        if (!permitsDecision(task, target)) {
+            auditOnly(task, "HUMAN_TASK_ACTION_REFUSED", context.requestId());
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
+        }
+        try {
+            comment = normalizePinnedComment(task, comment);
+        } catch (IllegalArgumentException refused) {
+            auditOnly(task, "HUMAN_TASK_COMMENT_REFUSED", context.requestId());
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
+        }
         boolean possibleRedelivery = task.status() == target
                 && task.generation() == expectedGeneration + 1;
         if (possibleRedelivery && target == HumanTaskStatus.RESOLVED
@@ -315,7 +528,7 @@ public final class HumanTaskService {
             return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
         }
         if (possibleRedelivery) {
-            return new HumanTaskResult(exactRedelivery(task, target, expectedGeneration, actor, response)
+            return new HumanTaskResult(exactRedelivery(task, target, expectedGeneration, actor, response, comment)
                     ? HumanTaskResult.Code.ALREADY_APPLIED : HumanTaskResult.Code.ALREADY_SETTLED,
                     task, resumeTraversalOf(task));
         }
@@ -332,7 +545,15 @@ public final class HumanTaskService {
             auditOnly(task, "HUMAN_TASK_PAYLOAD_REFUSED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
         }
-        return commitTerminal(task, expectedGeneration, target, actor, response, context.requestId(), null);
+        return commitTerminal(task, expectedGeneration, target, actor, response, comment,
+                context.requestId(), null);
+    }
+
+    private static HumanTaskAttentionAuthorization attentionAuthorization(RequestContext context) {
+        Set<String> roles = context.roles().stream().map(Role::name)
+                .collect(Collectors.toUnmodifiableSet());
+        return new HumanTaskAttentionAuthorization(
+                SecurityContext.of(context).qualifiedIdentity(), roles, context.scopes());
     }
 
     private boolean validResponse(DurableHumanTask task, OpaquePayload response) {
@@ -392,7 +613,7 @@ public final class HumanTaskService {
 
     private HumanTaskResult commitTerminal(DurableHumanTask original, long expectedGeneration,
                                            HumanTaskStatus target, String actor, OpaquePayload response,
-                                           String correlationId, Long fencingToken) {
+                                           String comment, String correlationId, Long fencingToken) {
         int maxAttempts = original.request().executionLimits().writeAttempts();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
@@ -401,7 +622,7 @@ public final class HumanTaskService {
                 return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
             }
             if (task.generation() != expectedGeneration) {
-                if (exactRedelivery(task, target, expectedGeneration, actor, response)) {
+                if (exactRedelivery(task, target, expectedGeneration, actor, response, comment)) {
                     return new HumanTaskResult(HumanTaskResult.Code.ALREADY_APPLIED, task,
                             resumeTraversalOf(task));
                 }
@@ -416,9 +637,9 @@ public final class HumanTaskService {
             UUID resumeTraversalId = UUID.nameUUIDFromBytes(("human-task-reentry:"
                     + task.request().taskId() + ":" + expectedGeneration).getBytes(StandardCharsets.UTF_8));
             HumanTaskTransition taskTransition = switch (target) {
-                case RESOLVED -> new HumanTaskTransition.Resolved(task.request().taskId(), expectedGeneration, actor);
-                case DENIED -> new HumanTaskTransition.Denied(task.request().taskId(), expectedGeneration, actor);
-                case CANCELLED -> new HumanTaskTransition.Cancelled(task.request().taskId(), expectedGeneration, actor);
+                case RESOLVED -> new HumanTaskTransition.Resolved(task.request().taskId(), expectedGeneration, actor, comment);
+                case DENIED -> new HumanTaskTransition.Denied(task.request().taskId(), expectedGeneration, actor, comment);
+                case CANCELLED -> new HumanTaskTransition.Cancelled(task.request().taskId(), expectedGeneration, actor, comment);
                 case EXPIRED -> new HumanTaskTransition.Expired(task.request().taskId(), expectedGeneration);
                 default -> throw new IllegalArgumentException("not a terminal human-task status: " + target);
             };
@@ -474,7 +695,7 @@ public final class HumanTaskService {
                         DurableHumanTask current = await(store.loadHumanTask(task.key().tenantId(),
                                 task.request().taskId())).orElse(task);
                         return commitTerminal(current, current.generation(), HumanTaskStatus.EXPIRED,
-                                "", null, correlationId, fencingToken);
+                                "", null, "", correlationId, fencingToken);
                     }
                     if (attempt < maxAttempts) continue;
                 }
@@ -510,12 +731,54 @@ public final class HumanTaskService {
     }
 
     private boolean exactRedelivery(DurableHumanTask task, HumanTaskStatus target,
-                                    long expectedGeneration, String actor, OpaquePayload response) {
+                                    long expectedGeneration, String actor, OpaquePayload response,
+                                    String comment) {
         if (task.status() != target || task.generation() != expectedGeneration + 1
-                || !task.actor().equals(actor)) return false;
+                || !task.actor().equals(actor) || !task.decisionComment().equals(comment)) return false;
         if (target != HumanTaskStatus.RESOLVED) return true;
         DurableHandler handler = await(store.loadHandler(task.key(), task.request().taskId())).orElse(null);
         return handler != null && response != null && response.equals(handler.outcomePayload());
+    }
+
+    private static String normalizePinnedComment(DurableHumanTask task, String comment) {
+        comment = comment == null ? "" : comment.strip();
+        var requirement = task.request().confirmationPresentation().commentRequirement();
+        if (requirement == ai.ravenroot.api.persistence.HumanTaskCommentRequirement.DISALLOWED
+                && !comment.isEmpty()) {
+            throw new IllegalArgumentException("decision comment is not allowed by this presentation");
+        }
+        if (requirement == ai.ravenroot.api.persistence.HumanTaskCommentRequirement.REQUIRED
+                && comment.isEmpty()) {
+            throw new IllegalArgumentException("decision comment is required by this presentation");
+        }
+        for (int index = 0; index < comment.length(); index++) {
+            char unit = comment.charAt(index);
+            if (Character.isHighSurrogate(unit)) {
+                if (index + 1 == comment.length() || !Character.isLowSurrogate(comment.charAt(index + 1))) {
+                    throw new IllegalArgumentException("decision comment contains malformed Unicode");
+                }
+                index++;
+            } else if (Character.isLowSurrogate(unit)
+                    || (Character.isISOControl(unit) && unit != '\n' && unit != '\t')) {
+                throw new IllegalArgumentException("decision comment contains invalid control or Unicode data");
+            }
+        }
+        if (comment.getBytes(StandardCharsets.UTF_8).length
+                > task.request().confirmationLimits().maxCommentUtf8Bytes()) {
+            throw new IllegalArgumentException("decision comment exceeds pinned byte limit");
+        }
+        return comment;
+    }
+
+    private static boolean permitsDecision(DurableHumanTask task, HumanTaskStatus target) {
+        if (!task.request().confirmationPresentation().embedded()) return true;
+        ai.ravenroot.api.persistence.HumanTaskConfirmationAction action = switch (target) {
+            case RESOLVED -> ai.ravenroot.api.persistence.HumanTaskConfirmationAction.RESOLVE;
+            case DENIED -> ai.ravenroot.api.persistence.HumanTaskConfirmationAction.DENY;
+            case CANCELLED -> ai.ravenroot.api.persistence.HumanTaskConfirmationAction.CANCEL;
+            default -> null;
+        };
+        return action == null || task.request().confirmationPresentation().actions().contains(action);
     }
 
     private EventEnvelope event(ExecutionKey key, StoredProcessInstance stored,

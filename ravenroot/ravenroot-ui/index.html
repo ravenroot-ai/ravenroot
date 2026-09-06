@@ -910,6 +910,30 @@
   </section>
 </dialog>
 
+<!-- A Human Task decision is a central modal operation: the selected graph node remains selection
+     context, while this form identifies one exact durable task and generation. All prose enters as
+     textContent in human-task-ui.js; no presentation value becomes markup or a destination. -->
+<dialog id="human-task-dialog" class="human-task-dialog" aria-labelledby="human-task-dialog-title"
+        aria-describedby="human-task-dialog-prompt">
+  <form method="dialog" class="human-task-decision-form" novalidate>
+    <header class="credentials-hd">
+      <h2 id="human-task-dialog-title">Human task decision</h2>
+      <button class="btn" type="button" data-human-task-close>Close</button>
+    </header>
+    <p id="human-task-dialog-prompt" class="human-task-prompt" data-human-task-prompt></p>
+    <p class="human-task-dialog-identity" data-human-task-identity></p>
+    <div class="editor-field full" data-human-task-comment-field>
+      <label for="human-task-comment">Comment</label>
+      <textarea id="human-task-comment" data-human-task-comment
+                aria-describedby="human-task-comment-hint human-task-error"></textarea>
+      <small id="human-task-comment-hint" data-human-task-comment-hint></small>
+    </div>
+    <p id="human-task-error" class="credential-error" role="status" aria-live="polite"
+       data-human-task-error hidden></p>
+    <div class="human-task-dialog-actions" data-human-task-actions></div>
+  </form>
+</dialog>
+
 <!-- ══ DRAG CARRIER ══════════════════════════════════════════════════════════════════════════════
      A 200x32 chip, not the panel itself: dragging a full-width panel across a stage that is
      already 46% chrome hides the target being aimed at. `pointer-events: none` so it can never

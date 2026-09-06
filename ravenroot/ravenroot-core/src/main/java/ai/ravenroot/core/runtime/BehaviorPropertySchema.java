@@ -81,9 +81,17 @@ public final class BehaviorPropertySchema {
 
     /** Validates every behavior node in {@code graph}, throwing on the first violation. */
     public void validate(GraphDefinition graph) {
+        validate(graph, node -> true);
+    }
+
+    /** Validates behavior nodes selected by {@code include}, for pinned continuation recovery. */
+    void validate(GraphDefinition graph, java.util.function.Predicate<GraphNode> include) {
         Objects.requireNonNull(graph, "graph");
+        Objects.requireNonNull(include, "include");
         for (GraphNode node : graph.nodes()) {
-            validateNode(node);
+            if (include.test(node)) {
+                validateNode(node);
+            }
         }
     }
 

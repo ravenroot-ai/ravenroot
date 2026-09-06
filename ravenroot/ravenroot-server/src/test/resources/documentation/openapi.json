@@ -731,6 +731,61 @@
         }
       }
     },
+    "/v1/human-tasks/attention": {
+      "get": {
+        "summary": "Lists authorized actionable embedded Human Tasks for an exact durable graph context, or recovers one actionable task by its exact task and generation locator.",
+        "x-assistant-posture": "READ",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "graphVersion", "in": "query", "required": false, "description": "Required for aggregate mode; exact durable graph version.", "schema": {"type": "string"}},
+          {"name": "deploymentId", "in": "query", "required": false, "description": "Aggregate mode requires exactly one of deploymentId and processInstanceId.", "schema": {"type": "string"}},
+          {"name": "processInstanceId", "in": "query", "required": false, "description": "Aggregate mode requires exactly one of processInstanceId and deploymentId.", "schema": {"type": "string"}},
+          {"name": "traversalId", "in": "query", "required": false, "description": "Optional aggregate traversal filter.", "schema": {"type": "string"}},
+          {"name": "nodeId", "in": "query", "required": false, "description": "Optional aggregate node filter.", "schema": {"type": "string"}},
+          {"name": "taskId", "in": "query", "required": false, "description": "With generation and no graph context, selects the exact recovery locator.", "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": false, "description": "Required with taskId in exact-locator mode.", "schema": {"type": "integer"}},
+          {"name": "cursor", "in": "query", "required": false, "description": "Opaque aggregate page cursor.", "schema": {"type": "string"}},
+          {"name": "limit", "in": "query", "required": false, "schema": {"type": "integer", "minimum": 1, "maximum": 100, "default": 20}}
+        ],
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskAttentionPage"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
+    "/v1/human-tasks/{taskId}/confirmation/{action}": {
+      "post": {
+        "summary": "Applies one generation-fenced built-in confirmation action with bounded separate decision metadata and returns only its safe terminal task projection.",
+        "x-assistant-posture": "NEVER",
+        "security": [{"bearerAuth": []}],
+        "parameters": [
+          {"name": "taskId", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "action", "in": "path", "required": true, "schema": {"type": "string"}},
+          {"name": "generation", "in": "query", "required": true, "schema": {"type": "integer", "format": "int64", "minimum": 1}}
+        ],
+        "requestBody": {"required": true, "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskConfirmationRequest"}}}},
+        "responses": {
+          "200": {"description": "success", "content": {"application/json": {"schema": {"$ref": "#/components/schemas/HumanTaskConfirmationResult"}}}},
+          "401": {"description": "AUTHENTICATION_REQUIRED"},
+          "403": {"description": "ACCESS_DENIED"},
+          "405": {"description": "METHOD_NOT_ALLOWED"},
+          "431": {"description": "HEADER_VALUE_TOO_LARGE"},
+          "414": {"description": "QUERY_TOO_LARGE"},
+          "429": {"description": "LIMITER_CAPACITY_EXHAUSTED"},
+          "400": {"description": "INVALID_REQUEST"},
+          "404": {"description": "UNKNOWN_RESOURCE"},
+          "409": {"description": "CONFLICT"},
+          "500": {"description": "INTERNAL_ERROR"}
+        }
+      }
+    },
     "/v1/human-tasks/{taskId}/{decision}": {
       "post": {
         "summary": "Resolves, denies, or cancels one tenant-scoped human task under its required generation fence. Resolve accepts the task's bounded PayloadEnvelope; unknown and cross-tenant task IDs are indistinguishable.",
@@ -1097,6 +1152,13 @@
       "PayloadEnvelope": {"type": "object", "required": ["schema", "schemaVersion", "kind", "value"], "properties": {"schema": {"type": "string"}, "schemaVersion": {"type": "string"}, "kind": {"type": "string"}, "value": {}}},
       "HumanTaskInboxItem": {"type": "object", "required": ["taskId", "processInstanceId", "nodeId", "title", "description", "status", "generation", "responseContentType", "responseSchema", "responseSchemaVersion", "responseKind", "maxResponseBytes", "expiresAt"], "properties": {"taskId": {"type": "string", "format": "uuid"}, "processInstanceId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string"}, "title": {"type": "string"}, "description": {"type": "string"}, "status": {"type": "string"}, "generation": {"type": "integer", "format": "int64"}, "responseContentType": {"type": "string"}, "responseSchema": {"type": "string"}, "responseSchemaVersion": {"type": "string"}, "responseKind": {"type": "string"}, "maxResponseBytes": {"type": "integer"}, "expiresAt": {"type": "string", "format": "date-time"}, "escalateAt": {"type": "string", "format": "date-time"}}},
       "HumanTaskInboxPage": {"type": "object", "required": ["items", "nextCursor"], "properties": {"items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskInboxItem"}}, "nextCursor": {"type": "string", "format": "uuid", "nullable": true}}},
+      "HumanTaskConfirmationRequest": {"type": "object", "additionalProperties": false, "required": ["schemaVersion", "comment"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "comment": {"type": "string"}}},
+      "HumanTaskConfirmationPresentation": {"type": "object", "required": ["version", "prompt", "commentRequirement", "actions", "resolveLabel", "denyLabel", "cancelLabel"], "properties": {"version": {"type": "integer", "enum": [1]}, "prompt": {"type": "string"}, "commentRequirement": {"type": "string", "enum": ["DISALLOWED", "OPTIONAL", "REQUIRED"]}, "actions": {"type": "array", "items": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}}, "resolveLabel": {"type": "string"}, "denyLabel": {"type": "string"}, "cancelLabel": {"type": "string"}}},
+      "HumanTaskAttentionItem": {"type": "object", "required": ["taskId", "generation", "status", "graphVersion", "deploymentId", "processInstanceId", "traversalId", "nodeId", "createdAt", "expiresAt", "escalateAt", "promptMaxUtf8Bytes", "actionLabelMaxUtf8Bytes", "commentMaxUtf8Bytes", "presentation", "availableActions"], "properties": {"taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "status": {"type": "string"}, "graphVersion": {"type": "string"}, "deploymentId": {"type": "string", "nullable": true}, "processInstanceId": {"type": "string", "format": "uuid"}, "traversalId": {"type": "string", "format": "uuid"}, "nodeId": {"type": "string"}, "createdAt": {"type": "string", "format": "date-time"}, "expiresAt": {"type": "string", "format": "date-time"}, "escalateAt": {"type": "string", "format": "date-time", "nullable": true}, "promptMaxUtf8Bytes": {"type": "integer"}, "actionLabelMaxUtf8Bytes": {"type": "integer"}, "commentMaxUtf8Bytes": {"type": "integer"}, "presentation": {"$ref": "#/components/schemas/HumanTaskConfirmationPresentation"}, "availableActions": {"type": "array", "items": {"type": "string", "enum": ["RESOLVE", "DENY", "CANCEL"]}}}},
+      "HumanTaskAttentionCounts": {"type": "object", "required": ["pending", "escalated"], "properties": {"pending": {"type": "integer"}, "escalated": {"type": "integer"}}},
+      "HumanTaskNodeCount": {"allOf": [{"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, {"type": "object", "required": ["nodeId"], "properties": {"nodeId": {"type": "string"}}}]},
+      "HumanTaskAttentionPage": {"type": "object", "required": ["schemaVersion", "items", "nextCursor", "counts", "nodeCounts"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "items": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}, "nextCursor": {"type": "string", "nullable": true}, "counts": {"$ref": "#/components/schemas/HumanTaskAttentionCounts"}, "nodeCounts": {"type": "array", "items": {"$ref": "#/components/schemas/HumanTaskNodeCount"}}}},
+      "HumanTaskConfirmationResult": {"type": "object", "required": ["schemaVersion", "outcome", "task"], "properties": {"schemaVersion": {"type": "integer", "enum": [1]}, "outcome": {"type": "string", "enum": ["APPLIED", "ALREADY_APPLIED"]}, "task": {"$ref": "#/components/schemas/HumanTaskAttentionItem"}}},
       "HumanTaskDecisionResult": {"type": "object", "required": ["outcome", "taskId", "generation"], "properties": {"outcome": {"type": "string"}, "taskId": {"type": "string", "format": "uuid"}, "generation": {"type": "integer", "format": "int64"}, "resumeTraversalId": {"type": "string", "format": "uuid"}}}
     }
   }

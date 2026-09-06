@@ -30,4 +30,21 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
         return "{\"schemaVersion\":" + schemaVersion
                 + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes + "}";
     }
+
+    String json(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
+        var confirmation = humanTaskPolicy.confirmation();
+        return "{\"schemaVersion\":" + schemaVersion
+                + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes
+                + ",\"humanTasks\":{\"schemaVersion\":1"
+                + ",\"confirmationPresentationVersions\":[1]"
+                + ",\"confirmationPromptMaxUtf8Bytes\":" + confirmation.maxPromptUtf8Bytes()
+                + ",\"confirmationActionLabelMaxUtf8Bytes\":" + confirmation.maxActionLabelUtf8Bytes()
+                + ",\"commentMaxUtf8Bytes\":" + confirmation.maxCommentUtf8Bytes()
+                + ",\"attentionPollMillis\":" + confirmation.pollAfterMillis()
+                + ",\"attentionBackoffMaxMillis\":" + confirmation.pollBackoffMaxMillis()
+                + ",\"attentionPageSize\":" + confirmation.attentionDefaultPageSize()
+                + ",\"attentionPageSizeMax\":" + confirmation.attentionMaxPageSize()
+                + "}}";
+    }
 }

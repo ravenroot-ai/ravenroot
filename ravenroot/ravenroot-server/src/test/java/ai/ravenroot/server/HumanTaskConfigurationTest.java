@@ -50,6 +50,18 @@ class HumanTaskConfigurationTest {
     }
 
     @Test
+    void confirmationValuesUseTheSamePropertyEnvironmentAndPolicyAuthority() {
+        var policy = HumanTaskConfiguration.fromSources(
+                Map.of("ravenroot.human-task.max-confirmation-prompt-bytes", "8192",
+                        "ravenroot.human-task.default-attention-page-size", "25"),
+                Map.of("RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES", "4096",
+                        "RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE", "80"));
+        assertEquals(8_192, policy.confirmation().maxPromptUtf8Bytes());
+        assertEquals(25, policy.confirmation().attentionDefaultPageSize());
+        assertEquals(80, policy.confirmation().attentionMaxPageSize());
+    }
+
+    @Test
     void malformedAndOverflowValuesAreSanitizedAndAttributed() {
         for (String value : new String[]{"secret-text", "999999999999999999999999999"}) {
             var failure = assertThrows(IllegalArgumentException.class,

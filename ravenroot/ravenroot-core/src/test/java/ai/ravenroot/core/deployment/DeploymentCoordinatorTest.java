@@ -20,6 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -448,6 +449,44 @@ class DeploymentCoordinatorTest {
         assertNotNull(after.failure(), "and an operator can see that the effect failed");
         assertEquals("java.lang.IllegalStateException", after.failure().message(),
                 "the classifier reaches operator surfaces, so it must never be the message");
+    }
+
+    /**
+     * A cancel does not disprove the last recorded failure, so it must not erase it — while a restart,
+     * which replaces the activation that failure was about, may.
+     *
+     * <p>The registry treats every new generation as the explicit recovery boundary and clears the
+     * failure with it. ADR 0038 leaves that behaviour alone, because changing it would change what an
+     * existing conformance test asserts, and hands the distinction to the coordinator as the only layer
+     * that knows which barrier it applied. Both halves are driven here, because handling that only ever
+     * preserved would silently make a restart look permanently degraded.</p>
+     */
+    @Test
+    void aCancelRetainsTheRecordedFailureAndARestartClearsIt() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "failure-across-a-barrier");
+        DeploymentId id = fixture.idOf(target);
+        var coordinator = fixture.coordinator("owner-a");
+        target.failNext(new IllegalStateException("the runtime refused"));
+        coordinator.submit(TENANT, id, new LifecycleCommand.Start("s", 1,
+                DeploymentRegistry.UpdateStrategy.STOP_FIRST), GenerationExpectation.exactly(0));
+        DeploymentRegistry.Failure recorded = fixture.record(TENANT, id).failure();
+        assertNotNull(recorded, "the failed start recorded a cause");
+
+        coordinator.submit(TENANT, id, new LifecycleCommand.Cancel("c", "wrong input batch"),
+                GenerationExpectation.exactly(1));
+
+        DeploymentRegistry.Failure afterCancel = fixture.record(TENANT, id).failure();
+        assertNotNull(afterCancel, "cancelling in-flight work is not a statement that the failure did "
+                + "not happen, and the operator must not lose it to a barrier that never disproved it");
+        assertEquals(recorded.code(), afterCancel.code());
+        assertEquals(recorded.message(), afterCancel.message());
+
+        coordinator.submit(TENANT, id, new LifecycleCommand.Restart("r"), GenerationExpectation.any());
+
+        assertNull(fixture.record(TENANT, id).failure(),
+                "a restart replaces the activation the failure was about, so the new generation really "
+                        + "is the recovery boundary the registry treats it as");
     }
 
     /**

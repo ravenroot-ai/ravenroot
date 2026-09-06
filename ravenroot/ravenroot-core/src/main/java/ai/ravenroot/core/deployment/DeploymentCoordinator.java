@@ -350,6 +350,7 @@ public final class DeploymentCoordinator {
                 : new DeploymentCommandOutcome.Accepted(identity(intent), from, generation);
 
         if (replayed) return outcome;
+        intent = preserveFailureAcrossACancel(record, intent, command);
 
         Optional<DeploymentLifecycleTarget> target = targets.resolve(tenantId, deploymentId);
         if (target.isEmpty() || !ownership.holds(intent)) {
@@ -374,6 +375,29 @@ public final class DeploymentCoordinator {
             return new DeploymentCommandOutcome.Terminal(identity(removed), removed.generation());
         }
         return outcome;
+    }
+
+    /**
+     * Restores a recorded failure that writing a barrier cleared.
+     *
+     * <p>{@code DeploymentRegistry.command} treats a new generation as the explicit recovery boundary
+     * and drops the recorded failure with it. That is right for a {@code Restart}, which replaces the
+     * activation the failure was about, and wrong for a {@code Cancel}, which ends the work admitted so
+     * far and says nothing whatever about whether the last recorded failure happened. ADR 0038 leaves
+     * the registry behaviour exactly as it is — changing it would change what an existing conformance
+     * test asserts about explicit recovery — and flags the case for the coordinator, which is the only
+     * layer that knows which barrier it just applied. This is that handling.</p>
+     *
+     * <p>Best-effort and idempotent: the write is keyed by the new generation and this owner's fence,
+     * so a retry replays it, and losing the annotation costs an operator context rather than the
+     * command's answer.</p>
+     */
+    private Record preserveFailureAcrossACancel(Record before, Record intent, LifecycleCommand command) {
+        if (!(command instanceof LifecycleCommand.Cancel) || before.failure() == null
+                || intent.failure() != null) {
+            return intent;
+        }
+        return ownership.record(intent, before.failure(), "cancel-retains-failure");
     }
 
     /**

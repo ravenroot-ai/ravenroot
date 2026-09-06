@@ -121,18 +121,31 @@ final class DeploymentOwnership {
      * answer.</p>
      */
     void report(Record record, Throwable failure) {
-        if (!holds(record)) return;
-        String key = "fail:" + record.generation() + ":" + record.lease().fence();
+        record(record, new DeploymentRegistry.Failure("LIFECYCLE_EFFECT_FAILED", classify(failure),
+                record.updatedAt()), "fail");
+    }
+
+    /**
+     * Writes a sanitized failure back onto the aggregate under this owner's fence.
+     *
+     * <p>Shared by the two callers that need it for opposite reasons: one has just seen an effect fail,
+     * and the other has just written a barrier that cleared a failure it did not disprove. Both are
+     * best-effort, and both key the write by the generation and fence so a retry replays rather than
+     * appending a second identical record.</p>
+     *
+     * @return the record after the write, or the record unchanged when nothing was written.
+     */
+    Record record(Record record, DeploymentRegistry.Failure failure, String slot) {
+        if (!holds(record)) return record;
+        String key = slot + ":" + record.generation() + ":" + record.lease().fence();
         try {
-            await(registry.fail(
-                    new DeploymentRegistry.Failure("LIFECYCLE_EFFECT_FAILED", classify(failure),
-                            record.updatedAt()),
-                    record.lease(),
+            return await(registry.fail(failure, record.lease(),
                     new DeploymentRegistry.Command(record.tenantId(), record.deploymentId(), key,
                             digestOf(key), RevisionExpectation.exactly(record.revision()),
                             GenerationExpectation.any())));
         } catch (RuntimeException unrecorded) {
             // Deliberately swallowed; see this method's contract above.
+            return record;
         }
     }
 

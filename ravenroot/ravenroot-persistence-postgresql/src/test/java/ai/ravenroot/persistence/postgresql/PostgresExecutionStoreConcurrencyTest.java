@@ -1,6 +1,9 @@
 package ai.ravenroot.persistence.postgresql;
 
+import ai.ravenroot.api.application.Traversal;
+import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.ExecutionBatch;
+import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
@@ -65,6 +68,63 @@ class PostgresExecutionStoreConcurrencyTest {
      * surviving side effects is a second, independent witness: a lost update loses a timer row too, and
      * a store that somehow kept the revisions but dropped a write would fail on the timers instead.</p>
      */
+    /**
+     * A loaded aggregate's revision describes the state beside it, even while a writer is advancing it.
+     *
+     * <p>This is the read half of the same problem, and it is the one that looks safe. A fold reads the
+     * instance's revision and then its traversals, invocations, causal edges and attempts. Under
+     * {@code READ COMMITTED} each of those statements takes its own snapshot <em>whether or not a
+     * transaction is open</em>, so the natural implementation returns a
+     * {@link StoredProcessInstance} pairing a revision with a state that has since moved past it —
+     * roughly one load in seven under this test's contention, measured before the fix. Nothing throws;
+     * the caller simply receives a snapshot that never existed.</p>
+     *
+     * <p>The invariant is arithmetic rather than probabilistic: this instance gains exactly one
+     * traversal per write, so a load reporting revision {@code r} must show exactly {@code r}
+     * traversals. A torn read shows more, because the meta row is read first and the rows after it.</p>
+     */
+    @Test
+    void aLoadedAggregateAgreesWithItsOwnRevisionWhileAWriterAdvancesIt() throws Exception {
+        String storeId = "concurrency-load-" + UUID.randomUUID();
+        var key = new ExecutionKey("acme", UUID.randomUUID());
+        var clock = new MutableClock(EPOCH);
+
+        try (var store = new PostgresExecutionStore(PostgresTestDatabase.dataSourceFor(storeId), clock)) {
+            await(store.apply(creationBatch(key, UUID.randomUUID())));
+
+            var stop = new java.util.concurrent.atomic.AtomicBoolean();
+            var writer = CompletableFuture.runAsync(() -> {
+                while (!stop.get()) {
+                    UUID added = UUID.randomUUID();
+                    store.apply(ExecutionBatch.to(key)
+                            .expecting(RevisionExpectation.any())
+                            .apply(new ExecutionTransition.TraversalAdded(new Traversal(added,
+                                    "ingress", TraversalStatus.ACCEPTED, java.util.Map.of())))
+                            .build()).toCompletableFuture().join();
+                }
+            });
+
+            var torn = new ArrayList<String>();
+            int reads = 0;
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (System.nanoTime() < deadline) {
+                StoredProcessInstance loaded = await(store.load(key));
+                reads++;
+                int traversals = loaded.state().traversals().size();
+                if (traversals != loaded.revision()) {
+                    torn.add("revision=" + loaded.revision() + " traversals=" + traversals);
+                }
+            }
+            stop.set(true);
+            writer.get(1, TimeUnit.MINUTES);
+
+            assertTrue(reads > 0, "the probe never managed a single read");
+            assertTrue(torn.isEmpty(), torn.size() + " of " + reads
+                    + " loads returned an aggregate whose revision does not describe its state, so the "
+                    + "fold saw more than one committed snapshot: " + torn.subList(0, Math.min(5, torn.size())));
+        }
+    }
+
     @Test
     void concurrentWritersToOneInstanceEachAdvanceTheRevisionByExactlyOne() throws Exception {
         String storeId = "concurrency-revision-" + UUID.randomUUID();

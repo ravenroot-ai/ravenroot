@@ -21,7 +21,7 @@
  * contention, which is the one failure this adapter exists to make impossible.</p>
  *
  * <h2>Where it must not be deployed</h2>
- * <p><strong>All four stores of one deployment must address one database.</strong> Acceptance is
+ * <p><strong>All durable stores of one deployment must address one database.</strong> Acceptance is
  * ordered rather than distributed: a graph definition is committed, then the manifest that pins it,
  * then the batch that references both. That ordering is safe because a later step can check the
  * earlier one's row inside its own transaction, and it stops being safe the moment the rows live in

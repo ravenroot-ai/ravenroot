@@ -62,7 +62,7 @@ import java.util.function.Supplier;
  * which is a strictly stronger signal than the pin column: it is keyed by the same content address this
  * store uses rather than by an opaque reference string, and it catches a manifest pinned for an
  * execution whose acceptance has not yet committed a {@code process_instance} row. Every reference class
- * neither table can answer — a deployment, anything outside this deployment's four stores — reaches this
+ * neither table can answer — a deployment, anything outside this deployment's durable stores — reaches this
  * adapter only through the composed {@link GraphDefinitionReferences}, exactly as the port's javadoc
  * anticipates.</p>
  */

@@ -106,17 +106,68 @@ final class Transactions {
     }
 
     /**
-     * Runs {@code work} against a connection in autocommit, for reads that need no transaction.
+     * Runs {@code work} against a connection in autocommit, for reads of a <em>single</em> statement.
      *
-     * <p>A single statement is already atomic, and wrapping one read in an explicit transaction buys
-     * nothing but a second round trip. Multi-statement reads that must see one consistent snapshot use
-     * {@link #inTransaction} instead, and the distinction is deliberate rather than incidental: a read
-     * that folds an aggregate from several tables is not correct here.</p>
+     * <p>One statement is already atomic, and wrapping it in an explicit transaction buys nothing but
+     * a second round trip. A read that issues more than one statement and needs them to agree must
+     * use {@link #readConsistent} instead — see the reason there, which is not the reason one would
+     * guess.</p>
      */
     <T> T readOnly(Work<T> work) throws SQLException {
         try (Connection connection = open()) {
             return work.run(connection);
         }
+    }
+
+    /**
+     * Runs a multi-statement read that must see one consistent snapshot.
+     *
+     * <h2>Why this is not simply {@link #inTransaction}</h2>
+     * <p>Opening a transaction is not what makes several statements agree. Under
+     * {@code READ COMMITTED} — the level everything else in this adapter runs at, and PostgreSQL's
+     * default — <strong>every statement takes a fresh snapshot, transaction or not</strong>. A fold
+     * that reads an instance's revision and then its traversals, invocations, causal edges and
+     * attempts would therefore see up to five different committed states while looking exactly like
+     * an atomic read, and would return an aggregate whose revision does not describe the state beside
+     * it. Worse, the fold checks references <em>across</em> those reads: an invocation observed in one
+     * snapshot can name a traversal absent from the next, and the adapter would report
+     * {@link ai.ravenroot.api.persistence.ExecutionStoreFailure.Corrupted} — its loudest signal — for
+     * a database that is perfectly healthy and merely busy.</p>
+     *
+     * <p>{@code REPEATABLE READ} takes one snapshot at the first statement and holds it for the whole
+     * transaction, which is exactly and only what a fold needs. It costs nothing extra for a read-only
+     * transaction: PostgreSQL's snapshot isolation means readers still never block writers and are
+     * never blocked by them. Retries are kept because a serialization failure remains possible, and a
+     * read is the safest possible thing to retry.</p>
+     *
+     * <p>This is deliberately a separate method rather than a stricter default for every read. A
+     * single-statement read gains nothing from it and would pay a round trip, and a reader that has
+     * to choose is a reader who has to think about whether their statements must agree.</p>
+     */
+    <T> T readConsistent(Work<T> work) throws SQLException {
+        SQLException lastRetryable = null;
+        for (int attempt = 0; attempt <= config.serializationRetries(); attempt++) {
+            try (Connection connection = open()) {
+                connection.setTransactionIsolation(Connection.TRANSACTION_REPEATABLE_READ);
+                connection.setAutoCommit(false);
+                try {
+                    T result = work.run(connection);
+                    connection.commit();
+                    return result;
+                } catch (SQLException failed) {
+                    safeRollback(connection);
+                    if (SqlStates.isRetryable(failed)) {
+                        lastRetryable = failed;
+                        continue;
+                    }
+                    throw failed;
+                } catch (RuntimeException failed) {
+                    safeRollback(connection);
+                    throw failed;
+                }
+            }
+        }
+        throw lastRetryable;
     }
 
     private Connection open() throws SQLException {

@@ -444,7 +444,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     public CompletionStage<StoredProcessInstance> load(ExecutionKey key) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
-            return read(key, connection -> {
+            return readFolded(key, connection -> {
                 InstanceMeta meta = readMeta(connection, key, false);
                 if (meta == null) {
                     throw failure(new ExecutionStoreFailure.NotFound(key));
@@ -923,7 +923,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     public CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
-            return read(key, connection -> {
+            return readFolded(key, connection -> {
                 Instant now = clock.instant();
                 try (PreparedStatement statement = connection.prepareStatement(INVENTORY_COLUMNS
                         + "WHERE p.tenant_id = ? AND p.process_instance_id = ?")) {
@@ -947,7 +947,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     public CompletionStage<List<TraversalInventoryEntry>> listTraversals(ExecutionKey key) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
-            return read(key, connection -> {
+            return readFolded(key, connection -> {
                 InstanceMeta meta = readMeta(connection, key, false);
                 if (meta == null) {
                     // NotFound rather than an empty list: an instance that exists with no traversals
@@ -1121,7 +1121,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
             requireTenantId(tenantId);
             Objects.requireNonNull(traversalId, "traversalId");
             Instant now = clock.instant();
-            return read(null, connection -> {
+            return readFolded(null, connection -> {
                 DurableExecutionResult stored = readExecutionResult(connection, tenantId, traversalId);
                 if (stored == null) {
                     return Optional.<DurableExecutionResult>empty();
@@ -1181,7 +1181,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 throw failure(ExecutionStoreFailure.invalid("afterOffset cannot be negative"));
             }
             requireLimit(limit);
-            return read(null, connection -> {
+            return readFolded(null, connection -> {
                 long retainedFrom = readWatermarkColumn(connection, tenantId, "retained_from");
                 // Strictly below: a caller resuming from the last offset it saw is asking for what comes
                 // after a record it already holds, and that record being the oldest survivor is the
@@ -1355,6 +1355,16 @@ public final class PostgresExecutionStore implements ExecutionStore {
 
                 // Only a contiguous prefix goes. Punching a hole in the middle would leave surviving
                 // offsets that no single retained_from could honestly describe.
+                //
+                // The allocation ceiling is read FIRST, and the order is load-bearing. Every statement
+                // in this transaction takes its own snapshot at READ COMMITTED, so reading it after the
+                // survivor query would let an apply that commits in between raise next_offset, and the
+                // fallback below would then compute a ceiling covering an event that was allocated
+                // after the decision to compact - deleting a brand-new, undelivered, in-retention
+                // record and recording a floor as though it had been legitimately compacted. Read
+                // before, and the ceiling can only ever be lower than the truth, which discards
+                // nothing and merely leaves a record for the next compaction.
+                long allocatedThrough = readWatermarkColumn(connection, tenantId, "next_offset") - 1;
                 long ceiling;
                 try (PreparedStatement statement = connection.prepareStatement(
                         "SELECT MIN(journal_offset) FROM event_journal WHERE tenant_id = ? "
@@ -1369,8 +1379,9 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     }
                 }
                 if (ceiling == Long.MAX_VALUE) {
-                    // Nothing survives the filter, so everything currently stored is compactable.
-                    ceiling = readWatermarkColumn(connection, tenantId, "next_offset") - 1;
+                    // Nothing survives the filter, so everything allocated when this transaction began
+                    // is compactable - and nothing beyond it, which is what the earlier read buys.
+                    ceiling = allocatedThrough;
                 }
 
                 long discarded;
@@ -2986,6 +2997,25 @@ public final class PostgresExecutionStore implements ExecutionStore {
     }
 
     /**
+     * A read whose answer is assembled from more than one statement.
+     *
+     * <p>Separate from {@link #read} because the two are not interchangeable and the difference is
+     * invisible at the call site. Under {@code READ COMMITTED} each statement takes its own snapshot,
+     * so a fold reading an instance's revision and then its rows can pair a revision with a state that
+     * is already ahead of it, and can observe a child row whose parent the next statement no longer
+     * returns - which this adapter would report as {@code Corrupted}, its loudest signal, for a
+     * database that is merely busy. {@link Transactions#readConsistent} holds one snapshot for the
+     * whole fold.</p>
+     */
+    private <T> T readFolded(ExecutionKey key, Transactions.Work<T> work) {
+        try {
+            return transactions.readConsistent(work);
+        } catch (SQLException failed) {
+            throw mapped(failed, key);
+        }
+    }
+
+    /**
      * Classifies a database failure the adapter did not anticipate at its own call site.
      *
      * <p>Every arm here is reached only after a rollback, so "nothing was applied" is an observation
@@ -2999,8 +3029,17 @@ public final class PostgresExecutionStore implements ExecutionStore {
      * reporting it as unavailability would invite a caller to retry forever. And the rest of class 42 —
      * syntax and access-rule violations other than insufficient privilege — is a fault in this adapter
      * or a schema that does not match this binary, so it takes the same deterministic-reject route
-     * rather than being laundered into a transient condition. There is deliberately no arm that turns
-     * an unrecognised code into something retryable without saying so.</p>
+     * rather than being laundered into a transient condition.</p>
+     *
+     * <p><strong>An unrecognised code is rejected, not retried.</strong> Every genuinely transient
+     * condition PostgreSQL reports has a code this adapter already names: connection loss, admin
+     * shutdown, too many connections, lock and statement timeouts, serialization failure and deadlock.
+     * What is left over is therefore far more likely to be deterministic than transient - a check or
+     * not-null constraint, a value that does not fit its column, a fault in this adapter - and
+     * reporting one of those as unavailability tells a caller to retry something that will fail
+     * identically every time, forever. Rejecting says less than the truth and costs one failed
+     * operation; retrying claims something untrue and costs a loop. The classifier deliberately has no
+     * arm that turns an unrecognised code into something retryable.</p>
      */
     private ExecutionStoreException mapped(SQLException failed, ExecutionKey key) {
         if (SqlStates.isNotAuthorized(failed)) {
@@ -3032,14 +3071,38 @@ public final class PostgresExecutionStore implements ExecutionStore {
                             + "adapter or a schema that does not match this build: "
                             + failed.getMessage()), failed);
         }
-        return new ExecutionStoreException(
-                new ExecutionStoreFailure.Unavailable(String.valueOf(failed.getMessage())), failed);
+        if (isDataOrIntegrityFault(failed)) {
+            return new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                    "the write did not satisfy a constraint or a column's domain: "
+                            + failed.getMessage()), failed);
+        }
+        return new ExecutionStoreException(ExecutionStoreFailure.invalid(
+                "the database refused the operation with a condition this adapter does not classify, "
+                        + "and every transient condition it does classify has been ruled out: "
+                        + failed.getMessage()), failed);
     }
 
+    /** Class 42: syntax or access-rule violation other than insufficient privilege. */
     private static boolean isProgrammingFault(SQLException failed) {
+        return inClass(failed, "42");
+    }
+
+    /**
+     * Class 22 data exception and class 23 integrity-constraint violation.
+     *
+     * <p>Unique and foreign-key violations are already answered above, more precisely. What reaches
+     * here is a check constraint, a not-null, or a value outside its column's domain - each of which
+     * fails identically on every retry, and each of which the schema does declare, so none is
+     * unreachable in principle.</p>
+     */
+    private static boolean isDataOrIntegrityFault(SQLException failed) {
+        return inClass(failed, "22") || inClass(failed, "23");
+    }
+
+    private static boolean inClass(SQLException failed, String stateClass) {
         for (SQLException current = failed; current != null; current = current.getNextException()) {
             String state = current.getSQLState();
-            if (state != null && state.startsWith("42")) {
+            if (state != null && state.startsWith(stateClass)) {
                 return true;
             }
         }

@@ -14,10 +14,10 @@ repository explains why the two adapters share their contract and not their code
 
 | Property | Contract |
 |---|---|
-| Server version | PostgreSQL 14 or later. Earlier versions are untested and unsupported. |
+| Server version | Tested against PostgreSQL 17. Nothing in the adapter requires a version beyond 9.5, but older servers are untested. |
 | Databases per deployment | Exactly one. Every durable store addresses the same database. |
-| Isolation level | `READ COMMITTED`, set by the adapter on every connection. |
-| Deployments per database | One. A second deployment needs its own database or its own schema. |
+| Isolation level | `READ COMMITTED` for ordinary work; `REPEATABLE READ` for reads assembled from several statements. |
+| Deployments per database | One. A second deployment needs its own database. A separate schema isolates the tables but not the migration advisory lock, which is database-wide. |
 | Clock discipline | Every host running Ravenroot must be time-synchronised. |
 
 **One database is a contract, not a convenience.** An accepted execution is guaranteed to have its
@@ -43,9 +43,11 @@ Require TLS at the database rather than trusting the network. Configure the driv
 presenting an unexpected certificate is refused rather than accepted. `sslmode=require` encrypts the
 connection but authenticates nothing, and is not sufficient for a database that holds execution state.
 
-Grant the adapter's role only what it uses: `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the store's
-tables, and `CREATE` on its schema for as long as migrations must run. A role that cannot create
-objects will fail at startup with an authorization failure rather than run partially migrated.
+Grant the adapter's role `SELECT`, `INSERT`, `UPDATE` and `DELETE` on the store's tables, and
+`CREATE` on its schema. `CREATE` is needed on **every** start, not only on the one that migrates: the
+adapter re-asserts its version and history tables each time it opens, so a role that has had `CREATE`
+revoked after the initial migration fails at startup with an authorization failure rather than
+running against a schema it cannot verify.
 
 ## Connection pool sizing
 
@@ -68,8 +70,11 @@ The adapter does not pool. Size the pool the deployment supplies it as follows.
 
 ## Contention and timeouts
 
-The adapter sets two bounds on every connection it uses, from its own configuration rather than from
-the server's, because a store cannot publish a bound it does not control.
+The adapter sets two bounds on every connection it uses for ordinary work, from its own configuration
+rather than from the server's, because a store cannot publish a bound it does not control. The
+connection that runs schema migration is deliberately excluded from both: it waits on the advisory
+lock for as long as another process's migration takes, and a bound there would turn an ordinary
+concurrent start into a failure.
 
 - `lock_timeout` bounds how long a statement waits for a row lock another transaction holds. It is
   never zero: PostgreSQL reads zero as "wait forever", which would let a worker block on a row whose

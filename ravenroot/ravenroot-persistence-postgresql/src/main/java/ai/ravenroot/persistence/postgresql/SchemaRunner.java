@@ -54,11 +54,15 @@ final class SchemaRunner {
     /**
      * The advisory-lock key, chosen once and never derived from anything that could change.
      *
-     * <p>Advisory locks share one namespace per database, so this number is a name: another
-     * application using the same database and the same number would block against this migration for
-     * reasons neither side could diagnose. It is recorded here so that a deployment sharing a database
-     * has something to check against, which is also why the operator documentation recommends a
-     * dedicated schema.</p>
+     * <p>Advisory locks taken with a single 64-bit key share one namespace per <em>database</em> — a
+     * namespace distinct from the two-integer form, and not divided by schema. So this number is a
+     * name, and another application using the same database and the same number would block against
+     * this migration for reasons neither side could diagnose. A dedicated schema does not help: it is
+     * the right isolation for the tables and no isolation at all for this lock. A deployment sharing a
+     * database with another application needs a dedicated database, or that application's advisory
+     * keys checked against this one. The consequence of a collision is delay rather than incorrectness
+     * — two holders of the same key serialize, which is what the lock is for — so it is recorded here
+     * to be diagnosable rather than defended against.</p>
      */
     static final long MIGRATION_LOCK_KEY = 0x52_41_56_4E_44_42L;
 
@@ -82,7 +86,24 @@ final class SchemaRunner {
             }
             installed = applyOne(connection, migration, clock.instant(), installed);
         }
+        // The guard is re-applied here and not only in prepareAndRead, because the version can move
+        // between the two. An older process that reads an empty database at the moment a newer one is
+        // migrating it passes the first check with version 0, then watches applyOne observe the
+        // version the winner installed - which may be beyond anything this build knows. Checking only
+        // on the way in would let exactly that process open a schema it cannot write correctly, which
+        // is the silent corruption the guard exists to prevent. With one migration the window does not
+        // exist; it opens with the second, so the check belongs here before there is one.
+        requireNotAhead(installed, highestKnown);
         return installed;
+    }
+
+    private static void requireNotAhead(int installed, int highestKnown) {
+        if (installed > highestKnown) {
+            throw new IllegalStateException("database schema version " + installed
+                    + " is newer than this build understands (" + highestKnown + "); refusing to open, "
+                    + "because an older binary writing rows a newer schema expects would corrupt them "
+                    + "silently");
+        }
     }
 
     /**
@@ -100,10 +121,7 @@ final class SchemaRunner {
             int installed = versionOf(connection);
             if (installed > highestKnown) {
                 connection.rollback();
-                throw new IllegalStateException("database schema version " + installed
-                        + " is newer than this build understands (" + highestKnown + "); refusing to open, "
-                        + "because an older binary writing rows a newer schema expects would corrupt them "
-                        + "silently");
+                requireNotAhead(installed, highestKnown);
             }
             connection.commit();
             return installed;

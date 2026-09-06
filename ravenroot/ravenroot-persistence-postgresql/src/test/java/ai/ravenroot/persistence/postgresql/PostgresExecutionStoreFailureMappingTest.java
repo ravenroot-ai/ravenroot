@@ -274,4 +274,43 @@ class PostgresExecutionStoreFailureMappingTest {
                 () -> new PostgresExecutionStore(dataSource, new MutableClock(EPOCH)));
         assertTrue(refused.getMessage().contains("newer than this build understands"), refused.getMessage());
     }
+
+    /**
+     * A condition the classifier does not name is rejected, not reported as transient.
+     *
+     * <p>{@code 23514 check_violation}, driven by adding a constraint the adapter's own write cannot
+     * satisfy. It stands in for the whole unclassified remainder: a not-null, a value outside its
+     * column's domain, anything a future schema adds. None of them is retryable, and the port has no
+     * member meaning "unknown", so the only question is which lie is cheaper. Reporting unavailability
+     * tells a caller to retry an operation that will fail identically forever; rejecting costs one
+     * failed operation and says so.</p>
+     *
+     * <p>This is pinned by a test because the classifier's own documentation asserts it in three
+     * places, and a documented intention with no assertion behind it is how a catch-all reappears.</p>
+     */
+    @Test
+    void anUnclassifiedDatabaseConditionIsRejectedRatherThanReportedAsTransient() throws Exception {
+        String storeId = "failure-unclassified-" + UUID.randomUUID();
+        var key = new ExecutionKey("acme", UUID.randomUUID());
+        DataSource dataSource = PostgresTestDatabase.dataSourceFor(storeId);
+
+        try (var store = new PostgresExecutionStore(dataSource, new MutableClock(EPOCH))) {
+            try (Connection connection = dataSource.getConnection();
+                 Statement statement = connection.createStatement()) {
+                // A constraint no write of this adapter can satisfy, so the next apply raises 23514
+                // from inside the database rather than from a fault injected into the adapter.
+                statement.execute("ALTER TABLE process_instance "
+                        + "ADD CONSTRAINT unsatisfiable_probe CHECK (revision < 0)");
+            }
+
+            ExecutionStoreFailure failure =
+                    failureOf(() -> store.apply(creationBatch(key, UUID.randomUUID()))
+                            .toCompletableFuture().join());
+
+            var invalid = assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure,
+                    "an unclassified condition must be a deterministic rejection, not unavailability, "
+                            + "because a caller told it is transient will retry it forever: " + failure);
+            assertEquals(Retryability.DETERMINISTIC_REJECT, invalid.retryability());
+        }
+    }
 }

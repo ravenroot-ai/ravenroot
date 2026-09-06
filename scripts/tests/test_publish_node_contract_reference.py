@@ -17,7 +17,16 @@ SPEC.loader.exec_module(PUBLISHER)
 class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_runtime_snapshot_covers_every_node_and_sensitive_variant(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(53, rendered.count("## `"))
+        self.assertEqual(59, rendered.count("## `"))
+        for behavior in (
+            "matrix.send",
+            "matrix.sync",
+            "mattermost.send",
+            "mattermost.outgoing-webhook",
+            "teams.send",
+            "teams.outgoing-webhook",
+        ):
+            self.assertIn(f"## `{behavior}`", rendered)
         self.assertIn("## `openapi.request-reply`", rendered)
         self.assertIn("`maxResponseBytes`", rendered)
         self.assertIn("## `telegram.delete.message`", rendered)
@@ -28,7 +37,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
     def test_render_publishes_the_full_catalog_metadata_shape(self) -> None:
         rendered = PUBLISHER.render()
         lines = rendered.splitlines()
-        self.assertEqual(53, rendered.count("| Catalog field | Runtime descriptor value |"))
+        self.assertEqual(59, rendered.count("| Catalog field | Runtime descriptor value |"))
         for label in (
             "Display name",
             "Category",
@@ -42,9 +51,9 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
             "Runtime concurrency",
             "Outcomes",
         ):
-            self.assertEqual(53, sum(line.startswith(f"| {label} |") for line in lines), label)
+            self.assertEqual(59, sum(line.startswith(f"| {label} |") for line in lines), label)
         self.assertEqual(
-            53,
+            59,
             rendered.count("| Property | Display label | Editor help | Type | Required |"),
         )
         self.assertIn(
@@ -59,7 +68,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
 
     def test_each_node_links_a_complete_graph(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(53, rendered.count("Complete GraphML example"))
+        self.assertEqual(59, rendered.count("Complete GraphML example"))
 
     def test_regeneration_uses_the_isolated_non_reactor_fixture(self) -> None:
         rendered = PUBLISHER.render()
@@ -68,7 +77,7 @@ class PublishNodeContractReferenceTest(unittest.TestCase):
 
     def test_compact_index_links_every_node_anchor(self) -> None:
         rendered = PUBLISHER.render()
-        self.assertEqual(53, rendered.count("](#"))
+        self.assertEqual(59, rendered.count("](#"))
         self.assertIn("may scroll horizontally", rendered)
 
 

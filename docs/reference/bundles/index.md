@@ -23,12 +23,15 @@ and expected Run result for every node listed below.
 | [JDBC](jdbc.md) | `jdbc.query`, `jdbc.insert` |
 | [Kafka](kafka.md) | `kafka.produce`, `kafka.consume` |
 | [Mail](mail.md) | `mail.send`, `mail.imap.query`, `mail.imap.consume`, `mail.imap.move`, `mail.imap.delete` |
+| [Matrix](matrix.md) | `matrix.send`, `matrix.sync` |
+| [Mattermost](mattermost.md) | `mattermost.send`, `mattermost.outgoing-webhook` |
 | [Object storage](object-storage.md) | `object.get`, `object.put`, `object.list`, `object.delete` |
 | [OCR](ocr.md) | `ocr.extract` |
 | [OpenAPI client](openapi-client.md) | `openapi.call` |
 | [OpenAPI server](openapi-server.md) | `openapi.receive`, `openapi.request-reply` |
 | [Slack](slack.md) | `slack.events`, `slack.commands`, `slack.post-message` |
 | [Restricted SpEL](spel.md) | `spel.transform`, `spel.decision` |
+| [Microsoft Teams](teams.md) | `teams.send`, `teams.outgoing-webhook` |
 | [Telegram](telegram.md) | `telegram.send`, `telegram.answer.callback`, `telegram.edit.message`, `telegram.delete.message` |
 | [WebSocket](websocket.md) | `websocket.send`, `websocket.receive` |
 

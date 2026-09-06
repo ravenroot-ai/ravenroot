@@ -67,6 +67,16 @@
         </dependency>
         <dependency>
             <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-matrix</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-mattermost</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-object-storage</artifactId>
             <version>${project.version}</version>
         </dependency>
@@ -93,6 +103,11 @@
         <dependency>
             <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-telegram</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-teams</artifactId>
             <version>${project.version}</version>
         </dependency>
         <dependency>

@@ -5,12 +5,16 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestFactory;
 
 import java.io.ByteArrayInputStream;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -209,10 +213,57 @@ class GraphMlRejectionSanitisationTest {
                 assertTrue(rejectionMessage(xml).startsWith("GraphML"), name));
     }
 
+    /** The compatibility reader must not retain parser text on any throwable surface. */
+    @Test
+    void hostileBytesCannotEscapeThroughACompatibilityParserFailure() {
+        byte[] hostile = ("<?xml version=\"1.0\" encoding=\"" + MARKER
+                + "\"?><graphml/>").getBytes(StandardCharsets.US_ASCII);
+
+        var rejection = assertThrows(GraphMlCompatibilityException.class,
+                () -> GraphMlDocument.read(hostile));
+
+        assertEquals("Invalid or unsafe GraphML XML", rejection.getMessage());
+        assertEquals(GraphMlParseException.Reason.INVALID_GRAPH, rejection.reason());
+        assertTrue(rejection.incidentId().matches("[0-9a-f]{16}"), rejection.incidentId());
+        String exceptionClass = rejection.diagnosticDetail().get("exceptionClass");
+        assertTrue(exceptionClass != null
+                        && exceptionClass.matches("[A-Za-z_$][A-Za-z0-9_$.]*"),
+                rejection.diagnosticDetail().toString());
+        assertNoMarker(exceptionClass);
+        assertNull(rejection.getCause());
+        assertEquals(0, rejection.getSuppressed().length);
+        assertNoMarker(rejection.getMessage());
+        assertNoMarker(rejection.getLocalizedMessage());
+        assertNoMarker(rejection.toString());
+        for (Throwable suppressed : rejection.getSuppressed()) {
+            assertThrowableHasNoMarker(suppressed);
+        }
+        var printed = new StringWriter();
+        rejection.printStackTrace(new PrintWriter(printed));
+        assertNoMarker(printed.toString());
+    }
+
     private static String rejectionMessage(String graphMl) {
         var rejection = assertThrows(IllegalArgumentException.class,
                 () -> GraphManager.readGraphMl(
                         new ByteArrayInputStream(graphMl.getBytes(StandardCharsets.UTF_8))).close());
         return String.valueOf(rejection.getMessage());
+    }
+
+    private static void assertThrowableHasNoMarker(Throwable throwable) {
+        assertNoMarker(throwable.getMessage());
+        assertNoMarker(throwable.getLocalizedMessage());
+        assertNoMarker(throwable.toString());
+        if (throwable.getCause() != null) {
+            assertThrowableHasNoMarker(throwable.getCause());
+        }
+        for (Throwable suppressed : throwable.getSuppressed()) {
+            assertThrowableHasNoMarker(suppressed);
+        }
+    }
+
+    private static void assertNoMarker(String surface) {
+        assertFalse(String.valueOf(surface).toLowerCase(java.util.Locale.ROOT).contains(MARKER),
+                surface);
     }
 }

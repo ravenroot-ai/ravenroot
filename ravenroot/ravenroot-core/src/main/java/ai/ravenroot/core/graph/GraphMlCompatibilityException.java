@@ -24,8 +24,8 @@ public final class GraphMlCompatibilityException extends IllegalArgumentExceptio
     private final Map<String, String> diagnosticDetail;
 
     GraphMlCompatibilityException(String message, String incidentId,
-                                  Map<String, String> diagnosticDetail, Throwable cause) {
-        super(message, cause);
+                                  Map<String, String> diagnosticDetail) {
+        super(message, null);
         this.incidentId = incidentId;
         this.diagnosticDetail = diagnosticDetail;
     }

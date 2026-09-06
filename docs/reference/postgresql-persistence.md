@@ -1,7 +1,3 @@
----
-title: Shared PostgreSQL persistence
----
-
 # Shared PostgreSQL persistence
 
 The shared PostgreSQL adapter is the durable store for a deployment whose Ravenroot processes are not
@@ -11,9 +7,8 @@ control plane beside a worker fleet.
 
 The single-host store remains the right choice for a developer machine, a single-node deployment, or
 an embedded installation. See [Persistence, lifecycle, and recovery](../operator-guide/persistence-lifecycle.md)
-for the procedures that are common to both, and
-[ADR 0039](../../adr/0039-shared-persistence-adapters-share-ports-not-a-jdbc-core.md) for why the two
-adapters share their contract and not their code.
+for the procedures that are common to both. The architecture decision record collection in the
+repository explains why the two adapters share their contract and not their code.
 
 ## Supported topology
 

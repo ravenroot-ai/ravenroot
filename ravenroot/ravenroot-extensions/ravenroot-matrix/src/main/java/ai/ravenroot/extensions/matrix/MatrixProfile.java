@@ -34,7 +34,7 @@ record MatrixProfile(String tenantId, String name, URI homeserverOrigin, String 
                 || retryBackoffMs < 100 || retryBackoffMs > 60_000
                 || maxEventsPerSync < 1 || maxEventsPerSync > 1_000) throw configuration();
         initialSyncMode = java.util.Objects.requireNonNull(initialSyncMode);
-        initialSince = initialSince == null ? "" : opaque(initialSince, 2_048);
+        initialSince = initialSince == null || initialSince.isEmpty() ? "" : opaque(initialSince, 2_048);
     }
 
     boolean permitsRoom(String roomId) { return roomIds.contains(roomId); }

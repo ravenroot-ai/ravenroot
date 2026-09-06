@@ -1,6 +1,6 @@
 # Public ADR curation manifest
 
-- Status: Complete for the published collection at 2026-09-05
+- Status: Complete for the published collection at 2026-09-06
 - Ordering: Chronological, then numerical
 - Publication scope: Accepted decisions and historically material superseded decisions
 
@@ -43,6 +43,7 @@ without presenting the same choice as two independent contracts.
 | 2026-09-05 | [0035](0035-cancellation-as-a-distinct-termination-reason.md) | Accepted | Defines a nullable termination reason beside an unchanged terminal status, and a dedicated terminal event type, so a cancelled execution is distinguishable from an ordinary failure everywhere it is reported. |
 | 2026-09-04 | [0036](0036-layered-graph-drawing-in-the-design-editor.md) | Accepted | Defines the additive layered arrangements of the design editor: ELK layered placement and routing consumed together, one arrangement per axis of flow, label-aware spacing with the node name on the side the axis leaves free, back edges routed outside the band, and the existing arrangements left unchanged. |
 | 2026-09-05 | [0037](0037-durable-execution-results.md) | Accepted | Defines the durable canonical execution result: a four-state payload vocabulary, a fourth `ExecutionLookup` read answer, exactly-once-by-refusal recording, and a retention window that must not outlive the process instance it names. |
+| 2026-09-06 | [0038](0038-deployment-lifecycle-generations-and-typed-command-outcomes.md) | Accepted contract | Extends ADR 0023 and supersedes in part the `GraphDeployment` account of `stop`: three disjoint monotone axes for a deployment, stratified fencing with no third token, sealed lifecycle commands and returned typed outcomes, half-open barriers, and an explicit statement that no published contract changes with it. Absorbs the lease, fence and check-order rules the codebase cites as ADR 0010, which is not published in this collection. |
 
 ## Publication rules
 

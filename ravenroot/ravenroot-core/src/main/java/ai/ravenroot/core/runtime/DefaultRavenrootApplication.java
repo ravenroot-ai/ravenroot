@@ -231,11 +231,17 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * siblings and no lookup can reach across. The engine-level {@link DeploymentId} is derived from
      * the same pair, so two tenants' identically named deployments never share an execution domain.
      *
-     * <h2>What this is not</h2>
-     * <p>Not {@code DeploymentRegistry}/{@code InMemoryDeploymentRegistry} (ADR 0023). Those model
-     * durable CAS, leases, fencing and desired/observed reconciliation, none of which this process-local
-     * lifecycle provides; they remain wired to nothing here. This local registry and that durable model
-     * must not be treated as two equivalent lifecycles.
+     * <h2>How this relates to the durable registry</h2>
+     * <p>{@code DeploymentRegistry} (ADR 0023, ADR 0038) is the authority: durable CAS, leases,
+     * fencing, generations and desired/observed reconciliation. This map is the <em>process-local
+     * projection</em> of that record -- the runtimes this pod actually hosts -- and
+     * {@link #localDeploymentTargets()} is where it is published as one, so a
+     * {@code DeploymentCoordinator} or {@code DeploymentReconciler} carrying out a durable decision
+     * reaches these deployments instead of a second lifecycle running beside them.
+     *
+     * <p>The two are not equivalent and must not be confused: this map holds no generation, no lease
+     * and no fence of its own, and answers only "which deployment runtime lives in this process". The
+     * decisions belong to the registry; the effects belong here.</p>
      */
     private final ConcurrentHashMap<LocalDeploymentKey, LocalDeploymentRecord> localDeployments =
             new ConcurrentHashMap<>();
@@ -2233,6 +2239,44 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         // source-less graphs; it is only an error for a source session.
         int sourceCount = inspectEffectiveSources(graphBytes);
         return localDeploymentStatus(key.deploymentId(), register(key, graphBytes, sourceCount).record());
+    }
+
+    /**
+     * Publishes the deployment runtimes this process hosts as the port a lifecycle authority reaches.
+     *
+     * <h2>Why the two id spaces line up, and what happens when they do not</h2>
+     * <p>The durable {@link DeploymentId} is matched against this registry's own caller-facing
+     * deployment id, not against the engine-level id derived in {@code localDeploymentId} -- that one
+     * is a private, tenant-salted digest whose whole purpose is that two tenants' identically named
+     * deployments never share an execution domain, and no external authority can or should predict it.
+     * A composer that wants this projection to be exact mints registry ids through
+     * {@code DeploymentIdSource} using the same caller-facing id the tenant registered here.
+     *
+     * <p>A composer that does not gets an empty answer, which is the correct one and not a failure:
+     * {@link DeploymentTargets} defines empty as "this process does not host that deployment", the
+     * durable intent stays standing, and whoever can reach the runtime performs the effect. That is
+     * exactly the answer a pod hosting none of a tenant's deployments should give.</p>
+     *
+     * <p>Nothing on the returned port can reach {@code engine.drain()} or {@code engine.close()}: the
+     * widest operation {@code DefaultGraphDeployment} exposes there is its own
+     * {@code GraphDeployment#stop()}, and the engine this application shares between every deployment
+     * is ended only by {@link #close()} (ADR 0038 D9).</p>
+     *
+     * @return resolver over this process's hosted deployment runtimes; never {@code null}.
+     */
+    public ai.ravenroot.core.deployment.DeploymentTargets localDeploymentTargets() {
+        return (tenantId, deploymentId) -> {
+            java.util.Objects.requireNonNull(tenantId, "tenantId");
+            java.util.Objects.requireNonNull(deploymentId, "deploymentId");
+            LocalDeploymentRecord record =
+                    localDeployments.get(new LocalDeploymentKey(requireTenant(tenantId), deploymentId.value()));
+            if (record == null) {
+                return java.util.Optional.empty();
+            }
+            GraphDeployment hosted = deployments.get(record.engineId());
+            return hosted instanceof DefaultGraphDeployment target
+                    ? java.util.Optional.of(target) : java.util.Optional.empty();
+        };
     }
 
     @Override

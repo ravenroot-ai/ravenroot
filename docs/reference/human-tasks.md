@@ -107,6 +107,13 @@ GET /v1/human-tasks/attention?graphVersion=<sha256>&deploymentId=release&limit=2
 GET /v1/human-tasks/attention?graphVersion=<sha256>&processInstanceId=<uuid>&nodeId=approval&limit=20
 ```
 
+For a local deployment, use the `deploymentId` and `graphVersion` returned by its lifecycle status.
+That public, tenant-scoped deployment ID is also the ID pinned into hosted execution context and is
+therefore the authoritative attention key. Ravenroot keeps its tenant-derived engine/domain ID
+internal; ingress deduplication, outbox, and request/reply ownership continue to use that internal
+identity. Durable attention remains queryable by the public ID after a server restart without
+re-registering the local deployment.
+
 Optional `traversalId`, `nodeId`, `taskId`, and `generation` fields narrow the selected durable
 context. The response is `{schemaVersion,items,nextCursor,counts,nodeCounts}`. Counts cover every
 authorized actionable match, independently of the current item page. Graph-level `nodeCounts` are

@@ -2193,6 +2193,15 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * identity, it does not consume the shutdown budget the deployment-admission contract's cap is about.</p>
      */
     private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes) {
+        return registerDeployment(id, graphMlBytes, id.value());
+    }
+
+    /**
+     * Registers an engine-private deployment while giving its hosted executions the deployment id
+     * exposed by the lifecycle API. Tenant remains a separate durable partition key.
+     */
+    private GraphDeployment registerDeployment(DeploymentId id, byte[] graphMlBytes,
+                                               String executionContextDeploymentId) {
         return deployments.computeIfAbsent(id, key -> {
             var created = new DefaultGraphDeployment(key, engine, behaviors, monitor, identitySource, graphMlBytes,
                     DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY, executionStore,
@@ -2200,7 +2209,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
                             DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
                     graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
-                    executionManifests());
+                    executionManifests(), executionContextDeploymentId);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });
@@ -2371,7 +2380,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
             // could always start another, and a per-record cap would have started answering 429 there.
             // A published route's limits are not something to tighten as a side effect.
             var created = new LocalDeploymentRecord(graphHash, engineId, sourceCount);
-            registerDeployment(engineId, graphBytes);
+            registerDeployment(engineId, graphBytes, key.deploymentId());
             localDeployments.put(key, created);
             return new Registration(created, true);
         }

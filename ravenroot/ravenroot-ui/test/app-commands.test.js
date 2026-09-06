@@ -26,7 +26,8 @@ describe('application command catalog', () => {
   it('expresses document, editing, layout, runtime and selection state without DOM access', () => {
     const byId = Object.fromEntries(commands.map(command => [command.id, command]));
     const context = {
-      hasDocument: true, editable: true, documentEditable: true, canModify: true, modifyEnabled: true,
+      hasDocument: true, editable: true, documentEditable: true, tenantAuthority: true,
+      canModify: true, modifyEnabled: true,
       documentMode: 'draft',
       layoutBusy: false,
       connectArmed: true, hasSelection: true, layoutMode: 'cyto', renderMode: 'design', running: false,
@@ -53,6 +54,7 @@ describe('application command catalog', () => {
     expect(byId['workspace.grid'].isChecked(context)).toBe(true);
     expect(byId['workspace.reset'].isEnabled(context)).toBe(true);
     expect(byId['run.play'].isEnabled(context)).toBe(true);
+    expect(byId['run.play'].isEnabled({ ...context, tenantAuthority: false })).toBe(false);
     expect(byId['run.play'].isEnabled({ ...context, running: true })).toBe(false);
     expect(byId['run.play'].isEnabled({ ...context, running: true, executionUnknown: true })).toBe(true);
     expect(byId['run.start'].isEnabled({ ...context, running: true, executionUnknown: true })).toBe(true);

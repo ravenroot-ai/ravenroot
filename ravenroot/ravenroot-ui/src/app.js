@@ -199,6 +199,7 @@ import {
   hasUnsavedWork,
 } from './workspace.js';
 import {
+  canonicalGraphSnapshot,
   readWorkspaceSnapshot,
   workspaceScope,
   writeWorkspaceSnapshot,
@@ -711,13 +712,62 @@ let workspacePersistenceGeneration = 0;
 let workspacePersistenceTimer = null;
 let workspaceWriteChain = Promise.resolve();
 let workspaceRestoreInProgress = false;
+let workspacePersistenceSuspended = true;
+let workspacePersistenceRevision = 0;
+let workspacePersistedRevision = 0;
+let workspaceSnapshotReader = readWorkspaceSnapshot;
+let workspaceAuthority = Object.freeze({ state: 'unverified', client: null, scope: null, generation: 0 });
+
+function beginWorkspaceAuthority(client, state = 'pending') {
+  workspaceAuthority = Object.freeze({ state, client, scope: null,
+    generation: workspaceAuthority.generation + 1 });
+  workspaceRestoreInProgress = false;
+  workspacePersistenceSuspended = true;
+  workspacePersistenceGeneration += 1;
+  humanTaskDecisionDialog?.suspend();
+  humanTaskController?.configure(null, null, workspace.active);
+  void credentialsWindow?.setClient(null);
+  void deploymentsWindow?.setClient(null);
+  refreshCommands();
+  return workspaceAuthority.generation;
+}
+
+function authorizeWorkspaceClient(client, scope, generation) {
+  if (runtimeClient !== client || workspaceAuthority.client !== client
+      || workspaceAuthority.generation !== generation) return false;
+  workspaceAuthority = Object.freeze({ state: 'ready', client, scope,
+    generation: workspaceAuthority.generation });
+  workspacePersistenceSuspended = false;
+  scheduleWorkspacePersistence();
+  refreshCommands();
+  return true;
+}
+
+function failWorkspaceAuthority(client, generation, reason) {
+  if (workspaceAuthority.client !== client || workspaceAuthority.generation !== generation) return;
+  workspaceAuthority = Object.freeze({ state: 'failed', client, scope: null, generation });
+  workspaceRestoreInProgress = false;
+  workspacePersistenceReason = reason;
+  syncActiveDocumentChrome();
+  refreshCommands();
+}
+
+function tenantAuthorityAllows(owner, client = runtimeClient) {
+  if (!owner || workspaceAuthority.state !== 'ready' || workspaceAuthority.client !== client
+      || runtimeClient !== client) return false;
+  if (owner.tenantId === null) return workspaceAuthority.scope === null;
+  return workspaceAuthority.scope?.key === activeWorkspaceScope?.key
+    && owner.tenantId === workspaceAuthority.scope?.tenantId;
+}
 
 function normalizedWorkspaceServiceUrl(client) {
   return new URL(client?.baseUrl || globalThis.location.origin, globalThis.location.origin).href.replace(/\/$/, '');
 }
 
 function scheduleWorkspacePersistence() {
-  if (!activeWorkspaceScope || !workspacePersistenceWritable || workspaceRestoreInProgress) return;
+  if (!activeWorkspaceScope || !workspacePersistenceWritable || workspaceRestoreInProgress
+      || workspacePersistenceSuspended) return;
+  workspacePersistenceRevision += 1;
   if (workspacePersistenceTimer !== null) clearTimeout(workspacePersistenceTimer);
   workspacePersistenceTimer = setTimeout(() => {
     workspacePersistenceTimer = null;
@@ -725,17 +775,26 @@ function scheduleWorkspacePersistence() {
   }, 40);
 }
 
-function flushWorkspacePersistence() {
-  if (!activeWorkspaceScope || !workspacePersistenceWritable) return workspaceWriteChain;
+function flushWorkspacePersistence({ allowSuspended = false } = {}) {
+  if (!activeWorkspaceScope || !workspacePersistenceWritable
+      || (workspacePersistenceSuspended && !allowSuspended)) return workspaceWriteChain;
+  if (workspacePersistenceTimer !== null) {
+    clearTimeout(workspacePersistenceTimer);
+    workspacePersistenceTimer = null;
+  }
   captureActiveDocument();
   const scope = activeWorkspaceScope;
   const generation = workspacePersistenceGeneration;
   const documents = [...workspace.documents];
   const activeId = workspace.activeId;
+  const revision = workspacePersistenceRevision;
   workspaceWriteChain = workspaceWriteChain.then(async () => {
     if (generation !== workspacePersistenceGeneration || scope !== activeWorkspaceScope
         || !workspacePersistenceWritable) return;
     await writeWorkspaceSnapshot(scope, documents, activeId);
+    if (generation === workspacePersistenceGeneration && scope === activeWorkspaceScope) {
+      workspacePersistedRevision = Math.max(workspacePersistedRevision, revision);
+    }
   }).catch(error => {
     if (generation === workspacePersistenceGeneration && scope === activeWorkspaceScope) {
       workspacePersistenceWritable = false;
@@ -761,26 +820,26 @@ async function switchWorkspacePersistence(configuration, client) {
   // check resolves back to the scope already on screen. Otherwise a slow B restore can land after
   // a newer authentication has reaffirmed A and silently replace A's documents.
   const transition = ++workspacePersistenceGeneration;
-  if (!activeWorkspaceScope && !nextScope) return;
+  if (!activeWorkspaceScope && !nextScope) return null;
   if (activeWorkspaceScope?.key === nextScope?.key && workspacePersistenceWritable) {
     scheduleWorkspacePersistence();
-    return;
+    return nextScope;
   }
   if (!activeWorkspaceScope && nextScope && workspace.documents.length
       && !(workspace.documents.length === 1 && graphName === 'untitled.graphml'
         && !editHistory.isDirty())) {
     workspacePersistenceReason = 'Session-only documents remain open and exportable. Close or export them before reconnecting to restore the authenticated workspace.';
     syncPaneHeaders();
-    return;
+    return false;
   }
   if (activeWorkspaceScope) {
     if (!workspacePersistenceWritable) {
       workspacePersistenceReason = 'This workspace could not be saved, so it remains open to prevent data loss.';
       syncPaneHeaders();
-      return;
+      return false;
     }
-    await flushWorkspacePersistence();
-    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return;
+    await flushWorkspacePersistence({ allowSuspended: true });
+    if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
   }
   if (!nextScope) {
     removeAllWorkspaceDocuments();
@@ -788,15 +847,15 @@ async function switchWorkspacePersistence(configuration, client) {
     workspacePersistenceWritable = false;
     workspacePersistenceReason = 'Session only: no authenticated workspace scope is available.';
     openDocument({ tenantId: null });
-    return;
+    return null;
   }
   workspaceRestoreInProgress = true;
   try {
-    const restored = await readWorkspaceSnapshot(nextScope);
-    if (transition !== workspacePersistenceGeneration) return;
+    const restored = await workspaceSnapshotReader(nextScope);
+    if (transition !== workspacePersistenceGeneration) return false;
     if (activeWorkspaceScope) {
-      await flushWorkspacePersistence();
-      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return;
+      await flushWorkspacePersistence({ allowSuspended: true });
+      if (transition !== workspacePersistenceGeneration || !workspacePersistenceWritable) return false;
     }
     removeAllWorkspaceDocuments();
     activeWorkspaceScope = nextScope;
@@ -817,11 +876,13 @@ async function switchWorkspacePersistence(configuration, client) {
       openDocument({ tenantId: nextScope.tenantId });
     }
     workspacePersistenceWritable = true;
+    return nextScope;
   } catch (error) {
     if (transition !== workspacePersistenceGeneration) return;
     // Keep both the unreadable snapshot and current visible workspace untouched. Writes never open
     // for the failed scope, so a recovery view cannot overwrite recoverable stored documents.
     workspacePersistenceReason = `Stored documents could not be restored: ${error.message}`;
+    return false;
   } finally {
     if (transition === workspacePersistenceGeneration) {
       workspaceRestoreInProgress = false;
@@ -856,6 +917,7 @@ let runtimeClient = null;
 let runtimeDisconnect = null;
 let runtimeConfigurationRequest = null;
 let runtimeConfiguration = null;
+let runtimeConnectionGeneration = 0;
 const runtimeTokenProvider = memoryTokenProvider();
 const PROGRAM_TEST_PAYLOAD_DEFAULT = 'test payload';
 const PROGRAM_BUILD_BATCH_LIMIT = 256;
@@ -1002,7 +1064,7 @@ function renderSelectedHumanTasks(owner = workspace.active) {
   renderHumanTaskInspector(document.getElementById('info-body'), state, nodeId, {
     onSelect: task => {
       const capability = currentHumanTaskCapability();
-      if (!capability) return;
+      if (!capability || !tenantAuthorityAllows(owner)) return;
       rememberHumanTaskSelection(task);
       humanTaskDecisionDialog.open(task, capability);
     },
@@ -1021,7 +1083,7 @@ function humanTaskPageSignature(page) {
 
 function receiveHumanTaskProjection(state) {
   const owner = humanTaskControllerOwner;
-  if (!owner) return;
+  if (!owner || !tenantAuthorityAllows(owner)) return;
   if (state.kind === 'error' && humanTaskDecisionDialog?.selected()) {
     // A failed authoritative refresh makes every displayed task detail stale. Close the modal so
     // the normal reconnect controls remain reachable, retaining only the opaque locator. A later
@@ -1051,7 +1113,9 @@ function receiveHumanTaskProjection(state) {
 
 function configureHumanTasks(owner = workspace.active) {
   humanTaskControllerOwner = owner;
-  const configured = humanTaskController?.configure(runtimeClient, currentHumanTaskCapability(), owner);
+  const authorized = tenantAuthorityAllows(owner);
+  const configured = humanTaskController?.configure(authorized ? runtimeClient : null,
+    authorized ? currentHumanTaskCapability() : null, owner);
   void recoverHumanTaskSelection(owner);
   return configured;
 }
@@ -1059,7 +1123,7 @@ function configureHumanTasks(owner = workspace.active) {
 async function recoverHumanTaskSelection(owner) {
   const client = runtimeClient;
   const capability = currentHumanTaskCapability();
-  if (!client || !capability) return;
+  if (!client || !capability || !tenantAuthorityAllows(owner, client)) return;
   const locator = readHumanTaskSelection();
   if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
       || typeof locator.taskId !== 'string'
@@ -1070,7 +1134,7 @@ async function recoverHumanTaskSelection(owner) {
     // including when a process-local deployment registration no longer exists.
     const page = await client.humanTaskAttention({ taskId: locator.taskId,
       generation: locator.generation }, { capability });
-    if (runtimeClient !== client || workspace.active !== owner) return;
+    if (runtimeClient !== client || workspace.active !== owner || !tenantAuthorityAllows(owner, client)) return;
     const task = page.items.find(item => item.taskId === locator.taskId
       && item.generation === locator.generation);
     if (!task) { clearHumanTaskSelection(); return; }
@@ -2073,10 +2137,20 @@ window.ravenroot = {
     scope: activeWorkspaceScope ? { serviceUrl: activeWorkspaceScope.serviceUrl,
       tenantId: activeWorkspaceScope.tenantId } : null,
     writable: workspacePersistenceWritable,
+    pending: Boolean(activeWorkspaceScope && workspacePersistenceWritable
+      && (workspacePersistenceTimer !== null
+        || workspacePersistedRevision < workspacePersistenceRevision)),
     reason: workspacePersistenceReason,
+    restoring: workspaceRestoreInProgress,
+    authority: { state: workspaceAuthority.state,
+      tenantId: workspaceAuthority.scope?.tenantId ?? null,
+      generation: workspaceAuthority.generation },
   }),
   applicationTheme: () => applicationTheme,
   setApplicationTheme: theme => themePreference.select(theme),
+  _setWorkspaceSnapshotReaderForTest: reader => {
+    workspaceSnapshotReader = typeof reader === 'function' ? reader : readWorkspaceSnapshot;
+  },
 };
 
 // ── Panes (UI-03) ───────────────────────────────────────────────────────────────────────────
@@ -4598,7 +4672,7 @@ function completeOwnedLayout(job) {
     }
   }
   if (job.recordPositions && layoutRequestIsCurrent(token)
-      && owner.graph?.format !== 'graphify' && owner.cy === job.target) {
+      && documentIsEditable(owner) && owner.graph?.format !== 'graphify' && owner.cy === job.target) {
     const positions = job.target.nodes().map(node => ({
       id: node.id(), ox: node.position('x'), oy: node.position('y'),
     }));
@@ -6974,6 +7048,21 @@ function programReadiness(owner) {
   return owner.programReadiness;
 }
 
+function graphForAuthorizedExecution(owner, graph) {
+  const submission = canonicalGraphSnapshot(graph);
+  const phases = programReadiness(owner).phases;
+  for (const node of programNodes(submission)) {
+    const resolvedArtifactId = phases.get(node.id)?.artifactId;
+    if (!resolvedArtifactId) continue;
+    node.properties ||= {};
+    node.propertyTypes ||= {};
+    node.properties.artifactId = resolvedArtifactId;
+    node.propertyTypes.artifactId = 'string';
+  }
+  submission.nodeMap = Object.fromEntries(submission.nodes.map(node => [node.id, node]));
+  return submission;
+}
+
 function retireProgramReadiness(owner) {
   const state = owner?.programReadiness;
   if (!state) return;
@@ -7012,11 +7101,6 @@ function programPhase(owner, nodeId, result) {
   }
   const snapshot = { ...result, phase, detail, output: result.smokeOutput, history };
   state.phases.set(nodeId, snapshot);
-  const model = programGraph(owner)?.nodeMap?.[nodeId];
-  if (model) {
-    model.programPhase = phase;
-    model.programReadinessState = snapshot;
-  }
   const node = owner.cy?.getElementById(nodeId);
   if (node?.length) {
     node.data('programPhase', phase);
@@ -7175,6 +7259,7 @@ function hideProgramReadinessOverlay(owner) {
 }
 
 function bindProgramArtifact(owner, node, artifactId) {
+  if (!documentIsEditable(owner)) return;
   node.properties ||= {};
   node.propertyTypes ||= {};
   node.properties.artifactId = artifactId;
@@ -7197,14 +7282,6 @@ function programBuildSubmission(node) {
 
 function programBuildPlan(owner) {
   const nodes = programNodes(programGraph(owner));
-  nodes.forEach(node => {
-    node.properties ||= {};
-    node.propertyTypes ||= {};
-    if (node.properties.testPayload == null) {
-      node.properties.testPayload = PROGRAM_TEST_PAYLOAD_DEFAULT;
-      node.propertyTypes.testPayload = 'string';
-    }
-  });
   const programs = nodes.map(programBuildSubmission);
   return { nodes, programs, signature: JSON.stringify(programs) };
 }
@@ -7215,8 +7292,6 @@ function resetProgramGeneration(owner, state, plan) {
   state.activeRevision = 0;
   state.settledGeneration = 0;
   plan.nodes.forEach(model => {
-    delete model.programPhase;
-    delete model.programReadinessState;
     const node = owner.cy?.getElementById(model.id);
     if (!node?.length) return;
     node.removeData('programPhase');
@@ -7346,6 +7421,7 @@ function startProgramReadinessFlight(owner, plan, generation, {
   if (automatic) showProgramReadinessOverlay(owner);
   const client = runtimeClient;
   const isCurrent = () => workspace.find(owner.id) === owner && runtimeClient === client
+    && tenantAuthorityAllows(owner, client)
     && state.generation === generation && state.signature === plan.signature;
   const promise = (async () => {
     const initial = await start(client);
@@ -7383,7 +7459,7 @@ function startProgramReadinessFlight(owner, plan, generation, {
 }
 
 async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
-  if (!owner || !runtimeClient) return false;
+  if (!owner || !runtimeClient || !tenantAuthorityAllows(owner)) return false;
   const state = programReadiness(owner);
   const plan = programBuildPlan(owner);
   if (!plan.nodes.length) {
@@ -7416,7 +7492,8 @@ async function ensureProgramGraphReady(owner, { automatic = false } = {}) {
 }
 
 function scheduleProgramGraphReadiness(owner) {
-  if (!owner || !runtimeClient || !programNodes(programGraph(owner)).length) return;
+  if (!owner || !runtimeClient || !tenantAuthorityAllows(owner)
+      || !programNodes(programGraph(owner)).length) return;
   void ensureProgramGraphReady(owner, { automatic: true });
 }
 
@@ -8609,10 +8686,10 @@ function prepareDocumentDownload(id) {
       'Only Ravenroot workflow documents can be exported as executable GraphML.');
     return null;
   }
-  if (id === workspace.activeId) {
+  if (id === workspace.activeId && documentIsEditable(target)) {
     syncGraphPositions();
     captureActiveDocument();
-  } else if (target.layoutMode !== 'elastic') {
+  } else if (id !== workspace.activeId && documentIsEditable(target) && target.layoutMode !== 'elastic') {
     syncGraphPositionsFromCy(target.graph, target.cy);
   }
   const xml = serializeGraphML(target.graph);
@@ -8667,7 +8744,7 @@ function rebuildGraph(options = {}) {
   if (!graphData) return;
   // Undo and redo have just written the document. Reading positions back out of the renderer here
   // would overwrite the state that was restored, so history rebuilds skip the sync.
-  if (options.syncPositions !== false) syncGraphPositions();
+  if (options.syncPositions !== false && documentIsEditable(workspace.active)) syncGraphPositions();
   const owner = workspace.active;
   const activeStyle = visualStyle;
   const viewport = cy && !cy.destroyed() ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
@@ -10038,14 +10115,17 @@ function duplicateSelectedNode() {
 }
 
 function syncGraphPositions() {
-  if (!cy || !graphData || graphData.format === 'graphify' || layoutMode === 'elastic') return;
+  if (!cy || !graphData || !documentIsEditable(workspace.active)
+      || graphData.format === 'graphify' || layoutMode === 'elastic') return;
   syncGraphPositionsFromCy(graphData, cy);
 }
 
 // `atBoot` marks the attempt the page makes for itself on load, with nobody watching the tab yet.
 // It changes two things and nothing else: the wording of the in-flight state, and the refusal to
 // raise a modal confirmation that no user asked for.
-function connectRuntime(atBoot = false) {
+async function connectRuntime(atBoot = false) {
+  const connectionGeneration = ++runtimeConnectionGeneration;
+  const authorityGeneration = beginWorkspaceAuthority(null);
   const input = document.getElementById('service-url');
   const baseUrl = input.value.trim().replace(/\/$/, '');
   input.value = baseUrl;
@@ -10086,6 +10166,8 @@ function connectRuntime(atBoot = false) {
       confirmedServiceOrigin = target.origin;
     }
   }
+  await flushWorkspacePersistence({ allowSuspended: true });
+  if (connectionGeneration !== runtimeConnectionGeneration) return;
   if (runtimeDisconnect) runtimeDisconnect();
   runtimeClient = new RavenrootRuntimeClient(baseUrl, {
     tokenProvider: runtimeTokenProvider,
@@ -10094,34 +10176,43 @@ function connectRuntime(atBoot = false) {
   // nothing else — it has no base URL of its own to be pointed elsewhere. That is what makes "a
   // denial to the user is a denial to the panel" true here rather than merely intended, and it is
   // why no provider host appears anywhere in this file.
-  assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
-  void refreshAssistantAvailability();
   // A construction site of the same shape, for the same reason. The credential window reaches
   // THE SAME Ravenroot service with THE SAME authentication and has no base URL of its own — which is what
   // makes "a value typed there goes to your own service and nowhere else" true by construction
   // rather than by inspection. Re-listing here is also what refreshes the node inspector's
   // SECRET_REFERENCE choices after an authentication, without the window ever being opened.
-  void credentialsWindow?.setClient(
-    new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
   // the Deployments window's client IS the runtime client, not a construction of its
   // own -- `/v1/deployments` is one of `RavenrootRuntimeClient`'s own routes (see `runtime-client.js`),
   // unlike credentials, which has a transport entirely to itself.
-  void deploymentsWindow?.setClient(runtimeClient);
   const connectedClient = runtimeClient;
+  workspaceAuthority = Object.freeze({ state: 'pending', client: connectedClient, scope: null,
+    generation: authorityGeneration });
+  assistantClient = null;
+  void refreshAssistantAvailability();
   runtimeConfiguration = null;
-  runtimeConfigurationRequest = connectedClient.configuration().then(configuration => {
+  runtimeConfigurationRequest = connectedClient.configuration().then(async configuration => {
     const result = { client: connectedClient, configuration, error: null };
     if (runtimeClient === connectedClient) {
       runtimeConfiguration = result;
-      void switchWorkspacePersistence(configuration, connectedClient);
-      void configureHumanTasks();
+      const scope = await switchWorkspacePersistence(configuration, connectedClient);
+      if (scope !== false && authorizeWorkspaceClient(connectedClient, scope, authorityGeneration)) {
+        assistantClient = new RavenrootAssistantClient(baseUrl, { tokenProvider: runtimeTokenProvider });
+        void refreshAssistantAvailability();
+        void credentialsWindow?.setClient(
+          new RavenrootCredentialClient(baseUrl, { tokenProvider: runtimeTokenProvider }));
+        void deploymentsWindow?.setClient(connectedClient);
+        void configureHumanTasks();
+        workspace.documents.forEach(scheduleProgramGraphReadiness);
+      } else if (scope === false) {
+        failWorkspaceAuthority(connectedClient, authorityGeneration, workspacePersistenceReason);
+      }
     }
     return result;
   }).catch(error => {
     if (runtimeClient === connectedClient) {
       runtimeConfiguration = null;
-      void switchWorkspacePersistence(null, connectedClient);
-      void configureHumanTasks();
+      failWorkspaceAuthority(connectedClient, authorityGeneration,
+        `Workspace authority could not be verified: ${error.message}`);
     }
     return { client: connectedClient, configuration: null, error };
   });
@@ -10135,8 +10226,10 @@ function connectRuntime(atBoot = false) {
       setRuntimeConnectionState(status, message);
       if (status === 'connected') void configureHumanTasks();
     });
-    connectedClient.nodeTypes().then(catalog => {
-      if (runtimeClient !== connectedClient) return;
+    connectedClient.nodeTypes().then(async catalog => {
+      await runtimeConfigurationRequest;
+      if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
+          || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = catalog;
       nodeCatalogFailure = null;
       nodeCatalogLoaded = true;
@@ -10144,7 +10237,8 @@ function connectRuntime(atBoot = false) {
       renderNodeCatalog();
       workspace.documents.forEach(scheduleProgramGraphReadiness);
     }).catch(error => {
-      if (runtimeClient !== connectedClient) return;
+      if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
+          || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = [];
       nodeCatalogFailure = error;
       nodeCatalogLoaded = true;
@@ -10178,7 +10272,11 @@ function authenticateRuntime() {
   connectRuntime();
 }
 
-function revokeRuntimeAccess() {
+async function revokeRuntimeAccess() {
+  const connectionGeneration = ++runtimeConnectionGeneration;
+  beginWorkspaceAuthority(null, 'revoked');
+  await flushWorkspacePersistence({ allowSuspended: true });
+  if (connectionGeneration !== runtimeConnectionGeneration) return;
   runtimeTokenProvider.clearAccessToken();
   hasRuntimeToken = false;
   runtimeDisconnect?.();
@@ -10186,7 +10284,8 @@ function revokeRuntimeAccess() {
   runtimeClient = null;
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
-  void switchWorkspacePersistence(null, null);
+  workspacePersistenceReason = 'Workspace authority was revoked. Documents remain open for export.';
+  syncActiveDocumentChrome();
   humanTaskDecisionDialog?.suspend();
   void configureHumanTasks();
   document.getElementById('access-token').value = '';
@@ -10219,6 +10318,9 @@ function setRuntimeConnectionState(status, message) {
 
 function graphLifecycleCommand(action) {
   if (!workspace.active || !graphData) return showInspectorMessage('Create or load a workflow first.');
+  if (!tenantAuthorityAllows(workspace.active)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified.');
+  }
   if (action === 'stop' && sourceSessionIsActive(activeSourceSession)) {
     void stopActiveSourceSession(workspace.active);
     return { status: 'stopping', deploymentId: activeSourceSession.sessionId };
@@ -10262,7 +10364,8 @@ function updateSourceSession(owner, status, token = null, { observationUnavailab
 }
 
 function sourceSessionCommandIsCurrent(owner, token) {
-  return workspace.find(owner.id) === owner && sourceSessionCleanupIsCurrent(owner, token);
+  return workspace.find(owner.id) === owner && tenantAuthorityAllows(owner, token?.client)
+    && sourceSessionCleanupIsCurrent(owner, token);
 }
 
 // Stop claims backend cleanup before it waits for a pending start. Closing the document detaches its
@@ -10440,12 +10543,12 @@ function reportExecutionOutcomeOnce(owner, token, outcome) {
 
 async function fetchAndReportExecutionOutcome(owner, token) {
   if (!token?.client || !token.executionId || token.executionId === PENDING_EXECUTION
-      || !claimExecutionOutcomeFetch(token)) return;
+      || !tenantAuthorityAllows(owner, token.client) || !claimExecutionOutcomeFetch(token)) return;
   try {
     const outcome = await token.client.execution(token.executionId, {
       signal: executionOutcomeFetchSignal(token),
     });
-    reportExecutionOutcomeOnce(owner, token, outcome);
+    if (tenantAuthorityAllows(owner, token.client)) reportExecutionOutcomeOnce(owner, token, outcome);
   } catch {
     // The terminal event is still truthful. A failed lookup produces no fabricated clean/failure
     // outcome and never exposes the request error, payload or protected diagnostic in the panel.
@@ -10485,7 +10588,7 @@ async function reconcileTestCompletion(owner, executionId, client) {
     return await reconcileExecution({
       lookup: () => client.execution(executionId, { signal: controller.signal }),
       isCurrent: () => owner.execution.executionId === executionId
-        && !owner.execution.finished.has(executionId),
+        && !owner.execution.finished.has(executionId) && tenantAuthorityAllows(owner, client),
       onUnknown: ({ error, failureCount }) => {
         setExecutionReconciliationState(owner, 'unknown');
         if (owner.id !== workspace.activeId) return;
@@ -10555,6 +10658,9 @@ async function playGraph(mode = 'test') {
   const owner = workspace.active;
   const ownerGraph = graphData;
   if (!owner || !ownerGraph) return showInspectorMessage('Create or load a workflow first.');
+  if (!tenantAuthorityAllows(owner)) {
+    return showInspectorMessage('Wait for this document workspace authority to be verified before execution.');
+  }
   if (programNodes(ownerGraph).length) {
     const ready = await ensureProgramGraphReady(owner, { automatic: true });
     if (!ready) {
@@ -10580,8 +10686,8 @@ async function playGraph(mode = 'test') {
   // Everything a later POST can consume is captured before the first await. The graph is serialized
   // now, not read from whichever document may become active while a delayed terminal GET is pending.
   syncGraphPositions();
-  const graphMl = serializeGraphML(ownerGraph);
-  const testProjectionGraph = mode === 'test' ? structuredClone(ownerGraph) : null;
+  const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
+  const testProjectionGraph = mode === 'test' ? canonicalGraphSnapshot(ownerGraph) : null;
   const payload = document.getElementById('execution-payload').value;
   const displayName = graphDisplayName;
   const ownerCy = cy;
@@ -10623,7 +10729,8 @@ async function playGraph(mode = 'test') {
     releaseExecutionCommand(flight);
     return;
   }
-  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner;
+  const ownerStillActive = workspace.activeId === owner.id && workspace.find(owner.id) === owner
+    && tenantAuthorityAllows(owner, executionClient);
   if (!ownerStillActive || !executionCommandIsCurrent(flight)) {
     releaseExecutionCommand(flight);
     return;
@@ -10715,7 +10822,7 @@ async function playGraph(mode = 'test') {
 // to be in front of the user is how a run in one document used to light up another.
 function handleRuntimeEvent(event) {
   const target = documentForRuntimeEvent(workspace, event);
-  if (!target) return;
+  if (!target || !tenantAuthorityAllows(target)) return;
   const isTerminal = event.type === 'EXECUTION_COMPLETED' || event.type === 'EXECUTION_FAILED'
     || event.type === 'EXECUTION_CANCELLED';
   const isActive = target === workspace.active;
@@ -10800,17 +10907,6 @@ function handleRuntimeEvent(event) {
   node.data('lastOccurredAt', event.occurredAt || null);
   node.data('processingDuration', event.processingDuration ?? null);
   node.data('fallback', Boolean(event.fallback));
-  const model = targetGraph?.nodeMap[event.nodeId];
-  if (model) {
-    model.instances = instances;
-    model.arrivals = arrivals;
-    model.runtimeState = state;
-    model.runtimeObserved = true;
-    model.lastEventType = event.type;
-    model.lastOccurredAt = event.occurredAt || null;
-    model.processingDuration = event.processingDuration ?? null;
-    model.fallback = Boolean(event.fallback);
-  }
   applyRuntimeVisual(node);
   updateD3RuntimeNode(target, event.nodeId, instances, state, arrivals, event);
 }
@@ -10833,16 +10929,6 @@ function resetRuntimeState(owner, targetCy, targetGraph, targetLayoutMode, targe
     // run, so clearing run state must not clear it. The label is rebuilt through the same helper for
     // the same reason: the marker belongs to the idle node too.
     node.data('label', `${NODE_ICONS[node.data('nodeType')] || '• '}${runtimeNodeLabel(node)}`);
-    const model = targetGraph.nodeMap[node.id()];
-    if (model) {
-      model.instances = 0;
-      model.runtimeState = 'idle';
-      model.runtimeObserved = false;
-      model.lastEventType = null;
-      model.lastOccurredAt = null;
-      model.processingDuration = null;
-      model.fallback = false;
-    }
   });
   if (targetLayoutMode === 'elastic') {
     startD3Elastic(owner, targetCy, owner.layoutSessionToken);
@@ -13200,6 +13286,7 @@ function commandContext() {
     editable: Boolean(graphData && graphData.format !== 'graphify'),
     documentEditable: Boolean(documentIsEditable(workspace.active)),
     documentMode: workspace.find(workspace.activeId)?.mode ?? null,
+    tenantAuthority: tenantAuthorityAllows(workspace.active),
     canModify: canModifyGraph(graphData, layoutMode) && !layoutBusy,
     layoutBusy,
     modifyEnabled,
@@ -13743,7 +13830,10 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
   onSubmit: async ({ task, action, comment }) => {
     const client = runtimeClient;
     const capability = currentHumanTaskCapability();
-    if (!client || !capability) throw new Error('Reconnect to the service before deciding this task.');
+    const owner = workspace.active;
+    if (!client || !capability || !tenantAuthorityAllows(owner, client)) {
+      throw new Error('Reconnect to this document workspace before deciding this task.');
+    }
     try {
       const result = await client.confirmHumanTask(task.taskId, task.generation, action, comment,
         { capability });
@@ -13785,16 +13875,18 @@ credentialsWindow = createCredentialsWindow({
 deploymentsWindow = createDeploymentsWindow({
   dialog: document.getElementById('deployments-dialog'),
   currentDocument: () => {
-    if (!workspace.active || !graphData) return null;
-    syncGraphPositions();
+    if (!workspace.active || !graphData || !tenantAuthorityAllows(workspace.active)) return null;
+    if (documentIsEditable(workspace.active)) syncGraphPositions();
     return { documentId: workspace.activeId, displayName: graphDisplayName,
       incarnation: activeDocumentIncarnation,
-      graphMl: serializeGraphML(graphData), graph: structuredClone(graphData), name: graphName };
+      authorityGeneration: workspaceAuthority.generation,
+      graphMl: serializeGraphML(graphData), graph: canonicalGraphSnapshot(graphData), name: graphName };
   },
   onRegistered: (deployment, source) => {
     const owner = workspace.find(source.documentId);
     if (!owner || owner.incarnation !== source.incarnation || !deployment.graphVersion
-        || owner.tenantId !== (activeWorkspaceScope?.tenantId ?? null)) return;
+        || source.authorityGeneration !== workspaceAuthority.generation
+        || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     source.graph.nodeMap = Object.fromEntries(source.graph.nodes.map(node => [node.id, node]));
@@ -13819,7 +13911,7 @@ deploymentsWindow = createDeploymentsWindow({
   },
   onDeploymentSelected: deployment => {
     const owner = workspace.active;
-    if (!owner) return;
+    if (!owner || !tenantAuthorityAllows(owner)) return;
     owner.humanTasks.deploymentId = deployment.deploymentId;
     owner.humanTasks.graphVersion = deployment.graphVersion;
     void configureHumanTasks(owner);

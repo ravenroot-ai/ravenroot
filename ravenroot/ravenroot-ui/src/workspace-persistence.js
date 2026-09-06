@@ -18,6 +18,24 @@ function nullableString(value, label) {
   return value;
 }
 
+export function canonicalGraphSnapshot(graph) {
+  const { nodeMap: _derivedNodeIndex, ...semanticGraph } = graph;
+  const canonical = JSON.parse(JSON.stringify(semanticGraph));
+  for (const node of canonical.nodes || []) {
+    node.instances = 0;
+    node.arrivals = 0;
+    node.runtimeState = 'idle';
+    node.runtimeObserved = false;
+    node.lastEventType = null;
+    node.lastOccurredAt = null;
+    node.processingDuration = null;
+    node.fallback = false;
+    delete node.programPhase;
+    delete node.programReadinessState;
+  }
+  return canonical;
+}
+
 export function persistedDocument(document_) {
   if (!document_ || typeof document_ !== 'object' || !MODES.has(document_.mode)) {
     throw new TypeError('Workspace document mode is invalid');
@@ -28,7 +46,7 @@ export function persistedDocument(document_) {
   if (!document_.graph || !Array.isArray(document_.graph.nodes) || !Array.isArray(document_.graph.edges)) {
     throw new TypeError('Workspace document graph is invalid');
   }
-  const graph = JSON.parse(JSON.stringify(document_.graph, (key, value) => key === 'nodeMap' ? undefined : value));
+  const graph = canonicalGraphSnapshot(document_.graph);
   return Object.freeze({
     documentId,
     name: String(document_.name || 'untitled.graphml'),

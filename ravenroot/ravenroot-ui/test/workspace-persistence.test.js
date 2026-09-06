@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { serializeGraphML } from '../src/graph-document.js';
 
 import {
   persistedDocument,
@@ -32,6 +33,29 @@ describe('tenant workspace snapshot', () => {
     expect(snapshot.activeDocumentId).toBe('a');
     expect(JSON.stringify(snapshot)).not.toContain('never-store');
     expect(snapshot.documents[0].graph).not.toHaveProperty('nodeMap');
+  });
+
+  it('resets runtime projections while preserving arbitrary authored property names and artifact identity', () => {
+    const source = document_('runtime');
+    Object.assign(source.graph.nodes[0], { instances: 7, arrivals: 4, runtimeState: 'failed',
+      runtimeObserved: true, lastEventType: 'NODE_FAILED', lastOccurredAt: 'now',
+      processingDuration: 'PT1S', fallback: true, programPhase: 'READY',
+      programReadinessState: { phase: 'READY' } });
+    source.graph.nodes[0].properties = { nodeMap: '  Δ <xml>  ', artifactId: 'artifact-7' };
+    source.graph.nodes[0].propertyTypes = { nodeMap: 'string', artifactId: 'string' };
+    source.graph.graphProperties = { nodeMap: 'graph value' };
+    source.graph.sourceXml = '<?xml version="1.0"?><graphml xmlns="http://graphml.graphdrawing.org/xmlns"><graph id="g" edgedefault="directed"/></graphml>';
+    const stored = persistedDocument(source).graph;
+    expect(stored.nodes[0]).toMatchObject({ instances: 0, arrivals: 0, runtimeState: 'idle',
+      runtimeObserved: false, lastEventType: null, lastOccurredAt: null,
+      processingDuration: null, fallback: false,
+      properties: { nodeMap: '  Δ <xml>  ', artifactId: 'artifact-7' } });
+    expect(stored.nodes[0]).not.toHaveProperty('programPhase');
+    expect(stored.nodes[0]).not.toHaveProperty('programReadinessState');
+    expect(stored.graphProperties.nodeMap).toBe('graph value');
+    const exported = serializeGraphML(stored);
+    expect(exported).toContain('  Δ &lt;xml&gt;  ');
+    expect(exported).toContain('graph value');
   });
 
   it('restores order, selection and node index while rejecting stale or cross-tenant records', () => {

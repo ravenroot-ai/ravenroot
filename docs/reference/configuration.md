@@ -53,6 +53,13 @@ same budget independently. Graphify JSON remains a view-only import and does not
 durable graph content. Existing durable definitions remain readable after an operator lowers the
 limit, but recovery refuses to execute one that now exceeds the configured budget.
 
+An authenticated response also carries `workspace: { "tenantId": "…" }`. `tenantId` is the exact,
+opaque tenant of the principal authenticated for that request; clients compare it byte-for-byte and
+must not trim, parse, display, or use it as a new authorization input. The server derives this field
+from request-local principal state, so concurrent requests authenticated as different principals do
+not share identity. Older servers may omit `workspace`; the UI then keeps documents in the current
+session and does not read or write a tenant persistence namespace.
+
 Blank or absent values use the default. Zero, negative, malformed, and over-ceiling values refuse
 startup; they never silently widen or disable the limit. Compose passes the host value through to the
 same composition root.

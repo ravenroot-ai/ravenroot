@@ -189,22 +189,27 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,
-      isEnabled: context => context.editable && (!context.running || context.executionUnknown === true),
+      isEnabled: context => context.editable && context.tenantAuthority
+        && (!context.running || context.executionUnknown === true),
       shortcuts: [global({ key: 'Enter', primary: true })],
     },
     { id: 'run.start', group: 'execution', order: 20,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.run,
-      isEnabled: context => context.editable && (!context.running || context.executionUnknown === true),
+      isEnabled: context => context.editable && context.tenantAuthority
+        && (!context.running || context.executionUnknown === true),
     },
     { id: 'run.pause', group: 'execution', order: 30,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.pause,
-      isEnabled: context => Boolean(context.transientRunning && !context.sourceSessionActive) },
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.sourceSessionActive) },
     { id: 'run.stop', group: 'execution', order: 40,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.stop,
-      isEnabled: context => Boolean(context.transientRunning || context.sourceSessionActive) },
+      isEnabled: context => Boolean(context.tenantAuthority
+        && (context.transientRunning || context.sourceSessionActive)) },
     { id: 'run.forceStop', group: 'execution', order: 50,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.forceStop,
-      isEnabled: context => Boolean(context.transientRunning && !context.sourceSessionActive) },
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.sourceSessionActive) },
     { id: 'run.authenticate', group: 'connection', order: 60,
       placements: ['menu.run', 'toolbar.runtime'], execute: actions.authenticate },
     { id: 'run.forgetToken', group: 'connection', order: 70,

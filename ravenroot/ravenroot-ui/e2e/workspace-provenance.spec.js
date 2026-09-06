@@ -1,11 +1,15 @@
 import { expect, test } from '@playwright/test';
 
 async function installWorkspaceService(page, tenant) {
-  await page.route('**/v1/configuration', route => route.fulfill({
-    status: 200, contentType: 'application/json',
-    body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
-      workspace: { tenantId: tenant.value } }),
-  }));
+  await page.route('**/v1/configuration', async route => {
+    const response = tenant.configuration
+      ? await tenant.configuration(route.request()) : { tenantId: tenant.value };
+    await route.fulfill(response?.status ? response : {
+      status: 200, contentType: 'application/json',
+      body: JSON.stringify({ schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024,
+        workspace: { tenantId: response.tenantId }, ...(response.extra || {}) }),
+    });
+  });
   await page.route('**/v1/node-types', route => route.fulfill({
     status: 200, contentType: 'application/json', body: '[]',
   }));
@@ -14,12 +18,77 @@ async function installWorkspaceService(page, tenant) {
   }));
 }
 
+test('pending and failed tenant changes leave old documents exportable but runtime-isolated', async ({ page }) => {
+  const humanTasks = { schemaVersion: 1, confirmationPresentationVersions: [1],
+    confirmationPromptMaxUtf8Bytes: 4096, confirmationActionLabelMaxUtf8Bytes: 64,
+    commentMaxUtf8Bytes: 4096, attentionPollMillis: 1000, attentionBackoffMaxMillis: 10000,
+    attentionPageSize: 25, attentionPageSizeMax: 1000 };
+  const tenant = { configuration: async request => {
+    if (request.headers().authorization === 'Bearer tenant-b-token') {
+      return { tenantId: 'tenant-b', extra: { humanTasks } };
+    }
+    return { tenantId: 'tenant-a', extra: { humanTasks } };
+  } };
+  await installWorkspaceService(page, tenant);
+  let executionPosts = 0;
+  let deploymentPosts = 0;
+  let humanTaskRequests = 0;
+  await page.route('**/v1/executions**', route => {
+    if (route.request().method() === 'POST') executionPosts += 1;
+    return route.fulfill({ status: 500, contentType: 'application/json', body: '{}' });
+  });
+  await page.route('**/v1/deployments**', route => {
+    if (route.request().method() === 'POST') deploymentPosts += 1;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"deployments":[]}' });
+  });
+  await page.route('**/v1/human-tasks/**', route => {
+    humanTaskRequests += 1;
+    return route.fulfill({ status: 200, contentType: 'application/json', body: '{"items":[]}' });
+  });
+  await page.goto('/');
+  await waitForWorkspace(page, 'tenant-a');
+  const oldDocument = await page.evaluate(() => window.ravenroot.activeDocument().documentId);
+  await page.evaluate(() => {
+    let reject;
+    window.__rejectTenantBRestore = () => reject?.(new Error('tenant B storage unavailable'));
+    window.ravenroot._setWorkspaceSnapshotReaderForTest(scope => scope.tenantId === 'tenant-b'
+      ? new Promise((_resolve, reject_) => { reject = reject_; }) : Promise.resolve(null));
+  });
+  await page.locator('#access-token').fill('tenant-b-token');
+  await page.locator('#btn-authenticate').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().restoring)).toBe(true);
+  await expect(page.locator('#btn-play')).toBeDisabled();
+  await expect(page.locator('#btn-run')).toBeDisabled();
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await page.evaluate(() => {
+    document.querySelector('#btn-play').click();
+    document.querySelector('#btn-run').click();
+  });
+  await page.locator('#menu-run').click();
+  await page.getByRole('menuitem', { name: 'Deployments…' }).click();
+  await page.locator('#deployment-id-input').fill('tenant-b-must-not-receive-a');
+  await page.locator('#deployment-register').click();
+  expect({ executionPosts, deploymentPosts }).toEqual({ executionPosts: 0, deploymentPosts: 0 });
+  const humanTasksAtPending = humanTaskRequests;
+  await page.evaluate(() => window.__rejectTenantBRestore());
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().authority.state))
+    .toBe('failed');
+  await expect(page.locator('#btn-play')).toBeDisabled();
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().documentId)).toBe(oldDocument);
+  expect({ executionPosts, deploymentPosts, humanTaskRequests }).toEqual({ executionPosts: 0,
+    deploymentPosts: 0, humanTaskRequests: humanTasksAtPending });
+  await page.locator('#deployment-close').click();
+  await page.locator('#menu-file').click();
+  await expect(page.getByRole('menuitem', { name: 'Save GraphML' })).toBeEnabled();
+});
+
 const waitForWorkspace = (page, tenantId) => expect.poll(() => page.evaluate(() => ({
   persistence: window.ravenroot.workspacePersistence(),
   documents: window.ravenroot.documents().map(document_ => ({
     id: document_.documentId, tenantId: document_.tenantId, mode: document_.mode,
   })),
-}))).toMatchObject({ persistence: { writable: true, scope: { tenantId } } });
+}))).toMatchObject({ persistence: { writable: true, restoring: false,
+  authority: { state: 'ready', tenantId }, scope: { tenantId } } });
 
 async function flush(page) {
   await page.evaluate(() => window.ravenroot.flushWorkspacePersistence());
@@ -38,10 +107,21 @@ test('reload restores durable ids, order, selection and modes without stale runt
     first.execution.executionId = 'stale-execution';
     first.execution.graphVersion = 'stale-version';
     first.sourceSession.sessionId = 'stale-session';
+    Object.assign(first.graph.nodeMap.dosomething, { instances: 9, arrivals: 5,
+      runtimeState: 'failed', runtimeObserved: true, lastEventType: 'NODE_FAILED',
+      lastOccurredAt: 'stale-time', processingDuration: 'PT3S', fallback: true,
+      programPhase: 'READY', programReadinessState: { phase: 'READY', artifactId: 'stale' } });
     return { first: first.documentId, second: secondId };
   });
+  await page.locator('#btn-modify').click();
+  await page.evaluate(() => window.cy.getElementById('dosomething').select());
+  await page.locator('#node-editor input[name="name"]').fill('Persisted without a flush hook');
+  await page.locator('#node-editor input[name="name"]').press('Tab');
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.activeDocument().graph.nodeMap.dosomething.name))
+    .toBe('Persisted without a flush hook');
   await page.locator('#btn-monitoring').click();
-  await flush(page);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().pending)).toBe(false);
   await page.reload();
   await waitForWorkspace(page, tenant.value);
 
@@ -49,13 +129,25 @@ test('reload restores durable ids, order, selection and modes without stale runt
     ids: window.ravenroot.documents().map(document_ => document_.documentId),
     active: window.ravenroot.activeDocument().documentId,
     renderMode: window.ravenroot.activeDocument().renderMode,
+    nodeName: window.ravenroot.activeDocument().graph.nodeMap.dosomething.name,
     executionId: window.ravenroot.activeDocument().execution.executionId,
     sourceSessionId: window.ravenroot.activeDocument().sourceSession.sessionId,
+    nodeProjection: ((node) => ({ instances: node.instances, arrivals: node.arrivals,
+      runtimeState: node.runtimeState, runtimeObserved: node.runtimeObserved,
+      lastEventType: node.lastEventType, lastOccurredAt: node.lastOccurredAt,
+      processingDuration: node.processingDuration, fallback: node.fallback,
+      hasProgramPhase: Object.hasOwn(node, 'programPhase'),
+      hasProgramReadiness: Object.hasOwn(node, 'programReadinessState') }))(
+      window.ravenroot.activeDocument().graph.nodeMap.dosomething),
   }))).toEqual({ ids: [before.first, before.second], active: before.first,
-    renderMode: 'monitoring', executionId: null, sourceSessionId: null });
+    renderMode: 'monitoring', nodeName: 'Persisted without a flush hook',
+    executionId: null, sourceSessionId: null, nodeProjection: { instances: 0, arrivals: 0,
+      runtimeState: 'idle', runtimeObserved: false, lastEventType: null, lastOccurredAt: null,
+      processingDuration: null, fallback: false, hasProgramPhase: false,
+      hasProgramReadiness: false } });
 
   await page.evaluate(id => window.ravenroot.closeDocument(id), before.second);
-  await flush(page);
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().pending)).toBe(false);
   await page.reload();
   await waitForWorkspace(page, tenant.value);
   expect(await page.evaluate(() => window.ravenroot.documents().map(document_ => document_.documentId)))
@@ -89,6 +181,37 @@ test('reauthentication switches exact tenant scopes without adopting either tena
   await waitForWorkspace(page, 'tenant-a');
   expect(await page.evaluate(() => window.ravenroot.documents().map(document_ => document_.documentId)))
     .toEqual(tenantA);
+});
+
+test('overlapping A to B to A restore cannot replace A or leave its autosave suspended', async ({ page }) => {
+  const tenant = { configuration: async request => ({ tenantId:
+    request.headers().authorization === 'Bearer tenant-b-token' ? 'tenant-b' : 'tenant-a' }) };
+  await installWorkspaceService(page, tenant);
+  await page.goto('/');
+  await waitForWorkspace(page, 'tenant-a');
+  const originalA = await page.evaluate(() => window.ravenroot.activeDocument().documentId);
+  await page.evaluate(() => {
+    let release;
+    window.__releaseTenantBRestore = () => release?.(null);
+    window.ravenroot._setWorkspaceSnapshotReaderForTest(scope => scope.tenantId === 'tenant-b'
+      ? new Promise(resolve => { release = resolve; }) : Promise.resolve(null));
+  });
+  await page.locator('#access-token').fill('tenant-b-token');
+  await page.locator('#btn-authenticate').click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().restoring)).toBe(true);
+  await page.locator('#access-token').fill('tenant-a-token');
+  await page.locator('#btn-authenticate').click();
+  await waitForWorkspace(page, 'tenant-a');
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().restoring)).toBe(false);
+  const added = await page.evaluate(() => window.ravenroot.openDocument({ name: 'after-overlap.graphml' }));
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().pending)).toBe(false);
+  await page.evaluate(() => window.__releaseTenantBRestore());
+  expect(await page.evaluate(() => window.ravenroot.documents().map(item => item.documentId)))
+    .toEqual([originalA, added]);
+  await page.reload();
+  await waitForWorkspace(page, 'tenant-a');
+  expect(await page.evaluate(() => window.ravenroot.documents().map(item => item.documentId)))
+    .toEqual([originalA, added]);
 });
 
 test('an unreadable stored schema remains intact and write-locked', async ({ page }) => {
@@ -135,11 +258,22 @@ test('Test creates an immutable exact snapshot and Fork creates a distinct edita
   const tenant = { value: 'tenant-test' };
   await installWorkspaceService(page, tenant);
   let postedGraph = '';
+  let executionOrdinal = 0;
+  let buildOrdinal = 0;
+  await page.route('**/v1/program-artifacts/build', route => {
+    buildOrdinal += 1;
+    return route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify({ buildId: `build-test-${buildOrdinal}`,
+      revision: 1, terminal: true, programs: [{ nodeId: 'dosomething', phase: 'READY', ready: true,
+        reused: true, artifactId: buildOrdinal === 1 ? 'artifact-test' : 'artifact-revalidated' }] }),
+    });
+  });
   await page.route('**/v1/executions**', async route => {
     if (route.request().method() === 'POST') {
       postedGraph = route.request().postData() || '';
+      executionOrdinal += 1;
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
-        executionId: 'execution-test', processInstanceId: 'process-test',
+        executionId: `execution-test-${executionOrdinal}`, processInstanceId: 'process-test',
         graphVersion: 'graph-version-test', executionPolicy: 'TEST_PASSTHROUGH',
       }) });
       return;
@@ -151,10 +285,18 @@ test('Test creates an immutable exact snapshot and Fork creates a distinct edita
   });
   await page.goto('/');
   await waitForWorkspace(page, tenant.value);
+  await page.evaluate(() => {
+    const node = window.ravenroot.activeDocument().graph.nodeMap.dosomething;
+    node.kind = 'BEHAVIOR';
+    node.behavior = 'program';
+    node.properties = { language: 'javascript', source: 'return input;', testPayload: 'hello' };
+    node.propertyTypes = { language: 'string', source: 'string', testPayload: 'string' };
+  });
   const draft = await page.evaluate(() => window.ravenroot.activeDocument().documentId);
   await page.locator('#btn-play').click();
   await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().mode)).toBe('test');
   expect(postedGraph).toContain('<graphml');
+  const firstSubmittedGraphMl = postedGraph;
   const tested = await page.evaluate(() => {
     const document_ = window.ravenroot.activeDocument();
     return { id: document_.documentId, mode: document_.mode, provenance: document_.provenance };
@@ -169,6 +311,28 @@ test('Test creates an immutable exact snapshot and Fork creates a distinct edita
     return JSON.stringify(owner.graph);
   });
   await page.keyboard.press('Delete');
+  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
+    .toBe(immutableBefore);
+
+  await page.locator('#btn-monitoring').click();
+  await page.locator('#btn-design').click();
+  await page.locator('#menu-layout').click();
+  await page.getByRole('menuitem', { name: 'Flow' }).click();
+  await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().layoutBusy)).toBe(false);
+  const download = page.waitForEvent('download');
+  await page.getByRole('button', { name: 'Save GraphML' }).click();
+  await download;
+  await expect.poll(() => page.evaluate(() => window.ravenroot.workspacePersistence().pending)).toBe(false);
+  await page.reload();
+  await waitForWorkspace(page, tenant.value);
+  await page.evaluate(id => window.ravenroot.activateDocument(id), tested.id);
+  expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
+    .toBe(immutableBefore);
+  await page.locator('#btn-play').click();
+  await expect.poll(() => executionOrdinal).toBe(2);
+  expect(firstSubmittedGraphMl).toContain('artifact-test');
+  expect(postedGraph).toContain('artifact-revalidated');
+  expect(postedGraph).not.toBe(firstSubmittedGraphMl);
   expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
     .toBe(immutableBefore);
 

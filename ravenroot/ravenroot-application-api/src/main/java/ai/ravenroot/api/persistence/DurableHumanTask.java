@@ -33,7 +33,15 @@ public record DurableHumanTask(ExecutionKey key, HumanTaskRegistration request,
         }
     }
 
-    /** Compatibility constructor for rows and callers before decision comments were durable. */
+    /**
+     * Compatibility constructor for rows and callers before decision comments were durable.
+     * @param key owning execution identity
+     * @param request immutable task registration
+     * @param status current lifecycle status
+     * @param actor bounded terminal responder identity
+     * @param generation optimistic decision fence
+     * @param revision execution-store revision containing this state
+     */
     public DurableHumanTask(ExecutionKey key, HumanTaskRegistration request, HumanTaskStatus status,
                             String actor, long generation, long revision) {
         this(key, request, status, actor, "", generation, revision, Instant.EPOCH);
@@ -52,7 +60,14 @@ public record DurableHumanTask(ExecutionKey key, HumanTaskRegistration request,
         return waiting(key, request, revision, Instant.EPOCH);
     }
 
-    /** Creates the initial waiting state using the store's authoritative registration time. */
+    /**
+     * Creates the initial waiting state using the store's authoritative registration time.
+     * @param key owning execution identity
+     * @param request immutable task registration
+     * @param revision execution-store revision containing the registration
+     * @param createdAt immutable store-clock registration time
+     * @return waiting task at generation one
+     */
     public static DurableHumanTask waiting(ExecutionKey key, HumanTaskRegistration request,
                                            long revision, Instant createdAt) {
         return new DurableHumanTask(key, request, HumanTaskStatus.WAITING, "", "", 1L, revision,

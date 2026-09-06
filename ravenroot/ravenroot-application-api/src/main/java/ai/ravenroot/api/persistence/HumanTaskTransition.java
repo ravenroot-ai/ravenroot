@@ -57,6 +57,7 @@ public sealed interface HumanTaskTransition {
      * @param taskId target task identity.
      * @param expectedGeneration generation that must still be current.
      * @param actor authorized responder identity.
+     * @param comment separately persisted decision metadata.
      */
     record Resolved(UUID taskId, long expectedGeneration, String actor, String comment)
             implements HumanTaskTransition {
@@ -66,7 +67,12 @@ public sealed interface HumanTaskTransition {
             actor = requireActor(actor);
             comment = requireComment(comment);
         }
-        /** Compatibility constructor without a decision comment. */
+        /**
+         * Compatibility constructor without a decision comment.
+         * @param taskId target task identity
+         * @param expectedGeneration generation that must still be current
+         * @param actor authorized responder identity
+         */
         public Resolved(UUID taskId, long expectedGeneration, String actor) {
             this(taskId, expectedGeneration, actor, "");
         }
@@ -80,6 +86,7 @@ public sealed interface HumanTaskTransition {
      * @param taskId target task identity.
      * @param expectedGeneration generation that must still be current.
      * @param actor authorized responder identity.
+     * @param comment separately persisted decision metadata.
      */
     record Denied(UUID taskId, long expectedGeneration, String actor, String comment)
             implements HumanTaskTransition {
@@ -89,7 +96,12 @@ public sealed interface HumanTaskTransition {
             actor = requireActor(actor);
             comment = requireComment(comment);
         }
-        /** Compatibility constructor without a decision comment. */
+        /**
+         * Compatibility constructor without a decision comment.
+         * @param taskId target task identity
+         * @param expectedGeneration generation that must still be current
+         * @param actor authorized responder identity
+         */
         public Denied(UUID taskId, long expectedGeneration, String actor) {
             this(taskId, expectedGeneration, actor, "");
         }
@@ -118,6 +130,7 @@ public sealed interface HumanTaskTransition {
      * @param taskId target task identity.
      * @param expectedGeneration generation that must still be current.
      * @param actor authorized requester or responder identity.
+     * @param comment separately persisted decision metadata.
      */
     record Cancelled(UUID taskId, long expectedGeneration, String actor, String comment)
             implements HumanTaskTransition {
@@ -127,7 +140,12 @@ public sealed interface HumanTaskTransition {
             actor = requireActor(actor);
             comment = requireComment(comment);
         }
-        /** Compatibility constructor without a decision comment. */
+        /**
+         * Compatibility constructor without a decision comment.
+         * @param taskId target task identity
+         * @param expectedGeneration generation that must still be current
+         * @param actor authorized requester or responder identity
+         */
         public Cancelled(UUID taskId, long expectedGeneration, String actor) {
             this(taskId, expectedGeneration, actor, "");
         }

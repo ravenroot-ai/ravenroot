@@ -1,6 +1,11 @@
 package ai.ravenroot.api.persistence;
 
-/** Immutable embedded-confirmation limits pinned with one durable Human Task registration. */
+/**
+ * Immutable embedded-confirmation limits pinned with one durable Human Task registration.
+ * @param maxPromptUtf8Bytes maximum UTF-8 bytes in the presentation prompt
+ * @param maxActionLabelUtf8Bytes maximum UTF-8 bytes in one action label
+ * @param maxCommentUtf8Bytes maximum UTF-8 bytes in separate decision metadata
+ */
 public record HumanTaskConfirmationLimits(int maxPromptUtf8Bytes, int maxActionLabelUtf8Bytes,
                                           int maxCommentUtf8Bytes) {
     /** Compatibility limits for a classic task that cannot accept embedded confirmation metadata. */

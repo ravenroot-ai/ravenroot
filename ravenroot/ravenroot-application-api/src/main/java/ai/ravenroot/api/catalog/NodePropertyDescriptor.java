@@ -90,7 +90,21 @@ public record NodePropertyDescriptor(
         // and only one of them is what an older descriptor meant.
     }
 
-    /** Compatibility constructor preserving the canonical shape before numeric bounds. */
+    /**
+     * Compatibility constructor preserving the canonical shape before numeric and text bounds.
+     * All numeric and text bounds are left undeclared.
+     *
+     * @param name stable schema key; blank names are rejected
+     * @param displayName editor-facing label, defaulting to {@code name}
+     * @param type declared scalar representation, defaulting to string
+     * @param required baseline graph-admission requirement
+     * @param description editor-facing help text
+     * @param defaultValue fallback textual value
+     * @param allowedValues immutable enumerated choices
+     * @param adapterBinding whether absence defers requiredness until traversal reaches the node
+     * @param visibleWhen condition controlling editor visibility, or {@code null} for unconditional visibility
+     * @param requiredWhen condition controlling requiredness, or {@code null} to retain {@code required}
+     */
     public NodePropertyDescriptor(String name, String displayName, NodePropertyType type,
                                   boolean required, String description, String defaultValue,
                                   List<String> allowedValues, boolean adapterBinding,
@@ -99,7 +113,22 @@ public record NodePropertyDescriptor(
                 adapterBinding, visibleWhen, requiredWhen, "", "", 0, 0, 0);
     }
 
-    /** Compatibility constructor preserving the canonical shape before text bounds. */
+    /**
+     * Compatibility constructor preserving the canonical shape before text bounds.
+     *
+     * @param name stable schema key; blank names are rejected
+     * @param displayName editor-facing label, defaulting to {@code name}
+     * @param type declared scalar representation, defaulting to string
+     * @param required baseline graph-admission requirement
+     * @param description editor-facing help text
+     * @param defaultValue fallback textual value
+     * @param allowedValues immutable enumerated choices
+     * @param adapterBinding whether absence defers requiredness until traversal reaches the node
+     * @param visibleWhen condition controlling editor visibility, or {@code null} for unconditional visibility
+     * @param requiredWhen condition controlling requiredness, or {@code null} to retain {@code required}
+     * @param minimumValue inclusive numeric minimum, or blank when not declared
+     * @param maximumValue inclusive numeric maximum, or blank when not declared
+     */
     public NodePropertyDescriptor(String name, String displayName, NodePropertyType type,
                                   boolean required, String description, String defaultValue,
                                   List<String> allowedValues, boolean adapterBinding,
@@ -184,7 +213,18 @@ public record NodePropertyDescriptor(
         return new NodePropertyDescriptor(name, displayName, type, false, description, defaultValue, List.of(), false);
     }
 
-    /** Creates an optional numeric property with an authoritative inclusive range. */
+    /**
+     * Creates an optional numeric property with an authoritative inclusive range.
+     *
+     * @param name stable schema key; blank names are rejected
+     * @param displayName editor-facing label, defaulting to {@code name}
+     * @param type integer or decimal representation
+     * @param description editor-facing help text
+     * @param defaultValue fallback numeric text within the declared range, or blank for no fallback
+     * @param minimum inclusive lower bound
+     * @param maximum inclusive upper bound
+     * @return unconditional optional descriptor carrying the declared numeric range
+     */
     public static NodePropertyDescriptor optionalBounded(String name, String displayName,
                                                           NodePropertyType type, String description,
                                                           String defaultValue, long minimum,
@@ -193,7 +233,20 @@ public record NodePropertyDescriptor(
                 List.of(), false, null, null, Long.toString(minimum), Long.toString(maximum));
     }
 
-    /** Creates a text property with encoded and optional comma-separated item budgets. */
+    /**
+     * Creates a text property with encoded and optional comma-separated item budgets.
+     *
+     * @param name stable schema key; blank names are rejected
+     * @param displayName editor-facing label, defaulting to {@code name}
+     * @param type textual value representation
+     * @param required whether ordinary graph admission requires a value
+     * @param description editor-facing help text
+     * @param defaultValue fallback textual value
+     * @param maximumUtf8Bytes inclusive maximum encoded value bytes, or zero when not declared
+     * @param maximumItems inclusive maximum comma-separated item count, or zero when not declared
+     * @param maximumItemUtf8Bytes inclusive maximum UTF-8 bytes per comma-separated item, or zero when not declared
+     * @return unconditional descriptor carrying the declared text and item budgets
+     */
     public static NodePropertyDescriptor boundedText(String name, String displayName,
                                                       NodePropertyType type, boolean required,
                                                       String description, String defaultValue,

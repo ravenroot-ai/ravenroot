@@ -65,7 +65,13 @@ public record PayloadEnvelope(String contract, String schema, String schemaVersi
      */
     public static final int MAX_LABEL_LENGTH = 128;
 
-    /** Returns whether a value is a non-blank label accepted by this wire contract. */
+    /**
+     * Returns whether a value is a non-blank label accepted by this wire contract.
+     *
+     * @param value candidate schema or schema-version label
+     * @return {@code true} when the value uses only the permitted ASCII grammar and is at most
+     *         {@value #MAX_LABEL_LENGTH} characters
+     */
     public static boolean isValidLabel(String value) {
         if (value == null || value.isBlank() || value.length() > MAX_LABEL_LENGTH) return false;
         for (int index = 0; index < value.length(); index++) {

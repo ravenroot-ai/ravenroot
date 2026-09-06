@@ -12,6 +12,27 @@ import java.util.Set;
 /**
  * One immutable operator-owned policy for Human Task authoring, HTTP, persistence, and recovery.
  * Graph-authored values may narrow this policy; they never widen it.
+ *
+ * @param defaultResponseBytes default maximum UTF-8 bytes for a complete encoded response envelope
+ * @param maxResponseBytes inclusive maximum UTF-8 bytes a graph may allow for an encoded response envelope
+ * @param defaultEscalationSeconds default seconds until escalation, or zero to disable escalation
+ * @param maxEscalationSeconds inclusive maximum seconds until escalation; always below the maximum expiry
+ * @param defaultExpirySeconds default positive seconds until task expiry
+ * @param maxExpirySeconds inclusive maximum positive seconds until task expiry
+ * @param maxTitleUtf8Bytes inclusive maximum UTF-8 bytes in a task title
+ * @param maxDescriptionUtf8Bytes inclusive maximum UTF-8 bytes in a task description
+ * @param maxResponseSchemaUtf8Bytes inclusive maximum UTF-8 bytes in the graph-authored response schema label
+ * @param maxAuthorizationTokens inclusive maximum token count for each of the required-role and required-scope sets
+ * @param maxAuthorizationTokenUtf8Bytes inclusive maximum UTF-8 bytes in each authorization token
+ * @param decisionBodyMaxBytes inclusive maximum raw HTTP decision-body bytes accepted before parsing
+ * @param inboxDefaultPageSize default number of task projections returned by an inbox request
+ * @param inboxMaxPageSize inclusive maximum number of task projections returned by an inbox request
+ * @param responseMaxDepth inclusive maximum nesting depth of a structured response
+ * @param responseMaxCollectionSize inclusive maximum members in one response collection
+ * @param responseMaxValueCount inclusive maximum total structured values in a response
+ * @param responseMaxTextLength inclusive maximum UTF-16 code units in a response text value
+ * @param responseMaxKeyLength inclusive maximum UTF-16 code units in a response object key
+ * @param writeAttempts inclusive maximum optimistic persistence attempts for one task transition
  */
 public record HumanTaskPolicy(
         int defaultResponseBytes,
@@ -55,6 +76,7 @@ public record HumanTaskPolicy(
     /** Bounds synchronous load-and-apply work performed by one conflict-path settlement request. */
     public static final int HARD_MAX_WRITE_ATTEMPTS = 32;
 
+    /** The authoritative Human Task policy used when no operator override is supplied. */
     public static final HumanTaskPolicy DEFAULTS = new HumanTaskPolicy(
             64 * 1_024, 256 * 1_024,
             0, Duration.ofDays(30).toSeconds() - 1,
@@ -64,6 +86,10 @@ public record HumanTaskPolicy(
             256 * 1_024, 50, 100,
             32, 1_024, 4_096, 16 * 1_024, 256, 3);
 
+    /**
+     * Validates individual inclusive bounds and the relationships between defaults, maxima,
+     * escalation, expiry, response parsing, and raw-body capacity.
+     */
     public HumanTaskPolicy {
         positive(defaultResponseBytes, "defaultResponseBytes");
         bounded(maxResponseBytes, 1, HARD_MAX_RESPONSE_BYTES, "maxResponseBytes");
@@ -118,7 +144,12 @@ public record HumanTaskPolicy(
         bounded(writeAttempts, 1, HARD_MAX_WRITE_ATTEMPTS, "writeAttempts");
     }
 
-    /** Resolves the persisted structured-response contract for one graph-authored byte ceiling. */
+    /**
+     * Resolves the persisted structured-response contract for one graph-authored byte ceiling.
+     *
+     * @param graphResponseBytes positive encoded-envelope byte ceiling, no greater than the active policy maxima
+     * @return recovery-sensitive parser, body, and write-attempt limits to pin with the task
+     */
     public HumanTaskExecutionLimits executionLimits(int graphResponseBytes) {
         if (graphResponseBytes < 1 || graphResponseBytes > maxResponseBytes
                 || graphResponseBytes > decisionBodyMaxBytes) {
@@ -135,6 +166,9 @@ public record HumanTaskPolicy(
      * <p>Callers must perform exact durable deduplication first. That ordering lets a replay of the
      * same logical request remain idempotent after policy changes, while every new
      * registration passes through this single authority.</p>
+     *
+     * @param registration new durable registration to validate against this complete policy
+     * @param now authoritative instant used to measure its remaining escalation and expiry durations
      */
     public void requireNewRegistration(HumanTaskRegistration registration, Instant now) {
         Objects.requireNonNull(registration, "registration");

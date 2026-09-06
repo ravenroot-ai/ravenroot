@@ -16,13 +16,25 @@ import java.util.Objects;
  */
 public record HumanTaskExecutionLimits(PayloadLimits responsePayload, int decisionBodyMaxBytes,
                                        int writeAttempts) {
-    /** Existing behavior used for registrations created before limits were persisted explicitly. */
+    /**
+     * Returns the historical recovery contract used before task limits were persisted explicitly.
+     *
+     * @param maxEncodedBytes positive encoded-response byte limit captured by the historical task
+     * @return historical parser, decision-body, and three-attempt write limits
+     */
     public static HumanTaskExecutionLimits legacy(int maxEncodedBytes) {
         return new HumanTaskExecutionLimits(new PayloadLimits(maxEncodedBytes,
                 32, 1_024, 4_096, 16 * 1_024, 256),
                 Math.max(256 * 1_024, maxEncodedBytes), 3);
     }
 
+    /**
+     * Validates a complete recovery-sensitive execution contract.
+     *
+     * @param responsePayload structured response limits pinned when the task is registered
+     * @param decisionBodyMaxBytes inclusive raw HTTP decision-body byte limit pinned with the task
+     * @param writeAttempts inclusive maximum optimistic persistence attempts pinned with the task
+     */
     public HumanTaskExecutionLimits {
         responsePayload = Objects.requireNonNull(responsePayload, "responsePayload");
         if (decisionBodyMaxBytes < responsePayload.maxEncodedBytes()
@@ -35,7 +47,13 @@ public record HumanTaskExecutionLimits(PayloadLimits responsePayload, int decisi
         }
     }
 
-    /** Compatibility constructor for callers that do not distinguish transport and payload caps. */
+    /**
+     * Compatibility constructor for callers that do not distinguish transport and payload caps.
+     * The raw decision-body cap is set to the encoded response-payload cap.
+     *
+     * @param responsePayload structured response limits to pin with the task
+     * @param writeAttempts inclusive maximum optimistic persistence attempts to pin with the task
+     */
     public HumanTaskExecutionLimits(PayloadLimits responsePayload, int writeAttempts) {
         this(responsePayload, responsePayload.maxEncodedBytes(), writeAttempts);
     }

@@ -87,7 +87,28 @@ public record HumanTaskRegistration(
 
     /**
      * Compatibility constructor preserving the canonical registration shape before Human Task
-     * execution limits were persisted explicitly.
+     * execution limits were persisted explicitly. It derives the historical parser, raw-body, and
+     * write-attempt contract from {@code responseSchema} while preserving the supplied trusted
+     * continuation envelope.
+     *
+     * @param taskId deterministic task identity
+     * @param traversalId suspended traversal identity
+     * @param invocationId suspended node invocation identity
+     * @param attemptId suspended node attempt identity
+     * @param nodeId graph node awaiting the decision
+     * @param correlationKey generic handler correlation key
+     * @param deduplicationKey generic handler deduplication key
+     * @param metadata bounded graph-authored display copy
+     * @param responseSchema exact bounded response contract
+     * @param responderRequirements authorization required from a responder
+     * @param requester security context that created the task
+     * @param graphVersionPin immutable graph version used for re-entry
+     * @param escalateAt optional durable escalation deadline
+     * @param expiresAt required durable expiry deadline
+     * @param reentryMapping terminal status to graph-outcome mapping
+     * @param continuationVersion positive version of the trusted graph continuation envelope
+     * @param continuation bounded opaque continuation bytes, copied on construction
+     * @param continuationDigest SHA-256 content binding for {@code continuation}
      */
     public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
                                  String nodeId, String correlationKey, String deduplicationKey,

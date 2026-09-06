@@ -874,7 +874,26 @@ final class SqliteSchema {
                         "ALTER TABLE human_task ADD COLUMN response_max_value_count INTEGER NOT NULL DEFAULT 4096",
                         "ALTER TABLE human_task ADD COLUMN response_max_text_length INTEGER NOT NULL DEFAULT 16384",
                         "ALTER TABLE human_task ADD COLUMN response_max_key_length INTEGER NOT NULL DEFAULT 256",
-                        "ALTER TABLE human_task ADD COLUMN write_attempts INTEGER NOT NULL DEFAULT 3")));
+                        "ALTER TABLE human_task ADD COLUMN write_attempts INTEGER NOT NULL DEFAULT 3")),
+                // Old rows are deliberately classic. New embedded registrations write an immutable
+                // presentation and its effective limits, so a later configuration change cannot
+                // alter an outstanding operator decision.
+                new SchemaMigration(20, "pinned human-task confirmation presentation and comments", List.of(
+                        "ALTER TABLE human_task ADD COLUMN confirmation_version INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_prompt TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_comment_requirement TEXT NOT NULL DEFAULT 'DISALLOWED'",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_actions TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_resolve_label TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_deny_label TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_cancel_label TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_max_prompt_bytes INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_max_action_label_bytes INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE human_task ADD COLUMN confirmation_max_comment_bytes INTEGER NOT NULL DEFAULT 1",
+                        "ALTER TABLE human_task ADD COLUMN decision_comment TEXT NOT NULL DEFAULT ''",
+                        "ALTER TABLE human_task ADD COLUMN created_at_epoch_second INTEGER NOT NULL DEFAULT 0",
+                        "ALTER TABLE human_task ADD COLUMN created_at_nano INTEGER NOT NULL DEFAULT 0",
+                        "CREATE INDEX human_task_created_order ON human_task "
+                                + "(tenant_id, created_at_epoch_second, created_at_nano, task_id)")));
     }
 
     static int currentVersion() {

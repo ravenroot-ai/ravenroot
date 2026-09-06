@@ -35,6 +35,10 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationLimits;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
 import ai.ravenroot.api.persistence.HumanTaskPage;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
@@ -3611,16 +3615,24 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         .filter(query::admits).toList();
                 if (admitted.isEmpty()) return new HumanTaskPage(List.of(), Optional.empty());
                 var matching = new ArrayList<DurableHumanTask>();
+                DurableHumanTask cursor = query.cursor().isPresent()
+                        ? readHumanTask(tenantId, query.cursor().orElseThrow()) : null;
                 String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ?"
-                        + (query.cursor().isPresent() ? " AND t.task_id > ?" : "")
+                        + (cursor != null ? " AND (t.created_at_epoch_second > ? OR "
+                                + "(t.created_at_epoch_second = ? AND (t.created_at_nano > ? OR "
+                                + "(t.created_at_nano = ? AND t.task_id > ?))))" : "")
                         + " AND t.status IN (" + admitted.stream().map(ignored -> "?")
                                 .collect(java.util.stream.Collectors.joining(",")) + ")"
-                        + " ORDER BY t.task_id LIMIT ?";
+                        + " ORDER BY t.created_at_epoch_second, t.created_at_nano, t.task_id LIMIT ?";
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     int parameter = 1;
                     statement.setString(parameter++, tenantId);
-                    if (query.cursor().isPresent()) {
-                        statement.setString(parameter++, query.cursor().orElseThrow().toString());
+                    if (cursor != null) {
+                        statement.setLong(parameter++, cursor.createdAt().getEpochSecond());
+                        statement.setLong(parameter++, cursor.createdAt().getEpochSecond());
+                        statement.setInt(parameter++, cursor.createdAt().getNano());
+                        statement.setInt(parameter++, cursor.createdAt().getNano());
+                        statement.setString(parameter++, cursor.request().taskId().toString());
                     }
                     for (HumanTaskStatus status : admitted) statement.setString(parameter++, status.name());
                     statement.setInt(parameter, query.limit() + 1);
@@ -3686,7 +3698,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 throw failure(ExecutionStoreFailure.invalid("correlation key "
                         + registration.correlationKey() + " already identifies a live human task"));
             }
-            insertHumanTask(DurableHumanTask.waiting(key, registration, revision));
+            insertHumanTask(DurableHumanTask.waiting(key, registration, revision, now));
         }
         for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
             DurableHumanTask current = readHumanTask(key.tenantId(), transition.taskId());
@@ -3735,9 +3747,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "resolved_outcome, denied_outcome, expired_outcome, cancelled_outcome, "
                 + "decision_body_max_bytes, response_max_depth, response_max_collection_size, response_max_value_count, "
                 + "response_max_text_length, response_max_key_length, write_attempts, "
-                + "continuation_version, continuation, continuation_digest, status, actor, generation, revision";
+                + "continuation_version, continuation, continuation_digest, "
+                + "confirmation_version, confirmation_prompt, confirmation_comment_requirement, "
+                + "confirmation_actions, confirmation_resolve_label, confirmation_deny_label, "
+                + "confirmation_cancel_label, confirmation_max_prompt_bytes, "
+                + "confirmation_max_action_label_bytes, confirmation_max_comment_bytes, "
+                + "created_at_epoch_second, created_at_nano, "
+                + "status, actor, decision_comment, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(44) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(57) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             statement.setString(index++, task.key().processInstanceId().toString());
@@ -3783,8 +3801,22 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setInt(index++, request.continuationVersion());
             statement.setBytes(index++, request.continuation());
             statement.setString(index++, request.continuationDigest());
+            HumanTaskConfirmationPresentation presentation = request.confirmationPresentation();
+            statement.setInt(index++, presentation.version());
+            statement.setString(index++, presentation.prompt());
+            statement.setString(index++, presentation.commentRequirement().name());
+            statement.setString(index++, joinConfirmationActions(presentation.actions()));
+            statement.setString(index++, presentation.resolveLabel());
+            statement.setString(index++, presentation.denyLabel());
+            statement.setString(index++, presentation.cancelLabel());
+            HumanTaskConfirmationLimits confirmationLimits = request.confirmationLimits();
+            statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
+            statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
+            statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            index = StoredInstant.bindValue(statement, index, task.createdAt());
             statement.setString(index++, task.status().name());
             statement.setString(index++, task.actor());
+            statement.setString(index++, task.decisionComment());
             statement.setLong(index++, task.generation());
             statement.setLong(index, task.revision());
             statement.executeUpdate();
@@ -3793,14 +3825,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     private void updateHumanTask(DurableHumanTask task) throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
-                "UPDATE human_task SET status = ?, actor = ?, generation = ?, revision = ? "
+                "UPDATE human_task SET status = ?, actor = ?, decision_comment = ?, generation = ?, revision = ? "
                         + "WHERE tenant_id = ? AND task_id = ?")) {
             statement.setString(1, task.status().name());
             statement.setString(2, task.actor());
-            statement.setLong(3, task.generation());
-            statement.setLong(4, task.revision());
-            statement.setString(5, task.key().tenantId());
-            statement.setString(6, task.request().taskId().toString());
+            statement.setString(3, task.decisionComment());
+            statement.setLong(4, task.generation());
+            statement.setLong(5, task.revision());
+            statement.setString(6, task.key().tenantId());
+            statement.setString(7, task.request().taskId().toString());
             statement.executeUpdate();
         }
     }
@@ -3893,13 +3926,36 @@ public final class SqliteExecutionStore implements ExecutionStore {
                             rows.getInt("decision_body_max_bytes"),
                             rows.getInt("write_attempts")),
                     rows.getInt("continuation_version"), rows.getBytes("continuation"),
-                    rows.getString("continuation_digest"));
+                    rows.getString("continuation_digest"),
+                    new HumanTaskConfirmationPresentation(rows.getInt("confirmation_version"),
+                            rows.getString("confirmation_prompt"),
+                            HumanTaskCommentRequirement.valueOf(
+                                    rows.getString("confirmation_comment_requirement")),
+                            splitConfirmationActions(rows.getString("confirmation_actions")),
+                            rows.getString("confirmation_resolve_label"),
+                            rows.getString("confirmation_deny_label"),
+                            rows.getString("confirmation_cancel_label")),
+                    new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
+                            rows.getInt("confirmation_max_action_label_bytes"),
+                            rows.getInt("confirmation_max_comment_bytes")));
             return new DurableHumanTask(key, request,
                     HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
-                    rows.getLong("generation"), rows.getLong("revision"));
+                    rows.getString("decision_comment"), rows.getLong("generation"),
+                    rows.getLong("revision"), StoredInstant.read(rows, "created_at"));
         } catch (IllegalArgumentException | IllegalStateException corrupted) {
             throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
         }
+    }
+
+    private static String joinConfirmationActions(Set<HumanTaskConfirmationAction> actions) {
+        return actions.stream().map(Enum::name).sorted().collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static Set<HumanTaskConfirmationAction> splitConfirmationActions(String stored) {
+        if (stored == null || stored.isEmpty()) return Set.of();
+        return java.util.Arrays.stream(stored.split(","))
+                .map(HumanTaskConfirmationAction::valueOf)
+                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private void requireAttemptExists(ProcessInstance folded, UUID traversalId, UUID invocationId,

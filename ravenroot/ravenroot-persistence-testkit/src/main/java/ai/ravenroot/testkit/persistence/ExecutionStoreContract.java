@@ -3283,6 +3283,7 @@ public abstract class ExecutionStoreContract {
         DurableHumanTask resolved = await(store().loadHumanTask(
                 fixture.key().tenantId(), fixture.registration().taskId())).orElseThrow();
         assertEquals(HumanTaskStatus.RESOLVED, resolved.status());
+        assertEquals("", resolved.decisionComment());
         assertEquals(3L, resolved.generation(), "an exact replay must not advance generation");
 
         ExecutionStoreFailure conflict = failureOf(() -> transitionHumanTask(fixture,

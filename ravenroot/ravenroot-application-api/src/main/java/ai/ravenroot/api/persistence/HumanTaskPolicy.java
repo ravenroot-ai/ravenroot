@@ -316,16 +316,16 @@ public record HumanTaskPolicy(
         }
 
         public Confirmation {
-            bounded(maxPromptUtf8Bytes, 1, HARD_MAX_PROMPT_UTF8_BYTES, "maxPromptUtf8Bytes");
-            bounded(maxActionLabelUtf8Bytes, 1, HARD_MAX_ACTION_LABEL_UTF8_BYTES,
+            confirmationBounded(maxPromptUtf8Bytes, 1, HARD_MAX_PROMPT_UTF8_BYTES, "maxPromptUtf8Bytes");
+            confirmationBounded(maxActionLabelUtf8Bytes, 1, HARD_MAX_ACTION_LABEL_UTF8_BYTES,
                     "maxActionLabelUtf8Bytes");
-            bounded(maxCommentUtf8Bytes, 1, HARD_MAX_COMMENT_UTF8_BYTES, "maxCommentUtf8Bytes");
-            bounded(pollAfterMillis, MIN_POLL_MILLIS, HARD_MAX_POLL_MILLIS, "pollAfterMillis");
-            bounded(pollBackoffMaxMillis, pollAfterMillis, HARD_MAX_POLL_MILLIS,
+            confirmationBounded(maxCommentUtf8Bytes, 1, HARD_MAX_COMMENT_UTF8_BYTES, "maxCommentUtf8Bytes");
+            confirmationBounded(pollAfterMillis, MIN_POLL_MILLIS, HARD_MAX_POLL_MILLIS, "pollAfterMillis");
+            confirmationBounded(pollBackoffMaxMillis, pollAfterMillis, HARD_MAX_POLL_MILLIS,
                     "pollBackoffMaxMillis");
-            bounded(attentionDefaultPageSize, 1, HARD_MAX_ATTENTION_PAGE_SIZE,
+            confirmationBounded(attentionDefaultPageSize, 1, HARD_MAX_ATTENTION_PAGE_SIZE,
                     "attentionDefaultPageSize");
-            bounded(attentionMaxPageSize, 1, HARD_MAX_ATTENTION_PAGE_SIZE,
+            confirmationBounded(attentionMaxPageSize, 1, HARD_MAX_ATTENTION_PAGE_SIZE,
                     "attentionMaxPageSize");
             if (attentionDefaultPageSize > attentionMaxPageSize) {
                 throw new IllegalArgumentException(
@@ -378,6 +378,12 @@ public record HumanTaskPolicy(
         private static void requireBytes(String value, int maximum, String name) {
             if (value.getBytes(StandardCharsets.UTF_8).length > maximum) {
                 throw new IllegalArgumentException(name + " exceeds active policy byte limit");
+            }
+        }
+
+        private static void confirmationBounded(long value, long minimum, long maximum, String name) {
+            if (value < minimum || value > maximum) {
+                throw new IllegalArgumentException(name + " must be between " + minimum + " and " + maximum);
             }
         }
     }

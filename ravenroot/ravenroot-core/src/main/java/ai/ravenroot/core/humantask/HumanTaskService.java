@@ -201,7 +201,13 @@ public final class HumanTaskService {
 
     public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
                                    OpaquePayload response) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response);
+        return resolve(context, taskId, expectedGeneration, response, "");
+    }
+
+    /** Resolves a task while atomically persisting its separate decision comment. */
+    public HumanTaskResult resolve(RequestContext context, UUID taskId, long expectedGeneration,
+                                   OpaquePayload response, String comment) {
+        return settle(context, taskId, expectedGeneration, HumanTaskStatus.RESOLVED, response, comment);
     }
 
     /**
@@ -223,11 +229,23 @@ public final class HumanTaskService {
     }
 
     public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null);
+        return deny(context, taskId, expectedGeneration, "");
+    }
+
+    /** Denies a task while atomically persisting its separate decision comment. */
+    public HumanTaskResult deny(RequestContext context, UUID taskId, long expectedGeneration,
+                                String comment) {
+        return settle(context, taskId, expectedGeneration, HumanTaskStatus.DENIED, null, comment);
     }
 
     public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration) {
-        return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null);
+        return cancel(context, taskId, expectedGeneration, "");
+    }
+
+    /** Cancels a task while atomically persisting its separate decision comment. */
+    public HumanTaskResult cancel(RequestContext context, UUID taskId, long expectedGeneration,
+                                  String comment) {
+        return settle(context, taskId, expectedGeneration, HumanTaskStatus.CANCELLED, null, comment);
     }
 
     public HumanTaskResult escalate(ExecutionKey key, UUID taskId, long expectedGeneration,
@@ -240,7 +258,8 @@ public final class HumanTaskService {
         DurableHumanTask task = await(store.loadHumanTask(key.tenantId(), taskId))
                 .filter(candidate -> candidate.key().equals(key)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
-        return commitTerminal(task, expectedGeneration, HumanTaskStatus.EXPIRED, "", null, correlationId, null);
+        return commitTerminal(task, expectedGeneration, HumanTaskStatus.EXPIRED, "", null, "",
+                correlationId, null);
     }
 
     public boolean ownsTimer(PendingWork.TimerDue timer) {
@@ -265,7 +284,7 @@ public final class HumanTaskService {
             if (task.status() == HumanTaskStatus.ESCALATED || task.status().terminal()) return true;
             if (!clock.instant().isBefore(task.request().expiresAt())) {
                 HumanTaskResult.Code code = commitTerminal(task, task.generation(), HumanTaskStatus.EXPIRED,
-                        "", null, correlationId, timer.fencingToken()).code();
+                        "", null, "", correlationId, timer.fencingToken()).code();
                 return code == HumanTaskResult.Code.EXPIRED
                         || code == HumanTaskResult.Code.ALREADY_APPLIED;
             }
@@ -276,7 +295,7 @@ public final class HumanTaskService {
         if (timer.workItemId().equals(expiryTimerId(task.request().taskId()))) {
             if (task.status().terminal()) return true;
             HumanTaskResult.Code code = commitTerminal(task, task.generation(), HumanTaskStatus.EXPIRED,
-                    "", null, correlationId, timer.fencingToken()).code();
+                    "", null, "", correlationId, timer.fencingToken()).code();
             return code == HumanTaskResult.Code.EXPIRED || code == HumanTaskResult.Code.ALREADY_APPLIED;
         }
         return false;
@@ -297,10 +316,16 @@ public final class HumanTaskService {
     }
 
     private HumanTaskResult settle(RequestContext context, UUID taskId, long expectedGeneration,
-                                   HumanTaskStatus target, OpaquePayload response) {
+                                   HumanTaskStatus target, OpaquePayload response, String comment) {
         Objects.requireNonNull(context, "context");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
+        try {
+            comment = normalizePinnedComment(task, comment);
+        } catch (IllegalArgumentException refused) {
+            auditOnly(task, "HUMAN_TASK_COMMENT_REFUSED", context.requestId());
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
+        }
         String actor = SecurityContext.of(context).qualifiedIdentity();
         Set<String> roles = context.roles().stream().map(Role::name).collect(Collectors.toUnmodifiableSet());
         boolean requesterCancellation = target == HumanTaskStatus.CANCELLED
@@ -318,7 +343,7 @@ public final class HumanTaskService {
             return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
         }
         if (possibleRedelivery) {
-            return new HumanTaskResult(exactRedelivery(task, target, expectedGeneration, actor, response)
+            return new HumanTaskResult(exactRedelivery(task, target, expectedGeneration, actor, response, comment)
                     ? HumanTaskResult.Code.ALREADY_APPLIED : HumanTaskResult.Code.ALREADY_SETTLED,
                     task, resumeTraversalOf(task));
         }
@@ -335,7 +360,8 @@ public final class HumanTaskService {
             auditOnly(task, "HUMAN_TASK_PAYLOAD_REFUSED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
         }
-        return commitTerminal(task, expectedGeneration, target, actor, response, context.requestId(), null);
+        return commitTerminal(task, expectedGeneration, target, actor, response, comment,
+                context.requestId(), null);
     }
 
     private boolean validResponse(DurableHumanTask task, OpaquePayload response) {
@@ -395,7 +421,7 @@ public final class HumanTaskService {
 
     private HumanTaskResult commitTerminal(DurableHumanTask original, long expectedGeneration,
                                            HumanTaskStatus target, String actor, OpaquePayload response,
-                                           String correlationId, Long fencingToken) {
+                                           String comment, String correlationId, Long fencingToken) {
         int maxAttempts = original.request().executionLimits().writeAttempts();
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             DurableHumanTask task = await(store.loadHumanTask(original.key().tenantId(),
@@ -404,7 +430,7 @@ public final class HumanTaskService {
                 return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
             }
             if (task.generation() != expectedGeneration) {
-                if (exactRedelivery(task, target, expectedGeneration, actor, response)) {
+                if (exactRedelivery(task, target, expectedGeneration, actor, response, comment)) {
                     return new HumanTaskResult(HumanTaskResult.Code.ALREADY_APPLIED, task,
                             resumeTraversalOf(task));
                 }
@@ -419,9 +445,9 @@ public final class HumanTaskService {
             UUID resumeTraversalId = UUID.nameUUIDFromBytes(("human-task-reentry:"
                     + task.request().taskId() + ":" + expectedGeneration).getBytes(StandardCharsets.UTF_8));
             HumanTaskTransition taskTransition = switch (target) {
-                case RESOLVED -> new HumanTaskTransition.Resolved(task.request().taskId(), expectedGeneration, actor);
-                case DENIED -> new HumanTaskTransition.Denied(task.request().taskId(), expectedGeneration, actor);
-                case CANCELLED -> new HumanTaskTransition.Cancelled(task.request().taskId(), expectedGeneration, actor);
+                case RESOLVED -> new HumanTaskTransition.Resolved(task.request().taskId(), expectedGeneration, actor, comment);
+                case DENIED -> new HumanTaskTransition.Denied(task.request().taskId(), expectedGeneration, actor, comment);
+                case CANCELLED -> new HumanTaskTransition.Cancelled(task.request().taskId(), expectedGeneration, actor, comment);
                 case EXPIRED -> new HumanTaskTransition.Expired(task.request().taskId(), expectedGeneration);
                 default -> throw new IllegalArgumentException("not a terminal human-task status: " + target);
             };
@@ -477,7 +503,7 @@ public final class HumanTaskService {
                         DurableHumanTask current = await(store.loadHumanTask(task.key().tenantId(),
                                 task.request().taskId())).orElse(task);
                         return commitTerminal(current, current.generation(), HumanTaskStatus.EXPIRED,
-                                "", null, correlationId, fencingToken);
+                                "", null, "", correlationId, fencingToken);
                     }
                     if (attempt < maxAttempts) continue;
                 }
@@ -513,12 +539,21 @@ public final class HumanTaskService {
     }
 
     private boolean exactRedelivery(DurableHumanTask task, HumanTaskStatus target,
-                                    long expectedGeneration, String actor, OpaquePayload response) {
+                                    long expectedGeneration, String actor, OpaquePayload response,
+                                    String comment) {
         if (task.status() != target || task.generation() != expectedGeneration + 1
-                || !task.actor().equals(actor)) return false;
+                || !task.actor().equals(actor) || !task.decisionComment().equals(comment)) return false;
         if (target != HumanTaskStatus.RESOLVED) return true;
         DurableHandler handler = await(store.loadHandler(task.key(), task.request().taskId())).orElse(null);
         return handler != null && response != null && response.equals(handler.outcomePayload());
+    }
+
+    private static String normalizePinnedComment(DurableHumanTask task, String comment) {
+        var limits = task.request().confirmationLimits();
+        var pinned = new HumanTaskPolicy.Confirmation(limits.maxPromptUtf8Bytes(),
+                limits.maxActionLabelUtf8Bytes(), limits.maxCommentUtf8Bytes(), 1, 1);
+        return pinned.normalizeComment(comment,
+                task.request().confirmationPresentation().commentRequirement());
     }
 
     private EventEnvelope event(ExecutionKey key, StoredProcessInstance stored,

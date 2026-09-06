@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +41,29 @@ class DurableHumanTaskModelTest {
         assertTrue(escalated.alreadyApplied(escalation));
         assertThrows(IllegalStateException.class, () -> escalated.apply(
                 new HumanTaskTransition.Resolved(escalated.request().taskId(), 1L, "actor"), 9L));
+    }
+
+    @Test
+    void terminalCommentIsPartOfTheAtomicDecisionAndItsReplayIdentity() {
+        DurableHumanTask waiting = DurableHumanTask.waiting(KEY, embeddedRegistration(), 7L);
+        var decision = new HumanTaskTransition.Denied(waiting.request().taskId(), 1L,
+                "actor", "Needs a documented exception.");
+
+        DurableHumanTask denied = waiting.apply(decision, 8L);
+
+        assertEquals("actor", denied.actor());
+        assertEquals("Needs a documented exception.", denied.decisionComment());
+        assertTrue(denied.alreadyApplied(decision));
+        assertFalse(denied.alreadyApplied(new HumanTaskTransition.Denied(
+                waiting.request().taskId(), 1L, "actor", "Different comment")));
+    }
+
+    @Test
+    void classicTasksRejectDecisionCommentsAtTheDurableTransitionBoundary() {
+        DurableHumanTask waiting = DurableHumanTask.waiting(KEY, registration(), 7L);
+        assertThrows(IllegalArgumentException.class, () -> waiting.apply(
+                new HumanTaskTransition.Cancelled(waiting.request().taskId(), 1L, "actor", "why"),
+                8L));
     }
 
     @Test
@@ -117,5 +141,20 @@ class DurableHumanTaskModelTest {
                 Optional.of(Instant.parse("2026-01-01T01:00:00Z")),
                 Instant.parse("2026-01-02T00:00:00Z"),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"));
+    }
+
+    private static HumanTaskRegistration embeddedRegistration() {
+        HumanTaskRegistration source = registration();
+        return new HumanTaskRegistration(source.taskId(), source.traversalId(), source.invocationId(),
+                source.attemptId(), source.nodeId(), source.correlationKey(), source.deduplicationKey(),
+                source.metadata(), source.responseSchema(), source.responderRequirements(),
+                source.requester(), source.graphVersionPin(), source.escalateAt(), source.expiresAt(),
+                source.reentryMapping(), source.executionLimits(), source.continuationVersion(),
+                source.continuation(), source.continuationDigest(),
+                new HumanTaskConfirmationPresentation(1, "Confirm this task.",
+                        HumanTaskCommentRequirement.OPTIONAL,
+                        Set.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY,
+                                HumanTaskConfirmationAction.CANCEL), "Confirm", "Deny", "Cancel"),
+                new HumanTaskConfirmationLimits(4096, 64, 4096));
     }
 }

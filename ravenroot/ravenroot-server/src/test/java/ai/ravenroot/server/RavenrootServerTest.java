@@ -891,9 +891,14 @@ class RavenrootServerTest {
             };
             var protectedProbe = (com.sun.net.httpserver.HttpHandler) method.invoke(server, probe);
             var cleaned = new java.util.concurrent.atomic.AtomicInteger();
+            var observedCleanup = new java.util.concurrent.CountDownLatch(2);
             com.sun.net.httpserver.HttpHandler observingProbe = exchange -> {
-                protectedProbe.handle(exchange);
-                if (AuthenticatedPrincipalAttribute.find(exchange).isEmpty()) cleaned.incrementAndGet();
+                try {
+                    protectedProbe.handle(exchange);
+                } finally {
+                    if (AuthenticatedPrincipalAttribute.find(exchange).isEmpty()) cleaned.incrementAndGet();
+                    observedCleanup.countDown();
+                }
             };
             var field = RavenrootServer.class.getDeclaredField("server");
             field.setAccessible(true);
@@ -909,6 +914,7 @@ class RavenrootServerTest {
                     .contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"));
             assertTrue(b.get(10, TimeUnit.SECONDS).body()
                     .contains("\"workspace\":{\"tenantId\":\"tenant-b\"}"));
+            assertTrue(observedCleanup.await(5, TimeUnit.SECONDS));
             assertEquals(2, cleaned.get());
         }
     }

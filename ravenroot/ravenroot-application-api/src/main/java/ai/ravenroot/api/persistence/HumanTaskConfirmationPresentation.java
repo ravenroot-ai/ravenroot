@@ -18,7 +18,7 @@ import java.util.Set;
  *
  * <p>This structural value remains able to represent historical rows. Current admission additionally
  * applies {@link HumanTaskPolicy.Confirmation#requirePresentation(HumanTaskConfirmationPresentation)},
- * which requires distinct normalized visible labels for the enabled actions.</p>
+ * which requires visible text and distinct stable comparison keys for the enabled actions.</p>
  *
  * @param version presentation wire version, zero for classic tasks.
  * @param prompt bounded plain-text confirmation prompt.
@@ -85,7 +85,7 @@ public record HumanTaskConfirmationPresentation(
                     case DENY -> denyLabel;
                     case CANCEL -> cancelLabel;
                 };
-                if (label.isBlank()) {
+                if (label.isEmpty()) {
                     throw new IllegalArgumentException("embedded confirmation action label cannot be blank");
                 }
             }
@@ -160,7 +160,7 @@ public record HumanTaskConfirmationPresentation(
 
     private static String requireText(String value, String name, int maximum, boolean required) {
         value = value == null ? "" : value;
-        if (required && value.isBlank()) {
+        if (required && value.isEmpty()) {
             throw new IllegalArgumentException(name + " cannot be blank");
         }
         for (int index = 0; index < value.length(); index++) {

@@ -156,5 +156,19 @@ class HumanTaskPolicyCatalogTest {
                 new GraphNode("review", NodeKind.BEHAVIOR, "human-task", inactive)),
                 "an inactive action's duplicate label is neither displayed nor admitted");
 
+        var crossRuntime = new java.util.HashMap<>(ambiguous.properties());
+        crossRuntime.put("confirmationResolveLabel", "A");
+        crossRuntime.put("confirmationDenyLabel", "\ud833\udcd6");
+        assertDoesNotThrow(() -> factory.definition(
+                new GraphNode("review", NodeKind.BEHAVIOR, "human-task", crossRuntime)),
+                "U+1CCD6 remains distinct from ASCII A on every supported runtime");
+
+        var separatorOnly = new java.util.HashMap<>(ambiguous.properties());
+        separatorOnly.put("confirmationResolveLabel", "\u00a0\u3000");
+        separatorOnly.put("confirmationDenyLabel", "Deny");
+        assertThrows(IllegalArgumentException.class, () -> factory.validate(
+                new GraphNode("review", NodeKind.BEHAVIOR, "human-task", separatorOnly)),
+                "graph preflight must apply stable visible blankness before traversal");
+
     }
 }

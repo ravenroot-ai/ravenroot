@@ -4,11 +4,9 @@ import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.nio.charset.StandardCharsets;
-import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
-import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -403,6 +401,9 @@ public record HumanTaskPolicy(
             presentation = Objects.requireNonNull(presentation, "presentation");
             if (!presentation.embedded()) return;
             requireBytes(presentation.prompt(), maxPromptUtf8Bytes, "confirmation prompt");
+            if (stableVisibleTextKey(presentation.prompt()).isEmpty()) {
+                throw new IllegalArgumentException("confirmation prompt must have a visible name");
+            }
             requireBytes(presentation.resolveLabel(), maxActionLabelUtf8Bytes,
                     "confirmation resolve label");
             requireBytes(presentation.denyLabel(), maxActionLabelUtf8Bytes,
@@ -411,7 +412,7 @@ public record HumanTaskPolicy(
                     "confirmation cancel label");
             var visibleLabels = new HashSet<String>();
             for (HumanTaskConfirmationAction action : presentation.actions()) {
-                String visible = normalizedVisibleLabel(presentation.label(action));
+                String visible = stableVisibleTextKey(presentation.label(action));
                 if (visible.isEmpty() || !visibleLabels.add(visible)) {
                     throw new IllegalArgumentException(
                             "active confirmation action labels must have distinct visible names");
@@ -420,18 +421,24 @@ public record HumanTaskPolicy(
         }
 
         /**
-         * Produces the locale-independent comparison key used only for active visible action labels.
-         * NFKC folds compatibility forms; Unicode whitespace and space separators collapse to one
-         * ASCII space before trimming and lowercasing. The authored label itself is never changed.
+         * Produces a version-stable comparison key for visible confirmation text.
+         * Full-width ASCII and ASCII case are folded arithmetically. A fixed separator repertoire
+         * collapses to one interior ASCII space and is omitted at the edges. Every other code point
+         * remains exact, so this contract does not depend on the host's Unicode tables.
          */
-        private static String normalizedVisibleLabel(String label) {
-            String normalized = Normalizer.normalize(label, Normalizer.Form.NFKC);
-            var visible = new StringBuilder(normalized.length());
+        private static String stableVisibleTextKey(String text) {
+            var visible = new StringBuilder(text.length());
             boolean pendingSpace = false;
-            for (int offset = 0; offset < normalized.length();) {
-                int codePoint = normalized.codePointAt(offset);
+            for (int offset = 0; offset < text.length();) {
+                int codePoint = text.codePointAt(offset);
                 offset += Character.charCount(codePoint);
-                if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
+                if (codePoint >= 0xff01 && codePoint <= 0xff5e) {
+                    codePoint -= 0xfee0;
+                }
+                if (codePoint >= 'A' && codePoint <= 'Z') {
+                    codePoint += 'a' - 'A';
+                }
+                if (isStableSeparator(codePoint)) {
                     pendingSpace = visible.length() != 0;
                 } else {
                     if (pendingSpace) visible.append(' ');
@@ -439,7 +446,15 @@ public record HumanTaskPolicy(
                     pendingSpace = false;
                 }
             }
-            return visible.toString().toLowerCase(Locale.ROOT);
+            return visible.toString();
+        }
+
+        private static boolean isStableSeparator(int codePoint) {
+            return switch (codePoint) {
+                case 0x0009, 0x000a, 0x000b, 0x000c, 0x000d, 0x0020, 0x0085, 0x00a0,
+                        0x1680, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000 -> true;
+                default -> codePoint >= 0x2000 && codePoint <= 0x200a;
+            };
         }
 
         /**

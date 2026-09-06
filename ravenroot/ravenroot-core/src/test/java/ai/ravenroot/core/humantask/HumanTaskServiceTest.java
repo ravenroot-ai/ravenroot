@@ -22,6 +22,7 @@ import ai.ravenroot.api.persistence.GraphVersionPin;
 import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
 import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
@@ -343,6 +344,38 @@ class HumanTaskServiceTest {
     }
 
     @Test
+    void historicalAmbiguousPresentationRemainsReadableAndCancellableAfterReopen()
+            throws Exception {
+        Path database = directory.resolve("historical-confirmation-labels.db");
+        HistoricalTask task;
+        try (var store = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            task = historicalTaskSkeleton(store);
+        }
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database)) {
+            insertHistoricalTask(connection, task, HumanTaskConfirmationPresentation.RESPONSE_SCHEMA,
+                    HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION);
+            makeHistoricalEmbeddedConfirmation(connection, task);
+        }
+        try (var reopened = new SqliteExecutionStore(database, Clock.fixed(NOW, ZoneOffset.UTC))) {
+            var service = new HumanTaskService(reopened, Clock.fixed(NOW, ZoneOffset.UTC));
+            var stored = reopened.loadHumanTask(TENANT, task.taskId())
+                    .toCompletableFuture().join().orElseThrow();
+            assertEquals("\u00a0", stored.request().confirmationPresentation().prompt());
+            assertEquals("Proceed", stored.request().confirmationPresentation().resolveLabel());
+            assertEquals("proceed", stored.request().confirmationPresentation().cancelLabel());
+
+            var attention = service.attention(requester(),
+                    new HumanTaskAttentionLocator(task.taskId(), 1)).orElseThrow();
+            assertEquals(List.of(HumanTaskConfirmationAction.CANCEL), attention.availableActions());
+            assertEquals("Proceed", attention.presentation().resolveLabel());
+            assertEquals("proceed", attention.presentation().cancelLabel());
+            assertEquals(HumanTaskResult.Code.CANCELLED,
+                    service.cancel(requester(), task.taskId(), 1).code(),
+                    "current admission must not be reapplied to a historical task's cancellation path");
+        }
+    }
+
+    @Test
     void serviceRefusesEveryCurrentPolicyDimensionBeforeWritingATask() throws Exception {
         try (var store = new SqliteExecutionStore(directory.resolve("service-policy.db"),
                 Clock.fixed(NOW, ZoneOffset.UTC), STRICT_POLICY)) {
@@ -579,6 +612,33 @@ class HumanTaskServiceTest {
             statement.setLong(index, task.revision());
             assertEquals(1, statement.executeUpdate(),
                     "the historical row must be inserted without current HumanTask admission");
+        }
+    }
+
+    private static void makeHistoricalEmbeddedConfirmation(
+            java.sql.Connection connection, HistoricalTask task) throws Exception {
+        try (var statement = connection.prepareStatement("""
+                UPDATE human_task
+                   SET response_content_type = ?, response_schema = ?, response_schema_version = ?,
+                       response_kind = 'SCALAR', confirmation_version = 1,
+                       confirmation_prompt = ?, confirmation_comment_requirement = 'OPTIONAL',
+                       confirmation_actions = 'RESOLVE,CANCEL', confirmation_resolve_label = ?,
+                       confirmation_deny_label = '', confirmation_cancel_label = ?,
+                       confirmation_max_prompt_bytes = 64,
+                       confirmation_max_action_label_bytes = 64,
+                       confirmation_max_comment_bytes = 4096
+                 WHERE tenant_id = ? AND task_id = ?
+                """)) {
+            statement.setString(1, HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE);
+            statement.setString(2, HumanTaskConfirmationPresentation.RESPONSE_SCHEMA);
+            statement.setString(3, HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION);
+            statement.setString(4, "\u00a0");
+            statement.setString(5, "Proceed");
+            statement.setString(6, "proceed");
+            statement.setString(7, task.key().tenantId());
+            statement.setString(8, task.taskId().toString());
+            assertEquals(1, statement.executeUpdate(),
+                    "the historical fixture must bypass only current admission");
         }
     }
 

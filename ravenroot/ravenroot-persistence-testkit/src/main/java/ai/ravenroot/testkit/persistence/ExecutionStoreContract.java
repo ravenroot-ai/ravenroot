@@ -3421,6 +3421,30 @@ public abstract class ExecutionStoreContract {
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
         assertTrue(await(store().loadHumanTask(key.tenantId(), ambiguous.taskId())).isEmpty(),
                 "rejected current admission must not create a durable task");
+
+        HumanTaskRegistration storedShape = fixture.registration();
+        HumanTaskRegistration stable = new HumanTaskRegistration(storedShape.taskId(),
+                storedShape.traversalId(), storedShape.invocationId(), storedShape.attemptId(),
+                storedShape.nodeId(), storedShape.correlationKey(), storedShape.deduplicationKey(),
+                storedShape.metadata(), storedShape.responseSchema(), storedShape.responderRequirements(),
+                storedShape.requester(), storedShape.graphVersionPin(), storedShape.escalateAt(),
+                storedShape.expiresAt(), storedShape.reentryMapping(), storedShape.executionLimits(),
+                storedShape.continuationVersion(), storedShape.continuation(), storedShape.continuationDigest(),
+                new HumanTaskConfirmationPresentation(1, "Confirm after review.",
+                        HumanTaskCommentRequirement.OPTIONAL,
+                        List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY),
+                        "A", "\ud833\udcd6", ""), HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        StoredProcessInstance admitted = await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .registerHumanTask(stable).build()));
+        await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(admitted.revision()))
+                .registerHumanTask(stable).build()));
+
+        assertEquals(stable, await(store().loadHumanTask(key.tenantId(), stable.taskId()))
+                .orElseThrow().request());
+        assertEquals(1, await(store().listHumanTasks(key.tenantId(), HumanTaskQuery.everything(10)))
+                .items().size(), "an exact replay must not create a second durable task");
     }
 
     @Test

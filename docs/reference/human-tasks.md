@@ -46,17 +46,23 @@ retains the classic raw-envelope behavior and its original defaults.
 `confirmationPrompt` is bounded plain text. `confirmationComment` is `DISALLOWED`, `OPTIONAL`, or
 `REQUIRED`. `confirmationActions` is an ordered comma-separated subset of `RESOLVE`, `DENY`, and
 `CANCEL`; Ravenroot pins that authored order and the corresponding label properties. Enabled actions
-must have distinct visible labels. For this comparison Ravenroot applies Unicode NFKC, collapses
-Unicode whitespace and space-separator runs, trims them, and uses locale-independent lowercase.
-Inactive labels do not participate. The task also pins its prompt, action-label, and comment byte
-limits, so a tighter or looser policy after restart does not reinterpret an existing decision.
+must have distinct visible labels under a version-stable comparison. Ravenroot maps full-width ASCII
+`U+FF01`–`U+FF5E` arithmetically to ASCII, folds only ASCII `A`–`Z` to lowercase, and collapses this
+fixed separator set to one interior ASCII space while omitting it at the edges: `U+0009`–`U+000D`,
+`U+0020`, `U+0085`, `U+00A0`, `U+1680`, `U+2000`–`U+200A`, `U+2028`–`U+2029`, `U+202F`, `U+205F`,
+and `U+3000`. Every other code point remains exact, including `U+FEFF` and `U+1CCD6`; the comparison
+does not depend on the Java or browser Unicode version. Controls in that separator list remain
+structurally forbidden. Inactive labels do not participate. The task also pins its prompt,
+action-label, and comment byte limits, so a tighter or looser policy after restart does not reinterpret
+an existing decision.
 
 The service applies this admission contract to every current task creation. Supported durable adapters
 apply the same check only after exact deduplication, so an exact replay of an already accepted request
-remains idempotent after a policy change. Pre-existing tasks with stored labels that do not satisfy the
-current payload-envelope rule can still be listed, read, and cancelled. Resolving one is refused because
-Ravenroot cannot create a compatible response envelope; this preserves the durable record and its
-cancellation path without treating an unrepresentable label as a valid current wire contract.
+remains idempotent after a policy change. Structural decoding does not reapply current visible-label or
+prompt admission, so a pre-existing embedded task with duplicate or separator-only display text remains
+readable and cancellable. Separately, pre-existing tasks with response schema labels that no longer
+satisfy the payload-envelope rule can still be listed, read, and cancelled; resolving one is refused
+because Ravenroot cannot create a compatible response envelope.
 
 `expiresAfterSeconds` creates a durable expiry timer. A non-zero `escalateAfterSeconds` creates a
 second durable timer that moves the task to `ESCALATED` while leaving it resolvable. Both delays are

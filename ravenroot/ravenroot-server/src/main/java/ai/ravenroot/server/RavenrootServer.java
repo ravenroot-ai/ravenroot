@@ -1390,8 +1390,9 @@ public final class RavenrootServer implements AutoCloseable {
             return;
         }
         exchange.getResponseHeaders().set("Cache-Control", "private, no-store");
+        String tenantId = AuthenticatedPrincipalAttribute.require(exchange).tenantId();
         json(exchange, 200, humanTasks != null && humanTasks.supportsConfirmations()
-                ? servedConfiguration.json(humanTaskPolicy) : servedConfiguration.json());
+                ? servedConfiguration.json(humanTaskPolicy, tenantId) : servedConfiguration.json(tenantId));
     }
 
     /**

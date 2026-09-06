@@ -789,7 +789,8 @@ class RavenrootServerTest {
                             URI.create("http://localhost:" + server.port() + "/v1/configuration")).GET().build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(200, configuration.statusCode());
-            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length + "}",
+            assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":" + exact.length
+                            + ",\"workspace\":{\"tenantId\":\"local\"}}",
                     configuration.body());
             assertEquals("private, no-store", configuration.headers().firstValue("Cache-Control").orElseThrow());
 
@@ -826,6 +827,43 @@ class RavenrootServerTest {
                     .POST(HttpRequest.BodyPublishers.ofString(structuredOversized, StandardCharsets.UTF_8)).build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(413, structuredRejected.statusCode(), structuredRejected.body());
+        }
+    }
+
+    @Test
+    void projectsOnlyTheAuthenticatedTenantsWorkspaceScopeIntoConfiguration() throws Exception {
+        RequestAuthenticator authenticator = headers -> {
+            String bearer = headers.getFirst("Authorization");
+            if ("Bearer tenant-a".equals(bearer)) return tenantPrincipal("tenant-a");
+            if ("Bearer tenant-b".equals(bearer)) return tenantPrincipal("tenant-b\"\n");
+            throw new ai.ravenroot.server.security.AuthenticationException("unknown test credential");
+        };
+        try (var engine = new PekkoExecutionEngine("ravenroot-server-configuration-tenant-test");
+             var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null,
+                     authenticator)) {
+            server.start();
+            HttpClient client = HttpClient.newHttpClient();
+            URI configuration = URI.create("http://localhost:" + server.port() + "/v1/configuration");
+
+            HttpResponse<String> tenantA = client.send(HttpRequest.newBuilder(configuration)
+                            .header("Authorization", "Bearer tenant-a")
+                            .header("X-Tenant-Id", "tenant-b")
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> tenantB = client.send(HttpRequest.newBuilder(configuration)
+                            .header("Authorization", "Bearer tenant-b")
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+            HttpResponse<String> anonymous = client.send(HttpRequest.newBuilder(configuration)
+                            .header("X-Tenant-Id", "tenant-a")
+                            .GET().build(), HttpResponse.BodyHandlers.ofString());
+
+            assertEquals(200, tenantA.statusCode(), tenantA.body());
+            assertTrue(tenantA.body().contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"), tenantA.body());
+            assertFalse(tenantA.body().contains("tenant-b"), tenantA.body());
+            assertEquals(200, tenantB.statusCode(), tenantB.body());
+            assertTrue(tenantB.body().contains("\"tenantId\":\"tenant-b\\\"\\n\""), tenantB.body());
+            assertEquals(401, anonymous.statusCode(), anonymous.body());
+            assertFalse(anonymous.body().contains("tenant-a"), anonymous.body());
+            assertFalse(anonymous.body().contains("tenant-b"), anonymous.body());
         }
     }
 
@@ -1391,6 +1429,16 @@ class RavenrootServerTest {
                         .map(ai.ravenroot.api.security.AuthorizationAction::requiredScope)
                         .collect(java.util.stream.Collectors.toUnmodifiableSet()),
                 expiresAt);
+    }
+
+    private static AuthenticatedPrincipal tenantPrincipal(String tenantId) {
+        return new AuthenticatedPrincipal("browser-user", AuthenticatedPrincipal.Type.USER,
+                "https://issuer.example", tenantId,
+                Set.of(ai.ravenroot.api.security.Role.PLATFORM_ADMIN),
+                java.util.Arrays.stream(ai.ravenroot.api.security.AuthorizationAction.values())
+                        .filter(ai.ravenroot.api.security.AuthorizationAction::available)
+                        .map(ai.ravenroot.api.security.AuthorizationAction::requiredScope)
+                        .collect(java.util.stream.Collectors.toUnmodifiableSet()));
     }
 
     /**

@@ -12,7 +12,7 @@
 
     <artifactId>ravenroot-persistence-postgresql</artifactId>
     <name>Ravenroot PostgreSQL Shared Execution Store</name>
-    <description>Durable multi-host PostgreSQL adapter for the execution-store, graph-definition and execution-manifest ports (ADR 0039). Not included in the standalone server or the default distribution; an adopter must add this module and supply it a DataSource explicitly to use it.</description>
+    <description>Durable multi-host PostgreSQL adapter for the execution-store, graph-definition and execution-manifest ports (ADR 0040). Not included in the standalone server or the default distribution; an adopter must add this module and supply it a DataSource explicitly to use it.</description>
 
     <dependencies>
         <dependency>

@@ -130,7 +130,12 @@ public final class PostgresExecutionManifestStore implements ExecutionManifestSt
         return async(() -> {
             requireKey(key);
             try {
-                return transactions.readOnly(connection -> {
+                // readConsistent, not readOnly: this fold reads the manifest row and then its package
+                // rows, and recomputes the digest across both. Under READ COMMITTED each statement
+                // takes its own snapshot, so a remove committing between them yields a manifest paired
+                // with an empty package set - a digest matching neither - and the adapter reports
+                // DigestMismatch, which names the store as damaged, for a store that is merely busy.
+                return transactions.readConsistent(connection -> {
                     StoredExecutionManifest stored = readManifest(connection, key, false);
                     if (stored == null) {
                         throw new SqlFailure(new ExecutionManifestStoreFailure.NotFound(key));

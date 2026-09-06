@@ -838,6 +838,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
             InventoryCursor.Position after = query.cursor()
                     .map(cursor -> InventoryCursor.decode(tenantId, cursor))
                     .orElse(null);
+            // read, not readFolded, and the statement order is what makes that safe. The page is
+            // read before the retention floor, so a purge committing between them can only raise the
+            // floor above a row the page already returned - which the page's contract permits, since a
+            // row present below the floor is a row that outlived the guarantee rather than one that
+            // was invented. Reading the floor first would allow the opposite and inadmissible pairing:
+            // a floor that promises completeness over rows the page has already lost.
             return read(null, connection -> {
                 Instant now = clock.instant();
                 var sql = new StringBuilder(INVENTORY_COLUMNS).append("WHERE p.tenant_id = ?");
@@ -923,7 +929,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
     public CompletionStage<Optional<ProcessInventoryEntry>> findProcessInstance(ExecutionKey key) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
-            return readFolded(key, connection -> {
+            return read(key, connection -> {
                 Instant now = clock.instant();
                 try (PreparedStatement statement = connection.prepareStatement(INVENTORY_COLUMNS
                         + "WHERE p.tenant_id = ? AND p.process_instance_id = ?")) {

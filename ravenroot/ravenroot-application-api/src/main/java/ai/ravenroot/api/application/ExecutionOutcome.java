@@ -362,4 +362,23 @@ public record ExecutionOutcome(UUID processInstanceId, UUID traversalId, Process
     public boolean cancelled() {
         return ExecutionTerminationReason.isCancellation(terminationReason);
     }
+
+    /**
+     * Whether this execution was ended by reconciliation because it could never reach an outcome.
+     *
+     * <p>The other read {@code status} cannot give on its own, and the one that separates two very
+     * different {@code FAILED} rows: a node that broke, and a traversal that was left with a branch
+     * parked at a join and nothing running, scheduled or arriving that could ever settle it. Both
+     * are incidents — unlike {@link #cancelled()}, this one should be counted as a failure — but
+     * they point an operator at opposite investigations, and only this flag says which.</p>
+     *
+     * <p>The same derivation shape as {@link #cancelled()}, written once here rather than in each
+     * adapter, and null-safe for the same reason: an absent reason is legal and means only that
+     * nothing distinguishes the termination.</p>
+     *
+     * @return whether this execution's termination is recorded as unreachable.
+     */
+    public boolean unreachable() {
+        return ExecutionTerminationReason.isUnreachable(terminationReason);
+    }
 }

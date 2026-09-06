@@ -220,7 +220,10 @@ public final class PostgresGraphDefinitionStore implements GraphDefinitionStore 
             requireTenantId(tenantId);
             require(identity != null, "identity cannot be null");
             try {
-                return transactions.readOnly(connection -> {
+                return // readConsistent, not readOnly: this reads the binding and then the definition it
+                // names, and at READ COMMITTED the second statement can miss a definition the first
+                // still pointed at, which reads as a dangling binding rather than as contention.
+                transactions.readConsistent(connection -> {
                     // Two independent autocommit reads under READ COMMITTED, each its own snapshot,
                     // deliberately not one locking transaction: this is a read-only operation and
                     // taking a lock here would only serialise readers against writers for no benefit

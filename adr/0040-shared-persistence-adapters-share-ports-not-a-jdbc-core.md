@@ -1,4 +1,4 @@
-# ADR 0039: Shared persistence adapters share the ports and the conformance suite, not a JDBC core
+# ADR 0040: Shared persistence adapters share the ports and the conformance suite, not a JDBC core
 
 - Status: Accepted contract, implementation delivered incrementally
 - Date: 2026-09-06

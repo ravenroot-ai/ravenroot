@@ -164,6 +164,15 @@ final class Transactions {
                 } catch (RuntimeException failed) {
                     safeRollback(connection);
                     throw failed;
+                } finally {
+                    // The isolation level is set while autocommit is still on, which the driver sends
+                    // as a session-scoped change rather than a transaction-scoped one. This adapter's
+                    // own open() resets it on every acquisition, so it would never notice - but the
+                    // module accepts whatever DataSource a deployment hands it, and a pool that does
+                    // not reset on return would lend a REPEATABLE READ session to the next borrower,
+                    // who may not be Ravenroot at all. Leaving a connection as it was found is cheap
+                    // and is not this adapter's judgement call to skip.
+                    restoreReadCommitted(connection);
                 }
             }
         }
@@ -202,6 +211,16 @@ final class Transactions {
         // A sub-millisecond bound would round to zero, and zero means "no limit" to PostgreSQL - the
         // exact opposite of what a caller asking for a very short timeout meant.
         return Math.max(1L, value);
+    }
+
+    private static void restoreReadCommitted(Connection connection) {
+        try {
+            connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        } catch (SQLException ignored) {
+            // The connection is being closed regardless, and a failure to reset it means it is already
+            // gone - which the pool will discover for itself and which must not replace the caller's
+            // original failure.
+        }
     }
 
     private static void safeRollback(Connection connection) {

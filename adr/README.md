@@ -47,7 +47,8 @@ their architecture status and wording are ready for publication.
 | 2026-09-04 | 0036 | Accepted | [Layered graph drawing in the design editor](0036-layered-graph-drawing-in-the-design-editor.md) |
 | 2026-09-05 | 0037 | Accepted | [Durable canonical execution results](0037-durable-execution-results.md) |
 | 2026-09-06 | 0038 | Accepted contract | [Deployment lifecycle generations and typed command outcomes](0038-deployment-lifecycle-generations-and-typed-command-outcomes.md) |
-| 2026-09-06 | 0039 | Accepted contract | [Shared persistence adapters share the ports and the conformance suite, not a JDBC core](0039-shared-persistence-adapters-share-ports-not-a-jdbc-core.md) |
+| 2026-09-06 | 0039 | Accepted | [Unreachable executions are reconciled, not waited out](0039-unreachable-executions-are-reconciled.md) |
+| 2026-09-06 | 0040 | Accepted contract | [Shared persistence adapters share the ports and the conformance suite, not a JDBC core](0040-shared-persistence-adapters-share-ports-not-a-jdbc-core.md) |
 
 ## Status vocabulary
 

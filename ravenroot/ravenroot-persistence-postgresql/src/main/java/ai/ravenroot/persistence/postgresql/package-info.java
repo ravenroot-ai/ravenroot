@@ -1,5 +1,5 @@
 /**
- * The durable shared execution store: PostgreSQL behind the execution-store port (ADR 0039).
+ * The durable shared execution store: PostgreSQL behind the execution-store port (ADR 0040).
  *
  * <h2>What this adapter is for</h2>
  * <p>It is the store for a deployment whose Ravenroot processes are not on one host: several server

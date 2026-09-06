@@ -23,6 +23,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertSame;
@@ -140,37 +141,60 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
      * it opened. An ordering test would find them "not after" the barrier and end them, discarding
      * work an operator's cancel never asked about; equality finds them on the opening side and leaves
      * them alone (ADR 0038 D6).</p>
+     *
+     * <p>The old generation is deliberately inside an incomplete node when the first barrier runs.
+     * Cancellation is cooperative, so that node remains physically in flight until its future returns,
+     * even though the traversal may run no later node. The two units admitted by the barrier therefore
+     * bring the physical count to three. Waiting for all three node entries makes that contract fact,
+     * rather than executor scheduling, decide what the re-drive observes.</p>
      */
     @Test
     void reDrivingTheSameBarrierLeavesTheWorkItsOwnGenerationAdmitted() throws Exception {
         var gate = new CompletableFuture<NodeResult>();
         var settled = new AtomicInteger();
+        var beforeEntered = new CountDownLatch(1);
+        var openedEntered = new CountDownLatch(2);
         try (var engine = new JoinTestEngine()) {
-            DefaultGraphDeployment deployment = deployment(engine, gate, settled);
+            DefaultGraphDeployment deployment = deployment(engine, gate, settled,
+                    new ConcurrentHashMap<>(), ConcurrentHashMap.newKeySet(), payload -> {
+                        if (payload.equals("before")) {
+                            beforeEntered.countDown();
+                        } else if (payload.startsWith("opened-")) {
+                            openedEntered.countDown();
+                        }
+                    });
             deployment.start(IDENTITY).toCompletableFuture().get(10, TimeUnit.SECONDS);
-
-            assertEquals(IngressDisposition.ACCEPTED,
-                    deployment.ingress().offer(IDENTITY, IngressTarget.start(), "before"));
-            awaitInFlight(deployment, 1);
-            deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertEquals(1, deployment.endedByLastBarrier());
-
-            for (int i = 0; i < 2; i++) {
+            try {
                 assertEquals(IngressDisposition.ACCEPTED,
-                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "opened-" + i));
+                        deployment.ingress().offer(IDENTITY, IngressTarget.start(), "before"));
+                assertTrue(beforeEntered.await(10, TimeUnit.SECONDS),
+                        "the old generation must enter blocked work before the barrier");
+                deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(1, deployment.endedByLastBarrier());
+
+                for (int i = 0; i < 2; i++) {
+                    assertEquals(IngressDisposition.ACCEPTED,
+                            deployment.ingress().offer(IDENTITY, IngressTarget.start(), "opened-" + i));
+                }
+                assertTrue(openedEntered.await(10, TimeUnit.SECONDS),
+                        "both units admitted by the barrier must enter blocked work before its re-drive");
+                assertEquals(3, deployment.observe().toCompletableFuture().get(10, TimeUnit.SECONDS).inFlight(),
+                        "cooperative cancellation leaves the old node physically in flight until it returns");
+
+                deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
+                assertEquals(1, deployment.endedByLastBarrier(),
+                        "a re-drive at the same generation is the same barrier, and ends nothing further");
+                assertEquals(3, deployment.observe().toCompletableFuture().get(10, TimeUnit.SECONDS).inFlight(),
+                        "re-driving the barrier must leave both units admitted by its generation in flight");
+
+                gate.complete(NodeResult.continueWith("released"));
+                awaitInFlight(deployment, 0);
+                assertEquals(2, settled.get(),
+                        "the cancelled old generation must not continue after its in-flight node returns");
+            } finally {
+                gate.complete(NodeResult.continueWith("cleanup"));
+                deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
             }
-            awaitInFlight(deployment, 2);
-
-            deployment.barrier(2).toCompletableFuture().get(10, TimeUnit.SECONDS);
-            assertEquals(1, deployment.endedByLastBarrier(),
-                    "a re-drive at the same generation is the same barrier, and ends nothing further");
-            assertEquals(2, deployment.observe().toCompletableFuture().get(10, TimeUnit.SECONDS).inFlight(),
-                    "the work the barrier's own generation opened is still in flight");
-
-            gate.complete(NodeResult.continueWith("released"));
-            awaitInFlight(deployment, 0);
-            assertEquals(2, settled.get());
-            deployment.stop().toCompletableFuture().get(10, TimeUnit.SECONDS);
         }
     }
 
@@ -326,12 +350,23 @@ class DefaultGraphDeploymentHalfOpenBarrierTest {
                                                      AtomicInteger settled,
                                                      ConcurrentHashMap<UUID, String> entered,
                                                      Set<UUID> completed) {
+        return deployment(engine, gate, settled, entered, completed, ignored -> { });
+    }
+
+    private static DefaultGraphDeployment deployment(JoinTestEngine engine,
+                                                     CompletableFuture<NodeResult> gate,
+                                                     AtomicInteger settled,
+                                                     ConcurrentHashMap<UUID, String> entered,
+                                                     Set<UUID> completed,
+                                                     Consumer<String> onWorkEntry) {
         var behaviors = BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults())
                 // One shared gate for every traversal: releasing it releases all of them at once, so a
                 // unit the barrier ended and a unit it admitted are distinguished by the barrier alone
                 // and never by which of them happened to be scheduled first.
                 .register("work", message -> {
-                    entered.put(message.traversalId(), String.valueOf(message.payload()));
+                    String payload = String.valueOf(message.payload());
+                    entered.put(message.traversalId(), payload);
+                    onWorkEntry.accept(payload);
                     return gate;
                 })
                 .register("settled", message -> {

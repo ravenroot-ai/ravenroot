@@ -276,20 +276,15 @@ class PostgresExecutionStoreFailureMappingTest {
     }
 
     /**
-     * A condition the classifier does not name is rejected, not reported as transient.
+     * A constraint the adapter's write cannot satisfy is a deterministic rejection.
      *
-     * <p>{@code 23514 check_violation}, driven by adding a constraint the adapter's own write cannot
-     * satisfy. It stands in for the whole unclassified remainder: a not-null, a value outside its
-     * column's domain, anything a future schema adds. None of them is retryable, and the port has no
-     * member meaning "unknown", so the only question is which lie is cheaper. Reporting unavailability
-     * tells a caller to retry an operation that will fail identically forever; rejecting costs one
-     * failed operation and says so.</p>
-     *
-     * <p>This is pinned by a test because the classifier's own documentation asserts it in three
-     * places, and a documented intention with no assertion behind it is how a catch-all reappears.</p>
+     * <p>{@code 23514 check_violation}, driven by adding a constraint no write of this adapter can
+     * meet. It stands for the integrity and data classes as a whole: a not-null, a value outside its
+     * column's domain, anything a future schema adds. None is retryable, so none may be reported as
+     * unavailability.</p>
      */
     @Test
-    void anUnclassifiedDatabaseConditionIsRejectedRatherThanReportedAsTransient() throws Exception {
+    void aConstraintTheWriteCannotSatisfyIsRejectedRatherThanReportedAsTransient() throws Exception {
         String storeId = "failure-unclassified-" + UUID.randomUUID();
         var key = new ExecutionKey("acme", UUID.randomUUID());
         DataSource dataSource = PostgresTestDatabase.dataSourceFor(storeId);
@@ -309,6 +304,51 @@ class PostgresExecutionStoreFailureMappingTest {
 
             var invalid = assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure,
                     "an unclassified condition must be a deterministic rejection, not unavailability, "
+                            + "because a caller told it is transient will retry it forever: " + failure);
+            assertEquals(Retryability.DETERMINISTIC_REJECT, invalid.retryability());
+        }
+    }
+
+    /**
+     * A condition the classifier names nowhere is rejected, not reported as transient.
+     *
+     * <p>This is the catch-all itself, and it needs its own test because the obvious probe does not
+     * reach it: a check violation is class 23, which the arm above answers, so a test driving one
+     * passes whether or not the final arm is correct. {@code 0A000 feature_not_supported} belongs to
+     * none of the classes this adapter names, so it lands where nothing else will.</p>
+     *
+     * <p>What is being pinned is the choice between two untruths. The port has no member meaning
+     * "unknown", every genuinely transient condition already has an arm of its own, and telling a
+     * caller that an unrecognised condition is transient tells them to retry something that will fail
+     * identically forever. The classifier's documentation asserts this in two places, and a documented
+     * intention with no assertion behind it is how a catch-all quietly returns.</p>
+     */
+    @Test
+    void anUnclassifiedDatabaseConditionIsRejectedRatherThanReportedAsTransient() throws Exception {
+        String storeId = "failure-catchall-" + UUID.randomUUID();
+        var key = new ExecutionKey("acme", UUID.randomUUID());
+        DataSource dataSource = PostgresTestDatabase.dataSourceFor(storeId);
+
+        try (var store = new PostgresExecutionStore(dataSource, new MutableClock(EPOCH))) {
+            try (Connection connection = dataSource.getConnection();
+                 Statement statement = connection.createStatement()) {
+                // A trigger that raises a SQLSTATE outside every class this adapter classifies. Raising
+                // it from the database rather than injecting it into the adapter is the point: the
+                // classification is on the state the server sends, and a fault injected into Java would
+                // test the injection instead.
+                statement.execute("CREATE OR REPLACE FUNCTION unclassified_probe() RETURNS trigger AS $$ "
+                        + "BEGIN RAISE EXCEPTION 'probe' USING ERRCODE = '0A000'; END; $$ LANGUAGE plpgsql");
+                statement.execute("CREATE TRIGGER unclassified_probe_trigger "
+                        + "BEFORE INSERT ON process_instance "
+                        + "FOR EACH ROW EXECUTE FUNCTION unclassified_probe()");
+            }
+
+            ExecutionStoreFailure failure =
+                    failureOf(() -> store.apply(creationBatch(key, UUID.randomUUID()))
+                            .toCompletableFuture().join());
+
+            var invalid = assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failure,
+                    "an unrecognised condition must be a deterministic rejection, not unavailability, "
                             + "because a caller told it is transient will retry it forever: " + failure);
             assertEquals(Retryability.DETERMINISTIC_REJECT, invalid.retryability());
         }

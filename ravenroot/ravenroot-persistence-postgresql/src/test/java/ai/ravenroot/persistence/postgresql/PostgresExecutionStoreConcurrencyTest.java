@@ -56,19 +56,6 @@ class PostgresExecutionStoreConcurrencyTest {
     private static final int WRITERS = 8;
 
     /**
-     * Concurrent writers to one instance each advance the revision by one, and none is overwritten.
-     *
-     * <p>This is the row lock, stated as arithmetic. {@code apply} reads the instance's revision and
-     * writes {@code revision + 1}; without {@code SELECT ... FOR UPDATE} two writers read the same
-     * value, both write the same successor, and one batch's rows are silently replaced by the other's —
-     * both callers are told they succeeded, and the instance carries one write instead of two. The
-     * final revision is the only place that shows.</p>
-     *
-     * <p>Each writer schedules its own timer rather than transitioning the status, so the count of
-     * surviving side effects is a second, independent witness: a lost update loses a timer row too, and
-     * a store that somehow kept the revisions but dropped a write would fail on the timers instead.</p>
-     */
-    /**
      * A loaded aggregate's revision describes the state beside it, even while a writer is advancing it.
      *
      * <p>This is the read half of the same problem, and it is the one that looks safe. A fold reads the
@@ -118,13 +105,31 @@ class PostgresExecutionStoreConcurrencyTest {
             stop.set(true);
             writer.get(1, TimeUnit.MINUTES);
 
-            assertTrue(reads > 0, "the probe never managed a single read");
+            // A floor rather than "at least one", because this test can only find a torn read by
+            // performing enough of them. On a loaded runner a single read would satisfy the weaker
+            // assertion and the test would pass having proved nothing, which is the failure mode a
+            // concurrency probe is most likely to have and least likely to show.
+            assertTrue(reads >= 50, "only " + reads + " reads completed in the window, which is too "
+                    + "few for their agreement to mean anything");
             assertTrue(torn.isEmpty(), torn.size() + " of " + reads
                     + " loads returned an aggregate whose revision does not describe its state, so the "
                     + "fold saw more than one committed snapshot: " + torn.subList(0, Math.min(5, torn.size())));
         }
     }
 
+    /**
+     * Concurrent writers to one instance each advance the revision by one, and none is overwritten.
+     *
+     * <p>This is the row lock, stated as arithmetic. {@code apply} reads the instance's revision and
+     * writes {@code revision + 1}; without {@code SELECT ... FOR UPDATE} two writers read the same
+     * value, both write the same successor, and one batch's rows are silently replaced by the other's —
+     * both callers are told they succeeded, and the instance carries one write instead of two. The
+     * final revision is the only place that shows.</p>
+     *
+     * <p>Each writer schedules its own timer rather than transitioning the status, so the count of
+     * surviving side effects is a second, independent witness: a lost update loses a timer row too, and
+     * a store that somehow kept the revisions but dropped a write would fail on the timers instead.</p>
+     */
     @Test
     void concurrentWritersToOneInstanceEachAdvanceTheRevisionByExactlyOne() throws Exception {
         String storeId = "concurrency-revision-" + UUID.randomUUID();

@@ -274,6 +274,7 @@ import {
   validateEdgeId,
 } from './edge-gestures.js';
 import {
+  commandPositionNodeIds,
   commandTargets,
   createCommandHistory,
   discardChangesMessage,
@@ -1623,6 +1624,10 @@ function applyActiveDocument() {
   graphName = document_?.name ?? 'untitled.graphml';
   graphDisplayName = document_?.displayName ?? graphName;
   const presentation = documentPresentationState(document_);
+  const retainRouteGeometry = Boolean(document_
+    && document_.renderMode === presentation.renderMode
+    && document_.layoutMode === presentation.layoutMode
+    && document_.visualStyle === presentation.visualStyle);
   renderMode = presentation.renderMode;
   layoutMode = presentation.layoutMode;
   visualStyle = presentation.visualStyle;
@@ -1641,7 +1646,12 @@ function applyActiveDocument() {
   activeExecutionReconciliation = document_?.execution.reconciliationState ?? 'known';
   // The inline-handler contract predates the workspace and still points at the visible graph.
   window.cy = cy;
-  if (cy && document_) cy.batch(() => applyVisualStyle(visualStyle, cy, document_));
+  // Activation repaints document-owned node/runtime state but leaves the live renderer's edge
+  // geometry untouched. Recomputing even the same route family here can choose different control
+  // points after a pane resize; the existing inline edge route is the exact arrangement result.
+  // A legacy or invalid record still takes the canonical normalized style as a complete repaint.
+  if (cy && document_) cy.batch(() =>
+    applyVisualStyle(visualStyle, cy, document_, { preserveEdgeGeometry: retainRouteGeometry }));
 }
 
 function syncSourceSessionChrome(owner = workspace.active) {
@@ -3550,7 +3560,7 @@ function applyElasticVisualStyle() {
       // WIDTH and COLOUR are restated here — the border is normally the canvas colour (a separator,
       // not a signal), so a neutral ring reads as clearly here as elsewhere. `border-style` is
       // deliberately NOT written: the dash belongs to `createStylesheet`'s `node[?bypassed]` rule, and
-      // writing it inline is what made it go stale on the autosave path (see `refreshBypassBorder`).
+      // writing it inline would make the value stale after an in-place Inspector refresh.
       'border-width': node.data('bypassed') ? 2.5 : 1.5,
       'border-color': node.data('bypassed') ? rendererPalette.nodeType.system : rendererPalette.canvas,
       'border-opacity': 0.9,
@@ -3613,7 +3623,7 @@ function applyN8nNodeStyle(target = cy, owner = workspace.active) {
       // This family includes the DEFAULT `cyto` style, so this is the border most authors
       // actually see. The neutral ring is restated here because the per-type `bd` written inline
       // would otherwise beat the stylesheet; the per-type icon tile is untouched, so the node stays
-      // identifiable. `border-style` is deliberately absent — see `refreshBypassBorder`.
+      // identifiable. `border-style` is deliberately absent so the data selector remains authoritative.
       'border-color':          n.data('bypassed') ? rendererPalette.nodeType.system : bd,
       'border-opacity':        1,
       'background-image':      makeN8nSVG(ic, t),
@@ -3971,29 +3981,29 @@ function scheduleN8n2EdgeCurves(owner, target, token, complete = null) {
   });
 }
 
-function restoreDefaultStyle(target = cy, owner = workspace.active) {
+function restoreDefaultStyle(target = cy, owner = workspace.active, { preserveEdgeGeometry = false } = {}) {
   if (!target) return;
   if (owner) owner.n8nActive = false;
   if (owner === workspace.active) n8nActive = false;
   target.nodes().removeStyle();
-  target.edges().removeStyle();
+  if (!preserveEdgeGeometry) target.edges().removeStyle();
 }
 
-function applyVisualStyle(name, target = cy, owner = workspace.active) {
+function applyVisualStyle(name, target = cy, owner = workspace.active, { preserveEdgeGeometry = false } = {}) {
   if (!target || !owner) return;
   name = normalizeVisualStyle(name);
   if (owner === workspace.active) visualStyle = name;
   owner.visualStyle = name;
-  restoreDefaultStyle(target, owner);
+  restoreDefaultStyle(target, owner, { preserveEdgeGeometry });
   if (isN8nFamilyLayout(name)) {
     owner.n8nActive = true;
     if (owner === workspace.active) n8nActive = true;
     applyN8nNodeStyle(target, owner);
-    if (name === 'n8n4') applyN8n4EdgeCurves(target);
-    else if (name === 'cyto') applyCytoEdgeCurves(target, owner);
-    else if (name === 'n8n2') applyN8n2EdgeCurves(target);
-    else if (name === 'n8n3') applyN8n3EdgeCurves(target);
-    else target.edges().style({
+    if (!preserveEdgeGeometry && name === 'n8n4') applyN8n4EdgeCurves(target);
+    else if (!preserveEdgeGeometry && name === 'cyto') applyCytoEdgeCurves(target, owner);
+    else if (!preserveEdgeGeometry && name === 'n8n2') applyN8n2EdgeCurves(target);
+    else if (!preserveEdgeGeometry && name === 'n8n3') applyN8n3EdgeCurves(target);
+    else if (!preserveEdgeGeometry) target.edges().style({
       'curve-style': name === 'n8n' ? 'taxi' : 'round-taxi',
       'taxi-direction': 'auto',
       'taxi-turn': '50%',
@@ -5058,49 +5068,76 @@ function inspectInspectorDraft(draft = inspectorDraft) {
   return draft?.elementType === 'edge' ? inspectEdgeDraft(draft) : inspectNodeDraft(draft);
 }
 
-/**
- * Re-applies the one bypass carrier an INLINE style owns after an autosave changes a
- * node's data without re-running a visual-style pass.
- *
- * The dash needs no help: it lives in `createStylesheet`'s `node[?bypassed]` rule, and a Cytoscape
- * selector re-evaluates the moment the data changes. That is exactly why nothing writes
- * `border-style` inline any more — an inline write wins over the stylesheet and then goes stale here,
- * on the ordinary editing path, which is the measured defect this function exists to close: switching
- * a node off through autosave updated its label and left its border drawn as an executing node's.
- *
- * The COLOUR does need help, and only in the n8n family — which includes the default `cyto` style, so
- * it is the border most authors actually see. Those styles write a per-type border colour inline that
- * would otherwise beat the stylesheet.
- *
- * A node the runtime is painting is left alone: `applyRuntimeVisual` owns its border while a run is
- * in flight, and what the run is doing right now outranks what the document says it will do next time.
- */
-function refreshBypassBorder(node) {
-  if (!isN8nFamilyLayout()) return;
-  if ((node.data('runtimeState') || 'idle') !== 'idle') return;
-  const ordinary = N8N_BORDER[node.data('nodeType')] || rendererPalette.nodeBorder;
-  node.style('border-color', node.data('bypassed') ? rendererPalette.nodeType.system : ordinary);
-}
-
 function syncAutosavedNodeRenderer(nodeId) {
   const element = cy?.getElementById(nodeId);
   if (!element?.nonempty()) return;
-  const rendered = buildElements(graphData).find(candidate =>
-    candidate.data?.id === nodeId && !Object.hasOwn(candidate.data, 'source'));
-  if (rendered) {
-    element.data(rendered.data);
-    refreshBypassBorder(element);
-  }
+  syncGraphRendererInPlace({ nodeIds: [nodeId], refreshDependentEdges: true });
 }
 
 function syncAutosavedEdgeRenderer(edgeId) {
   const element = cy?.getElementById(edgeId);
   if (!element?.nonempty()) return;
-  const rendered = buildElements(graphData).find(candidate =>
-    candidate.data?.id === edgeId && Object.hasOwn(candidate.data, 'source'));
-  if (!rendered) return;
-  element.move({ source: rendered.data.source, target: rendered.data.target });
-  element.data(rendered.data);
+  syncGraphRendererInPlace({ edgeIds: [edgeId] });
+}
+
+function syncGraphRendererInPlace({
+  nodeIds = [], edgeIds = [], refreshDependentEdges = false, restoreModelPositionIds = null,
+} = {}) {
+  const owner = workspace.active;
+  const target = cy;
+  if (!owner || owner.cy !== target || !target || target.destroyed()) return false;
+  const rendered = buildElements(graphData);
+  const renderedNodes = new Map(rendered
+    .filter(candidate => !Object.hasOwn(candidate.data, 'source'))
+    .map(candidate => [candidate.data.id, candidate]));
+  const renderedEdges = new Map(rendered
+    .filter(candidate => Object.hasOwn(candidate.data, 'source'))
+    .map(candidate => [candidate.data.id, candidate]));
+  const allNodes = nodeIds === null;
+  const allEdges = edgeIds === null || refreshDependentEdges;
+  if (allNodes && (target.nodes().length !== renderedNodes.size
+      || target.nodes().some(node => !renderedNodes.has(node.id())))) return false;
+  if (allEdges && (target.edges().length !== renderedEdges.size
+      || target.edges().some(edge => !renderedEdges.has(edge.id())))) return false;
+  const nodes = allNodes ? [...renderedNodes.keys()] : nodeIds;
+  const edges = allEdges ? [...renderedEdges.keys()] : edgeIds;
+  let routingChanged = false;
+  target.batch(() => {
+    nodes.forEach(id => {
+      const element = target.getElementById(id);
+      const next = renderedNodes.get(id);
+      if (!next || element.empty()) return;
+      const before = {
+        x: element.position('x'), y: element.position('y'),
+        width: element.width(), height: element.height(),
+      };
+      element.data(next.data);
+      if (restoreModelPositionIds?.has(id)) element.position(next.position);
+      if (isN8nFamilyLayout(owner.visualStyle)) applyN8nNodeStyle(element, owner);
+      else applyRuntimeVisual(element);
+      const after = {
+        x: element.position('x'), y: element.position('y'),
+        width: element.width(), height: element.height(),
+      };
+      routingChanged ||= Object.keys(before).some(key => before[key] !== after[key]);
+    });
+    edges.forEach(id => {
+      const element = target.getElementById(id);
+      const next = renderedEdges.get(id);
+      if (!next || element.empty()) return;
+      const endpointChanged = element.source().id() !== next.data.source
+        || element.target().id() !== next.data.target;
+      if (endpointChanged) element.move({ source: next.data.source, target: next.data.target });
+      element.data(next.data);
+      routingChanged ||= endpointChanged;
+    });
+    if (routingChanged) applyActiveEdgeVisualContract(target, owner.visualStyle);
+  });
+  updateStats();
+  buildLegend();
+  scheduleSelectionOverlay(target);
+  scheduleMinimap(owner);
+  return true;
 }
 
 function commitNodeDraft(draft = inspectorDraft, { coalesceKey = null } = {}) {
@@ -5447,13 +5484,15 @@ function renderNodeForm(model, creating) {
         if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
           return showFormError(form, 'This node is no longer part of the document');
         }
-      } else if (nodePatchChanged(model, patch)
-          && !updateNodeFields(graphData, model.id, patch, editHistory)) {
-        return showFormError(form, 'This node is no longer part of the document');
+      } else if (nodePatchChanged(model, patch)) {
+        if (!updateNodeFields(graphData, model.id, patch, editHistory)) {
+          return showFormError(form, 'This node is no longer part of the document');
+        }
+        syncAutosavedNodeRenderer(model.id);
       }
     }
     retireInspectorDraft(form);
-    rebuildGraph();
+    if (creating) rebuildGraph();
     updateHistoryUi();
     showNodeInfo(cy.getElementById(id));
     scheduleProgramGraphReadiness(workspace.active);
@@ -7520,13 +7559,15 @@ function renderEdgeForm(model, creating) {
         if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
           return showFormError(form, 'This edge is no longer part of the document');
         }
-      } else if (edgePatchChanged(model, patch)
-          && !updateEdgeFields(graphData, model.id, patch, editHistory)) {
-        return showFormError(form, 'This edge is no longer part of the document');
+      } else if (edgePatchChanged(model, patch)) {
+        if (!updateEdgeFields(graphData, model.id, patch, editHistory)) {
+          return showFormError(form, 'This edge is no longer part of the document');
+        }
+        syncAutosavedEdgeRenderer(model.id);
       }
     }
     retireInspectorDraft(form);
-    rebuildGraph();
+    if (creating) rebuildGraph();
     updateHistoryUi();
     showEdgeInfo(cy.getElementById(id));
   });
@@ -8171,11 +8212,25 @@ function rebuildGraph(options = {}) {
   // Undo and redo have just written the document. Reading positions back out of the renderer here
   // would overwrite the state that was restored, so history rebuilds skip the sync.
   if (options.syncPositions !== false) syncGraphPositions();
+  const owner = workspace.active;
   const activeStyle = visualStyle;
+  const viewport = cy && !cy.destroyed() ? { zoom: cy.zoom(), pan: { ...cy.pan() } } : null;
+  const selectedIds = cy && !cy.destroyed() ? cy.$(':selected').map(element => element.id()) : [];
+  invalidateDocumentLayouts(owner);
   graphData.nodeMap = Object.fromEntries(graphData.nodes.map(node => [node.id, node]));
   initCy(buildElements(graphData), graphData, {
     visualStyle: activeStyle,
   });
+  if (options.retainedNodePositions) {
+    cy.batch(() => options.retainedNodePositions.forEach((position, id) => {
+      const node = cy.getElementById(id);
+      if (node.nonempty()) node.position(position);
+    }));
+  }
+  if (viewport) cy.viewport(viewport);
+  const retainedSelection = selectedIds.filter(id => cy.getElementById(id).nonempty());
+  if (retainedSelection.length) applyStableSelection(cy, retainedSelection);
+  applyActiveEdgeVisualContract(cy, owner?.visualStyle || activeStyle);
   // initCy built a new renderer, so the keyboard's position has to be put back on it or the next
   // arrow key would start from the top of the graph again.
   if (graphCursorId && cy.getElementById(graphCursorId).nonempty()) setGraphCursor(graphCursorId);
@@ -8218,7 +8273,15 @@ function applyHistoryStep(command, verb) {
   retireInspectorDraft();
   dragSnapshot = null;
   resetConnectGesture();
-  rebuildGraph({ syncPositions: false });
+  const modelPositionIds = new Set(commandPositionNodeIds(command));
+  const retainedNodePositions = new Map(cy?.nodes().map(node => [node.id(), node.position()]) || []);
+  modelPositionIds.forEach(id => retainedNodePositions.delete(id));
+  // History commands are disabled while a layout owns the document. Retire any later paint-only
+  // route frame left by ordinary node movement before restoring authoritative model positions.
+  clearDynamicEdgeGeometry(workspace.active);
+  if (!syncGraphRendererInPlace({
+    nodeIds: null, edgeIds: null, restoreModelPositionIds: modelPositionIds,
+  })) rebuildGraph({ syncPositions: false, retainedNodePositions });
   selectCommandTargets(command);
   updateHistoryUi();
   addActivityMessage('editor', `${verb}: ${command.label}`, 'completed');

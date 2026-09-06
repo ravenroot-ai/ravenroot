@@ -352,6 +352,24 @@ export function commandTargets(command) {
   return { nodeIds: [...nodeIds], edgeIds: [...edgeIds] };
 }
 
+// Position state has narrower ownership than general command targeting. Structural and metadata
+// commands may mention a node without authoring its coordinates; only move-nodes entries make the
+// graph model authoritative for position during the corresponding history step.
+export function commandPositionNodeIds(command) {
+  const nodeIds = new Set();
+  collectPositionNodeIds(command, nodeIds);
+  return [...nodeIds];
+}
+
+function collectPositionNodeIds(command, nodeIds) {
+  if (!command) return;
+  if (command.type === 'move-nodes') {
+    command.entries.forEach(entry => nodeIds.add(entry.id));
+  } else if (command.type === 'composite') {
+    command.commands.forEach(child => collectPositionNodeIds(child, nodeIds));
+  }
+}
+
 function collectTargets(command, nodeIds, edgeIds) {
   if (!command) return;
   switch (command.type) {

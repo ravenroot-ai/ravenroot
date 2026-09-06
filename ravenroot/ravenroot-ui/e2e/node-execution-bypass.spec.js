@@ -350,7 +350,7 @@ test.describe('the flag reaches the document through autosave, not only through 
     const on = await canvasNode(page, 'a');
     expect(on.label).not.toContain('bypassed');
     // The colour carrier has to come back too, not just the dash — it is written inline by the
-    // default style and is the half that needs `refreshBypassBorder` rather than the stylesheet.
+    // default style and is the half that needs the in-place visual refresh rather than the stylesheet.
     expect(on.borderColor).not.toBe(off.borderColor);
     expect(on.borderColor).toBe((await canvasNode(page, 'c')).borderColor);
   });

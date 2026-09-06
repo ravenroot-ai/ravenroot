@@ -48,6 +48,7 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
     static final String NODE_ID = HumanTaskConfirmationWorkbenchProcess.NODE_ID;
     static final String DOWNSTREAM_NODE_ID = HumanTaskConfirmationWorkbenchProcess.DOWNSTREAM_NODE_ID;
     static final String FIXTURE_TOKEN = "human-task-e2e-nonsecret-fixture-token-0123456789";
+    static final String PINNED_RECOVERY_COMMENT = "R".repeat(5_000);
 
     @Test
     void createsTwoDeploymentHostedTasksThenReopensTheSameStoreWithoutLocalRegistration()
@@ -92,7 +93,7 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
                 assertEquals(1, downstreamVisits,
                         "each durable ingress has one downstream completion after replay");
             }
-            assertEquals(java.util.Set.of("Reviewed after the durable server restart.",
+            assertEquals(java.util.Set.of(PINNED_RECOVERY_COMMENT,
                     "Reviewed once through the central form."), comments,
                     "comments remain durable metadata rather than execution payload");
             assertTrue(store.claimPendingWork(TENANT, "human-task-confirmation-parent-probe", 100,

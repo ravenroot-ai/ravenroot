@@ -118,6 +118,33 @@ describe('portable visual groups', () => {
     }
   });
 
+  it('warns for an all-scope complex default without graph data and preserves it until explicit repair', () => {
+    const source = xml().replace('<graphml xmlns=', '<graphml xmlns:z="urn:visual-fixture" xmlns=')
+      .replace('id="groups" for="graph"', 'id="groups" for="all"')
+      .replace(`attr.name="${KEY}" attr.type="string"/>`,
+        `attr.name="${KEY}" attr.type="string"><default><z:payload value="opaque-default"/></default></key>`)
+      .replace(/<data key="groups">[^<]*<\/data>/, '')
+      .replace('<node id="a"/>', '<node id="a"><data key="groups"><z:payload value="retained"/></data></node>');
+    const graph = parseGraphML(source);
+    expect(readVisualGroups(graph)).toMatchObject({ status: 'invalid', groups: [] });
+    expect(readVisualGroups(graph).warning).toBeTruthy();
+    const untouched = serializeGraphML(graph);
+    expect(untouched).toContain('<default><z:payload value="opaque-default"/></default>');
+    expect(untouched).toContain('for="all"');
+    expect(readVisualGroups(parseGraphML(untouched)).status).toBe('invalid');
+    editVisualGroups(graph, []);
+    const saved = serializeGraphML(graph);
+    expect(readVisualGroups(parseGraphML(saved))).toMatchObject({ status: 'valid', groups: [] });
+    expect(saved).toContain('<z:payload value="retained"/>');
+    const document = new DOMParser().parseFromString(saved, 'application/xml');
+    const keys = [...document.getElementsByTagName('key')].filter(key => key.getAttribute('attr.name') === KEY);
+    expect(keys.filter(key => ['all', 'graph'].includes(key.getAttribute('for')))).toHaveLength(1);
+    for (const scope of ['node', 'edge']) {
+      const key = keys.find(key => key.getAttribute('for') === scope);
+      expect(key.getElementsByTagName('default')[0].firstElementChild.getAttribute('value')).toBe('opaque-default');
+    }
+  });
+
   it('rejects overlap, missing anchors, empty names and duplicate group IDs atomically', () => {
     const graph = parseGraphML(xml());
     const original = graph.graphProperties[KEY];

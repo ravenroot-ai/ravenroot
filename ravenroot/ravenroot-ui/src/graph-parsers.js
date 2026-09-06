@@ -636,7 +636,7 @@ export function parseGraphML(xmlText) {
       defaultValue: defaultElement && defaultElement.children.length === 0
         ? defaultElement.textContent
         : null,
-      ...(name === VISUAL_GROUPS_PROPERTY && scope === 'graph' && defaultElement?.children.length
+      ...(name === VISUAL_GROUPS_PROPERTY && ['graph', 'all'].includes(scope) && defaultElement?.children.length
         ? { defaultComplex: true } : {}),
     };
     if (definition.defaultValue !== null) {

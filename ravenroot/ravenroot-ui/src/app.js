@@ -776,8 +776,7 @@ function scheduleWorkspacePersistence() {
   workspacePersistenceTimer = setTimeout(() => {
     workspacePersistenceTimer = null;
     void flushWorkspacePersistence();
-  }, (workspace.active?.visualGroupsRenderer?.isAnimating
-    || workspace.active?.renderer?.elasticMount?.visualGroupAnimating) ? 300 : 40);
+  }, visualGroupTransitionIsAnimating(workspace.active) ? 300 : 40);
 }
 
 function flushWorkspacePersistence({ allowSuspended = false } = {}) {
@@ -1646,6 +1645,28 @@ function finishVisualGroups(owner = workspace.active) {
   elasticRendererFor(owner)?.elasticMount?.finishVisualGroupTransition?.();
 }
 
+// Group presentation lives only on its document; it has no module-level working-view mirror.
+function visualGroupTransitionIsAnimating(owner) {
+  return Boolean(owner && workspace.find(owner.id) === owner
+    && (owner.visualGroupsRenderer?.isAnimating || owner.renderer?.elasticMount?.visualGroupAnimating));
+}
+
+function visualGroupPresentationIsDirty(owner) {
+  return Boolean(owner && workspace.find(owner.id) === owner && owner.visualGroupPresentationDirty);
+}
+
+function suspendVisualGroups(owner) {
+  if (!owner || workspace.find(owner.id) !== owner) return;
+  finishVisualGroups(owner);
+  owner.visualGroupsRenderer?.suspend();
+}
+
+function destroyDesignVisualGroups(owner, target) {
+  if (!owner || workspace.find(owner.id) !== owner || owner.cy !== target) return;
+  owner.visualGroupsRenderer?.destroy();
+  owner.visualGroupsRenderer = null;
+}
+
 function refreshVisualGroups(owner = workspace.active, { animate = false, selection, focus } = {}) {
   if (!owner?.graph || !owner.cy || owner.cy.destroyed()) return;
   const metadata = readVisualGroups(owner.graph);
@@ -1761,7 +1782,7 @@ function createVisualGroupAction(captured = null) {
         finishVisualGroups(); syncGraphPositions();
         const anchor = selected.includes(graphCursorId) ? graphCursorId : [...selected].sort()[0];
         const group = createVisualGroup(graphData, selected, name, anchor, editHistory);
-        workspace.active.selectedVisualGroupId = group.id;
+        owner.selectedVisualGroupId = group.id;
         refreshVisualGroups(workspace.active, { animate: true, selection: selected, focus: anchor });
         updateHistoryUi();
       } });
@@ -1789,7 +1810,7 @@ function manageVisualGroup(action, suppliedGroup = null) {
           ? item.anchorNodeId : [...selected].sort()[0] });
       editVisualGroups(graphData, groups, editHistory, action === 'ungroup' ? `Ungroup ${group.name}` : `${action === 'rename' ? 'Rename' : action === 'replace' ? 'Replace members of' : 'Remove metadata for'} visual group`);
       refreshVisualGroups(); updateHistoryUi();
-      if (action === 'ungroup' || action === 'repair') { workspace.active.selectedVisualGroupId = null; closeInfo(); }
+      if (action === 'ungroup' || action === 'repair') { owner.selectedVisualGroupId = null; closeInfo(); }
       else showVisualGroupInfo(groups.find(item => item.id === group.id));
     };
     if (action === 'ungroup') { commit(); return true; }
@@ -1801,10 +1822,11 @@ function manageVisualGroup(action, suppliedGroup = null) {
   });
 }
 
-function showVisualGroupInfo(group) {
-  if (!group) return;
+function showVisualGroupInfo(group, owner = workspace.active) {
+  if (!group || !owner || owner !== workspace.active || workspace.find(owner.id) !== owner) return;
+  const incarnation = owner.incarnation;
   retireInspectorDraft(); humanTaskController?.selectNode(null); revealInspector();
-  workspace.active.selectedVisualGroupId = group.id;
+  owner.selectedVisualGroupId = group.id;
   document.getElementById('info-title').textContent = group.name;
   const body = document.createElement('section'); body.className = 'visual-group-inspector';
   document.getElementById('info-body').replaceChildren(body);
@@ -1815,9 +1837,11 @@ function showVisualGroupInfo(group) {
     const button = document.createElement('button'); button.type = 'button'; button.textContent = text;
     button.className = 'btn'; button.disabled = !enabled; button.title = reason;
     if (!enabled) button.setAttribute('aria-describedby', 'visual-group-edit-help');
-    button.addEventListener('click', handler); actions.append(button);
+    button.addEventListener('click', () => {
+      if (workspace.active === owner && owner.incarnation === incarnation) handler();
+    }); actions.append(button);
   };
-  action(workspace.active.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse', () => toggleVisualGroup(group.id));
+  action(owner.visualGroupState[group.id]?.collapsed ? 'Expand' : 'Collapse', () => toggleVisualGroup(group.id, undefined, owner));
   const editable = groupAuthoringAllowed();
   action('Rename group', () => manageVisualGroup('rename', group), editable, 'Available in editable Design documents');
   action('Replace members with selection', () => manageVisualGroup('replace', group), editable && selectedRealNodeIds().length >= 2,
@@ -1831,14 +1855,18 @@ function showVisualGroupInfo(group) {
   group.memberNodeIds.forEach(id => {
     const item = document.createElement('li'); const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
     const node = graphData.nodeMap[id]; button.textContent = `${node?.name || id} (${id})`;
-    button.addEventListener('click', () => revealVisualGroupMember(id)); item.append(button); list.append(item);
+    button.addEventListener('click', () => {
+      if (workspace.active === owner && owner.incarnation === incarnation) revealVisualGroupMember(id, owner);
+    }); item.append(button); list.append(item);
   });
 }
 
-function revealVisualGroupMember(id) {
+function revealVisualGroupMember(id, owner = workspace.active) {
+  const incarnation = owner?.incarnation;
   return runAfterInspectorDraft(() => {
+    if (!owner || workspace.active !== owner || workspace.find(owner.id) !== owner || owner.incarnation !== incarnation) return false;
     const group = readVisualGroups(graphData).groups.find(item => item.memberNodeIds.includes(id));
-    if (group && workspace.active.visualGroupState[group.id]?.collapsed) toggleVisualGroup(group.id, false);
+    if (group && owner.visualGroupState[group.id]?.collapsed) toggleVisualGroup(group.id, false, owner);
     finishVisualGroups();
     const node = cy.getElementById(id); if (node.empty()) return false;
     applyStableSelection(cy, [id]); setGraphCursor(id); showNodeInfo(node); return true;
@@ -3590,10 +3618,8 @@ function initCy(elements, gd, options = {}) {
     setModifyMode(false);
     editHistory.reset();
     updateHistoryUi();
-    // A genuinely new document's font is its own, starting from its own default — not whatever the
-    // slider happened to show for the document this one is replacing (UI-12). `rebuildGraph`
-    // is the only same-`gd` caller, so ordinary edits never reach this reset.
-    fontSize = workspace.active?.fontSize || DEFAULT_FONT_SIZE;
+    // Activation has already loaded this document's font into the working view. Replacement
+    // explicitly resets that view before loading; reading the record here could revive its old font.
   }
 
   // Register layout extensions (safe re-registration)
@@ -3609,8 +3635,7 @@ function initCy(elements, gd, options = {}) {
   }
 
   if (cy) {
-    workspace.active?.visualGroupsRenderer?.destroy();
-    if (workspace.active) workspace.active.visualGroupsRenderer = null;
+    destroyDesignVisualGroups(workspace.active, cy);
     releaseCanvasZoomBridge(cy);
     destroySelectionOverlay(cy);
     destroyNodeActionOverlay(cy);
@@ -9158,14 +9183,14 @@ function rebuildGraph(options = {}) {
 function undoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canUndo()
       || !finalizeInspectorBeforeHistory()) return;
-  finishVisualGroups(); workspace.active.visualGroupsRenderer?.suspend();
+  suspendVisualGroups(workspace.active);
   applyHistoryStep(editHistory.undo(graphData), 'Undo');
 }
 
 function redoEdit() {
   if (!documentIsEditable(workspace.active) || !graphData || !editHistory.canRedo()
       || !finalizeInspectorBeforeHistory()) return;
-  finishVisualGroups(); workspace.active.visualGroupsRenderer?.suspend();
+  suspendVisualGroups(workspace.active);
   applyHistoryStep(editHistory.redo(graphData), 'Redo');
 }
 
@@ -9228,7 +9253,7 @@ function confirmDiscardChanges() {
 
 function updateHistoryUi() {
   const state = editHistory.state();
-  const presentationDirty = Boolean(workspace.active?.visualGroupPresentationDirty);
+  const presentationDirty = visualGroupPresentationIsDirty(workspace.active);
   const dirty = state.dirty || (documentIsEditable(workspace.active) && presentationDirty);
   const undoButton = document.getElementById('btn-undo');
   if (undoButton) {

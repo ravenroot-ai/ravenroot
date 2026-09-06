@@ -27,7 +27,7 @@ class HumanTaskConfirmationPolicyTest {
 
     @Test
     void policyBoundsDisplayAndNormalizesDecisionMetadataOutsidePayload() {
-        var policy = new HumanTaskConfirmationPolicy(16, 8, 12, 250, 1_000);
+        var policy = new HumanTaskPolicy.Confirmation(16, 8, 32, 250, 1_000);
         var presentation = new HumanTaskConfirmationPresentation(1, "Approve",
                 HumanTaskCommentRequirement.REQUIRED, Set.of(HumanTaskConfirmationAction.RESOLVE),
                 "Approve", "", "");
@@ -35,10 +35,16 @@ class HumanTaskConfirmationPolicyTest {
         policy.requirePresentation(presentation);
         assertEquals("reason", policy.normalizeComment("  reason  ",
                 HumanTaskCommentRequirement.REQUIRED));
+        assertEquals("line one\nline two", policy.normalizeComment("line one\nline two",
+                HumanTaskCommentRequirement.OPTIONAL));
         assertThrows(IllegalArgumentException.class, () -> policy.normalizeComment("",
                 HumanTaskCommentRequirement.REQUIRED));
         assertThrows(IllegalArgumentException.class, () -> policy.normalizeComment("comment",
                 HumanTaskCommentRequirement.DISALLOWED));
+        assertThrows(IllegalArgumentException.class, () -> policy.normalizeComment("bad\u0000control",
+                HumanTaskCommentRequirement.OPTIONAL));
+        assertThrows(IllegalArgumentException.class, () -> policy.normalizeComment("bad\ud800",
+                HumanTaskCommentRequirement.OPTIONAL));
         assertThrows(IllegalArgumentException.class, () -> policy.requirePresentation(
                 new HumanTaskConfirmationPresentation(1, "prompt beyond limit",
                         HumanTaskCommentRequirement.OPTIONAL,

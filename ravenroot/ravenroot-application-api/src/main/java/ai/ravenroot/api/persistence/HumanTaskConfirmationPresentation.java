@@ -24,9 +24,9 @@ public record HumanTaskConfirmationPresentation(
     /** First and currently only embedded presentation wire version. */
     public static final int VERSION_1 = 1;
     /** Technical ceiling; the server policy normally configures a smaller bound. */
-    public static final int HARD_MAX_PROMPT_UTF8_BYTES = 64 * 1024 * 1024;
+    public static final int HARD_MAX_PROMPT_UTF8_BYTES = 64 * 1024;
     /** Technical ceiling; the server policy normally configures a smaller bound. */
-    public static final int HARD_MAX_ACTION_LABEL_UTF8_BYTES = 64 * 1024 * 1024;
+    public static final int HARD_MAX_ACTION_LABEL_UTF8_BYTES = 256;
 
     private static final HumanTaskConfirmationPresentation NONE =
             new HumanTaskConfirmationPresentation(0, "", HumanTaskCommentRequirement.DISALLOWED,
@@ -91,7 +91,18 @@ public record HumanTaskConfirmationPresentation(
             throw new IllegalArgumentException(name + " cannot be blank");
         }
         for (int index = 0; index < value.length(); index++) {
-            if (Character.isISOControl(value.charAt(index))) {
+            char unit = value.charAt(index);
+            if (Character.isHighSurrogate(unit)) {
+                if (index + 1 == value.length() || !Character.isLowSurrogate(value.charAt(index + 1))) {
+                    throw new IllegalArgumentException(name + " contains malformed Unicode");
+                }
+                index++;
+                continue;
+            }
+            if (Character.isLowSurrogate(unit)) {
+                throw new IllegalArgumentException(name + " contains malformed Unicode");
+            }
+            if (Character.isISOControl(unit)) {
                 throw new IllegalArgumentException(name + " cannot contain control characters");
             }
         }

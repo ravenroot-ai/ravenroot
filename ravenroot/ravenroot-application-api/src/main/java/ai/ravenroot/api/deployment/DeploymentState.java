@@ -19,6 +19,35 @@ package ai.ravenroot.api.deployment;
  * that observes a completed start has a deployment that is actually serving. {@code DEGRADED} is
  * serving with reduced capability rather than not serving. {@code FAILED} is terminal for that
  * activation attempt and carries a cause; recovery is a new {@code start}.
+ *
+ * <h2>Relationship to the registry's two lifecycle vocabularies (ADR 0038 D5)</h2>
+ * <p>Three enums describe a deployment's lifecycle and they are deliberately not the same enum:
+ * {@code DeploymentRegistry.DesiredKind} is <em>intent</em>, {@code DeploymentRegistry.ObservedKind}
+ * is <em>evidence</em> reported by whoever holds the lease, and this one is the <em>process-local
+ * observable state</em> of an activation this JVM owns. Intent and evidence are recorded by an
+ * authority that may be another process entirely; this enum is answered from memory, without a store
+ * read, which is what makes it safe to poll from a readiness probe.</p>
+ *
+ * <table border="1">
+ *   <caption>How the three vocabularies line up</caption>
+ *   <tr><th>DesiredKind (intent)</th><th>ObservedKind (evidence)</th><th>DeploymentState (local)</th></tr>
+ *   <tr><td>RUNNING</td><td>STARTING, READY, DEGRADED</td><td>{@link #STARTING}, {@link #READY}, {@link #DEGRADED}</td></tr>
+ *   <tr><td>PAUSED</td><td>PAUSED</td><td>no member</td></tr>
+ *   <tr><td>DRAINED</td><td>DRAINING, DRAINED</td><td>folded into {@link #STOPPING}</td></tr>
+ *   <tr><td>STOPPED</td><td>STOPPING, STOPPED</td><td>{@link #STOPPING}, {@link #STOPPED}</td></tr>
+ *   <tr><td>REMOVED</td><td>&mdash; (the aggregate is tombstoned)</td><td>no member</td></tr>
+ *   <tr><td>&mdash; (no intent yet)</td><td>COLD</td><td>{@link #COLD}</td></tr>
+ *   <tr><td>&mdash;</td><td>FAILED</td><td>{@link #FAILED}</td></tr>
+ * </table>
+ *
+ * <p><b>The three gaps are stated rather than closed.</b> This enum has no {@code PAUSED} and no
+ * {@code DRAINING}, and it will not grow them as a side effect of the registry growing its own. Every
+ * member here is mapped onto {@code LocalDeploymentState} and published over HTTP and the CLI, so a
+ * new member is a change to an externally published value space, which belongs to the change that
+ * owns that surface and can carry its migration and release notes. Until then a paused deployment is
+ * reported by the registry's evidence, which is where an operator asking about a remote deployment is
+ * already looking, and a draining one continues to report {@link #STOPPING} exactly as it does
+ * today.</p>
  */
 public enum DeploymentState {
     /** Exists and has never been started. Distinct from {@link #STOPPED}, which has run. */

@@ -66,7 +66,7 @@ export function renderHumanTaskInspector(host, state, nodeId, {
       button.setAttribute('aria-label', `${item.status === 'ESCALATED' ? 'Escalated' : 'Pending'}: `
         + `${item.presentation.prompt}. Task ${item.taskId}, generation ${item.generation}.`);
       const head = element(doc, 'span', 'human-task-row-head');
-      head.append(element(doc, 'strong', '', item.presentation.prompt),
+      head.append(element(doc, 'strong', 'human-task-row-prompt', item.presentation.prompt),
         element(doc, 'span', 'human-task-state', item.status === 'ESCALATED' ? '▲ Escalated' : '● Pending'));
       const identity = element(doc, 'span', 'human-task-row-identity',
         `Task ${short(item.taskId)} · process ${short(item.processInstanceId)}`

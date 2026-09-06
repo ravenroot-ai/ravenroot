@@ -235,6 +235,26 @@ test('two tasks page independently and explicit decisions remove the final non-c
     .getElementById('human-confirmation').renderedStyle('label'))).not.toContain('⚑');
 });
 
+test('long prompts keep both Inspector rows and their identities visible', async ({ page }, testInfo) => {
+  capabilityResponse = { ...CAPABILITY, attentionPageSize: 2 };
+  tasks = tasks.map((entry, index) => ({ ...entry, presentation: {
+    ...entry.presentation, prompt: `${index ? 'Second' : 'First'} ${'bounded prompt '.repeat(180)}`,
+  } }));
+  await connectAndCreate(page);
+  await runAndSelect(page);
+
+  const rows = page.locator('[data-human-task-id]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0).locator('.human-task-row-identity')).toContainText('Task task-1');
+  await expect(rows.nth(1).locator('.human-task-row-identity')).toContainText('Task task-2');
+  await expect(rows.nth(1)).toBeInViewport();
+  for (const prompt of await rows.locator('.human-task-row-prompt').all()) {
+    await expect(prompt).toHaveCSS('-webkit-line-clamp', '3');
+    expect((await prompt.boundingBox())?.height).toBeLessThan(50);
+  }
+  await page.screenshot({ path: testInfo.outputPath('human-task-long-prompt-inspector.png'), fullPage: true });
+});
+
 test('attention survives Design and Monitoring renderer changes with a pulsing non-colour carrier', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await connectAndCreate(page);

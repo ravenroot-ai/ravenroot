@@ -1881,7 +1881,10 @@
       border-color: var(--acc); background: var(--bg-h); outline: none;
     }
     .human-task-row-head { display: flex; gap: 8px; align-items: start; justify-content: space-between; }
-    .human-task-row-head strong { font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+    .human-task-row-prompt {
+      display: -webkit-box; min-width: 0; overflow: hidden; overflow-wrap: anywhere;
+      font-size: 11px; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 3;
+    }
     .human-task-state { flex: none; color: var(--outcome-warning-text); font-size: 9px; font-weight: 700; }
     .human-task-row.is-escalated .human-task-state { color: var(--outcome-error-text); }
     .human-task-row-identity, .human-task-row-time {

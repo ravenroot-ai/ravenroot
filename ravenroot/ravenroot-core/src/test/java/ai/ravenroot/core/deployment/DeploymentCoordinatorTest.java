@@ -489,6 +489,41 @@ class DeploymentCoordinatorTest {
                 "the mutex map releases what it created, or it leaks one entry per deployment ever seen");
     }
 
+    /**
+     * Issue 91 criterion 7, the slow-shutdown row: a drain whose bound elapses with work still in
+     * flight is recorded as evidence rather than waited on or reported as success.
+     *
+     * <p>The bound is honoured by the runtime and never by a timeout in the coordinator, because a
+     * caller that abandoned the stage would leave the deployment still draining while the authority
+     * recorded that it had finished. What an operator sees afterwards is the honest pair: intent at
+     * DRAINED, evidence at DRAINING, and the deployment still naming the version it holds.</p>
+     */
+    @Test
+    void aDrainThatOutlivesItsBoundIsRecordedAsEvidenceRatherThanReportedAsFinished() {
+        var fixture = new CoordinatorFixture();
+        var target = fixture.deployment(TENANT, "slow-shutdown");
+        DeploymentId id = fixture.idOf(target);
+        var coordinator = fixture.coordinator("owner-a");
+        coordinator.submit(TENANT, id, new LifecycleCommand.Start("s", 1,
+                DeploymentRegistry.UpdateStrategy.STOP_FIRST), GenerationExpectation.exactly(0));
+        target.inFlight(4);
+        target.drainOutlivesItsBound();
+
+        DeploymentCommandOutcome outcome = coordinator.submit(TENANT, id,
+                new LifecycleCommand.Drain("d", Duration.ofSeconds(5)), GenerationExpectation.exactly(1));
+
+        assertEquals(new DeploymentCommandOutcome.Accepted("g2/DRAINED", 1, 2), outcome,
+                "the decision was accepted; whether the runtime finished in time is a separate fact");
+        DeploymentRegistry.Record after = fixture.record(TENANT, id);
+        assertEquals(DesiredKind.DRAINED, after.desired().kind(), "the intent is what the operator asked for");
+        assertEquals(DeploymentRegistry.ObservedKind.DRAINING, after.observed().state(),
+                "and the evidence is what actually happened: still finishing what it holds");
+        assertEquals(1L, after.observed().activeVersion(),
+                "a drain that has not completed has not released its activation");
+        assertEquals(2, after.observed().observedGeneration(),
+                "evidence is current, so recovery does not re-drive a drain that is legitimately slow");
+    }
+
     /** A command for a deployment nobody created is a store answer, not a lifecycle answer. */
     @Test
     void aCommandForANonexistentDeploymentIsNotGivenALifecycleAnswer() {

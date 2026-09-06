@@ -125,6 +125,10 @@ class RecordingLifecycleTarget implements DeploymentLifecycleTarget {
         if (drainFinishes) {
             inFlight = 0;
             if (activeVersion != null) state = ObservedKind.DRAINED;
+        } else if (activeVersion != null) {
+            // Still finishing what it holds when the bound elapsed. Reporting DRAINED here would tell
+            // an operator that nothing is in flight, which is the one thing this case denies.
+            state = ObservedKind.DRAINING;
         }
         return CompletableFuture.completedFuture(drainFinishes);
     }

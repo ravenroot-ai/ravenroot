@@ -33,8 +33,8 @@ public final class GraphMlParseException extends IllegalArgumentException
     private final Map<String, String> diagnosticDetail;
 
     GraphMlParseException(Reason reason, String message, String incidentId,
-                          Map<String, String> diagnosticDetail, Throwable cause) {
-        super(message, cause);
+                          Map<String, String> diagnosticDetail) {
+        super(message, null);
         this.reason = reason;
         this.incidentId = incidentId;
         this.diagnosticDetail = diagnosticDetail;

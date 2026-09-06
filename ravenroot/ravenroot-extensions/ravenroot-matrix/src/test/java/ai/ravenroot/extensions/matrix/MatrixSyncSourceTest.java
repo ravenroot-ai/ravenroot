@@ -31,7 +31,7 @@ class MatrixSyncSourceTest {
 
     @Test void pollsWithManagedCredentialAndAdvancesOnlyAfterDurableReceipt() {
         Path database = directory.resolve("sync.db"); MatrixTestSupport.HttpHarness http = new MatrixTestSupport.HttpHarness();
-        http.reply(200, page("next-1", false, event("$one:example.org", "hello")));
+        http.reply(200, pageWithoutLimited("next-1", event("$one:example.org", "hello")));
         DurableIngress ingress = new DurableIngress(); SourceRun run = start(database, http, ingress,
                 MatrixProfile.InitialSyncMode.DELIVER_BOUNDED, "seed-token", "deployment", "matrix");
         assertEquals(1, ingress.offers.get()); assertTrue(ingress.payloads.getFirst().toString().contains("hello"));
@@ -42,6 +42,37 @@ class MatrixSyncSourceTest {
         MatrixSyncStore.SourceKey key = new MatrixSyncStore.SourceKey(MatrixTestSupport.TENANT,
                 MatrixTestSupport.PROFILE, "deployment", "matrix");
         assertEquals("next-1", run.store.cursor(key)); run.source.stop().toCompletableFuture().join();
+    }
+
+    @Test void nonBooleanLimitedFailsBeforeOfferOrCheckpointInBothInitialModes() {
+        List<Object> malformed = new ArrayList<>();
+        malformed.add("true"); malformed.add("false"); malformed.add(null); malformed.add(1L);
+        malformed.add(Map.of("value", true));
+        int caseNumber = 0;
+        for (MatrixProfile.InitialSyncMode mode : MatrixProfile.InitialSyncMode.values()) {
+            for (Object limited : malformed) {
+                Map<String, Object> timeline = new java.util.LinkedHashMap<>();
+                timeline.put("limited", limited);
+                timeline.put("events", List.of(event("$malformed-" + caseNumber + ":example.org", "hidden")));
+                assertMalformedPage(mode, "limited-" + caseNumber++, pageWithTimeline("next-malformed", timeline));
+            }
+        }
+    }
+
+    @Test void missingNullAndNonArrayEventsFailBeforeOfferOrCheckpointInBothInitialModes() {
+        int caseNumber = 0;
+        for (MatrixProfile.InitialSyncMode mode : MatrixProfile.InitialSyncMode.values()) {
+            assertMalformedPage(mode, "missing-events-" + caseNumber++,
+                    pageWithTimeline("next-missing", Map.of("limited", false)));
+            List<Object> malformed = new ArrayList<>();
+            malformed.add(null); malformed.add("[]"); malformed.add(Map.of());
+            for (Object events : malformed) {
+                Map<String, Object> timeline = new java.util.LinkedHashMap<>();
+                timeline.put("limited", false); timeline.put("events", events);
+                assertMalformedPage(mode, "invalid-events-" + caseNumber++,
+                        pageWithTimeline("next-invalid-events", timeline));
+            }
+        }
     }
 
     @Test void refusalAndLimitedTimelineNeverAdvanceCursor() {
@@ -196,6 +227,26 @@ class MatrixSyncSourceTest {
     private static Map<String, Object> page(String next, boolean limited, Map<String, Object> event) {
         return Map.of("next_batch", next, "rooms", Map.of("join", Map.of(MatrixTestSupport.ROOM,
                 Map.of("timeline", Map.of("limited", limited, "events", List.of(event))))));
+    }
+    private static Map<String, Object> pageWithoutLimited(String next, Map<String, Object> event) {
+        return pageWithTimeline(next, Map.of("events", List.of(event)));
+    }
+    private static Map<String, Object> pageWithTimeline(String next, Map<String, Object> timeline) {
+        return Map.of("next_batch", next, "rooms", Map.of("join", Map.of(MatrixTestSupport.ROOM,
+                Map.of("timeline", timeline))));
+    }
+    private void assertMalformedPage(MatrixProfile.InitialSyncMode mode, String suffix, Map<String, Object> page) {
+        Path database = directory.resolve(suffix + ".db");
+        MatrixTestSupport.HttpHarness http = new MatrixTestSupport.HttpHarness().reply(200, page);
+        DurableIngress ingress = new DurableIngress();
+        assertThrows(CompletionException.class, () -> start(database, http, ingress, mode,
+                mode == MatrixProfile.InitialSyncMode.SKIP ? "" : "seed", "deployment", "node"));
+        assertEquals(0, ingress.offers.get());
+        MatrixConfiguration configuration = MatrixTestSupport.configuration(database, mode,
+                mode == MatrixProfile.InitialSyncMode.SKIP ? "" : "seed");
+        assertNull(new SqliteMatrixSyncStore(configuration.store(), MatrixTestSupport.fixedClock()).cursor(
+                new MatrixSyncStore.SourceKey(MatrixTestSupport.TENANT, MatrixTestSupport.PROFILE,
+                        "deployment", "node")));
     }
     private static Map<String, Object> event(String id, String text) {
         return Map.of("event_id", id, "type", "m.room.message", "sender", "@alice:example.org",

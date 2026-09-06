@@ -289,8 +289,12 @@ public final class MatrixSyncSourceBehavior implements NodeBehavior, InboundSour
                 Object timelineValue = MatrixValues.object(entry.getValue()).get("timeline");
                 if (timelineValue == null) continue;
                 Map<String, Object> timeline = MatrixValues.object(timelineValue);
-                if (Boolean.TRUE.equals(timeline.get("limited"))) gap = true;
-                Object rawEvents = timeline.getOrDefault("events", List.of());
+                if (timeline.containsKey("limited")) {
+                    if (!(timeline.get("limited") instanceof Boolean limited)) throw MatrixValues.invalid();
+                    if (limited) gap = true;
+                }
+                if (!timeline.containsKey("events")) throw MatrixValues.invalid();
+                Object rawEvents = timeline.get("events");
                 if (!(rawEvents instanceof List<?> list)) throw MatrixValues.invalid();
                 for (Object raw : list) {
                     Map<String, Object> event = MatrixValues.object(raw);

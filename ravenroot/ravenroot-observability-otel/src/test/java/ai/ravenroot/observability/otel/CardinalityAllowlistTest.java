@@ -125,10 +125,16 @@ class CardinalityAllowlistTest {
         assertEquals(Set.of("WITHHELD", "UNCONVERTIBLE"), rejections.getLongSumData().getPoints().stream()
                 .map(point -> point.getAttributes().get(TelemetryBridge.METRIC_ATTR_RESULT_PAYLOAD_STATE))
                 .collect(java.util.stream.Collectors.toSet()));
-        assertTrue(rejections.getLongSumData().getPoints().stream().allMatch(point ->
-                        point.getAttributes().asMap().keySet()
-                                .equals(Set.of(TelemetryBridge.METRIC_ATTR_RESULT_PAYLOAD_STATE))),
-                "the result-rejection metric must carry no tenant, payload, traversal or node dimension");
+        Set<AttributeKey<?>> expectedKeys = Set.of(TelemetryBridge.METRIC_ATTR_RESULT_PAYLOAD_STATE);
+        for (PointData point : rejections.getLongSumData().getPoints()) {
+            // OpenTelemetry 1.65.0 exposes ReadOnlyArrayMap.KeySetView here. Its SetView base
+            // implements Set directly without overriding Object.equals(), so comparing that view
+            // to Set.of(...) tests object identity rather than Set membership. Copy through the
+            // iterator into a standard immutable Set before making the exact-keyset assertion.
+            Set<AttributeKey<?>> actualKeys = Set.copyOf(point.getAttributes().asMap().keySet());
+            assertEquals(expectedKeys, actualKeys,
+                    "the result-rejection metric must carry no tenant, payload, traversal or node dimension");
+        }
     }
 
     @Test

@@ -46,6 +46,13 @@ humanTask:
   responseMaxTextLength: 16384
   responseMaxKeyLength: 256
   writeAttempts: 3
+  maxConfirmationPromptBytes: 4096
+  maxConfirmationActionLabelBytes: 64
+  maxDecisionCommentBytes: 4096
+  attentionPollMillis: 1000
+  attentionPollBackoffMaxMillis: 10000
+  defaultAttentionPageSize: 20
+  maxAttentionPageSize: 100
 
 # Program execution timeout. RAVENROOT_PROGRAM_TIMEOUT_MS
 # has no chart-level default at all before this: an operator who wires in their own SEC-11 sandbox

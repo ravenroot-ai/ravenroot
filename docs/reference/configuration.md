@@ -91,6 +91,13 @@ the default below. Values are read at process startup and require a restart to c
 | `ravenroot.human-task.response-max-text-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | 16,384 | 1–67,108,864 | UTF-16 code units in one text value |
 | `ravenroot.human-task.response-max-key-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | 256 | 1–4,096 | UTF-16 code units in one object key |
 | `ravenroot.human-task.write-attempts` / `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | 3 | 1–32 | durable Human Task write retries |
+| `ravenroot.human-task.max-confirmation-prompt-bytes` / `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES` | 4,096 | 1–65,536 | UTF-8 bytes in a built-in confirmation prompt |
+| `ravenroot.human-task.max-confirmation-action-label-bytes` / `RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES` | 64 | 1–256 | UTF-8 bytes in one built-in action label |
+| `ravenroot.human-task.max-decision-comment-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES` | 4,096 | 1–16,384 | UTF-8 bytes in separately stored decision metadata |
+| `ravenroot.human-task.attention-poll-millis` / `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS` | 1,000 | 250–300,000 | client attention refresh base interval |
+| `ravenroot.human-task.attention-poll-backoff-max-millis` / `RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS` | 10,000 | 250–300,000; no lower than `attention-poll-millis` | client attention refresh backoff ceiling |
+| `ravenroot.human-task.default-attention-page-size` / `RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE` | 20 | 1–100; no greater than `max-attention-page-size` | default embedded-attention page size |
+| `ravenroot.human-task.max-attention-page-size` / `RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE` | 100 | 1–100 | largest embedded-attention page |
 
 For example, use
 `-Dravenroot.human-task.max-response-bytes=524288` or

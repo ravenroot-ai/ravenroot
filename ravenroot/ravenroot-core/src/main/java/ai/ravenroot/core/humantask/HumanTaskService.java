@@ -146,7 +146,10 @@ public final class HumanTaskService {
                 definition.escalationDelay().map(delay -> deadline(now, delay, "escalation")),
                 deadline(now, definition.expiryDelay(), "expiry"),
                 definition.reentryMapping(), definition.executionLimits(), continuationVersion, continuation,
-                ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation));
+                ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation),
+                definition.confirmationPresentation(), definition.confirmationPresentation().embedded()
+                        ? policy.confirmationLimits()
+                        : ai.ravenroot.api.persistence.HumanTaskConfirmationLimits.CLASSIC);
         DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
         if (existing != null) {
             return new HumanTaskResult(existing.request().sameRequest(registration)

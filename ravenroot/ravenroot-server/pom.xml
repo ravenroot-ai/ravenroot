@@ -18,6 +18,10 @@
             <version>${nimbus-jose-jwt.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.eclipse.jetty.websocket</groupId>
+            <artifactId>jetty-websocket-jetty-server</artifactId>
+        </dependency>
+        <dependency>
             <groupId>ai.ravenroot</groupId>
             <artifactId>ravenroot-application-api</artifactId>
         </dependency>

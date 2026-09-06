@@ -79,6 +79,9 @@ public final class RavenrootServerMain {
                 System.getenv("RAVENROOT_EGRESS_RESERVED_EXCEPTIONS")));
         var authentication = AuthenticationConfiguration.fromEnvironment(System.getenv(), port);
         var httpSecurity = HttpSecurityConfiguration.fromEnvironment(System.getenv(), port);
+        var interactionWebSockets = ai.ravenroot.server.interaction.InteractionWebSocketConfiguration.from(
+                System.getProperties(), System.getenv());
+        interactionWebSockets.requireAuthenticatedMode(authentication.mode());
         var artifactLifecycle = ArtifactLifecycleConfiguration.fromEnvironment(System.getenv());
         // Resolve the operator's graph-document budget once, before any durable store opens.
         // Every downstream admission and recovery boundary receives this same typed value.
@@ -439,6 +442,9 @@ public final class RavenrootServerMain {
                 }
                 if (humanTasks != null) {
                     server.installHumanTasks(humanTasks, approvalRecovery::sweepTenant, humanTaskPolicy);
+                }
+                if (interactionWebSockets.enabled()) {
+                    server.installInteractionWebSockets(interactionWebSockets);
                 }
                 if (agentBudgets != null) {
                     server.installAgentAuthorityControl(agentBudgets);

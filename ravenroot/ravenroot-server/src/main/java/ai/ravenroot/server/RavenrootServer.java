@@ -318,6 +318,7 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
+    private ai.ravenroot.server.interaction.InteractionWebSocketServer interactionWebSockets;
     private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
     /** Installed only by the packaged composition when durable agent authority is enabled. */
     /**
@@ -991,8 +992,14 @@ public final class RavenrootServer implements AutoCloseable {
         if (!started.compareAndSet(false, true)) {
             throw new IllegalStateException("server is already started");
         }
-        server.start();
-        verifyRequestHeaderCapTookEffect();
+        try {
+            if (interactionWebSockets != null) interactionWebSockets.start();
+            server.start();
+            verifyRequestHeaderCapTookEffect();
+        } catch (RuntimeException failure) {
+            if (interactionWebSockets != null) interactionWebSockets.close();
+            throw failure;
+        }
     }
 
     /**
@@ -1035,6 +1042,21 @@ public final class RavenrootServer implements AutoCloseable {
         humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
         humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
         humanTaskPolicy = java.util.Objects.requireNonNull(policy, "policy");
+    }
+
+    /** Installs the independently bound durable interaction listener before either listener starts. */
+    synchronized void installInteractionWebSockets(
+            ai.ravenroot.server.interaction.InteractionWebSocketConfiguration configuration) {
+        if (started.get()) throw new IllegalStateException("interaction WebSocket must be installed before start");
+        if (interactionWebSockets != null) throw new IllegalStateException("interaction WebSocket is already installed");
+        if (humanTasks == null) throw new IllegalStateException("interaction WebSocket requires durable human tasks");
+        if (!authorizedApplication.durableEventJournalAvailable()) {
+            throw new IllegalStateException("interaction WebSocket requires a durable event journal");
+        }
+        interactionWebSockets = new ai.ravenroot.server.interaction.InteractionWebSocketServer(
+                java.util.Objects.requireNonNull(configuration, "configuration"), authorizedApplication,
+                authenticator, httpSecurity.browserOrigins(), httpSecurity.sseAuthenticationRevalidation(),
+                rateLimiter, humanTasks, humanTaskSweep, clock);
     }
 
     /**
@@ -4844,28 +4866,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Complete UTF-8 durable frame, exposed package-locally for the shared transport-size proof. */
     static byte[] durableExecutionEventFrame(ai.ravenroot.api.application.DurableExecutionEvent event) {
-        String description = PublicExecutionDescription.forEventType(event.eventType());
-        String body = "{\"journalOffset\":" + event.journalOffset()
-                + ",\"streamSequence\":" + event.streamSequence()
-                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
-                + ",\"eventType\":\"" + escape(event.eventType()) + "\""
-                + ",\"description\":\"" + escape(description) + "\""
-                + ",\"graphVersion\":\"" + escape(event.graphVersion()) + "\""
-                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
-                + ",\"traversalId\":\"" + event.traversalId() + "\""
-                + ",\"invocationId\":" + (event.invocationId() == null ? "null" : "\"" + event.invocationId() + "\"")
-                + ",\"attemptId\":" + (event.attemptId() == null ? "null" : "\"" + event.attemptId() + "\"")
-                + ",\"causationId\":" + (event.causationId() == null ? "null" : "\"" + event.causationId() + "\"")
-                + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
-                + ",\"edgeId\":" + (event.edgeId() == null ? "null"
-                        : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
-                // The fourth identity, beside the process, the traversal and the invocation, so a
-                // client can tell a handler event apart from a node event that shares all three
-                // instead of parsing the sentence. A UUID, so it needs no escaping and costs a fixed
-                // 36 bytes inside the projection's own reserve.
-                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
-                        : "\"" + event.handlerId() + "\"")
-                + "}";
+        String body = ExecutionEventWireJson.durable(event);
         String frame = "id: " + event.journalOffset() + "\nevent: execution\ndata: " + body + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);
     }
@@ -5100,6 +5101,7 @@ public final class RavenrootServer implements AutoCloseable {
         if (managedIngress != null) {
             managedIngress.close();
         }
+        if (interactionWebSockets != null) interactionWebSockets.close();
         server.stop((int) httpStopDelay.toSeconds());
         executor.close();
         try {

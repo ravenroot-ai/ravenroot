@@ -76,7 +76,31 @@ public enum ExecutionTerminationReason {
      * issued before the cancellation was observed are not undone and cannot be; the refused hop is
      * the first that did <em>not</em> run, and every node before it did.</p>
      */
-    CANCELLED;
+    CANCELLED,
+
+    /**
+     * The execution could no longer reach any outcome of its own, and reconciliation ended it.
+     *
+     * <p>Recorded against a {@code FAILED} status, for the same reason {@link #CANCELLED} is: no end
+     * node ran and there is no result payload, so this is genuinely not a completion. Unlike a
+     * cancellation it <em>is</em> a fault — nobody asked for it and the run did not do what it was
+     * submitted to do — which is why it keeps the failed status and the failed event rather than
+     * earning a termination event of its own. What it is not is an ordinary node failure, and that
+     * is what this value says: no behaviour raised and no dependency refused. The traversal was left
+     * with a branch parked at a join and nothing running, nothing scheduled and no arrival that
+     * could ever come, so the last thing able to settle it was already gone.</p>
+     *
+     * <p>An operator reading this should look for what stopped delivering — a store call that never
+     * answered, a process that vanished mid-arrival — and not for a failing node, because there is
+     * none. Effects issued before the traversal became unreachable are not undone and cannot be.</p>
+     *
+     * <p>It is deliberately distinct from {@link #CANCELLED} rather than folded into it. An
+     * unreachable execution counted as an operator stop disappears from exactly the dashboards that
+     * exist to surface it; an operator stop counted as this fabricates an incident. Where both apply
+     * to one traversal, the cancellation is reported: the operator's stop is the stronger statement
+     * about provenance.</p>
+     */
+    UNREACHABLE;
 
     /**
      * Whether {@code reason} is a cancellation, tolerating an absent one.
@@ -91,5 +115,23 @@ public enum ExecutionTerminationReason {
      */
     public static boolean isCancellation(ExecutionTerminationReason reason) {
         return reason == CANCELLED;
+    }
+
+    /**
+     * Whether {@code reason} says the execution could no longer reach an outcome, tolerating an
+     * absent one.
+     *
+     * <p>The null-safe sibling of {@link #isCancellation}, written here for the same reason: absence
+     * is legal at every site this value appears, and a caller that has to remember it is a caller
+     * that will eventually forget. A reader that only wants to know whether a terminal status
+     * describes an incident should keep using {@link #isCancellation} and treat everything else —
+     * this value included — as one, which is what makes adding this member safe for consumers that
+     * have never heard of it.</p>
+     *
+     * @param reason a recorded termination reason, or {@code null} when none was recorded.
+     * @return {@code true} only when reconciliation ended an execution that could never settle.
+     */
+    public static boolean isUnreachable(ExecutionTerminationReason reason) {
+        return reason == UNREACHABLE;
     }
 }

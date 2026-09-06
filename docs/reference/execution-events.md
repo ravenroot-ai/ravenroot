@@ -22,8 +22,8 @@ The result contains unique node sets rather than an ordered trace:
 | Field | Interpretation |
 |---|---|
 | `paused` | Whether a pause is currently held on this execution; always `false` once the execution is terminal |
-| `terminationReason` | Why a terminal `status` was reached, when `status` alone would misdescribe it; `null` when nothing distinguishes the termination or the execution has not terminated. Always present, including as JSON `null`. **A cancelled execution reports `status == "FAILED"` and `terminationReason == "CANCELLED"`** — read the two together, never `status` alone, or a deliberate stop reads as an incident |
-| `cancelled` | Convenience boolean equivalent to `terminationReason == "CANCELLED"` |
+| `terminationReason` | Why a terminal `status` was reached, when `status` alone would misdescribe it; `null` when nothing distinguishes the termination or the execution has not terminated. Always present, including as JSON `null`. A closed vocabulary of `"CANCELLED"` and `"UNREACHABLE"`; treat a value you do not recognize as "not a cancellation". **A cancelled execution reports `status == "FAILED"` and `terminationReason == "CANCELLED"`** — read the two together, never `status` alone, or a deliberate stop reads as an incident. **An execution ended by reconciliation reports `status == "FAILED"` and `terminationReason == "UNREACHABLE"`**: it could no longer reach any outcome of its own, because a branch was left parked at a fan-in with no node running, no deadline armed and no arrival that could ever come. That is a genuine incident and is meant to be counted as one; what the reason adds is that no node failed, so the thing to investigate is what stopped delivering |
+| `cancelled` | Convenience boolean equivalent to `terminationReason == "CANCELLED"`. There is deliberately no matching boolean for `"UNREACHABLE"`: `cancelled` exists because a cancellation must be kept *out* of the failure count, and an unreachable execution belongs in it — read `terminationReason` for that distinction |
 | `visitedNodes` | Unique membership of nodes entered during traversal; iteration and wire order are not visit order |
 | `defaultedNodes` | Nodes resolved through default behavior |
 | `bypassedNodes` | Nodes traversed without executing behavior |
@@ -43,6 +43,12 @@ A handled failure can coexist with an overall successful terminal path. Consumer
 A hold is written down when the traversal is a single branch at a single completed node and the withheld payload is expressible in the payload type model; it is not written down for a traversal that has fanned out, one held at its very first node or at a fan-in, one inside a loop, one whose payload the type model does not cover, or one running against a store that does not keep holds. [Persistence, lifecycle, and recovery](../operator-guide/persistence-lifecycle.md) states the rule and what to do about it. Do not plan a restart on the assumption that held work is lost: check the durable inventory, where a held instance reads as `WAITING`.
 
 ## Cancellation event
+
+An execution ended by reconciliation publishes `EXECUTION_FAILED`, not a terminal type of its own.
+That is not an omission: a cancellation left the failure series because it is not a fault, and this is
+one. Nothing about an event-type consumer needs to change for it, and the distinction between "a node
+broke" and "this traversal could never settle" is carried by `terminationReason` on every read and by
+the failure classification on the event.
 
 A cancelled traversal publishes `EXECUTION_CANCELLED` instead of `EXECUTION_COMPLETED` or
 `EXECUTION_FAILED`. It is a traversal-terminal event with the same guarantees as the other two: exactly

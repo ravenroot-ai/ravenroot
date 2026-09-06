@@ -4451,6 +4451,94 @@ public final class GraphRunner implements AutoCloseable {
     }
 
     /**
+     * Ends every traversal on this runner that can never make further progress, and releases what it
+     * was holding.
+     *
+     * <h2>Why detection needed an action, and why this is it</h2>
+     * <p>{@link #unreachableTraversalIds()} establishes the verdict and deliberately stops there. A
+     * verdict alone changes nothing an operator can see: the traversal stays open, its entry stays in
+     * the runner, and its admission capacity stays held for the life of the process, so a graph that
+     * strands one branch per run drains a tenant's capacity one execution at a time and reports
+     * nothing while it does. This is the action half, kept apart from the criterion so that widening
+     * one is never silently a change to the other.</p>
+     *
+     * <h2>It ends the traversal through the release every traversal already performs</h2>
+     * <p>The stranded branches are completed by {@link JoinCoordinator#terminate(Throwable)}, which
+     * is the same release a completing traversal runs and which completes parked branches
+     * <em>without waiting for the store</em>. That failure then propagates up the branch stage into
+     * the traversal's own, and the terminal handler that was already waiting there does the rest:
+     * it records the termination, publishes the event, and calls {@link #release} — which is what
+     * returns the admission capacity, the pause gate and the actor instances. Nothing here releases
+     * capacity itself, and that is the point: one release path means one release, so "exactly once"
+     * is a property of the code's shape rather than of a check someone has to remember.</p>
+     *
+     * <h2>Idempotent against every concurrent ending</h2>
+     * <p>Reconciliation and a cancellation, a shutdown, or a late completion can all reach the same
+     * traversal at once. Each ends it through the same coordinator, whose termination is once-only:
+     * whoever arrives first strands the branches and supplies the verdict, and every later caller is
+     * handed the first one's stage and completes nothing. The traversal's terminal handler therefore
+     * runs once, records one reason, and releases one traversal's worth of capacity, no matter how
+     * many endings raced. A traversal that settled between the criterion reading it and this line is
+     * simply gone from {@code coordinators} and is skipped.</p>
+     *
+     * <h2>Caller-invoked, never a background sweep</h2>
+     * <p>Deliberately, and for the reason the store ports state for their own retention: a sweep
+     * needs a period, a period over a condition this specific is an elapsed-time guess, and this
+     * condition is exactly the one that must not be guessed at — the whole value of the criterion is
+     * that it is positive evidence rather than a deadline nobody armed. An operator, a supervisor or
+     * a shutdown decides when to ask; the runtime does not decide for them and does not need a clock
+     * to answer.</p>
+     *
+     * <h2>An operator's stop is honoured, not overwritten</h2>
+     * <p>A traversal that was already asked to stop is ended here as a cancellation rather than as a
+     * fault. That is not the classifier being overridden — it is the only place the stop can take
+     * effect at all: {@link #cancelTraversal(UUID)} refuses the next hop, and this traversal has
+     * none, which is precisely the "stalled" case that method's own contract hands to the forced
+     * teardown. So cancelling a stuck execution now genuinely ends it, and ends it as the deliberate
+     * act it was.</p>
+     *
+     * @return the traversals this call ended, empty when none was unreachable. A traversal appears
+     *         here at most once across every call: the second call finds its coordinator gone.
+     */
+    public Set<UUID> reconcileUnreachableTraversals() {
+        var reconciled = new LinkedHashSet<UUID>();
+        for (UUID traversalId : unreachableTraversalIds()) {
+            JoinCoordinator coordinator = coordinators.get(traversalId);
+            if (coordinator == null) {
+                // Settled between the criterion and this line. Not a miss: it reached an outcome on
+                // its own, which is the result reconciliation exists to produce.
+                continue;
+            }
+            // Read before the release rather than after, because the release is what empties it. The
+            // count is evidence in the verdict, so it has to be the count the criterion saw.
+            int parked = coordinator.liveParkedBranchCount();
+            if (parked == 0) {
+                continue;
+            }
+            // An operator who already asked this traversal to stop gets a cancellation, not a fault.
+            //
+            // Cancellation is cooperative: it refuses the traversal's next hop. An unreachable
+            // traversal has no next hop, so the refusal is published against an id that nothing ever
+            // reads, `cancelTraversal` returns true, and the traversal stays exactly as stuck as it
+            // was -- the one case its own contract already names as "the forced teardown's". This is
+            // that teardown, so it is where the stop finally lands, and recording it as anything
+            // other than a cancellation would tell the operator their deliberate act was a runtime
+            // incident. It is also the only ordering that can arise: the criterion requires a parked
+            // branch, and a cancellation that DID reach a hop would have ended the traversal through
+            // the ordinary terminal path before this line could run.
+            //
+            // The node named is a join the traversal is actually parked at, which is the truthful
+            // reading of "the first hop that did not run": the branch was waiting to pass through it.
+            Throwable verdict = cancelledTraversals.contains(traversalId)
+                    ? new TraversalCancelledException(traversalId, coordinator.anyParkedJoinNodeId())
+                    : new TraversalUnreachableException(traversalId, parked);
+            coordinator.terminate(verdict);
+            reconciled.add(traversalId);
+        }
+        return Set.copyOf(reconciled);
+    }
+
+    /**
      * Combines the arrivals that satisfied a join into the single message the join node receives.
      *
      * <p>Ordered by branch id. Ordering by the arrivals' parent invocation identifiers, which are

@@ -558,6 +558,47 @@ public interface RavenrootApplication extends AutoCloseable {
     }
 
     /**
+     * Ends this tenant's executions that can no longer reach any outcome, and releases what they
+     * were holding.
+     *
+     * <p>An execution becomes unreachable when the last thing capable of settling it disappears —
+     * most often a call that never answered — leaving a branch parked at a join with no node
+     * running, no deadline armed and no arrival that can ever come. Such an execution is not
+     * cancellable in the ordinary sense: a cooperative stop refuses the next hop, and there is no
+     * next hop. It stays live, stays listed, and holds its admission capacity for the life of the
+     * process, so a graph that strands one branch per run drains a tenant's capacity one execution
+     * at a time. This is the operation that ends them.</p>
+     *
+     * <p>A reconciled execution becomes readable through the ordinary result surface with
+     * {@link ExecutionTerminationReason#UNREACHABLE} beside its {@code FAILED} status, which
+     * {@link ExecutionOutcome#unreachable()} reports. That is a fault and is meant to be counted as
+     * one; what the reason adds is that no node broke, so an operator looks for what stopped
+     * delivering rather than for a failing behaviour.</p>
+     *
+     * <p><b>Caller-invoked, never a background sweep.</b> The condition is established by positive
+     * evidence rather than by a deadline, and a sweep would need a period — an elapsed-time guess
+     * over exactly the condition that must not be guessed at. An operator or a supervisor decides
+     * when to ask.</p>
+     *
+     * <p>Idempotent and safe to race against a cancellation, a shutdown or a late completion: an
+     * execution is ended once and reports one reason however many endings arrive together, and an
+     * execution that settled on its own is simply not found. Effects issued before the execution
+     * became unreachable are not undone and cannot be.</p>
+     *
+     * <p>Default empty for implementations that do not track active executions at all — an honest
+     * "nothing here was unreachable", never a false claim of effect, matching
+     * {@link #cancelTraversal(UUID)}'s own default. The engine-backed production implementation
+     * overrides this with the real mechanism.</p>
+     *
+     * @param tenantId authenticated tenant boundary; another tenant's execution is never reconciled
+     *                 here.
+     * @return the traversals this call ended, empty when none was unreachable.
+     */
+    default java.util.Set<UUID> reconcileUnreachableExecutions(String tenantId) {
+        return java.util.Set.of();
+    }
+
+    /**
  * Whether a hold is currently in place on the traversal identified by {@code traversalId}.
  *
  * <p>The read counterpart of {@link #pauseTraversal}, and the authority behind the {@code paused}

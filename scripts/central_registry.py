@@ -49,6 +49,8 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-jdbc",
     "ravenroot-kafka",
     "ravenroot-mail",
+    "ravenroot-matrix",
+    "ravenroot-mattermost",
     "ravenroot-object-storage",
     "ravenroot-observability-otel",
     "ravenroot-ocr",
@@ -63,6 +65,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-server",
     "ravenroot-slack",
     "ravenroot-spel",
+    "ravenroot-teams",
     "ravenroot-telegram",
     "ravenroot-websocket",
 )

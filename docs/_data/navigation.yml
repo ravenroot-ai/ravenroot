@@ -150,6 +150,10 @@
       url: /reference/bundles/kafka.html
     - title: Mail
       url: /reference/bundles/mail.html
+    - title: Matrix
+      url: /reference/bundles/matrix.html
+    - title: Mattermost
+      url: /reference/bundles/mattermost.html
     - title: Object storage
       url: /reference/bundles/object-storage.html
     - title: OCR
@@ -162,6 +166,8 @@
       url: /reference/bundles/slack.html
     - title: Restricted SpEL
       url: /reference/bundles/spel.html
+    - title: Microsoft Teams
+      url: /reference/bundles/teams.html
     - title: Telegram
       url: /reference/bundles/telegram.html
     - title: WebSocket

@@ -592,7 +592,11 @@ public interface RavenrootApplication extends AutoCloseable {
      *
      * @param tenantId authenticated tenant boundary; another tenant's execution is never reconciled
      *                 here.
-     * @return the traversals this call ended, empty when none was unreachable.
+     * @return the traversals this call reconciled, empty when none was unreachable. It names the
+     *         executions this call acted on rather than asserting that this call is what ended each
+     *         of them: a concurrent cancellation or shutdown may have ended one in the same instant,
+     *         and claiming otherwise would be a race dressed up as a return value. What the caller
+     *         may rely on is that every execution named here is ended.
      */
     default java.util.Set<UUID> reconcileUnreachableExecutions(String tenantId) {
         return java.util.Set.of();

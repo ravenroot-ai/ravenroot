@@ -147,7 +147,7 @@ class UnreachableExecutionReconciliationTest {
      * operation reports honestly which call did the work.</p>
      */
     @Test
-    void asecondReconciliationEndsNothingAndReleasesNothingAgain() throws Exception {
+    void aSecondReconciliationEndsNothingAndReleasesNothingAgain() throws Exception {
         var store = new StalledJoinStore(new InMemoryJoinStore(), 2);
         UUID traversalId = UUID.randomUUID();
         var b1Gate = new CompletableFuture<NodeResult>();

@@ -84,8 +84,13 @@ direction.
 period over this condition is an elapsed-time guess — which is precisely what the criterion exists to
 avoid. The whole value of the condition is that it rests on positive evidence, and a deadline nobody
 armed would put the guess back one layer up. This follows the boundary the store ports already draw
-for retention: an operator or a supervisor decides when to ask, and the runtime answers without a
-clock.
+for retention: a caller decides when to ask, and the runtime answers without a clock.
+
+**The invocation surface is the application API, and no transport surface is added here.** There is
+no HTTP route and no CLI verb, so this release makes the recovery reachable from an embedding
+supervisor and not from an operator command. That is a scoping decision recorded as a limitation
+rather than presented as a design: the decision above says who *may* ask, and until a transport
+exposes it the set of callers who *can* is smaller than that.
 
 **A reconciled traversal does not wait for its join records to be discarded before it ends.** For
 every other termination the discard is sequenced into the traversal's own ending, so a caller seeing
@@ -121,6 +126,9 @@ stay open exactly as before. The discard stays armed and still runs if the store
 - **Effects issued before the traversal became unreachable are not undone and cannot be**, the same
   concession [ADR 0012](0012-engine-supervision-cancellation-and-drain.md) states for cancellation.
   Reconciliation records what the traversal became; it does not roll back what it did.
+- **An operator has no command for this yet.** The recovery is exposed on the application API alone;
+  a transport surface is deferred, so a deployment that does not embed its own supervisor cannot
+  invoke it in this release.
 - **A join record belonging to a store that never answers may outlive the traversal it belonged to.**
   It is reclaimed if the store recovers, and otherwise it is recovery's to reclaim. The alternative —
   holding the traversal open until the record is provably gone — is the defect this decision removes.

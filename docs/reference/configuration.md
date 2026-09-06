@@ -164,6 +164,10 @@ Allowed browser origins and allowed HTTP hosts are exact values; wildcards are n
 | `RAVENROOT_UI_CONNECT_ORIGINS` | comma-separated exact additional UI connect origins; blank |
 | `RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS` | positive whole seconds; `30` |
 
+The optional interaction WebSocket has one typed property/environment authority and is disabled by
+default. Its complete limits, protocol contract, and secure proxy topology are documented in
+[Authenticated interaction WebSocket](interactions-websocket.md).
+
 ## Programmable artifacts
 
 | Setting | Default | Safety behavior |

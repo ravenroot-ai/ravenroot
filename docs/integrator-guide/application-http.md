@@ -8,6 +8,8 @@ Choose the narrowest transport while preserving the same execution and authority
 2. For remote use, inspect GraphML first, submit with explicit `mode`, retain the HTTP 202 execution ID, and poll the execution resource to terminal state.
 3. Open SSE for live changes and persist the last processed cursor; after reconnect, request recent events and reconcile any declared retention gap.
 4. Use the CLI for operator and shell workflows, not as a way around authentication or ownership.
+5. Use the [interaction WebSocket](../reference/interactions-websocket.md) only for acknowledged
+   durable event replay combined with Human Task resolve, deny, or cancel commands.
 
 ## Authority boundary
 

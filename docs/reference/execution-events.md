@@ -72,4 +72,8 @@ contract going forward — do not build new matching logic against `publicReason
 
 If the requested cursor predates retained history, the response marks a retention gap. The client must reconcile from the execution resource or another snapshot before continuing; it must not infer missing state.
 
+The optional [authenticated interaction WebSocket](interactions-websocket.md) reuses this durable
+journal projection and adds bounded acknowledgement flow control plus durable Human Task commands.
+It does not change the SSE representation or create server-side cursor state.
+
 For API paths see [HTTP API and CLI](api-cli.md). For diagnosis see [Events and persistence](../troubleshooting/events-persistence.md).

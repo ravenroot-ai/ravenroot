@@ -45,10 +45,11 @@ Each property table may scroll horizontally on a narrow viewport. Jump directly 
 - [`discord.interactions`](#node-discord-interactions) · [`discord.send`](#node-discord-send) · [`filesystem.read`](#node-filesystem-read) · [`filesystem.write`](#node-filesystem-write) · [`git-workspace`](#node-git-workspace) · [`github-app-review`](#node-github-app-review) · [`github-events-source`](#node-github-events-source)
 - [`github-workflow-watch`](#node-github-workflow-watch) · [`http-request`](#node-http-request) · [`human-task`](#node-human-task) · [`jdbc.insert`](#node-jdbc-insert) · [`jdbc.query`](#node-jdbc-query) · [`json-parse`](#node-json-parse) · [`json-path`](#node-json-path)
 - [`kafka.consume`](#node-kafka-consume) · [`kafka.produce`](#node-kafka-produce) · [`llm-prompt`](#node-llm-prompt) · [`log`](#node-log) · [`mail.imap.consume`](#node-mail-imap-consume) · [`mail.imap.delete`](#node-mail-imap-delete) · [`mail.imap.move`](#node-mail-imap-move)
-- [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`object.delete`](#node-object-delete) · [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract)
-- [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply) · [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands)
-- [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision) · [`spel.transform`](#node-spel-transform) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message)
-- [`telegram.send`](#node-telegram-send) · [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
+- [`mail.imap.query`](#node-mail-imap-query) · [`mail.send`](#node-mail-send) · [`matrix.send`](#node-matrix-send) · [`matrix.sync`](#node-matrix-sync) · [`mattermost.outgoing-webhook`](#node-mattermost-outgoing-webhook) · [`mattermost.send`](#node-mattermost-send) · [`object.delete`](#node-object-delete)
+- [`object.get`](#node-object-get) · [`object.list`](#node-object-list) · [`object.put`](#node-object-put) · [`ocr.extract`](#node-ocr-extract) · [`openapi.call`](#node-openapi-call) · [`openapi.receive`](#node-openapi-receive) · [`openapi.request-reply`](#node-openapi-request-reply)
+- [`program`](#node-program) · [`project-transition`](#node-project-transition) · [`release-prepare`](#node-release-prepare) · [`slack.commands`](#node-slack-commands) · [`slack.events`](#node-slack-events) · [`slack.post-message`](#node-slack-post-message) · [`spel.decision`](#node-spel-decision)
+- [`spel.transform`](#node-spel-transform) · [`teams.outgoing-webhook`](#node-teams-outgoing-webhook) · [`teams.send`](#node-teams-send) · [`telegram.answer.callback`](#node-telegram-answer-callback) · [`telegram.delete.message`](#node-telegram-delete-message) · [`telegram.edit.message`](#node-telegram-edit-message) · [`telegram.send`](#node-telegram-send)
+- [`template`](#node-template) · [`websocket.receive`](#node-websocket-receive) · [`websocket.send`](#node-websocket-send)
 
 ## `agent` {#node-agent}
 
@@ -932,6 +933,109 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | `maxConcurrency` | Concurrency limit | Optional 1–16 limit; blank uses the mail profile ceiling and a value may only tighten it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 | `defaultFrom` | Default sender | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
+## `matrix.send` {#node-matrix-send}
+
+Canonical runtime rules: [matrix bundle reference](bundles/matrix.md).
+[Complete GraphML example](../examples/nodes/matrix.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send Matrix message |
+| Category | Matrix |
+| Description | Sends one bounded matrix.message.v1 room message through an operator-owned profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `matrixProfile` | Matrix profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `roomId` | Room | May only tighten the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## `matrix.sync` {#node-matrix-sync}
+
+Canonical runtime rules: [matrix bundle reference](bundles/matrix.md).
+[Complete GraphML example](../examples/nodes/matrix.sync.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive Matrix messages |
+| Category | Matrix |
+| Description | Polls Matrix /sync and durably accepts bounded authorized room timeline events. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | credential-reference,durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `matrixProfile` | Matrix profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `pollTimeoutMs` | Poll timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxEventsPerSync` | Events per sync | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## `mattermost.outgoing-webhook` {#node-mattermost-outgoing-webhook}
+
+Canonical runtime rules: [mattermost bundle reference](bundles/mattermost.md).
+[Complete GraphML example](../examples/nodes/mattermost.outgoing-webhook.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive Mattermost outgoing webhook |
+| Category | Mattermost |
+| Description | Authenticates and durably accepts a Mattermost public-channel outgoing webhook. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `mattermostProfile` | Mattermost profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## `mattermost.send` {#node-mattermost-send}
+
+Canonical runtime rules: [mattermost bundle reference](bundles/mattermost.md).
+[Complete GraphML example](../examples/nodes/mattermost.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send Mattermost message |
+| Category | Mattermost |
+| Description | Posts one bounded mattermost.message.v1 payload through an operator-owned profile. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `mattermostProfile` | Mattermost profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `channelId` | Public channel | May only tighten the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Rate-limit retries | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
 ## `object.delete` {#node-object-delete}
 
 Canonical runtime rules: [object-storage bundle reference](bundles/object-storage.md).
@@ -1352,6 +1456,56 @@ Canonical runtime rules: [spel bundle reference](bundles/spel.md).
 | Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
 |---|---|---|---|---:|---|---|---:|---|---|---|
 | `expression` | Expression | Restricted SpEL expression; its bounded canonical result becomes the payload. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## `teams.outgoing-webhook` {#node-teams-outgoing-webhook}
+
+Canonical runtime rules: [teams bundle reference](bundles/teams.md).
+[Complete GraphML example](../examples/nodes/teams.outgoing-webhook.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Receive Teams outgoing webhook |
+| Category | Teams |
+| Description | Verifies and durably accepts relayed Microsoft Teams Outgoing Webhook activities. |
+| Visual type | source |
+| Agentic | false |
+| Capabilities | durable-ingress,inbound-source,network |
+| Declared default nature | SOURCE |
+| Declared allowed natures | SOURCE |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `teamsProfile` | Teams profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+
+## `teams.send` {#node-teams-send}
+
+Canonical runtime rules: [teams bundle reference](bundles/teams.md).
+[Complete GraphML example](../examples/nodes/teams.send.graphml).
+
+| Catalog field | Runtime descriptor value |
+|---|---|
+| Display name | Send Teams message |
+| Category | Teams |
+| Description | Sends one bounded teams.message.v1 payload through an operator-owned Teams Workflow. |
+| Visual type | actor |
+| Agentic | false |
+| Capabilities | credential-reference,network,side-effect |
+| Declared default nature | Not declared |
+| Declared allowed natures | Not declared |
+| Application command allowlist | Not declared |
+| Runtime concurrency | default 64; ceiling 256 |
+| Outcomes | Not declared |
+
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `teamsProfile` | Teams profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `channelId` | Channel | May only tighten the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `telegram.answer.callback` {#node-telegram-answer-callback}
 

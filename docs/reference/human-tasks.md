@@ -45,9 +45,11 @@ retains the classic raw-envelope behavior and its original defaults.
 
 `confirmationPrompt` is bounded plain text. `confirmationComment` is `DISALLOWED`, `OPTIONAL`, or
 `REQUIRED`. `confirmationActions` is an ordered comma-separated subset of `RESOLVE`, `DENY`, and
-`CANCEL`; Ravenroot pins that authored order and the corresponding label properties. The task also
-pins its prompt, action-label, and comment byte limits, so a tighter or looser policy after restart
-does not reinterpret an existing decision.
+`CANCEL`; Ravenroot pins that authored order and the corresponding label properties. Enabled actions
+must have distinct visible labels. For this comparison Ravenroot applies Unicode NFKC, collapses
+Unicode whitespace and space-separator runs, trims them, and uses locale-independent lowercase.
+Inactive labels do not participate. The task also pins its prompt, action-label, and comment byte
+limits, so a tighter or looser policy after restart does not reinterpret an existing decision.
 
 The service applies this admission contract to every current task creation. Supported durable adapters
 apply the same check only after exact deduplication, so an exact replay of an already accepted request

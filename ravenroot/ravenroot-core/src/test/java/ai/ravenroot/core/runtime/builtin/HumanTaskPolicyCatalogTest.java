@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -132,5 +133,28 @@ class HumanTaskPolicyCatalogTest {
                 new GraphNode("review", NodeKind.BEHAVIOR, "human-task", unsupported)));
         assertThrows(IllegalStateException.class, () -> factory.create(explicit),
                 "missing durable confirmation capability must fail while materializing the graph");
+    }
+
+    @Test
+    void activeLabelsAreUnambiguousAtGraphPreflight() {
+        var factory = new HumanTaskNodeBehaviorFactory(null, HumanTaskPolicy.DEFAULTS);
+        var ambiguous = new GraphNode("review", NodeKind.BEHAVIOR, "human-task", Map.of(
+                "title", "Review", "responseContentType", "application/json",
+                "responseSchema", "ravenroot.human-task.confirmation",
+                "responseSchemaVersion", "1", "responseKind", "SCALAR",
+                "maxResponseBytes", Integer.toString(HumanTaskPolicy.DEFAULTS.defaultResponseBytes()),
+                "confirmationPresentationVersion", "1",
+                "confirmationActions", "RESOLVE,DENY",
+                "confirmationResolveLabel", "Proceed now",
+                "confirmationDenyLabel", " ＰＲＯＣＥＥＤ\u00a0 NOW "));
+        assertThrows(IllegalArgumentException.class, () -> factory.validate(ambiguous),
+                "graph preflight must reject ambiguous controls before a task or traversal exists");
+
+        var inactive = new java.util.HashMap<>(ambiguous.properties());
+        inactive.put("confirmationActions", "RESOLVE");
+        assertDoesNotThrow(() -> factory.definition(
+                new GraphNode("review", NodeKind.BEHAVIOR, "human-task", inactive)),
+                "an inactive action's duplicate label is neither displayed nor admitted");
+
     }
 }

@@ -23,6 +23,9 @@ import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HandlerPayloadSchema;
 import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
 import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
@@ -125,6 +128,42 @@ class HumanTaskServiceTest {
             assertFalse(journal.stream().anyMatch(row -> new String(row.envelope().payload().bytes(),
                     StandardCharsets.UTF_8).contains("approved")),
                     "response values must never enter durable audit event payloads");
+        }
+    }
+
+    @Test
+    void ambiguousActiveLabelsAreRejectedBeforeTaskOrTraversalMutation() throws Exception {
+        try (var store = sqlite("ambiguous-labels", Clock.fixed(NOW, ZoneOffset.UTC))) {
+            Fixture fixture = running(store);
+            var service = new HumanTaskService(store, Clock.fixed(NOW, ZoneOffset.UTC));
+            var presentation = new HumanTaskConfirmationPresentation(1, "Confirm this task.",
+                    HumanTaskCommentRequirement.OPTIONAL,
+                    List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY),
+                    "Proceed now", " ＰＲＯＣＥＥＤ\u00a0 NOW ", "");
+            var definition = new HumanTaskDefinition(
+                    new HumanTaskMetadata("Review release", "Check the bounded facts."),
+                    new HumanTaskResponseSchema(HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE,
+                            HumanTaskConfirmationPresentation.RESPONSE_SCHEMA,
+                            HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION,
+                            PayloadKind.SCALAR, 4096),
+                    HandlerAuthorization.ofRoles(Role.APPROVER.name()),
+                    Optional.of(Duration.ofMinutes(5)), Duration.ofHours(1),
+                    new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                    HumanTaskPolicy.DEFAULTS.executionLimits(4096), presentation);
+
+            try (var recorder = ExecutionRecorder.open(store, fixture.key, "worker",
+                    Duration.ofSeconds(30), 1);
+                 var binding = service.bindLive(fixture.key, recorder)) {
+                assertThrows(IllegalArgumentException.class,
+                        () -> service.suspend(fixture.message(), definition));
+            }
+
+            assertTrue(service.inbox(requester(), HumanTaskQuery.everything(10)).items().isEmpty(),
+                    "admission refusal must precede durable task creation");
+            assertEquals(TraversalStatus.RUNNING,
+                    store.load(fixture.key).toCompletableFuture().join().state()
+                            .traversals().get(fixture.traversalId).status(),
+                    "admission refusal must precede traversal suspension");
         }
     }
 

@@ -4,8 +4,11 @@ import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.nio.charset.StandardCharsets;
+import java.text.Normalizer;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 
@@ -406,6 +409,37 @@ public record HumanTaskPolicy(
                     "confirmation deny label");
             requireBytes(presentation.cancelLabel(), maxActionLabelUtf8Bytes,
                     "confirmation cancel label");
+            var visibleLabels = new HashSet<String>();
+            for (HumanTaskConfirmationAction action : presentation.actions()) {
+                String visible = normalizedVisibleLabel(presentation.label(action));
+                if (visible.isEmpty() || !visibleLabels.add(visible)) {
+                    throw new IllegalArgumentException(
+                            "active confirmation action labels must have distinct visible names");
+                }
+            }
+        }
+
+        /**
+         * Produces the locale-independent comparison key used only for active visible action labels.
+         * NFKC folds compatibility forms; Unicode whitespace and space separators collapse to one
+         * ASCII space before trimming and lowercasing. The authored label itself is never changed.
+         */
+        private static String normalizedVisibleLabel(String label) {
+            String normalized = Normalizer.normalize(label, Normalizer.Form.NFKC);
+            var visible = new StringBuilder(normalized.length());
+            boolean pendingSpace = false;
+            for (int offset = 0; offset < normalized.length();) {
+                int codePoint = normalized.codePointAt(offset);
+                offset += Character.charCount(codePoint);
+                if (Character.isWhitespace(codePoint) || Character.isSpaceChar(codePoint)) {
+                    pendingSpace = visible.length() != 0;
+                } else {
+                    if (pendingSpace) visible.append(' ');
+                    visible.appendCodePoint(codePoint);
+                    pendingSpace = false;
+                }
+            }
+            return visible.toString().toLowerCase(Locale.ROOT);
         }
 
         /**

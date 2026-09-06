@@ -16,6 +16,10 @@ import java.util.Set;
  * callback, credential, execution payload, or third-party protocol. Version zero denotes the
  * classic Human Task experience and preserves rows created before embedded confirmations existed.</p>
  *
+ * <p>This structural value remains able to represent historical rows. Current admission additionally
+ * applies {@link HumanTaskPolicy.Confirmation#requirePresentation(HumanTaskConfirmationPresentation)},
+ * which requires distinct normalized visible labels for the enabled actions.</p>
+ *
  * @param version presentation wire version, zero for classic tasks.
  * @param prompt bounded plain-text confirmation prompt.
  * @param commentRequirement decision-comment rule.

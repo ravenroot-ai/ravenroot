@@ -3391,6 +3391,39 @@ public abstract class ExecutionStoreContract {
     }
 
     @Test
+    final void currentStoreAdmissionRejectsAmbiguousActiveConfirmationLabels() {
+        assumeCapability(StoreCapability.HUMAN_TASK_CONFIRMATIONS);
+        ExecutionKey key = newKey();
+        HumanTaskRegistration source = humanTaskRegistration(key, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "ambiguous-label-dedup", "ambiguous-label-correlation");
+        HumanTaskRegistration ambiguous = new HumanTaskRegistration(source.taskId(), source.traversalId(),
+                source.invocationId(), source.attemptId(), source.nodeId(), source.correlationKey(),
+                source.deduplicationKey(), source.metadata(),
+                new HumanTaskResponseSchema(HumanTaskConfirmationPresentation.RESPONSE_CONTENT_TYPE,
+                        HumanTaskConfirmationPresentation.RESPONSE_SCHEMA,
+                        HumanTaskConfirmationPresentation.RESPONSE_SCHEMA_VERSION,
+                        PayloadKind.SCALAR, 4096),
+                source.responderRequirements(), source.requester(), source.graphVersionPin(),
+                source.escalateAt(), source.expiresAt(), source.reentryMapping(), source.executionLimits(),
+                source.continuationVersion(), source.continuation(), source.continuationDigest(),
+                new HumanTaskConfirmationPresentation(1, "Confirm after review.",
+                        HumanTaskCommentRequirement.OPTIONAL,
+                        List.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY),
+                        "Proceed now", " ＰＲＯＣＥＥＤ\u00a0 NOW ", ""),
+                HumanTaskPolicy.DEFAULTS.confirmationLimits());
+        HumanTaskFixture fixture = runningHumanTaskFixture(key, ambiguous);
+        StoredProcessInstance current = await(store().load(key));
+
+        ExecutionStoreFailure refused = failureOf(() -> await(store().apply(ExecutionBatch.to(key)
+                .expecting(RevisionExpectation.exactly(current.revision()))
+                .registerHumanTask(fixture.registration()).build())));
+
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+        assertTrue(await(store().loadHumanTask(key.tenantId(), ambiguous.taskId())).isEmpty(),
+                "rejected current admission must not create a durable task");
+    }
+
+    @Test
     final void humanTaskAttentionAuthorizesBeforeCountsAndUsesAStableScopedCursor() {
         assumeCapability(StoreCapability.HUMAN_TASK_CONFIRMATIONS);
         String tenant = "human-attention-tenant";

@@ -9,7 +9,10 @@ presentation, task identity, generation, timers, and decision state with the dur
 1. Add a **Human task** node from the server catalog and select **Confirmation presentation 1**.
 2. Write a bounded prompt and choose whether a comment is disallowed, optional, or required.
 3. Keep only the permitted actions in their intended order: **Resolve**, **Deny**, and **Cancel**.
-   Give each retained action a short display label. Labels change the button text, not the action.
+   Give each retained action a short display label. The decision button always names its disposition,
+   followed by the custom label when it differs, so a label never obscures the action being committed.
+   For new tasks, ASCII case variants, full-width ASCII forms, and Ravenroot's fixed separator set
+   count as the same label; other Unicode characters remain distinct across supported runtimes.
 4. Save the node and run the graph. The catalog supplies the active deployment's defaults and text
    limits. The built-in confirmation response is produced by the server when Resolve succeeds; it
    does not turn the comment into execution payload.

@@ -124,7 +124,7 @@ async function assertPinnedDialog(page, taskId) {
   expect(await page.locator('[data-human-task-prompt]').textContent()).toMatch(/^P{8192}$/);
   await expect(page.locator('[data-human-task-comment]')).toBeFocused();
   await expect(page.locator('[data-human-task-comment-hint]')).toContainText('/ 8192 UTF-8 bytes');
-  await expect(page.locator('[data-human-task-action]')).toHaveText(['Confirm', 'Deny', 'Cancel']);
+  await expect(page.locator('[data-human-task-action]')).toHaveText(['Resolve — Confirm', 'Deny', 'Cancel']);
 }
 
 test.describe('real SQLite Human Task confirmation recovery', () => {

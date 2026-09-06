@@ -210,16 +210,18 @@ test('a catalog that cannot admit new confirmations omits authoring while runtim
   await expect(page.locator('[data-catalog-property^="confirmation"]')).toHaveCount(0);
 });
 
-test('ambiguous active labels are rejected before the decision form is rendered', async ({ page }) => {
+test('historical duplicate labels remain operable with explicit dispositions', async ({ page }) => {
   tasks[0] = task('task-1', 1, 'ESCALATED');
   tasks[0].presentation = { ...tasks[0].presentation, resolveLabel: 'Ｐｒｏｃｅｅｄ',
     denyLabel: '  proceed  ' };
   tasks = [tasks[0]];
   await connectAndCreate(page);
   await runAndSelect(page);
-  await expect(page.locator('.human-task-status')).toContainText('could not be refreshed');
-  await expect(page.locator('[data-human-task-id]')).toHaveCount(0);
-  await expect(page.locator('[data-human-task-action]')).toHaveCount(0);
+  await page.locator('[data-human-task-id="task-1"]').click();
+  await expect(page.getByRole('button', { name: 'Resolve — Ｐｒｏｃｅｅｄ', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Deny — proceed', exact: true })).toBeVisible();
+  await page.locator('[data-human-task-action="DENY"]').click();
+  await expect(page.locator('.human-task-status')).toContainText('No actionable');
 });
 
 test('two tasks page independently and explicit decisions remove the final non-colour halo', async ({ page }) => {
@@ -370,6 +372,7 @@ test('stale generation and ambiguous network loss reconcile without an automatic
 });
 
 test('browser reload restores an exact task only after the service origin and token are reauthorized', async ({ page }) => {
+  tasks[0].presentation = { ...tasks[0].presentation, resolveLabel: 'A', denyLabel: '\u{1ccd6}' };
   await connectAndCreate(page);
   await runAndSelect(page);
   await page.locator('[data-human-task-id="task-1"]').click();
@@ -384,12 +387,14 @@ test('browser reload restores an exact task only after the service origin and to
   await page.locator('#access-token').press('Enter');
   await expect(page.locator('#human-task-dialog')).toBeVisible();
   await expect(page.locator('[data-human-task-identity]')).toContainText('Task task-1');
+  await expect(page.getByRole('button', { name: 'Resolve — A', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Deny — \u{1ccd6}', exact: true })).toBeVisible();
   expect(requests.some(value => value === '/v1/human-tasks/attention?taskId=task-1&generation=1&limit=1'))
     .toBe(true);
 
-  await page.locator('[data-human-task-action="CANCEL"]').click();
+  await page.locator('[data-human-task-action="DENY"]').click();
   await expect(page.locator('#human-task-dialog')).toBeHidden();
-  expect(tasks[0].status).toBe('CANCELLED');
+  expect(tasks[0].status).toBe('DENIED');
   expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
 });
 

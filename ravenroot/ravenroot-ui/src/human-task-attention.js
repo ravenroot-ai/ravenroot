@@ -15,7 +15,7 @@ function text(value, name, { optional = false } = {}) {
 }
 
 function displayText(value, name, { required = false } = {}) {
-  if (typeof value !== 'string' || (required && !value.trim())) {
+  if (typeof value !== 'string' || (required && !value.length)) {
     throw new Error(`Human Task ${name} is missing`);
   }
   if ((typeof value.isWellFormed === 'function' && !value.isWellFormed())
@@ -43,11 +43,33 @@ export function utf8Length(value) {
   return new TextEncoder().encode(String(value ?? '')).length;
 }
 
+function frozenLabelSeparator(codePoint) {
+  return (codePoint >= 0x0009 && codePoint <= 0x000d) || codePoint === 0x0020
+    || codePoint === 0x0085 || codePoint === 0x00a0 || codePoint === 0x1680
+    || (codePoint >= 0x2000 && codePoint <= 0x200a) || codePoint === 0x2028
+    || codePoint === 0x2029 || codePoint === 0x202f || codePoint === 0x205f
+    || codePoint === 0x3000;
+}
+
+export function humanTaskActionDisplayLabel(value) {
+  const characters = [...String(value)];
+  while (characters.length && frozenLabelSeparator(characters[0].codePointAt(0))) characters.shift();
+  while (characters.length && frozenLabelSeparator(characters.at(-1).codePointAt(0))) characters.pop();
+  return characters.join('');
+}
+
 export function humanTaskActionLabelKey(value) {
-  return String(value).normalize('NFKC')
-    .replace(/[\p{White_Space}\p{Zs}]+/gu, ' ')
-    .replace(/^ +| +$/g, '')
-    .toLowerCase();
+  let key = '';
+  let separated = false;
+  for (const character of String(value)) {
+    let codePoint = character.codePointAt(0);
+    if (codePoint >= 0xff01 && codePoint <= 0xff5e) codePoint -= 0xfee0;
+    if (codePoint >= 0x0041 && codePoint <= 0x005a) codePoint += 0x20;
+    if (frozenLabelSeparator(codePoint)) { separated = Boolean(key); continue; }
+    if (separated) { key += ' '; separated = false; }
+    key += String.fromCodePoint(codePoint);
+  }
+  return key;
 }
 
 export function validateHumanTaskCapability(value) {
@@ -109,15 +131,10 @@ export function validateHumanTaskPresentation(value, capability, pinnedLimits) {
   const labels = Object.freeze({ RESOLVE: displayText(presentation.resolveLabel, 'resolve label'),
     DENY: displayText(presentation.denyLabel, 'deny label'),
     CANCEL: displayText(presentation.cancelLabel, 'cancel label') });
-  const activeLabelKeys = new Set();
   for (const action of actions) {
-    if (!labels[action].trim()) throw new Error(`Human Task ${action.toLowerCase()} label is missing`);
     if (utf8Length(labels[action]) > pinnedLimits.actionLabelMaxUtf8Bytes) {
       throw new Error('Human Task action label exceeds its pinned maximum');
     }
-    const key = humanTaskActionLabelKey(labels[action]);
-    if (activeLabelKeys.has(key)) throw new Error('Human Task active action labels are ambiguous');
-    activeLabelKeys.add(key);
   }
   return Object.freeze({ version, prompt, commentRequirement: presentation.commentRequirement,
     actions: Object.freeze(actions), labels });

@@ -1,4 +1,14 @@
-import { utf8Length, validateDecisionComment } from './human-task-attention.js';
+import { humanTaskActionDisplayLabel, humanTaskActionLabelKey, utf8Length,
+  validateDecisionComment } from './human-task-attention.js';
+
+const ACTION_DISPOSITIONS = Object.freeze({ RESOLVE: 'Resolve', DENY: 'Deny', CANCEL: 'Cancel' });
+
+export function humanTaskActionName(action, label) {
+  const disposition = ACTION_DISPOSITIONS[action];
+  const displayLabel = humanTaskActionDisplayLabel(label);
+  return !displayLabel || humanTaskActionLabelKey(disposition) === humanTaskActionLabelKey(label)
+    ? disposition : `${disposition} — ${displayLabel}`;
+}
 
 function short(value) {
   const string = String(value || '');
@@ -200,11 +210,13 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
         ? `Required · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`
         : `Optional · 0 / ${task.commentMaxUtf8Bytes} UTF-8 bytes`;
       actions.replaceChildren(...task.availableActions.map(action => {
+        const actionName = humanTaskActionName(action, task.presentation.labels[action]);
         const button = element(dialog.ownerDocument, 'button',
           `btn human-task-decision human-task-decision-${action.toLowerCase()}`,
-          task.presentation.labels[action]);
+          actionName);
         button.type = 'button';
         button.dataset.humanTaskAction = action;
+        button.setAttribute('aria-label', actionName);
         return button;
       }));
       say();

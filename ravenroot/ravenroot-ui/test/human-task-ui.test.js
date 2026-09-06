@@ -1,7 +1,8 @@
 import { JSDOM } from 'jsdom';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from '../src/human-task-ui.js';
+import { createHumanTaskDecisionDialog, humanTaskActionName,
+  renderHumanTaskInspector } from '../src/human-task-ui.js';
 
 const capability = { commentMaxUtf8Bytes: 4096 };
 const task = { taskId: 'task-secret-safe-id', generation: 7, status: 'ESCALATED',
@@ -44,6 +45,8 @@ describe('Human Task inspector and decision dialog', () => {
     controller.open(task, capability);
     expect(doc.querySelector('[data-human-task-prompt]').textContent).toBe('<b>Approve?</b>');
     expect(doc.querySelector('[data-human-task-actions]').innerHTML).not.toContain('<confirm>');
+    expect(doc.querySelector('[data-human-task-action="RESOLVE"]').textContent).toBe('Resolve — <Confirm>');
+    expect(doc.querySelector('[data-human-task-action="DENY"]').getAttribute('aria-label')).toBe('Deny — No');
     expect(doc.querySelector('[data-human-task-comment-hint]').textContent).toContain('/ 8 UTF-8 bytes');
     doc.querySelector('[data-human-task-action="RESOLVE"]').click();
     await Promise.resolve();
@@ -56,6 +59,16 @@ describe('Human Task inspector and decision dialog', () => {
     expect(submitted).toHaveBeenCalledTimes(1);
     expect(submitted).toHaveBeenCalledWith(expect.objectContaining({ task, action: 'RESOLVE',
       comment: '\u{1F642}\u{1F642}' }));
+  });
+
+  it('keeps the disposition explicit for duplicate historical labels and unfamiliar code points', () => {
+    expect(humanTaskActionName('RESOLVE', 'Proceed')).toBe('Resolve — Proceed');
+    expect(humanTaskActionName('DENY', ' proceed ')).toBe('Deny — proceed');
+    expect(humanTaskActionName('DENY', 'Deny')).toBe('Deny');
+    expect(humanTaskActionName('RESOLVE', 'A')).toBe('Resolve — A');
+    expect(humanTaskActionName('DENY', '\u{1ccd6}')).toBe('Deny — \u{1ccd6}');
+    expect(humanTaskActionName('RESOLVE', '\u00a0')).toBe('Resolve');
+    expect(humanTaskActionName('DENY', '\ufeff')).toBe('Deny — \ufeff');
   });
 
   it('suspends stale presentation during reauthentication without clearing the durable locator', () => {

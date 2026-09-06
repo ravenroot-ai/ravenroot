@@ -94,24 +94,26 @@ describe('Human Task capability and attention projection', () => {
       .toThrow(/do not match aggregate/);
   });
 
-  it('rejects duplicate normalized labels only among active actions', () => {
+  it('uses a frozen action-label key without widening historical row rejection', () => {
     const capability = validateHumanTaskCapability(CAPABILITY);
     const attention = (presentation, overrides = {}) => ({ schemaVersion: 1,
       items: [row({ presentation, ...overrides })],
       nextCursor: null, counts: { pending: 1, escalated: 0 }, nodeCounts: [] });
     const base = row().presentation;
-    for (const [resolveLabel, denyLabel] of [['Release', ' release '], ['Release', 'RELEASE'],
-      ['Release', 'Ｒｅｌｅａｓｅ'], ['Re  lease', 'Re\u00a0\u00a0lease']]) {
-      expect(() => validateHumanTaskAttention(attention({ ...base, resolveLabel, denyLabel }),
-        capability)).toThrow(/ambiguous/);
-    }
+    expect(humanTaskActionLabelKey(' Release ')).toBe('release');
+    expect(humanTaskActionLabelKey('ＲＥＬＥＡＳＥ')).toBe('release');
+    expect(humanTaskActionLabelKey('Re  lease')).toBe('re lease');
+    expect(humanTaskActionLabelKey('Re\u00a0\u00a0lease')).toBe('re lease');
+    expect(humanTaskActionLabelKey('A')).toBe('a');
+    expect(humanTaskActionLabelKey('\u{1ccd6}')).toBe('\u{1ccd6}');
+    expect(humanTaskActionLabelKey('\ufeffRelease\ufeff')).toBe('\ufeffrelease\ufeff');
+    expect(() => validateHumanTaskAttention(attention({ ...base, resolveLabel: 'Proceed',
+      denyLabel: ' proceed ' }), capability)).not.toThrow();
+    expect(() => validateHumanTaskAttention(attention({ ...base, prompt: '\u00a0',
+      resolveLabel: '\u00a0', denyLabel: '\ufeff' }), capability)).not.toThrow();
     expect(() => validateHumanTaskAttention(attention({ ...base, actions: ['RESOLVE'],
       resolveLabel: 'Release', denyLabel: ' release ', cancelLabel: '' },
     { availableActions: ['RESOLVE'] }), capability)).not.toThrow();
-    expect(humanTaskActionLabelKey(' Ｒｅ\u00a0\u00a0ＬＥＡＳＥ ')).toBe('re lease');
-    expect(humanTaskActionLabelKey('\ufeffRelease\ufeff')).toBe('\ufeffrelease\ufeff');
-    expect(() => validateHumanTaskAttention(attention({ ...base, resolveLabel: 'Release',
-      denyLabel: '\ufeffRelease' }), capability)).not.toThrow();
   });
 
   it('keeps attention context on authoritative runtime pins and out of graph content', () => {

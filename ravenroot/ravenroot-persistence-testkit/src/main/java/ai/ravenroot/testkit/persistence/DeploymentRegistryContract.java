@@ -39,8 +39,7 @@ import static org.junit.jupiter.api.Assertions.*;
  *
  * <h2>What this suite does not cover, and where those rows actually live</h2>
  * <p>A suite that must run against any adapter can only assert what every adapter has. Three rows the
- * acceptance criteria name are therefore <em>not</em> here, and two of them are now proved elsewhere
- * rather than left open:</p>
+ * acceptance criteria name are therefore <em>not</em> here, and each of them is proved elsewhere:</p>
  * <ul>
  *   <li><b>Partition.</b> Two live authorities disagreeing needs a durable adapter with real
  *       cross-process exclusion; the reference adapter is one map in one JVM, so a "partition" test
@@ -50,9 +49,11 @@ import static org.junit.jupiter.api.Assertions.*;
  *       {@link LifecycleCommand.Drain#bound()} is the parameter it drives. The coordinator suite owns
  *       that row, because a registry has no runtime to be slow.</li>
  *   <li><b>Restart under load.</b> The half-open barrier is asserted here only as generation
- *       arithmetic. That work admitted at {@code G} completes while work admitted afterwards enters at
- *       {@code G + 1} needs something actually executing, and no implementor of the lifecycle port
- *       admits work yet — so this one is still genuinely open rather than relocated.</li>
+ *       arithmetic, because a registry admits nothing. That work admitted at {@code G} completes while
+ *       work admitted afterwards enters at {@code G + 1} needs something actually executing, and
+ *       {@code DefaultGraphDeployment} is now the implementor that does: its own
+ *       {@code DefaultGraphDeploymentHalfOpenBarrierTest} drives real arrivals across a barrier,
+ *       including arrivals racing it, and accounts for every accepted one on exactly one side.</li>
  * </ul>
  */
 public abstract class DeploymentRegistryContract {

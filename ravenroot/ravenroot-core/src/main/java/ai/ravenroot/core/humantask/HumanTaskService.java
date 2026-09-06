@@ -329,6 +329,10 @@ public final class HumanTaskService {
             auditOnly(task, "HUMAN_TASK_UNAUTHORIZED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
         }
+        if (!permitsDecision(task, target)) {
+            auditOnly(task, "HUMAN_TASK_ACTION_REFUSED", context.requestId());
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
+        }
         try {
             comment = normalizePinnedComment(task, comment);
         } catch (IllegalArgumentException refused) {
@@ -576,6 +580,17 @@ public final class HumanTaskService {
             throw new IllegalArgumentException("decision comment exceeds pinned byte limit");
         }
         return comment;
+    }
+
+    private static boolean permitsDecision(DurableHumanTask task, HumanTaskStatus target) {
+        if (!task.request().confirmationPresentation().embedded()) return true;
+        ai.ravenroot.api.persistence.HumanTaskConfirmationAction action = switch (target) {
+            case RESOLVED -> ai.ravenroot.api.persistence.HumanTaskConfirmationAction.RESOLVE;
+            case DENIED -> ai.ravenroot.api.persistence.HumanTaskConfirmationAction.DENY;
+            case CANCELLED -> ai.ravenroot.api.persistence.HumanTaskConfirmationAction.CANCEL;
+            default -> null;
+        };
+        return action == null || task.request().confirmationPresentation().actions().contains(action);
     }
 
     private EventEnvelope event(ExecutionKey key, StoredProcessInstance stored,

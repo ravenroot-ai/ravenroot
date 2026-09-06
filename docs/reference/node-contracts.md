@@ -69,44 +69,44 @@ Canonical runtime rules: [ai bundle reference](bundles/ai.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The agent finished and its answer becomes the outgoing payload. The only outcome this node produces: anything else fails the node. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `provider` | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
-| `instructions` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `objective` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `model` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `mcpServers` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTurns` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTotalTokens` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTokens` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `temperature` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `topP` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `seed` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `skills.1.name` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `skills.1.description` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `skills.1.instructions` | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `skills.2.name` | `STRING` | false | Not declared | Not declared | false | skills.1.name:PRESENT: | Not declared | Not declared |
-| `skills.2.description` | `STRING` | false | Not declared | Not declared | false | skills.1.name:PRESENT: | Not declared | Not declared |
-| `skills.2.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.1.name:PRESENT: | Not declared | Not declared |
-| `skills.3.name` | `STRING` | false | Not declared | Not declared | false | skills.2.name:PRESENT: | Not declared | Not declared |
-| `skills.3.description` | `STRING` | false | Not declared | Not declared | false | skills.2.name:PRESENT: | Not declared | Not declared |
-| `skills.3.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.2.name:PRESENT: | Not declared | Not declared |
-| `skills.4.name` | `STRING` | false | Not declared | Not declared | false | skills.3.name:PRESENT: | Not declared | Not declared |
-| `skills.4.description` | `STRING` | false | Not declared | Not declared | false | skills.3.name:PRESENT: | Not declared | Not declared |
-| `skills.4.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.3.name:PRESENT: | Not declared | Not declared |
-| `skills.5.name` | `STRING` | false | Not declared | Not declared | false | skills.4.name:PRESENT: | Not declared | Not declared |
-| `skills.5.description` | `STRING` | false | Not declared | Not declared | false | skills.4.name:PRESENT: | Not declared | Not declared |
-| `skills.5.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.4.name:PRESENT: | Not declared | Not declared |
-| `skills.6.name` | `STRING` | false | Not declared | Not declared | false | skills.5.name:PRESENT: | Not declared | Not declared |
-| `skills.6.description` | `STRING` | false | Not declared | Not declared | false | skills.5.name:PRESENT: | Not declared | Not declared |
-| `skills.6.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.5.name:PRESENT: | Not declared | Not declared |
-| `skills.7.name` | `STRING` | false | Not declared | Not declared | false | skills.6.name:PRESENT: | Not declared | Not declared |
-| `skills.7.description` | `STRING` | false | Not declared | Not declared | false | skills.6.name:PRESENT: | Not declared | Not declared |
-| `skills.7.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.6.name:PRESENT: | Not declared | Not declared |
-| `skills.8.name` | `STRING` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
-| `skills.8.description` | `STRING` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
-| `skills.8.instructions` | `TEXT` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
+| `instructions` | Instructions | Who the agent is and how it should work. Sent as untrusted graph content, separate from operator policy. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `objective` | Objective | The task for this invocation. Sent as the first user turn. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `model` | Model | Overrides the profile's model. The endpoint is not overridable. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `mcpServers` | MCP servers | Comma-separated names of MCP servers this deployment declared in its environment (RAVENROOT_MCP_SERVER_<hex(name)>). Their tools are offered to the model as <server>__<tool>. At most 8. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTurns` | Max turns | Model turns this run may take before it is refused. Defaults to 8, never exceeds 64. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTotalTokens` | Max tokens | Cumulative reported tokens across the whole run before it is refused. The operator's finite ceiling still applies when absent. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | Deadline for the WHOLE run, not for one turn. May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTokens` | Max tokens per turn | Upper bound on one generated turn, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `temperature` | Temperature | Sampling temperature forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `topP` | Top-p | Nucleus sampling parameter forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `seed` | Seed | Sampling seed, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.1.name` | Skill 1 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.1.description` | Skill 1 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.1.instructions` | Skill 1 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `skills.2.name` | Skill 2 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.1.name:PRESENT: | Not declared | Not declared |
+| `skills.2.description` | Skill 2 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.1.name:PRESENT: | Not declared | Not declared |
+| `skills.2.instructions` | Skill 2 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.1.name:PRESENT: | Not declared | Not declared |
+| `skills.3.name` | Skill 3 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.2.name:PRESENT: | Not declared | Not declared |
+| `skills.3.description` | Skill 3 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.2.name:PRESENT: | Not declared | Not declared |
+| `skills.3.instructions` | Skill 3 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.2.name:PRESENT: | Not declared | Not declared |
+| `skills.4.name` | Skill 4 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.3.name:PRESENT: | Not declared | Not declared |
+| `skills.4.description` | Skill 4 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.3.name:PRESENT: | Not declared | Not declared |
+| `skills.4.instructions` | Skill 4 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.3.name:PRESENT: | Not declared | Not declared |
+| `skills.5.name` | Skill 5 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.4.name:PRESENT: | Not declared | Not declared |
+| `skills.5.description` | Skill 5 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.4.name:PRESENT: | Not declared | Not declared |
+| `skills.5.instructions` | Skill 5 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.4.name:PRESENT: | Not declared | Not declared |
+| `skills.6.name` | Skill 6 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.5.name:PRESENT: | Not declared | Not declared |
+| `skills.6.description` | Skill 6 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.5.name:PRESENT: | Not declared | Not declared |
+| `skills.6.instructions` | Skill 6 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.5.name:PRESENT: | Not declared | Not declared |
+| `skills.7.name` | Skill 7 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.6.name:PRESENT: | Not declared | Not declared |
+| `skills.7.description` | Skill 7 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.6.name:PRESENT: | Not declared | Not declared |
+| `skills.7.instructions` | Skill 7 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.6.name:PRESENT: | Not declared | Not declared |
+| `skills.8.name` | Skill 8 name | What the model passes to load_skill to read this skill. Matched ignoring case. At most 64 characters. | `STRING` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
+| `skills.8.description` | Skill 8 description | One line telling the model when this skill is worth loading. Shown on every turn, so keep it short. At most 512 characters. | `STRING` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
+| `skills.8.instructions` | Skill 8 instructions | The body. Sent only when the model calls load_skill for this name, and never before. It grants no tool and no authority. At most 16384 characters. | `TEXT` | false | Not declared | Not declared | false | skills.7.name:PRESENT: | Not declared | Not declared |
 
 ## `amqp.consume` {#node-amqp-consume}
 
@@ -127,19 +127,19 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `brokerProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `queue` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `prefetch` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxInFlight` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retryBackoffMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRetryBackoffMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `drainTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `poisonAttempts` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `poisonPolicy` | `STRING` | false | profile | profile,dead-letter | false | Not declared | Not declared | Not declared |
-| `deadLetterMode` | `STRING` | false | Not declared | broker-dlx | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
-| `checkpointPolicy` | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `brokerProfile` | Broker profile | Opaque tenant-scoped profile; endpoint, credentials, queue authority and DLX stay operator-owned. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `queue` | Queue | Optional confirmation of the exact operator-authorized queue. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `prefetch` | Prefetch | Positive tightening of the operator QoS ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxInFlight` | Maximum in-flight | Positive tightening of bounded delivery admission. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retryBackoffMs` | Retry backoff (ms) | Positive tightening of initial retry backoff. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRetryBackoffMs` | Maximum retry backoff (ms) | Positive tightening of maximum retry backoff. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `drainTimeoutMs` | Drain timeout (ms) | Non-negative tightening of stop cleanup. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `poisonAttempts` | Poison attempts | Positive tightening of the delivery retry ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `poisonPolicy` | Poison policy | Not declared | `STRING` | false | profile | profile,dead-letter | false | Not declared | Not declared | Not declared |
+| `deadLetterMode` | Dead-letter mode | Confirms broker DLX rejection; topology remains operator-owned. | `STRING` | false | Not declared | broker-dlx | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
+| `checkpointPolicy` | Checkpoint policy | Not declared | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 
 ## `amqp.publish` {#node-amqp-publish}
 
@@ -160,27 +160,27 @@ Canonical runtime rules: [amqp091 bundle reference](bundles/amqp091.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `brokerProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `exchange` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `routingKey` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `mandatory` | `BOOLEAN` | false | true | Not declared | false | Not declared | Not declared | Not declared |
-| `contentType` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `contentEncoding` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `persistent` | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
-| `priority` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `expirationMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `messageId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `correlationId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `replyTo` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `type` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `appId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `headers` | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `confirmTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `brokerProfile` | Broker profile | Opaque tenant-scoped operator profile; endpoints and credentials never come from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `exchange` | Exchange | Authorized profile default override. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `routingKey` | Routing key | Authorized profile default override. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `mandatory` | Mandatory | Must remain true so unroutable publications are observed. | `BOOLEAN` | false | true | Not declared | false | Not declared | Not declared | Not declared |
+| `contentType` | Content type | Default AMQP content type. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `contentEncoding` | Content encoding | Default AMQP content encoding. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `persistent` | Persistent | May be true only when authorized by the operator profile. | `BOOLEAN` | false | false | Not declared | false | Not declared | Not declared | Not declared |
+| `priority` | Priority | May only tighten the profile ceiling (0-9). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `expirationMs` | Expiration (ms) | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `messageId` | Message id | Default safe message identifier. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlationId` | Correlation id | Default safe correlation identifier. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `replyTo` | Reply-to | Must be authorized by the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `type` | Type | Default AMQP message type. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `appId` | Application id | Default AMQP application id. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `headers` | Approved headers | Comma-separated key=value defaults; keys must be approved by the profile. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `confirmTimeoutMs` | Confirm timeout | One total deadline; may only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile (1-16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Pre-publish retries | Only proven connection-establishment failures are retried (0-3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether republishing this message after a crash of unknown outcome is safe. The broker does not deduplicate; say repeatable only where the consumer discards a message id it has already handled. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `boundary-guard` {#node-boundary-guard}
 
@@ -201,11 +201,11 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The exact candidate passed the pinned policy.; violation: Evaluation failed closed or a policy rule refused the candidate. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `policyId` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `policyVersion` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `policyDigest` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `policyId` | Policy ID | Operator-owned immutable publication policy profile identifier. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `policyVersion` | Policy version | Exact immutable policy version selected for this graph. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `policyDigest` | Policy digest | Canonical sha256 binding pinned by the graph for recovery-safe evaluation. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `cel-decision` {#node-cel-decision}
 
@@ -226,11 +226,11 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | $trueOutcome: The expression evaluated to true.; $falseOutcome: The expression evaluated to anything other than true. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `expression` | `CEL_EXPRESSION` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `trueOutcome` | `STRING` | false | true | Not declared | false | Not declared | Not declared | Not declared |
-| `falseOutcome` | `STRING` | false | false | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `expression` | CEL expression | Boolean expression evaluated against payload, attributes and properties. | `CEL_EXPRESSION` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `trueOutcome` | True outcome | Outgoing edge outcome selected for true. | `STRING` | false | true | Not declared | false | Not declared | Not declared | Not declared |
+| `falseOutcome` | False outcome | Outgoing edge outcome selected for false. | `STRING` | false | false | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `cel-transform` {#node-cel-transform}
 
@@ -251,9 +251,9 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The expression result becomes the outgoing payload. The only outcome this node produces: a CEL evaluation error fails the node instead. Note that cel-transform never branches on its result — cel-decision does. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `expression` | `CEL_EXPRESSION` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `expression` | CEL expression | Expression result becomes the outgoing payload. | `CEL_EXPRESSION` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `delay` {#node-delay}
 
@@ -274,9 +274,9 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The wait elapsed and the payload passes through unchanged. The only outcome this node produces: the handler below returns it unconditionally. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `durationMs` | `INTEGER` | false | 1000 | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `durationMs` | Duration (ms) | Milliseconds to wait (0-86400000). The wait does not block an actor-system thread. | `INTEGER` | false | 1000 | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `discord.interactions` {#node-discord-interactions}
 
@@ -297,9 +297,9 @@ Canonical runtime rules: [discord bundle reference](bundles/discord.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `discordProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `discordProfile` | Discord profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `discord.send` {#node-discord-send}
 
@@ -320,16 +320,16 @@ Canonical runtime rules: [discord bundle reference](bundles/discord.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `discordProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `channelId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `requestTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxContentChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxAttachmentBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxAttachments` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `discordProfile` | Discord profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `channelId` | Channel | Optional narrowing to one channel already allowed by the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxContentChars` | Content limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxAttachmentBytes` | Attachment byte limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxAttachments` | Attachment count | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Rate-limit retries | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `filesystem.read` {#node-filesystem-read}
 
@@ -350,13 +350,13 @@ Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `filesystemProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `path` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `encoding` | `STRING` | false | utf-8 | utf-8,base64 | false | Not declared | Not declared | Not declared |
-| `maxBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `filesystemProfile` | Filesystem profile | Opaque tenant-scoped operator profile; the root never comes from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `path` | Relative path | Slash-separated relative path allowed by the selected profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `encoding` | Encoding | Result body encoding: strict UTF-8 or canonical Base64. | `STRING` | false | utf-8 | utf-8,base64 | false | Not declared | Not declared | Not declared |
+| `maxBytes` | Maximum bytes | May only tighten the profile byte ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `deadlineMs` | Deadline (ms) | May only tighten the profile total deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `filesystem.write` {#node-filesystem-write}
 
@@ -377,15 +377,15 @@ Canonical runtime rules: [filesystem bundle reference](bundles/filesystem.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `filesystemProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `path` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `encoding` | `STRING` | false | utf-8 | utf-8,base64 | false | Not declared | Not declared | Not declared |
-| `mode` | `STRING` | false | create-new | create-new,replace | false | Not declared | Not declared | Not declared |
-| `maxBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `filesystemProfile` | Filesystem profile | Opaque tenant-scoped operator profile; the root never comes from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `path` | Relative path | Slash-separated relative path allowed by the selected profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `encoding` | Encoding | Required body representation: strict UTF-8 or canonical Base64. | `STRING` | false | utf-8 | utf-8,base64 | false | Not declared | Not declared | Not declared |
+| `mode` | Write mode | Create a previously absent target or atomically replace an existing target. | `STRING` | false | create-new | create-new,replace | false | Not declared | Not declared | Not declared |
+| `maxBytes` | Maximum bytes | May only tighten the profile byte ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `deadlineMs` | Deadline (ms) | May only tighten the profile total deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating the complete atomic publication is safe after an ambiguous final move. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `git-workspace` {#node-git-workspace}
 
@@ -406,9 +406,9 @@ Canonical runtime rules: [git-workspace bundle reference](bundles/git-workspace.
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The operation completed or reconciled safely.; conflict: Existing workspace or branch state requires review.; unmerged: The accepted content is absent from the remote base. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `workspaceProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `workspaceProfile` | Workspace profile | Opaque tenant-scoped operator profile; roots, remotes and credentials never come from the graph. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `github-app-review` {#node-github-app-review}
 
@@ -429,10 +429,10 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Recovery repeats only the same content-bound operation and reconciles durable remote state first. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `github-events-source` {#node-github-events-source}
 
@@ -453,9 +453,9 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `github-workflow-watch` {#node-github-workflow-watch}
 
@@ -476,10 +476,10 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Recovery repeats only the same content-bound operation and reconciles durable remote state first. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `http-request` {#node-http-request}
 
@@ -500,18 +500,18 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | $successOutcome: The endpoint answered with an HTTP 2xx status.; $failureOutcome: The endpoint answered with a non-2xx status. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `url` | `URI` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `method` | `STRING` | false | GET | GET,POST,PUT,PATCH,DELETE | false | Not declared | Not declared | Not declared |
-| `body` | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | 10000 | Not declared | false | Not declared | Not declared | Not declared |
-| `credentialRef` | `SECRET_REFERENCE` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `credentialHeader` | `STRING` | false | Authorization | Not declared | false | Not declared | Not declared | Not declared |
-| `credentialScheme` | `STRING` | false | Bearer | Not declared | false | Not declared | Not declared | Not declared |
-| `successOutcome` | `STRING` | false | continue | Not declared | false | Not declared | Not declared | Not declared |
-| `failureOutcome` | `STRING` | false | error | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | method:ONE_OF:POST,PUT,PATCH,DELETE | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `url` | URL | HTTP(S) endpoint; the resolved host must be allowlisted by the server. | `URI` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `method` | Method | HTTP method. | `STRING` | false | GET | GET,POST,PUT,PATCH,DELETE | false | Not declared | Not declared | Not declared |
+| `body` | Body | Optional body template. Supports <code>{% raw %}{{payload}}{% endraw %}</code>. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Timeout (ms) | Capped by the server maximum. | `INTEGER` | false | 10000 | Not declared | false | Not declared | Not declared | Not declared |
+| `credentialRef` | Credential reference | Opaque server-side credential reference. | `SECRET_REFERENCE` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `credentialHeader` | Credential header | Header receiving the resolved credential. | `STRING` | false | Authorization | Not declared | false | Not declared | Not declared | Not declared |
+| `credentialScheme` | Credential scheme | For example Bearer. Empty writes only the secret value. | `STRING` | false | Bearer | Not declared | false | Not declared | Not declared | Not declared |
+| `successOutcome` | Success outcome | Outcome for HTTP 2xx responses. | `STRING` | false | continue | Not declared | false | Not declared | Not declared | Not declared |
+| `failureOutcome` | Failure outcome | Outcome for non-2xx responses. | `STRING` | false | error | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this request after a crash of unknown outcome is safe. Required for methods that change state. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | method:ONE_OF:POST,PUT,PATCH,DELETE | Not declared |
 
 ## `human-task` {#node-human-task}
 
@@ -532,32 +532,32 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | $resolvedOutcome: A responder supplied a valid response.; $deniedOutcome: An authorized responder denied the task.; $expiredOutcome: The durable expiry timer fired.; $cancelledOutcome: The requester or a responder cancelled the task. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `title` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 256 |
-| `description` | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 4096 |
-| `responseContentType` | `STRING` | false | application/vnd.ravenroot.payload+json | Not declared | false | Not declared | Not declared | Not declared |
-| `responseSchema` | `STRING` | false | ravenroot.human-task.response | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
-| `responseSchemaVersion` | `STRING` | false | 1 | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
-| `responseKind` | `STRING` | false | MAP | SCALAR,LIST,MAP | false | Not declared | Not declared | Not declared |
-| `maxResponseBytes` | `INTEGER` | false | 65536 | Not declared | false | Not declared | Not declared | min 1; max 262144 |
-| `confirmationPresentationVersion` | `STRING` | false | Not declared | 1 | false | Not declared | Not declared | Not declared |
-| `confirmationPrompt` | `TEXT` | false | Confirm this task. | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 4096 |
-| `confirmationComment` | `STRING` | false | OPTIONAL | DISALLOWED,OPTIONAL,REQUIRED | false | confirmationPresentationVersion:EQUALS:1 | Not declared | Not declared |
-| `confirmationActions` | `STRING` | false | RESOLVE,DENY,CANCEL | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max items 3; max item UTF-8 bytes 7 |
-| `confirmationResolveLabel` | `STRING` | false | Confirm | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 64 |
-| `confirmationDenyLabel` | `STRING` | false | Deny | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 64 |
-| `confirmationCancelLabel` | `STRING` | false | Cancel | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 64 |
-| `authorizedRoles` | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max items 16; max item UTF-8 bytes 256 |
-| `authorizedScopes` | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max items 16; max item UTF-8 bytes 256 |
-| `escalateAfterSeconds` | `INTEGER` | false | 0 | Not declared | false | Not declared | Not declared | min 0; max 2591999 |
-| `expiresAfterSeconds` | `INTEGER` | false | 604800 | Not declared | false | Not declared | Not declared | min 1; max 2592000 |
-| `correlationSource` | `STRING` | false | task-id | task-id | false | Not declared | Not declared | Not declared |
-| `deduplicationSource` | `STRING` | false | attempt-id | attempt-id | false | Not declared | Not declared | Not declared |
-| `resolvedOutcome` | `STRING` | false | resolved | Not declared | false | Not declared | Not declared | Not declared |
-| `deniedOutcome` | `STRING` | false | denied | Not declared | false | Not declared | Not declared | Not declared |
-| `expiredOutcome` | `STRING` | false | expired | Not declared | false | Not declared | Not declared | Not declared |
-| `cancelledOutcome` | `STRING` | false | cancelled | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `title` | Title | Static bounded title shown in the human-task inbox. Payload interpolation is not supported. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 256 |
+| `description` | Description | Static bounded instructions shown in the inbox. Payload interpolation is not supported. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max UTF-8 bytes 4096 |
+| `responseContentType` | Response media type | Exact media type required for a resolved response. | `STRING` | false | application/vnd.ravenroot.payload+json | Not declared | false | Not declared | Not declared | Not declared |
+| `responseSchema` | Response schema | Bounded response schema identifier. | `STRING` | false | ravenroot.human-task.response | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
+| `responseSchemaVersion` | Response schema version | Exact protocol label required at resolution. | `STRING` | false | 1 | Not declared | false | Not declared | Not declared | max UTF-8 bytes 128 |
+| `responseKind` | Response kind | Required top-level response shape. | `STRING` | false | MAP | SCALAR,LIST,MAP | false | Not declared | Not declared | Not declared |
+| `maxResponseBytes` | Maximum response bytes | Inclusive encoded-envelope byte bound owned by the server. | `INTEGER` | false | 65536 | Not declared | false | Not declared | Not declared | min 1; max 262144 |
+| `confirmationPresentationVersion` | Confirmation presentation | Version one enables the built-in embedded simple confirmation. | `STRING` | false | Not declared | 1 | false | Not declared | Not declared | Not declared |
+| `confirmationPrompt` | Confirmation prompt | Bounded plain-text prompt shown for this task. | `TEXT` | false | Confirm this task. | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 4096 |
+| `confirmationComment` | Comment | Whether the built-in decision comment is disallowed, optional, or required. | `STRING` | false | OPTIONAL | DISALLOWED,OPTIONAL,REQUIRED | false | confirmationPresentationVersion:EQUALS:1 | Not declared | Not declared |
+| `confirmationActions` | Actions | Ordered comma-separated subset of RESOLVE, DENY, and CANCEL. | `STRING` | false | RESOLVE,DENY,CANCEL | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max items 3; max item UTF-8 bytes 7 |
+| `confirmationResolveLabel` | Resolve label | Plain-text label for RESOLVE; enabled actions require distinct visible labels. | `STRING` | false | Confirm | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 64 |
+| `confirmationDenyLabel` | Deny label | Plain-text label for DENY; enabled actions require distinct visible labels. | `STRING` | false | Deny | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 64 |
+| `confirmationCancelLabel` | Cancel label | Plain-text label for CANCEL; enabled actions require distinct visible labels. | `STRING` | false | Cancel | Not declared | false | confirmationPresentationVersion:EQUALS:1 | Not declared | max UTF-8 bytes 64 |
+| `authorizedRoles` | Authorized roles | Comma-separated roles; every listed role is required. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max items 16; max item UTF-8 bytes 256 |
+| `authorizedScopes` | Authorized scopes | Comma-separated scopes; every listed scope is required. | `TEXT` | false | Not declared | Not declared | false | Not declared | Not declared | max items 16; max item UTF-8 bytes 256 |
+| `escalateAfterSeconds` | Escalate after (seconds) | Zero disables escalation; otherwise must be earlier than expiry. | `INTEGER` | false | 0 | Not declared | false | Not declared | Not declared | min 0; max 2591999 |
+| `expiresAfterSeconds` | Expire after (seconds) | Durable expiry delay bounded by server policy. | `INTEGER` | false | 604800 | Not declared | false | Not declared | Not declared | min 1; max 2592000 |
+| `correlationSource` | Correlation source | Deterministic correlation source; human tasks use their task ID. | `STRING` | false | task-id | task-id | false | Not declared | Not declared | Not declared |
+| `deduplicationSource` | Deduplication source | Deterministic deduplication source; human tasks use the node attempt ID. | `STRING` | false | attempt-id | attempt-id | false | Not declared | Not declared | Not declared |
+| `resolvedOutcome` | Resolved outcome | Outcome selected after a valid response. | `STRING` | false | resolved | Not declared | false | Not declared | Not declared | Not declared |
+| `deniedOutcome` | Denied outcome | Outcome selected after denial. | `STRING` | false | denied | Not declared | false | Not declared | Not declared | Not declared |
+| `expiredOutcome` | Expired outcome | Outcome selected after durable expiry. | `STRING` | false | expired | Not declared | false | Not declared | Not declared | Not declared |
+| `cancelledOutcome` | Cancelled outcome | Outcome selected after cancellation. | `STRING` | false | cancelled | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `jdbc.insert` {#node-jdbc-insert}
 
@@ -578,10 +578,10 @@ Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The bounded JDBC result. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `statement` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Profile | Operator-owned tenant JDBC profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `statement` | Statement | Operator-approved statement id. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `jdbc.query` {#node-jdbc-query}
 
@@ -602,10 +602,10 @@ Canonical runtime rules: [jdbc bundle reference](bundles/jdbc.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The bounded JDBC result. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `statement` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Profile | Operator-owned tenant JDBC profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `statement` | Statement | Operator-approved statement id. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `json-parse` {#node-json-parse}
 
@@ -626,9 +626,9 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The decoded value becomes the outgoing payload. Non-JSON text, or a document beyond the limits, fails the node instead of producing an outcome. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `source` | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `source` | JSON source | Template producing the JSON text to parse. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code>, <code>{% raw %}{{attributes.name}}{% endraw %}</code> and <code>{% raw %}{{properties.name}}{% endraw %}</code>. | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `json-path` {#node-json-path}
 
@@ -649,9 +649,9 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The ordered match array becomes the outgoing payload. Invalid input, query, or resource usage fails the node instead. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `path` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `path` | JSONPath | One RFC 9535 query. The ordered matches are emitted as an array. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `kafka.consume` {#node-kafka-consume}
 
@@ -672,23 +672,23 @@ Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `clusterProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `subscriptionMode` | `STRING` | false | profile | profile,topics,pattern | false | Not declared | Not declared | Not declared |
-| `topics` | `STRING` | false | Not declared | Not declared | false | subscriptionMode:EQUALS:topics | subscriptionMode:EQUALS:topics | Not declared |
-| `topicPattern` | `STRING` | false | Not declared | Not declared | false | subscriptionMode:EQUALS:pattern | subscriptionMode:EQUALS:pattern | Not declared |
-| `group` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `staticMember` | `STRING` | false | profile | profile,dynamic | false | Not declared | Not declared | Not declared |
-| `maxInFlight` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `pollTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `drainTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retryBackoffMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRetryBackoffMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `poisonAttempts` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `poisonPolicy` | `STRING` | false | profile | profile,halt,dead-letter | false | Not declared | Not declared | Not declared |
-| `deadLetterTopic` | `STRING` | false | Not declared | Not declared | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
-| `checkpointPolicy` | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `clusterProfile` | Cluster profile | Opaque tenant-scoped consumer profile; brokers, security and Kafka group id remain operator-owned. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `subscriptionMode` | Subscription | Not declared | `STRING` | false | profile | profile,topics,pattern | false | Not declared | Not declared | Not declared |
+| `topics` | Topics | Comma-separated subset of exact topics authorized by the profile. | `STRING` | false | Not declared | Not declared | false | subscriptionMode:EQUALS:topics | subscriptionMode:EQUALS:topics | Not declared |
+| `topicPattern` | Topic pattern | Anchored pattern equal to the pattern authorized by the profile. | `STRING` | false | Not declared | Not declared | false | subscriptionMode:EQUALS:pattern | subscriptionMode:EQUALS:pattern | Not declared |
+| `group` | Group | Logical group name only; the physical Kafka group id remains in the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `staticMember` | Membership | Not declared | `STRING` | false | profile | profile,dynamic | false | Not declared | Not declared | Not declared |
+| `maxInFlight` | Maximum in-flight | May only tighten profile admission. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `pollTimeoutMs` | Poll timeout (ms) | May only tighten the profile poll bound. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `drainTimeoutMs` | Drain timeout (ms) | May only tighten the profile drain bound. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retryBackoffMs` | Initial retry backoff (ms) | May only tighten the profile bound. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRetryBackoffMs` | Maximum retry backoff (ms) | May only tighten the profile bound. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `poisonAttempts` | Poison attempts | May only tighten the profile retry ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `poisonPolicy` | Poison policy | Not declared | `STRING` | false | profile | profile,halt,dead-letter | false | Not declared | Not declared | Not declared |
+| `deadLetterTopic` | Dead-letter topic | Logical confirmation of the operator-authorized dead-letter topic. | `STRING` | false | Not declared | Not declared | false | poisonPolicy:EQUALS:dead-letter | poisonPolicy:EQUALS:dead-letter | Not declared |
+| `checkpointPolicy` | Checkpoint policy | Not declared | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 
 ## `kafka.produce` {#node-kafka-produce}
 
@@ -709,15 +709,15 @@ Canonical runtime rules: [kafka bundle reference](bundles/kafka.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `clusterProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `topic` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRecordBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `correlationId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `clusterProfile` | Cluster profile | Opaque tenant-scoped operator profile; endpoints and credentials never come from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `topic` | Topic | Exact topic authorized by the profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline (ms) | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten profile admission. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRecordBytes` | Record bytes | May only tighten the serialized record ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `correlationId` | Correlation id | Safe result correlation metadata. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether producing this record again after a crash of unknown outcome is safe. Producer idempotence does not cover this; say repeatable only where the consumer discards a record it has already processed. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `llm-prompt` {#node-llm-prompt}
 
@@ -738,16 +738,16 @@ Canonical runtime rules: [ai bundle reference](bundles/ai.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The endpoint returned a completion, which becomes the outgoing payload. The only outcome this node produces: anything else fails the node. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `provider` | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
-| `prompt` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `model` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTokens` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `temperature` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `topP` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `seed` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `provider` | Provider | Name of a model profile this deployment declared in its environment (RAVENROOT_LLM_PROFILE_<hex(name)>). | `STRING` | true | Not declared | Not declared | true | Not declared | Not declared | Not declared |
+| `prompt` | Prompt | Instruction template. Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{payload.a.b}}{% endraw %}</code> and <code>{% raw %}{{attributes.x}}{% endraw %}</code>. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `model` | Model | Overrides the profile's model. The endpoint is not overridable. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTokens` | Max tokens | Upper bound on the generated answer, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `temperature` | Temperature | Sampling temperature forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `topP` | Top-p | Nucleus sampling parameter forwarded verbatim. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `seed` | Seed | Sampling seed, when the endpoint honours it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `log` {#node-log}
 
@@ -768,9 +768,9 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The message was written and the payload passes through. The only outcome this node produces: an unresolvable placeholder fails the node instead. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `message` | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `message` | Message | Supports <code>{% raw %}{{payload}}{% endraw %}</code>, <code>{% raw %}{{attributes.name}}{% endraw %}</code> and <code>{% raw %}{{properties.name}}{% endraw %}</code> placeholders. | `TEXT` | false | <code>{% raw %}{{payload}}{% endraw %}</code> | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.consume` {#node-mail-imap-consume}
 
@@ -791,20 +791,20 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `folder` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `pollIntervalMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `batchSize` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxInFlight` | `INTEGER` | false | 1 | 1 | false | Not declared | Not declared | Not declared |
-| `retryBackoffMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRetryBackoffMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `poisonAttempts` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `contentMode` | `STRING` | false | metadata | metadata,preview | false | Not declared | Not declared | Not declared |
-| `previewChars` | `INTEGER` | false | Not declared | Not declared | false | contentMode:EQUALS:preview | contentMode:EQUALS:preview | Not declared |
-| `allowedHeaders` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `checkpointPolicy` | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Mail profile | Opaque tenant-scoped operator profile; endpoint and credentials never enter the graph. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `folder` | Source folder | Optional confirmation of the exact operator-authorized source folder. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `pollIntervalMs` | Poll interval (ms) | May only increase the operator interval, up to 60000 ms. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `batchSize` | Batch size | Tightening-only messages per bounded scan. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxInFlight` | Maximum in-flight | The consumer is serial; only 1 is accepted. | `INTEGER` | false | 1 | 1 | false | Not declared | Not declared | Not declared |
+| `retryBackoffMs` | Retry backoff (ms) | May only increase the operator reconnect/admission backoff, up to 60000 ms. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRetryBackoffMs` | Maximum retry backoff (ms) | May only increase the operator maximum backoff, up to 60000 ms. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `poisonAttempts` | Poison attempts | Tightening-only projection/admission retry ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `contentMode` | Content mode | Metadata-only by default; preview requires operator authority. | `STRING` | false | metadata | metadata,preview | false | Not declared | Not declared | Not declared |
+| `previewChars` | Preview characters | Tightening-only text and HTML preview bound. | `INTEGER` | false | Not declared | Not declared | false | contentMode:EQUALS:preview | contentMode:EQUALS:preview | Not declared |
+| `allowedHeaders` | Allowed headers | Optional comma-separated tightening of the operator-authorized inbound header allowlist. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `checkpointPolicy` | Checkpoint policy | Only durable checkpointing is supported. | `STRING` | false | require-durable | require-durable | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.delete` {#node-mail-imap-delete}
 
@@ -825,14 +825,14 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `sourceFolder` | `STRING` | false | INBOX | Not declared | false | Not declared | Not declared | Not declared |
-| `deleteMode` | `STRING` | false | TRASH | TRASH,HARD_DELETE | false | Not declared | Not declared | Not declared |
-| `hardDeleteAcknowledgement` | `STRING` | false | Not declared | I_UNDERSTAND_EXPUNGE_IS_PERMANENT | false | deleteMode:EQUALS:HARD_DELETE | deleteMode:EQUALS:HARD_DELETE | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Mail profile | Opaque tenant-scoped operator profile; connection and policy stay outside GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `sourceFolder` | Source folder | Fallback source folder when the versioned input does not carry one. | `STRING` | false | INBOX | Not declared | false | Not declared | Not declared | Not declared |
+| `deleteMode` | Delete mode | TRASH moves to the operator trash folder; HARD_DELETE expunges exactly one UID. | `STRING` | false | TRASH | TRASH,HARD_DELETE | false | Not declared | Not declared | Not declared |
+| `hardDeleteAcknowledgement` | Permanent-delete acknowledgement | Required for HARD_DELETE; payload authorization is required separately at runtime. | `STRING` | false | Not declared | I_UNDERSTAND_EXPUNGE_IS_PERMANENT | false | deleteMode:EQUALS:HARD_DELETE | deleteMode:EQUALS:HARD_DELETE | Not declared |
+| `maxConcurrency` | Concurrency limit | Optional 1–16 action limit; blank uses the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | TRASH is effect-idempotent by immutable source UID. HARD_DELETE must be declared not-repeatable because a disconnect after expunge is ambiguous. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.move` {#node-mail-imap-move}
 
@@ -853,13 +853,13 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `sourceFolder` | `STRING` | false | INBOX | Not declared | false | Not declared | Not declared | Not declared |
-| `destinationFolder` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Mail profile | Opaque tenant-scoped operator profile; connection and policy stay outside GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `sourceFolder` | Source folder | Fallback source folder when the versioned input does not carry one. | `STRING` | false | INBOX | Not declared | false | Not declared | Not declared | Not declared |
+| `destinationFolder` | Destination folder | Requested destination; the operator policy must allow it. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency limit | Optional 1–16 action limit; blank uses the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Move is effect-idempotent by immutable source UID: a repeat cannot move a second message. Declare repeatable only when a missing-on-repeat outcome is acceptable. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `mail.imap.query` {#node-mail-imap-query}
 
@@ -880,14 +880,14 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `profile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `folder` | `STRING` | false | INBOX | Not declared | false | Not declared | Not declared | Not declared |
-| `limit` | `INTEGER` | false | 50 | Not declared | false | Not declared | Not declared | Not declared |
-| `contentMode` | `STRING` | false | preview | preview,full | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `profile` | Mail profile | Opaque tenant-scoped operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `folder` | Folder | Policy-approved default folder. | `STRING` | false | INBOX | Not declared | false | Not declared | Not declared | Not declared |
+| `limit` | Limit | Tightening-only page limit. | `INTEGER` | false | 50 | Not declared | false | Not declared | Not declared | Not declared |
+| `contentMode` | Content mode | Default body mode when the payload omits contentMode: preview truncates to the operator preview budget, full returns the whole decoded body. | `STRING` | false | preview | preview,full | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency limit | Optional 1–16 action limit; blank uses the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this query after a crash of unknown outcome is safe. The query is read-only and peeked, so a repeat changes nothing at the server and observes no other attempt. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `mail.send` {#node-mail-send}
 
@@ -908,29 +908,29 @@ Canonical runtime rules: [mail bundle reference](bundles/mail.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `mailProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `host` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `port` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `securityMode` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `tlsVerify` | `BOOLEAN` | false | true | Not declared | false | Not declared | Not declared | Not declared |
-| `authUsername` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `credentialRef` | `SECRET_REFERENCE` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `connectTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `readTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `writeTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRecipients` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxHeaders` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxHeaderChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxBodyChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxAttachments` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxAttachmentBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTotalAttachmentBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxEncodedAttachmentBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `defaultFrom` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `mailProfile` | Mail profile | Opaque operator-managed SMTP policy name. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `host` | SMTP host | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `port` | Port | Legacy exact-match only. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `securityMode` | Security mode | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `tlsVerify` | Verify TLS | Must remain true. | `BOOLEAN` | false | true | Not declared | false | Not declared | Not declared | Not declared |
+| `authUsername` | Authentication username | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `credentialRef` | Credential reference | Legacy exact-match only. | `SECRET_REFERENCE` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `connectTimeoutMs` | Connect timeout | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `readTimeoutMs` | Read timeout | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `writeTimeoutMs` | Write timeout | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Retries | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRecipients` | Recipient limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxHeaders` | Header limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxHeaderChars` | Envelope metadata limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxBodyChars` | Body limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxAttachments` | Attachment limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxAttachmentBytes` | Attachment byte limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTotalAttachmentBytes` | Attachment aggregate limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxEncodedAttachmentBytes` | Base64 aggregate limit | May only tighten profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency limit | Optional 1–16 limit; blank uses the mail profile ceiling and a value may only tighten it. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `defaultFrom` | Default sender | Legacy exact-match only. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `object.delete` {#node-object-delete}
 
@@ -951,13 +951,13 @@ Canonical runtime rules: [object-storage bundle reference](bundles/object-storag
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `storageProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `key` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `storageProfile` | Storage profile | Opaque operator-owned bucket profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `key` | Object key | Relative key inside the operator prefix. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Declare repeatable only when this exact delete is safe to repeat after an unknown outcome. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `object.get` {#node-object-get}
 
@@ -978,14 +978,14 @@ Canonical runtime rules: [object-storage bundle reference](bundles/object-storag
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `storageProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `key` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `encoding` | `STRING` | false | base64 | text,base64 | false | Not declared | Not declared | Not declared |
-| `maxBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `storageProfile` | Storage profile | Opaque operator-owned bucket profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `key` | Object key | Relative key inside the operator prefix. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `encoding` | Encoding | text or canonical Base64. | `STRING` | false | base64 | text,base64 | false | Not declared | Not declared | Not declared |
+| `maxBytes` | Maximum bytes | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `object.list` {#node-object-list}
 
@@ -1006,16 +1006,16 @@ Canonical runtime rules: [object-storage bundle reference](bundles/object-storag
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `storageProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `prefix` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `projection` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxResults` | `INTEGER` | false | 100 | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | 0 | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `storageProfile` | Storage profile | Opaque operator-owned bucket profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `prefix` | Prefix | Optional relative prefix that only narrows the operator prefix. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `projection` | Metadata projection | Comma-separated safe metadata fields: size, etag, lastModified, storageClass. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxResults` | Maximum results | Maximum entries returned by one page (1-1000). | `INTEGER` | false | 100 | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Retries | Bounded retries for transient list failures (0-3) under one deadline. | `INTEGER` | false | 0 | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Declare repeatable only when repeating this bounded read is acceptable. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `object.put` {#node-object-put}
 
@@ -1036,13 +1036,13 @@ Canonical runtime rules: [object-storage bundle reference](bundles/object-storag
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `storageProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `key` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `storageProfile` | Storage profile | Opaque operator-owned bucket profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `key` | Object key | Relative key inside the operator prefix. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxBytes` | Maximum bytes | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `ocr.extract` {#node-ocr-extract}
 
@@ -1063,14 +1063,14 @@ Canonical runtime rules: [ocr bundle reference](bundles/ocr.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `ocrProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `language` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxInputBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxOutputBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `ocrProfile` | OCR profile | Opaque tenant-scoped operator profile; executable and filesystem authority never come from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `language` | Language | One Tesseract language identifier allowed by the selected operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `deadlineMs` | Deadline (ms) | Optional deadline tightening; zero or an increase is refused. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxInputBytes` | Input bytes | Optional input-byte ceiling tightening. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxOutputBytes` | Output bytes | Optional OCR-output ceiling tightening. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | Optional per-tenant/profile concurrency tightening. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `openapi.call` {#node-openapi-call}
 
@@ -1091,14 +1091,14 @@ Canonical runtime rules: [openapi-client bundle reference](bundles/openapi-clien
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `apiProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `operationId` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRequestBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxResponseBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `apiProfile` | API profile | Opaque operator profile; it fixes the specification and HTTPS origin. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `operationId` | Operation | One operation id allowed by the operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline | May only tighten the profile deadline. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRequestBytes` | Request bytes | May only tighten the request ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxResponseBytes` | Response bytes | May only tighten the response ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the profile concurrency. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `openapi.receive` {#node-openapi-receive}
 
@@ -1119,14 +1119,14 @@ Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-serve
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `apiProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `operations` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRequestBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxIdempotencyBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `apiProfile` | API profile | Opaque operator profile; it fixes the specification, route and authorization. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `operations` | Operations | Comma-separated subset of operator-authorized operation ids. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRequestBytes` | Request bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxIdempotencyBytes` | Idempotency bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `deadlineMs` | Deadline | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `openapi.request-reply` {#node-openapi-request-reply}
 
@@ -1147,15 +1147,15 @@ Canonical runtime rules: [openapi-server bundle reference](bundles/openapi-serve
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | responded: A declared response was accepted for the active HTTP exchange. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `apiProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `operations` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxRequestBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxIdempotencyBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxResponseBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `deadlineMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `apiProfile` | API profile | Opaque operator profile; it fixes the specification, route and authorization. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `operations` | Operations | Comma-separated subset of operator-authorized operation ids. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxRequestBytes` | Request bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxIdempotencyBytes` | Idempotency bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxResponseBytes` | Response bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `deadlineMs` | Deadline | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `program` {#node-program}
 
@@ -1176,12 +1176,12 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The artifact ran and its result becomes the outgoing payload. The only outcome this node produces: a sandbox or artifact error fails the node. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `language` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `source` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `testPayload` | `TEXT` | false | test payload | Not declared | false | Not declared | Not declared | Not declared |
-| `artifactId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `language` | Language | Required runtime language identifier. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `source` | Source | Exact UTF-8 source; content identity is calculated by the server. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `testPayload` | Test payload | Strict JSON becomes structured smoke input; other text remains literal. | `TEXT` | false | test payload | Not declared | false | Not declared | Not declared | Not declared |
+| `artifactId` | Artifact ID | Managed read-only audit reference; never content or lifecycle authority. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `project-transition` {#node-project-transition}
 
@@ -1202,10 +1202,10 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Recovery repeats only the same content-bound operation and reconciles durable remote state first. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `release-prepare` {#node-release-prepare}
 
@@ -1226,10 +1226,10 @@ Canonical runtime rules: [github bundle reference](bundles/github.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `githubProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `githubProfile` | GitHub profile | Opaque tenant-scoped operator profile; authority never comes from graph content. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Recovery repeats only the same content-bound operation and reconciles durable remote state first. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `slack.commands` {#node-slack-commands}
 
@@ -1250,9 +1250,9 @@ Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `slackProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `slackProfile` | Slack profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `slack.events` {#node-slack-events}
 
@@ -1273,9 +1273,9 @@ Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `slackProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `slackProfile` | Slack profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `slack.post-message` {#node-slack-post-message}
 
@@ -1296,14 +1296,14 @@ Canonical runtime rules: [slack bundle reference](bundles/slack.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `slackProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `channelId` | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `requestTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTextChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `slackProfile` | Slack profile | Opaque tenant-scoped operator profile; graph content cannot create provider authority. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `channelId` | Channel | May only tighten the operator profile. | `STRING` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Rate-limit retries | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `spel.decision` {#node-spel-decision}
 
@@ -1324,11 +1324,11 @@ Canonical runtime rules: [spel bundle reference](bundles/spel.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | $trueOutcome: Expression returned true.; $falseOutcome: Expression returned false. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `expression` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `trueOutcome` | `STRING` | false | true | Not declared | false | Not declared | Not declared | Not declared |
-| `falseOutcome` | `STRING` | false | false | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `expression` | Expression | Restricted SpEL expression that must return exactly Boolean. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `trueOutcome` | True outcome | Outcome emitted for true. | `STRING` | false | true | Not declared | false | Not declared | Not declared | Not declared |
+| `falseOutcome` | False outcome | Outcome emitted for false. | `STRING` | false | false | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `spel.transform` {#node-spel-transform}
 
@@ -1349,9 +1349,9 @@ Canonical runtime rules: [spel bundle reference](bundles/spel.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The bounded expression result. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `expression` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `expression` | Expression | Restricted SpEL expression; its bounded canonical result becomes the payload. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `telegram.answer.callback` {#node-telegram-answer-callback}
 
@@ -1372,14 +1372,14 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `botProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `requestTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTextChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `botProfile` | Bot profile | Opaque tenant-scoped operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this acknowledgement after a crash of unknown outcome is safe. A repeat is refused as an expired or invalid query id and leaves the first acknowledgement standing. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `telegram.delete.message` {#node-telegram-delete-message}
 
@@ -1400,13 +1400,13 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `botProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `requestTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `botProfile` | Bot profile | Opaque tenant-scoped operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this deletion after a crash of unknown outcome is safe. A repeat is answered 'message to delete not found' and the message is gone either way. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `telegram.edit.message` {#node-telegram-edit-message}
 
@@ -1427,15 +1427,15 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `botProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `requestTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTextChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxButtons` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `recovery.repeatable` | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `botProfile` | Bot profile | Opaque tenant-scoped operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxButtons` | Button limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `recovery.repeatable` | Repeatable after an unknown outcome | Whether repeating this edit after a crash of unknown outcome is safe. A replay of the same edit is answered 'message is not modified'; declare it repeatable only where nothing else edits this message. | `STRING` | false | Not declared | repeatable,not-repeatable | false | Not declared | Not declared | Not declared |
 
 ## `telegram.send` {#node-telegram-send}
 
@@ -1456,15 +1456,15 @@ Canonical runtime rules: [telegram bundle reference](bundles/telegram.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `botProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `requestTimeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxTextChars` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxMediaBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxButtons` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxConcurrency` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `retries` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `botProfile` | Bot profile | Opaque tenant-scoped operator profile. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `requestTimeoutMs` | Request timeout | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxTextChars` | Text limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxMediaBytes` | Media byte limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxButtons` | Button limit | May only tighten the operator profile. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxConcurrency` | Concurrency | May only tighten the operator profile (1–16). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `retries` | Pre-accept retries | May only tighten the operator profile (0–3). | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `template` {#node-template}
 
@@ -1485,9 +1485,9 @@ Canonical runtime rules: [core behavior reference](core-nodes.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | continue: The rendered text becomes the outgoing payload. The only outcome this node produces: an unresolvable placeholder fails the node instead. |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `template` | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `template` | Template | Text with <code>{% raw %}{{payload}}{% endraw %}</code> and optional attribute/property placeholders. | `TEXT` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `websocket.receive` {#node-websocket-receive}
 
@@ -1508,12 +1508,12 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `websocketProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxMessageBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxFragments` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `websocketProfile` | WebSocket profile | Opaque operator profile; origin, path and credentials never come from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxMessageBytes` | Maximum message bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxFragments` | Maximum fragments | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Handshake deadline (ms) | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
 
 ## `websocket.send` {#node-websocket-send}
 
@@ -1534,9 +1534,9 @@ Canonical runtime rules: [websocket bundle reference](bundles/websocket.md).
 | Runtime concurrency | default 64; ceiling 256 |
 | Outcomes | Not declared |
 
-| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
-|---|---|---:|---|---|---:|---|---|---|
-| `websocketProfile` | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxMessageBytes` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `maxFragments` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
-| `timeoutMs` | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |
+|---|---|---|---|---:|---|---|---:|---|---|---|
+| `websocketProfile` | WebSocket profile | Opaque operator profile; origin, path and credentials never come from GraphML. | `STRING` | true | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxMessageBytes` | Maximum message bytes | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `maxFragments` | Maximum fragments | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |
+| `timeoutMs` | Deadline (ms) | May only tighten the operator profile ceiling. | `INTEGER` | false | Not declared | Not declared | false | Not declared | Not declared | Not declared |

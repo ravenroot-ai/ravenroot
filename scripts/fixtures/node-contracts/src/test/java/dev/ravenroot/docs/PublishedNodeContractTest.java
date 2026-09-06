@@ -131,6 +131,23 @@ final class PublishedNodeContractTest {
     }
 
     @Test
+    void propertyPresentationMutationsChangeTheComparedContract() {
+        List<NodeTypeDescriptor> descriptors = descriptors();
+        NodeTypeDescriptor first = descriptors.get(0);
+        NodePropertyDescriptor property = first.properties().get(0);
+
+        var labelMutation = replaceProperty(first, copyProperty(property,
+                "Documentation label mutation", property.description()));
+        assertTrue(!snapshot(descriptors).equals(snapshot(replaceDescriptor(descriptors, first, labelMutation))),
+                "a property display-name change must fail the descriptor snapshot gate");
+
+        var helpMutation = replaceProperty(first, copyProperty(property,
+                property.displayName(), "Documentation help mutation"));
+        assertTrue(!snapshot(descriptors).equals(snapshot(replaceDescriptor(descriptors, first, helpMutation))),
+                "a property description change must fail the descriptor snapshot gate");
+    }
+
+    @Test
     void nonPropertyAndRuntimeConcurrencyMutationsChangeTheComparedContract() {
         List<NodeTypeDescriptor> descriptors = descriptors();
         NodeTypeDescriptor first = descriptors.get(0);
@@ -401,7 +418,7 @@ final class PublishedNodeContractTest {
     }
 
     private static String snapshot(List<NodeTypeDescriptor> descriptors) {
-        StringBuilder out = new StringBuilder("behavior\tdisplayName\tcategory\tdescription\tvisualType\tagentic\tcapabilities\tdefaultNature\tallowedNatures\tcommands\truntimeConcurrencyDefault\truntimeConcurrencyCeiling\tproperty\ttype\trequired\tdefault\tallowed\tadapterBinding\tvisibleWhen\trequiredWhen\tminimum\tmaximum\tmaximumUtf8Bytes\tmaximumItems\tmaximumItemUtf8Bytes\tdescriptorOutcomes\n");
+        StringBuilder out = new StringBuilder("behavior\tdisplayName\tcategory\tdescription\tvisualType\tagentic\tcapabilities\tdefaultNature\tallowedNatures\tcommands\truntimeConcurrencyDefault\truntimeConcurrencyCeiling\tproperty\tpropertyDisplayName\tpropertyDescription\ttype\trequired\tdefault\tallowed\tadapterBinding\tvisibleWhen\trequiredWhen\tminimum\tmaximum\tmaximumUtf8Bytes\tmaximumItems\tmaximumItemUtf8Bytes\tdescriptorOutcomes\n");
         for (NodeTypeDescriptor descriptor : descriptors.stream()
                 .sorted(Comparator.comparing(NodeTypeDescriptor::behavior)).toList()) {
             String outcomes = descriptor.outcomes().stream()
@@ -424,9 +441,12 @@ final class PublishedNodeContractTest {
                         .append(descriptor.runtimeConcurrency().defaultValue()).append('\t')
                         .append(descriptor.runtimeConcurrency().ceiling()).append('\t');
                 if (property == null) {
-                    out.append("—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t");
+                    out.append("—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t—\t");
                 } else {
-                    out.append(cell(property.name())).append('\t').append(property.type()).append('\t')
+                    out.append(cell(property.name())).append('\t')
+                            .append(cell(property.displayName())).append('\t')
+                            .append(cell(property.description())).append('\t')
+                            .append(property.type()).append('\t')
                             .append(property.required()).append('\t').append(cell(property.defaultValue())).append('\t')
                             .append(cell(String.join(",", property.allowedValues()))).append('\t')
                             .append(property.adapterBinding()).append('\t')
@@ -453,6 +473,30 @@ final class PublishedNodeContractTest {
                 descriptor.description(), descriptor.visualType(), descriptor.agentic(), properties,
                 descriptor.capabilities(), descriptor.defaultNature(), descriptor.allowedNatures(),
                 descriptor.commands(), descriptor.outcomes(), descriptor.runtimeConcurrency());
+    }
+
+    private static NodeTypeDescriptor replaceProperty(NodeTypeDescriptor descriptor,
+                                                        NodePropertyDescriptor replacement) {
+        var properties = new ArrayList<>(descriptor.properties());
+        properties.set(0, replacement);
+        return copyWithProperties(descriptor, properties);
+    }
+
+    private static List<NodeTypeDescriptor> replaceDescriptor(List<NodeTypeDescriptor> descriptors,
+                                                               NodeTypeDescriptor original,
+                                                               NodeTypeDescriptor replacement) {
+        var changed = new ArrayList<>(descriptors);
+        changed.set(changed.indexOf(original), replacement);
+        return changed;
+    }
+
+    private static NodePropertyDescriptor copyProperty(NodePropertyDescriptor property,
+                                                        String displayName,
+                                                        String description) {
+        return new NodePropertyDescriptor(property.name(), displayName, property.type(), property.required(),
+                description, property.defaultValue(), property.allowedValues(), property.adapterBinding(),
+                property.visibleWhen(), property.requiredWhen(), property.minimumValue(), property.maximumValue(),
+                property.maximumUtf8Bytes(), property.maximumItems(), property.maximumItemUtf8Bytes());
     }
 
     private static String condition(ai.ravenroot.api.catalog.PropertyCondition condition) {

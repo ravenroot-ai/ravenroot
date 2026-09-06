@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import re
 from collections import OrderedDict
 from pathlib import Path
 
@@ -31,6 +32,7 @@ BUNDLES = {
     "telegram.edit.message": "telegram", "telegram.delete.message": "telegram",
     "websocket.send": "websocket", "websocket.receive": "websocket",
 }
+TEMPLATE_LITERAL = re.compile(r"\{\{[^{}\n]+\}\}")
 
 
 def display(value: str, *, zero_is_none: bool = False) -> str:
@@ -39,9 +41,10 @@ def display(value: str, *, zero_is_none: bool = False) -> str:
     if not value or (zero_is_none and value == "0"):
         return "Not declared"
     rendered = value.replace("|", "\\|")
-    if "{{" in rendered and "}}" in rendered:
-        return "<code>{% raw %}" + rendered + "{% endraw %}</code>"
-    return rendered
+    return TEMPLATE_LITERAL.sub(
+        lambda match: "<code>{% raw %}" + match.group(0) + "{% endraw %}</code>",
+        rendered,
+    )
 
 
 def constraint(row: dict[str, str]) -> str:
@@ -131,14 +134,15 @@ def render() -> str:
                     f"| Application command allowlist | {display(descriptor['commands'])} |",
                     f"| Runtime concurrency | default {descriptor['runtimeConcurrencyDefault']}; ceiling {descriptor['runtimeConcurrencyCeiling']} |",
                     f"| Outcomes | {display(outcomes)} |", "",
-                    "| Property | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |",
-                    "|---|---|---:|---|---|---:|---|---|---|"])
+                    "| Property | Display label | Editor help | Type | Required | Default | Allowed values | Adapter | Visible when | Required when | Descriptor limits |",
+                    "|---|---|---|---|---:|---|---|---:|---|---|---|"])
         for row in rows:
             if row["property"] == "—":
-                out.append("| _No configurable properties_ | — | — | — | — | — | — | — | — |")
+                out.append("| _No configurable properties_ | — | — | — | — | — | — | — | — | — | — |")
                 continue
-            out.append("| `{property}` | `{type}` | {required} | {default} | {allowed} | {adapter} | {visible} | {required_when} | {limits} |".format(
-                property=row["property"], type=row["type"], required=row["required"],
+            out.append("| `{property}` | {label} | {help_text} | `{type}` | {required} | {default} | {allowed} | {adapter} | {visible} | {required_when} | {limits} |".format(
+                property=row["property"], label=display(row["propertyDisplayName"]),
+                help_text=display(row["propertyDescription"]), type=row["type"], required=row["required"],
                 default=display(row["default"]), allowed=display(row["allowed"]),
                 adapter=row["adapterBinding"], visible=display(row["visibleWhen"]),
                 required_when=display(row["requiredWhen"]), limits=constraint(row)))

@@ -190,13 +190,15 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await assertPinnedDialog(page, storedLocator.taskId);
     await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks');
     await expect(page.locator('[data-human-task-id]')).toHaveCount(2);
+    const recoveredScreenshot = testInfo.outputPath('real-human-task-recovered.png');
+    await page.screenshot({ path: recoveredScreenshot, fullPage: true });
     await testInfo.attach('real-human-task-recovered.png', {
-      body: await page.screenshot({ fullPage: true }), contentType: 'image/png',
+      path: recoveredScreenshot, contentType: 'image/png',
     });
 
     const decisionUrl = `${recovery.serviceOrigin}/v1/human-tasks/${encodeURIComponent(storedLocator.taskId)}`
       + `/confirmation/resolve?generation=${storedLocator.generation}`;
-    const comment = 'Reviewed after the durable server restart.';
+    const comment = 'R'.repeat(5_000);
     let forwarded = 0;
     let committed;
     await page.route(decisionUrl, async route => {

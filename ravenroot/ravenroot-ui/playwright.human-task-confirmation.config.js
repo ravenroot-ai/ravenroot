@@ -11,6 +11,7 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   timeout: 120_000,
+  preserveOutput: 'always',
   use: {
     browserName: 'chromium',
     headless: true,

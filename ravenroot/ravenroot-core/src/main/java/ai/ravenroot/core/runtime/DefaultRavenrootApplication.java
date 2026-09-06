@@ -1922,25 +1922,26 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
     public java.util.Set<UUID> reconcileUnreachableExecutions(String tenantId) {
         java.util.Objects.requireNonNull(tenantId, "tenantId");
         var runners = new java.util.LinkedHashSet<GraphRunner>();
+        var ownedByTenant = new java.util.HashSet<UUID>();
         activeExecutions.forEach((traversalId, active) -> {
             if (tenantId.equals(active.tenantId)) {
                 runners.add(active.runner);
+                ownedByTenant.add(traversalId);
             }
         });
         var reconciled = new java.util.LinkedHashSet<UUID>();
         for (GraphRunner runner : runners) {
             reconciled.addAll(runner.reconcileUnreachableTraversals());
         }
-        // Narrowed to this tenant a second time, deliberately. A runner is selected because it hosts
-        // one of this tenant's traversals, and it reconciles every unreachable traversal it holds --
-        // so an id it returns is this tenant's by construction today, and this line is what keeps
-        // that true if a runner is ever shared. Reporting another tenant's traversal id to this
-        // caller would be a cross-tenant disclosure, which is not a risk worth leaving to an
-        // invariant held elsewhere.
-        reconciled.removeIf(traversalId -> {
-            ActiveExecution active = activeExecutions.get(traversalId);
-            return active != null && !tenantId.equals(active.tenantId);
-        });
+        // Narrowed against the membership snapshot taken above, not against a re-read of the map.
+        // Re-reading cannot decide this: reconciliation ends the traversal, and the terminal seam
+        // that removes its entry frequently runs synchronously inside the call above -- so by this
+        // line the entry for a reconciled id is usually already gone, and a filter that keeps an id
+        // whose entry it cannot find keeps every id unconditionally. That is a check that reads as
+        // defence and performs as nothing. The snapshot names exactly this tenant's traversals as
+        // they were when the runners were chosen, which is the same instant the selection was made
+        // from, so the two agree by construction.
+        reconciled.retainAll(ownedByTenant);
         return java.util.Set.copyOf(reconciled);
     }
 

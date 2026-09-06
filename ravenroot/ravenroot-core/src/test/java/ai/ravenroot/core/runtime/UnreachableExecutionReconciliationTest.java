@@ -278,6 +278,151 @@ class UnreachableExecutionReconciliationTest {
     }
 
     /**
+     * The operator-facing composition: a stop, then the forced teardown, with no reconciliation call
+     * in between — and the ending is still recorded as the operator's action.
+     *
+     * <p>This is the sequence {@code DefaultRavenrootApplication.cancelTraversal} actually performs.
+     * It signals the runner and then closes it, because a cooperative stop cannot reach a stalled
+     * traversal on its own; the teardown is the half that ends one. Before this change that teardown
+     * stranded the parked branch with a bare join failure carrying no cause, so an operator who
+     * deliberately stopped a stuck execution read an unqualified {@code FAILED} back — a fault they
+     * did not cause, on the one path they were told to use.</p>
+     *
+     * <p>Asserted separately from the reconciliation path on purpose. The two paths reach the same
+     * traversal through different code, and a fix to one that left the other reporting a fault would
+     * pass every other test here while the operator-reachable behaviour stayed wrong.</p>
+     */
+    @Test
+    void aStoppedStuckTraversalIsRecordedAsCancelledByTheForcedTeardownToo() throws Exception {
+        var store = new StalledJoinStore(new InMemoryJoinStore(), 2);
+        UUID traversalId = UUID.randomUUID();
+        var b1Gate = new CompletableFuture<NodeResult>();
+
+        var manager = GraphManager.from(JoinMiniGraphs.fanIn(2));
+        var runner = new GraphRunner(manager, engine, branchesWithGatedB1(b1Gate), monitor,
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store,
+                java.time.Clock.systemUTC());
+        try {
+            var execution = runner.execute(TestIdentities.TENANT_A, traversalId, "in", "v1")
+                    .toCompletableFuture();
+            awaitParkedBranchCount(runner, 1);
+            b1Gate.complete(NodeResult.continueWith("from-b1"));
+            assertTrue(store.awaitStall(5_000), "the condition must be built before the stop");
+
+            assertTrue(runner.cancelTraversal(traversalId));
+            assertFalse(execution.isDone(), "the cooperative stop alone cannot end a stalled traversal");
+
+            // No reconcileUnreachableTraversals() here. This is the teardown half of the
+            // application's own cancel, and it has to carry the operator's intent by itself.
+            runner.close();
+
+            ExecutionException ended = assertThrows(ExecutionException.class,
+                    () -> execution.get(5, TimeUnit.SECONDS),
+                    "the forced teardown must end the traversal the stop could not reach");
+            assertEquals(ExecutionTerminationReason.CANCELLED,
+                    ExecutionTermination.reasonOf(ended.getCause()),
+                    "the operator stopped this execution, so the record must say so rather than "
+                            + "report a fault they did not cause");
+        } finally {
+            runner.close();
+            manager.close();
+        }
+    }
+
+    /**
+     * A shutdown that catches a traversal nobody asked to stop is not a cancellation.
+     *
+     * <p>The mirror of the test above, and the reason the verdict is conditional rather than applied
+     * to everything the teardown reaches: labelling every traversal a shutdown happens to catch as
+     * cancelled would fabricate an operator action nobody took, which is the same class of defect in
+     * the opposite direction.</p>
+     */
+    @Test
+    void aShutdownIsNotACancellationForATraversalNobodyStopped() throws Exception {
+        var store = new StalledJoinStore(new InMemoryJoinStore(), 2);
+        UUID traversalId = UUID.randomUUID();
+        var b1Gate = new CompletableFuture<NodeResult>();
+
+        var manager = GraphManager.from(JoinMiniGraphs.fanIn(2));
+        var runner = new GraphRunner(manager, engine, branchesWithGatedB1(b1Gate), monitor,
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store,
+                java.time.Clock.systemUTC());
+        try {
+            var execution = runner.execute(TestIdentities.TENANT_A, traversalId, "in", "v1")
+                    .toCompletableFuture();
+            awaitParkedBranchCount(runner, 1);
+            b1Gate.complete(NodeResult.continueWith("from-b1"));
+            assertTrue(store.awaitStall(5_000), "the condition must be built before the shutdown");
+
+            // Reconciled first, so this test does not depend on close() completing against a store
+            // that never answers -- which is a property of the shutdown bound, not of this claim.
+            assertEquals(Set.of(traversalId), runner.reconcileUnreachableTraversals());
+            ExecutionException ended = assertThrows(ExecutionException.class,
+                    () -> execution.get(5, TimeUnit.SECONDS));
+
+            assertEquals(ExecutionTerminationReason.UNREACHABLE,
+                    ExecutionTermination.reasonOf(ended.getCause()),
+                    "nobody stopped this traversal, so its ending must not be recorded as an "
+                            + "operator action");
+        } finally {
+            runner.close();
+            manager.close();
+        }
+    }
+
+    /**
+     * A shutdown that reaches a traversal nobody stopped does not end it as a cancellation.
+     *
+     * <p>The direct guard on the hazard the fix above creates. {@code close()} cancels every
+     * traversal it holds before tearing them down, so the membership that answers "who did an
+     * operator stop" is true only if it is read before that loop. Read after it, every traversal a
+     * shutdown catches looks stopped, and a stuck one would be recorded as an operator action nobody
+     * took — and, because the verdict also shortens the release, the runner's own leak diagnostics
+     * would be cleared away at the moment they exist to report.</p>
+     *
+     * <p>What is asserted is the absence of a fabricated ending: with nobody having asked to stop it,
+     * this traversal is left unsettled, exactly as a shutdown has always left it, rather than closed
+     * out under a reason that would be untrue. The other half of the same defect — a shortened
+     * release clearing away the runner's leak diagnostics — is asserted by
+     * {@code JoinRetainedStateTest#reportsTheLiveTimeoutItCouldNotRelease}, whose fixture parks no
+     * branch at all and so keeps its coordinator for the whole shutdown; this one's does reach
+     * {@code release}, so the coordinator count here says nothing about that.</p>
+     */
+    @Test
+    void aShutdownDoesNotEndATraversalNobodyStoppedAsACancellation() throws Exception {
+        var store = new StalledJoinStore(new InMemoryJoinStore(), 2);
+        UUID traversalId = UUID.randomUUID();
+        var b1Gate = new CompletableFuture<NodeResult>();
+
+        var manager = GraphManager.from(JoinMiniGraphs.fanIn(2));
+        var runner = new GraphRunner(manager, engine, branchesWithGatedB1(b1Gate), monitor,
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store,
+                java.time.Clock.systemUTC(), java.time.Duration.ofMillis(250));
+        try {
+            var execution = runner.execute(TestIdentities.TENANT_A, traversalId, "in", "v1")
+                    .toCompletableFuture();
+            awaitParkedBranchCount(runner, 1);
+            b1Gate.complete(NodeResult.continueWith("from-b1"));
+            assertTrue(store.awaitStall(5_000), "the condition must be built before the shutdown");
+
+            // No cancelTraversal, no reconcile. Only the shutdown, which cancels internally.
+            runner.close();
+
+            // Under the defect this guards, the shutdown's own internal cancel is mistaken for an
+            // operator's, the traversal is stranded with a cancellation verdict, its release is
+            // shortened past the drain, and this future settles -- reporting an operator stop that
+            // nobody asked for. Unsettled is therefore the correct outcome here, and it is the exact
+            // observation that separates the two behaviours.
+            assertFalse(execution.isDone(),
+                    "a shutdown must not manufacture an ending for a traversal nobody stopped: its "
+                            + "own internal cancel is not an operator's act");
+        } finally {
+            runner.close();
+            manager.close();
+        }
+    }
+
+    /**
      * An operator stop and a reconciliation can reach the same traversal together, and each attaches
      * its own cause on the way out. The classifier decides by rank rather than by which of the two
      * happened to wrap the other, so the reason a reader sees does not depend on a race.

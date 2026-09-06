@@ -44,12 +44,6 @@ A hold is written down when the traversal is a single branch at a single complet
 
 ## Cancellation event
 
-An execution ended by reconciliation publishes `EXECUTION_FAILED`, not a terminal type of its own.
-That is not an omission: a cancellation left the failure series because it is not a fault, and this is
-one. Nothing about an event-type consumer needs to change for it, and the distinction between "a node
-broke" and "this traversal could never settle" is carried by `terminationReason` on every read and by
-the failure classification on the event.
-
 A cancelled traversal publishes `EXECUTION_CANCELLED` instead of `EXECUTION_COMPLETED` or
 `EXECUTION_FAILED`. It is a traversal-terminal event with the same guarantees as the other two: exactly
 one of the three per traversal, never followed by `EXECUTION_PAUSED`, published after the traversal has
@@ -71,6 +65,12 @@ The event's `publicReason` field is a transitional exception to that separation:
 window it still carries the leaked internal exception class name that predated `terminationReason`,
 so a consumer that was matching on that name is not blinded by this change. The event type is the
 contract going forward — do not build new matching logic against `publicReason`'s text.
+
+An execution ended by reconciliation publishes `EXECUTION_FAILED`, not a terminal type of its own.
+That is not an omission: a cancellation left the failure series because it is not a fault, and this is
+one. Nothing about an event-type consumer needs to change for it, and the distinction between "a node
+broke" and "this traversal could never settle" is carried by `terminationReason` on every read and by
+the failure classification on the event.
 
 ## Event delivery
 

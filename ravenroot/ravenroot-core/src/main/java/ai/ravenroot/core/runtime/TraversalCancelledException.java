@@ -23,16 +23,38 @@ public final class TraversalCancelledException extends RuntimeException {
     private final String refusedNodeId;
 
     TraversalCancelledException(UUID traversalId, String refusedNodeId) {
-        super("Traversal " + traversalId + " was cancelled before node '" + refusedNodeId + "' was invoked");
+        super(describe(traversalId, refusedNodeId));
         this.traversalId = traversalId;
         this.refusedNodeId = refusedNodeId;
+    }
+
+    /**
+     * Says which hop was refused when one is known, and says nothing about a hop when none is.
+     *
+     * <p>A stop that reaches a traversal between two hops always names the one it refused. A stop
+     * that lands on a traversal stalled with no hop to refuse — delivered by the forced teardown
+     * rather than by the dispatch gate — has no such node, and rendering the absence as
+     * {@code node 'null'} would put a node name that does not exist into an operator's incident
+     * report. Stating the absence is the honest form of the same message.</p>
+     */
+    private static String describe(UUID traversalId, String refusedNodeId) {
+        return refusedNodeId == null
+                ? "Traversal " + traversalId + " was cancelled while no hop was pending"
+                : "Traversal " + traversalId + " was cancelled before node '" + refusedNodeId
+                        + "' was invoked";
     }
 
     public UUID traversalId() {
         return traversalId;
     }
 
-    /** The first hop that did not run. Every node before it did, and its effects stand. */
+    /**
+     * The first hop that did not run. Every node before it did, and its effects stand.
+     *
+     * <p>{@code null} when the stop reached a traversal that had no pending hop to refuse — a
+     * traversal stalled at a fan-in, ended by the forced teardown rather than by the dispatch gate.
+     * The cancellation is no less real; there is simply no hop it can name.</p>
+     */
     public String refusedNodeId() {
         return refusedNodeId;
     }

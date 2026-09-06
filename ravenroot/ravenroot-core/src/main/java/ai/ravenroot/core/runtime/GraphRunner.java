@@ -4157,6 +4157,13 @@ public final class GraphRunner implements AutoCloseable {
         // Set before the first traversal is touched. Everything below releases holds through paths
         // whose reason is ENDED, and none of those is a decision about the traversal; see the field.
         shuttingDown = true;
+        // Snapshotted BEFORE the loop below, and the order is load-bearing. That loop cancels every
+        // traversal this runner holds, so after it `cancelledTraversals` names all of them and can no
+        // longer answer "which of these did an operator ask to stop" -- the question the forced
+        // teardown has to answer if it is to record an operator's act as theirs without inventing one
+        // for a traversal a shutdown merely happened to catch. Read here, it names exactly the
+        // traversals somebody stopped before this shutdown began.
+        Set<UUID> operatorStopped = Set.copyOf(cancelledTraversals);
         coordinators.keySet().forEach(traversalId -> cancelTraversal(traversalId, GateRelease.ON_CALLER));
         // Refuse every queued admission before draining traversal continuations. Active leases are
         // released by their attempt handlers; queued hops fail immediately and cannot spawn actors.
@@ -4185,7 +4192,7 @@ public final class GraphRunner implements AutoCloseable {
         // what keeps the shutdown bound meaningful -- a branch asleep in a backoff is not doing work
         // the engine's stop can drain, so waiting for it would be waiting on a timer.
         backoffWaits.keySet().forEach(this::cancelBackoffs);
-        releaseTraversals();
+        releaseTraversals(operatorStopped);
         // Every worker instance still serving an invocation is released before the stop below, so the
         // stop it escalates from is a stop of things that are supposed to still be here. A worker
         // whose traversal was abandoned by releaseTraversals() has nobody left to release it, and
@@ -4240,10 +4247,13 @@ public final class GraphRunner implements AutoCloseable {
      * against it could see anything. The entry is retired when the drain completes — including
      * after the bound has expired — and in the worst case dies with the runner.</p>
      */
-    private void releaseTraversals() {
+    private void releaseTraversals(Set<UUID> operatorStopped) {
         var pending = new ArrayList<Termination>();
         coordinators.forEach((traversalId, coordinator) -> pending.add(
-                new Termination(traversalId, coordinator, coordinator.terminate().toCompletableFuture())));
+                new Termination(traversalId, coordinator,
+                        coordinator.terminate(operatorStopped.contains(traversalId)
+                                        ? operatorStop(traversalId, coordinator) : null)
+                                .toCompletableFuture())));
         // A drain that lands after the bound still retires its own entry, so a slow store leaves a
         // temporary observation rather than a permanent one.
         pending.forEach(termination -> termination.stage().whenComplete((ignored, error) ->
@@ -4264,7 +4274,39 @@ public final class GraphRunner implements AutoCloseable {
         }
     }
 
-    /** One in-flight traversal being released by {@link #releaseTraversals()}. */
+    /**
+     * The verdict for a traversal an operator asked to stop and that never read the refusal.
+     *
+     * <h2>The one case a shutdown must not report as a fault</h2>
+     * <p>A traversal that was asked to stop and is still here has, by construction, not read the
+     * refusal — a cooperative stop refuses the next hop, and this traversal never reached one. That
+     * is the "stalled" case {@link #cancelTraversal(UUID)}'s own contract hands to the forced
+     * teardown, and this is the forced teardown. Before this, such a traversal was stranded with a
+     * bare join failure carrying no cause and was therefore recorded as an unqualified {@code FAILED}
+     * — an operator's deliberate stop, reported back to them as an incident, on the very path
+     * {@code DefaultRavenrootApplication.cancelTraversal} composes to make cancellation reach a
+     * stalled execution at all.</p>
+     *
+     * <p>A traversal that <em>did</em> read the refusal is not here: it ended through the ordinary
+     * terminal path, which already recorded the cancellation, and {@code terminate} is once-only, so
+     * a verdict offered to it now is discarded rather than able to overwrite anything.</p>
+     *
+     * <p>Everything else releases with no verdict, exactly as before. A shutdown is not a
+     * cancellation, and labelling every traversal a shutdown happens to catch as one would fabricate
+     * an operator action nobody took — the mirror of the defect this fixes, and a live hazard rather
+     * than a theoretical one: {@link #close()} cancels every traversal it holds on its way past, so
+     * the membership that answers "who was stopped" has to be read before that loop runs, not after.
+     * </p>
+     */
+    private TraversalCancelledException operatorStop(UUID traversalId, JoinCoordinator coordinator) {
+        // Named against a join the traversal is actually parked at when there is one, which is the
+        // truthful reading of "the first hop that did not run": the parked branch was waiting to pass
+        // through it. A traversal stalled somewhere else carries no node name rather than a borrowed
+        // or invented one.
+        return new TraversalCancelledException(traversalId, coordinator.anyParkedJoinNodeId());
+    }
+
+    /** One in-flight traversal being released by {@link #releaseTraversals(Set)}. */
     private record Termination(UUID traversalId, JoinCoordinator coordinator,
                                CompletableFuture<Void> stage) {
     }
@@ -4497,8 +4539,13 @@ public final class GraphRunner implements AutoCloseable {
      * teardown. So cancelling a stuck execution now genuinely ends it, and ends it as the deliberate
      * act it was.</p>
      *
-     * @return the traversals this call ended, empty when none was unreachable. A traversal appears
-     *         here at most once across every call: the second call finds its coordinator gone.
+     * @return the traversals this call reconciled, empty when none was unreachable. A traversal
+     *         appears here at most once across every call, because the second call finds its
+     *         coordinator gone. It names the traversals this call acted on rather than asserting
+     *         that this call is what ended each of them: a concurrent cancellation or shutdown may
+     *         have ended one in the same instant, and claiming otherwise would be a race dressed up
+     *         as a return value. What the caller may rely on is that every traversal named here is
+     *         ended.
      */
     public Set<UUID> reconcileUnreachableTraversals() {
         var reconciled = new LinkedHashSet<UUID>();
@@ -4529,10 +4576,12 @@ public final class GraphRunner implements AutoCloseable {
             //
             // The node named is a join the traversal is actually parked at, which is the truthful
             // reading of "the first hop that did not run": the branch was waiting to pass through it.
-            Throwable verdict = cancelledTraversals.contains(traversalId)
-                    ? new TraversalCancelledException(traversalId, coordinator.anyParkedJoinNodeId())
-                    : new TraversalUnreachableException(traversalId, parked);
-            coordinator.terminate(verdict);
+            // `cancelledTraversals` answers "did somebody ask to stop this" honestly here, unlike
+            // inside close(), which cancels every traversal it holds before tearing them down and so
+            // has to be handed the set as it stood beforehand.
+            coordinator.terminate(cancelledTraversals.contains(traversalId)
+                    ? operatorStop(traversalId, coordinator)
+                    : new TraversalUnreachableException(traversalId, parked));
             reconciled.add(traversalId);
         }
         return Set.copyOf(reconciled);

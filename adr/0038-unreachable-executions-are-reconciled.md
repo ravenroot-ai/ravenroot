@@ -62,14 +62,23 @@ race rather than a classification. Cancellation is the stronger statement about 
 reader told "this could never settle" about a deliberate stop would go looking for a defect that does
 not exist.
 
-**A traversal that was already asked to stop is reconciled as a cancellation, and this is where that
-stop finally takes effect.** Cancelling an unreachable traversal has always reported success and
-changed nothing, because a cooperative stop refuses the next hop and there is no next hop to refuse —
-the "stalled" case [ADR 0012](0012-engine-supervision-cancellation-and-drain.md)'s cooperative model
-hands to the forced teardown. Reconciliation is that teardown, so it honours the request rather than
-discarding it, and records the deliberate act rather than the fault it was not. The cancellation
-names a join the traversal is actually parked at, which is the truthful reading of "the first hop
-that did not run".
+**A traversal that was already asked to stop is ended as a cancellation, on both paths that can end
+one.** A cooperative stop refuses the traversal's next hop, and an unreachable traversal has none to
+refuse — the "stalled" case [ADR 0012](0012-engine-supervision-cancellation-and-drain.md)'s
+cooperative model hands to the forced teardown. Such a traversal was already being ended, by that
+teardown; what it was not doing was ending as a cancellation. It was stranded with a bare join
+failure carrying no cause, and so recorded as an unqualified `FAILED` — an operator's deliberate stop
+reported back to them as an incident, on precisely the path the application composes to make
+cancellation reach a stalled execution. The verdict is therefore supplied by the forced teardown as
+well as by reconciliation, because the teardown is the half an operator's cancel actually reaches.
+The cancellation names a join the traversal is parked at when there is one, which is the truthful
+reading of "the first hop that did not run", and names no node when there is none rather than
+inventing one.
+
+**A shutdown that catches a traversal nobody asked to stop is not a cancellation.** The verdict is
+conditional on a stop having been requested, because labelling every traversal a shutdown happens to
+reach as cancelled would fabricate an operator action nobody took — the same defect in the opposite
+direction.
 
 **Reconciliation is caller-invoked and is not a background sweep.** A sweep needs a period, and a
 period over this condition is an elapsed-time guess — which is precisely what the criterion exists to
@@ -104,10 +113,11 @@ stay open exactly as before. The discard stays armed and still runs if the store
   armed, and no branch parked — is never ended by it. A traversal that settles between the criterion
   reading it and the recovery acting is left alone; it reached an outcome, which is the result the
   recovery exists to produce.
-- **Cancelling a stuck execution now ends it.** Before this decision, the request succeeded and the
-  execution stayed live for the life of the process. Where a stop was already asked for,
-  reconciliation ends the execution with `terminationReason == CANCELLED` rather than `UNREACHABLE`,
-  so an operator's deliberate act is never reported back to them as an incident.
+- **Cancelling a stuck execution is now recorded as a cancellation.** It already ended — the forced
+  teardown the application composes behind the stop saw to that — but it ended with no termination
+  reason at all, which under [ADR 0035](0035-cancellation-as-a-distinct-termination-reason.md)'s own
+  reading rule is an ordinary failure. It now carries `terminationReason == CANCELLED`, so an
+  operator's deliberate act is not reported back to them as an incident.
 - **Effects issued before the traversal became unreachable are not undone and cannot be**, the same
   concession [ADR 0012](0012-engine-supervision-cancellation-and-drain.md) states for cancellation.
   Reconciliation records what the traversal became; it does not roll back what it did.

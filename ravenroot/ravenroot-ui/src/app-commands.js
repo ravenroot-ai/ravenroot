@@ -38,6 +38,7 @@ function localizeCommand(command, t) {
 export function createAppCommands(actions, { t = uiText } = {}) {
   const active = context => context.hasDocument;
   const editable = context => context.editable;
+  const documentEditable = context => context.documentEditable;
   const modifiable = context => context.canModify;
   const modifying = context => context.modifyEnabled;
   const authoring = context => context.modifyEnabled && context.canModify;
@@ -68,7 +69,11 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     { id: 'file.open', group: 'document', order: 20,
       placements: ['menu.file', 'toolbar.file'], execute: actions.openFile },
     { id: 'file.replaceActive', group: 'document', order: 30,
-      placements: ['menu.file'], execute: actions.replaceActive, isEnabled: active },
+      placements: ['menu.file'], execute: actions.replaceActive,
+      isEnabled: context => active(context) && context.documentMode === 'draft' },
+    { id: 'file.fork', group: 'document', order: 35,
+      placements: ['menu.file'], execute: actions.forkDocument,
+      isEnabled: context => active(context) && context.documentMode !== 'draft' },
     { id: 'file.save', group: 'save', order: 40,
       placements: ['menu.file', 'toolbar.editor', 'help'], execute: actions.save,
       isEnabled: context => editable(context) && !context.layoutBusy,
@@ -79,11 +84,12 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     { id: 'edit.undo', group: 'history', order: 10,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.undo,
-      isEnabled: context => context.canUndo, shortcuts: [global({ key: 'z', primary: true })],
+      isEnabled: context => context.documentEditable && context.canUndo,
+      shortcuts: [global({ key: 'z', primary: true })],
     },
     { id: 'edit.redo', group: 'history', order: 20,
       placements: ['menu.edit', 'toolbar.editor', 'help'], execute: actions.redo,
-      isEnabled: context => context.canRedo,
+      isEnabled: context => context.documentEditable && context.canRedo,
       shortcuts: [global({ key: 'z', primary: true, shift: true }), global({ key: 'y', ctrl: true })],
     },
     { id: 'edit.modify', group: 'mode', order: 30, kind: 'checkbox',
@@ -184,22 +190,27 @@ export function createAppCommands(actions, { t = uiText } = {}) {
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,
-      isEnabled: context => context.editable && (!context.running || context.executionUnknown === true),
+      isEnabled: context => context.editable && context.tenantAuthority
+        && (!context.running || context.executionUnknown === true),
       shortcuts: [global({ key: 'Enter', primary: true })],
     },
     { id: 'run.start', group: 'execution', order: 20,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.run,
-      isEnabled: context => context.editable && (!context.running || context.executionUnknown === true),
+      isEnabled: context => context.editable && context.tenantAuthority
+        && (!context.running || context.executionUnknown === true),
     },
     { id: 'run.pause', group: 'execution', order: 30,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.pause,
-      isEnabled: context => Boolean(context.transientRunning && !context.sourceSessionActive) },
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.sourceSessionActive) },
     { id: 'run.stop', group: 'execution', order: 40,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.stop,
-      isEnabled: context => Boolean(context.transientRunning || context.sourceSessionActive) },
+      isEnabled: context => Boolean(context.tenantAuthority
+        && (context.transientRunning || context.sourceSessionActive)) },
     { id: 'run.forceStop', group: 'execution', order: 50,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.forceStop,
-      isEnabled: context => Boolean(context.transientRunning && !context.sourceSessionActive) },
+      isEnabled: context => Boolean(context.tenantAuthority
+        && context.transientRunning && !context.sourceSessionActive) },
     { id: 'run.authenticate', group: 'connection', order: 60,
       placements: ['menu.run', 'toolbar.runtime'], execute: actions.authenticate },
     { id: 'run.forgetToken', group: 'connection', order: 70,

@@ -21,7 +21,7 @@ describe('runtime configuration client', () => {
     MAX_GRAPH_DOCUMENT_BYTES,
   ])('accepts a positive safe byte limit within the supported ceiling: %s', graphDocumentMaxBytes => {
     expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes })).toEqual({
-      schemaVersion: 1, graphDocumentMaxBytes,
+      schemaVersion: 1, graphDocumentMaxBytes, workspace: null,
     });
   });
 
@@ -50,13 +50,23 @@ describe('runtime configuration client', () => {
       fetchImpl, accessToken: 'token',
     });
 
-    await expect(client.configuration()).resolves.toEqual(configuration);
+    await expect(client.configuration()).resolves.toEqual({ ...configuration, workspace: null });
     expect(fetchImpl).toHaveBeenCalledWith('https://runtime.example/v1/configuration', {
       method: 'GET',
       headers: { Accept: 'application/json', Authorization: 'Bearer token' },
       credentials: 'omit',
       cache: 'no-store',
     });
+  });
+
+  it('retains the exact opaque workspace tenant and rejects malformed scope', () => {
+    const tenantId = ' tenant/\n"opaque" ';
+    expect(validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
+      workspace: { tenantId } }).workspace).toEqual({ tenantId });
+    for (const workspace of [{}, { tenantId: '' }, { tenantId: 42 }, { tenantId: 'a', extra: true }]) {
+      expect(() => validateRuntimeConfiguration({ schemaVersion: 1, graphDocumentMaxBytes: 4096,
+        workspace })).toThrow(/workspace scope is malformed/);
+    }
   });
 
   it('retains the complete Human Task capability and rejects an incomplete one', () => {

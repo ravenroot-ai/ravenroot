@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class ServedConfigurationTest {
 
@@ -18,6 +19,18 @@ class ServedConfigurationTest {
 
         assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":33554432}",
                 ServedConfiguration.from(graphMl).json());
+        assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":33554432,\"workspace\":{\"tenantId\":\"tenant-a\"}}",
+                ServedConfiguration.from(graphMl).json("tenant-a"));
+    }
+
+    @Test
+    void serializesTheAuthenticatedWorkspaceTenantAsAJsonString() {
+        var configuration = ServedConfiguration.from(GraphMlLimits.DEFAULTS);
+
+        assertEquals("{\"schemaVersion\":1,\"graphDocumentMaxBytes\":10485760,\"workspace\":{\"tenantId\":\"tenant-\\\"\\\\\\n\\u0001\"}}",
+                configuration.json("tenant-\"\\\n\u0001"));
+        assertTrue(configuration.json(ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS, "tenant-a")
+                .contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"));
     }
 
     @Test

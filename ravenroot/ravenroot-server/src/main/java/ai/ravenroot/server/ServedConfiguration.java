@@ -2,6 +2,7 @@ package ai.ravenroot.server;
 
 import ai.ravenroot.api.persistence.GraphDefinitionStore;
 import ai.ravenroot.core.graph.GraphMlLimits;
+import ai.ravenroot.server.audit.JsonStrings;
 
 import java.util.Objects;
 
@@ -27,16 +28,42 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
     }
 
     String json() {
-        return "{\"schemaVersion\":" + schemaVersion
-                + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes + "}";
+        return limitsJson() + "}";
+    }
+
+    /**
+     * The connected browser's server-authoritative workspace scope.
+     *
+     * <p>The tenant value comes from the authenticated request boundary, never from browser input.
+     * It is an equality key for browser-local workspace persistence, not an authorization credential
+     * and not a value the UI may interpret.</p>
+     */
+    String json(String tenantId) {
+        return limitsJson() + workspaceJson(tenantId) + "}";
     }
 
     String json(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        return limitsJson() + humanTasksJson(humanTaskPolicy) + "}";
+    }
+
+    String json(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy, String tenantId) {
+        return limitsJson() + workspaceJson(tenantId) + humanTasksJson(humanTaskPolicy) + "}";
+    }
+
+    private String limitsJson() {
+        return "{\"schemaVersion\":" + schemaVersion
+                + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes;
+    }
+
+    private static String workspaceJson(String tenantId) {
+        return ",\"workspace\":{\"tenantId\":\""
+                + JsonStrings.escape(Objects.requireNonNull(tenantId, "tenantId")) + "\"}";
+    }
+
+    private static String humanTasksJson(ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
         Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         var confirmation = humanTaskPolicy.confirmation();
-        return "{\"schemaVersion\":" + schemaVersion
-                + ",\"graphDocumentMaxBytes\":" + graphDocumentMaxBytes
-                + ",\"humanTasks\":{\"schemaVersion\":1"
+        return ",\"humanTasks\":{\"schemaVersion\":1"
                 + ",\"confirmationPresentationVersions\":[1]"
                 + ",\"confirmationPromptMaxUtf8Bytes\":" + confirmation.maxPromptUtf8Bytes()
                 + ",\"confirmationActionLabelMaxUtf8Bytes\":" + confirmation.maxActionLabelUtf8Bytes()
@@ -47,4 +74,5 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
                 + ",\"attentionPageSizeMax\":" + confirmation.attentionMaxPageSize()
                 + "}}";
     }
+
 }

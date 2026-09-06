@@ -361,7 +361,7 @@ class ManagedIngressDeadlineTest {
                     true, hooks);
             var server = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), 0);
             registry.bind(server, next -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+                AuthenticatedPrincipalAttribute.install(exchange,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer",
                                 "tenant", Set.of(), Set.of("invoke")));
                 next.handle(exchange);

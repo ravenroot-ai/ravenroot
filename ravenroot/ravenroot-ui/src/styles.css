@@ -1381,6 +1381,15 @@
        strip appears the moment a second document exists — tiled beside it or hidden behind it. */
     #cy:not(.panes-titled) .doc-pane-header { display: none; }
     .doc-pane-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .doc-pane-origin {
+      flex: 0 0 auto;
+      padding: 1px 6px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      color: var(--text-muted);
+      font-size: 10px;
+      white-space: nowrap;
+    }
     .doc-pane-modified { flex: 0 0 auto; font-weight: 700; color: var(--warn); }
     .doc-pane-close {
       flex: 0 0 24px; width: 24px; height: 24px; margin-left: auto; padding: 0;

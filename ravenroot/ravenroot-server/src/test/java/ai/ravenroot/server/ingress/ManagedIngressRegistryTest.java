@@ -80,7 +80,7 @@ class ManagedIngressRegistryTest {
         try (registry) {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME, new AuthenticatedPrincipal("user", AuthenticatedPrincipal.Type.USER, "issuer", "tenant", Set.of(), Set.of("invoke")));
+                AuthenticatedPrincipalAttribute.install(exchange, new AuthenticatedPrincipal("user", AuthenticatedPrincipal.Type.USER, "issuer", "tenant", Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
             });
             var old = new IngressRouteOwner("example.oas", "tenant", "deployment", "node", 1);
@@ -103,7 +103,7 @@ class ManagedIngressRegistryTest {
         try (registry) {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME, new AuthenticatedPrincipal("user", AuthenticatedPrincipal.Type.USER, "issuer", "tenant", Set.of(), Set.of("invoke")));
+                AuthenticatedPrincipalAttribute.install(exchange, new AuthenticatedPrincipal("user", AuthenticatedPrincipal.Type.USER, "issuer", "tenant", Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
             });
             registry.authorityFor(new IngressRouteOwner("example.oas", "tenant", "deployment", "node", 1))
@@ -243,7 +243,7 @@ class ManagedIngressRegistryTest {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
                 String tenant = exchange.getRequestHeaders().getFirst("X-Test-Tenant");
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+                AuthenticatedPrincipalAttribute.install(exchange,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", tenant,
                                 Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -318,7 +318,7 @@ class ManagedIngressRegistryTest {
         try (registry) {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+                AuthenticatedPrincipalAttribute.install(exchange,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
                                 Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -432,7 +432,7 @@ class ManagedIngressRegistryTest {
         try (registry) {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+                AuthenticatedPrincipalAttribute.install(exchange,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
                                 Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -513,7 +513,7 @@ class ManagedIngressRegistryTest {
         try {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+                AuthenticatedPrincipalAttribute.install(exchange,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
                                 Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -587,7 +587,7 @@ class ManagedIngressRegistryTest {
         try (registry) {
             var server = httpServer();
             registry.bind(server, handler -> exchange -> {
-                exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+                AuthenticatedPrincipalAttribute.install(exchange,
                         new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", "tenant",
                                 Set.of(), Set.of("invoke")));
                 handler.handle(exchange);
@@ -786,7 +786,7 @@ class ManagedIngressRegistryTest {
             throws Exception {
         var server = httpServer();
         registry.bind(server, handler -> exchange -> {
-            exchange.setAttribute(AuthenticatedPrincipalAttribute.NAME,
+            AuthenticatedPrincipalAttribute.install(exchange,
                     new AuthenticatedPrincipal("subject", AuthenticatedPrincipal.Type.USER, "issuer", tenant,
                             Set.of(), Set.of("invoke")));
             handler.handle(exchange);

@@ -170,8 +170,15 @@ final class Transactions {
                     // own open() resets it on every acquisition, so it would never notice - but the
                     // module accepts whatever DataSource a deployment hands it, and a pool that does
                     // not reset on return would lend a REPEATABLE READ session to the next borrower,
-                    // who may not be Ravenroot at all. Leaving a connection as it was found is cheap
-                    // and is not this adapter's judgement call to skip.
+                    // who may not be Ravenroot at all. Handing a connection back at the server's
+                    // default is cheap and is not this adapter's judgement call to skip.
+                    //
+                    // ORDER-SENSITIVE: this runs immediately after the commit or the rollback, and
+                    // nothing may be placed between them. PostgreSQL refuses an isolation change in
+                    // the middle of a transaction, and restoreReadCommitted swallows that refusal
+                    // because it has no better answer on a failing path - so a statement inserted
+                    // above would not break the build or fail a test, it would silently stop the
+                    // restore from happening at all.
                     restoreReadCommitted(connection);
                 }
             }
@@ -213,6 +220,15 @@ final class Transactions {
         return Math.max(1L, value);
     }
 
+    /**
+     * Returns the connection to {@code READ COMMITTED}, which is the server's default and this
+     * adapter's own level for everything else.
+     *
+     * <p>Not literally "as it was found": {@link #open} already overwrites a borrowed connection's
+     * level unconditionally, so a pool lending a {@code SERIALIZABLE} session gets it back at
+     * {@code READ COMMITTED} either way. What this closes is the case that would otherwise be this
+     * adapter's own doing — a session left at the stricter level by a read that raised it.</p>
+     */
     private static void restoreReadCommitted(Connection connection) {
         try {
             connection.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);

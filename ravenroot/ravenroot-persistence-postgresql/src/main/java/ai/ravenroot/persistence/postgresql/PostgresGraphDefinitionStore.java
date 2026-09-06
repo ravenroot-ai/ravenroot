@@ -220,19 +220,15 @@ public final class PostgresGraphDefinitionStore implements GraphDefinitionStore 
             requireTenantId(tenantId);
             require(identity != null, "identity cannot be null");
             try {
-                return // readConsistent, not readOnly: this reads the binding and then the definition it
-                // names, and at READ COMMITTED the second statement can miss a definition the first
-                // still pointed at, which reads as a dangling binding rather than as contention.
-                transactions.readConsistent(connection -> {
-                    // Two independent autocommit reads under READ COMMITTED, each its own snapshot,
-                    // deliberately not one locking transaction: this is a read-only operation and
-                    // taking a lock here would only serialise readers against writers for no benefit
-                    // this port promises. That leaves a narrow window the single-transaction SQLite
-                    // adapter's own snapshot does not have: a concurrent purge can remove the
-                    // definition between these two statements. The result is the Corrupted verdict
-                    // below rather than a wrong document, because deleteDefinition only ever runs after
-                    // its own transaction confirmed the definition unreferenced, so nothing this method
-                    // could read back would be silently wrong - only, rarely, gone.
+                // readConsistent, not readOnly, and not a locking transaction either. This reads the
+                // binding and then the definition it names. Under READ COMMITTED each of those takes
+                // its own snapshot even inside a transaction, so a purge committing between them
+                // leaves the second statement unable to find a definition the first still pointed at -
+                // which this method would then report as a binding naming content the store does not
+                // hold, that is, as corruption rather than as contention. One REPEATABLE READ snapshot
+                // makes the pair agree, and it does so without taking a lock: readers still never
+                // block writers, so nothing is serialised for a guarantee this port does not promise.
+                return transactions.readConsistent(connection -> {
                     GraphContentId bound = readBinding(connection, tenantId, identity);
                     if (bound == null) {
                         throw new SqlFailure(new GraphDefinitionStoreFailure.NotFound(

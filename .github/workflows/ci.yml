@@ -52,6 +52,14 @@ jobs:
           ref: ${{ inputs.merge_sha || github.sha }}
       - name: Configure GitHub Pages
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
+      - name: Verify maintained operational documentation contracts
+        run: |
+          python3 -m unittest scripts.tests.test_publish_bundle_reference -v
+          python3 -m unittest scripts.tests.test_publish_environment_reference -v
+          python3 -m unittest scripts.tests.test_check_operational_docs -v
+          python3 scripts/publish_bundle_reference.py --check
+          python3 scripts/publish_environment_reference.py --check
+          python3 scripts/check_operational_docs.py
       - name: Build the GitHub Pages documentation
         uses: actions/jekyll-build-pages@44a6e6beabd48582f863aeeb6cb2151cc1716697 # v1
         with:

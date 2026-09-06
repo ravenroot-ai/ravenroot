@@ -60,6 +60,10 @@ Credential reads never return secret material. Governed resources remain scoped 
 
 ## CLI mapping
 
+This table maps common graph and status commands to HTTP resources. The
+[command-line tools manual](command-line-tools.md) covers every application CLI verb and option,
+plus the repository's service, bundle, development, build, and test scripts.
+
 | Command | Purpose |
 |---|---|
 | `ravenroot status` | Read service status |

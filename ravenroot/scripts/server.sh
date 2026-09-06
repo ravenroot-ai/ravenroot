@@ -42,7 +42,7 @@ Environment:
   RAVENROOT_TRUSTED_TLS_TERMINATOR
                        Set true only behind a trusted TLS terminator; requires HTTPS RAVENROOT_PUBLIC_ORIGIN
   RAVENROOT_ARTIFACT_DUAL_CONTROL
-                       true or false exactly; maker-checker separation defaults to true
+                       true or false exactly; maker-checker separation is opt-in (default: false)
 
 OIDC mode (the server executable default) requires:
   RAVENROOT_AUTH_ISSUER, RAVENROOT_AUTH_AUDIENCE, RAVENROOT_AUTH_JWKS_URI

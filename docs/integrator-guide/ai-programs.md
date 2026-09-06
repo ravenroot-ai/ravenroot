@@ -2,6 +2,11 @@
 
 Connect AI and code execution through governed profiles rather than embedding provider or source details in GraphML.
 
+The optional [`ai` bundle reference](../reference/bundles/ai.md) is the exact node and environment
+contract for `llm-prompt` and `agent`. These graph nodes are separate from the browser
+[authoring assistant](../operator-guide/authoring-assistant.md), even when both use the same kind of
+external model provider.
+
 ## Integration sequence
 
 1. Register the model or agent adapter and expose only its declared capabilities.
@@ -44,5 +49,8 @@ is an operation/process cleanup guarantee, not the runtime-neutral deployment fe
 
 ## Linked contracts
 
+- [AI bundle node reference](../reference/bundles/ai.md)
+- [Bundle installation and activation](../operator-guide/plugin-bundles.md)
+- [Authoring assistant runbook](../operator-guide/authoring-assistant.md)
 - [Primary interface](../reference/embed-extension-contracts.md)
 - [Operational or security model](../security/ai-code.md)

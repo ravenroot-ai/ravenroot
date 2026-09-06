@@ -81,7 +81,7 @@ Commands:
                                          Without at least one complete JDBC driver/digest pair, jdbc is explicitly
                                          SKIPPED, and 'ai' is always SKIPPED. This command never
                                          activates plugins, changes
-                                         RAVENROOT_ENABLED_PLUGINS/plugins.lock.yaml, or builds an
+                                         RAVENROOT_ENABLED_PLUGINS, or builds an
                                          image. -st/--skip-tests have the same meaning as for build.
 
   remove <id> [--dir plugins-dir]       Remove an installed bundle. Succeeds unconditionally, even
@@ -558,7 +558,7 @@ cmd_install_all() {
     return 1
   fi
   rm -rf "$plan_dir"
-  echo "Not enabled: activate bundles explicitly via RAVENROOT_ENABLED_PLUGINS (or plugins.lock.yaml) when ready."
+  echo "Not enabled: activate bundles explicitly via RAVENROOT_ENABLED_PLUGINS when ready."
 }
 
 cmd_install() {
@@ -615,7 +615,7 @@ cmd_install() {
   fi
   cp -R "$source_dir" "$dest"
   echo "Installed: $dest"
-  echo "Not enabled: activate it explicitly via RAVENROOT_ENABLED_PLUGINS (or plugins.lock.yaml) when you are ready."
+  echo "Not enabled: activate it explicitly via RAVENROOT_ENABLED_PLUGINS when you are ready."
 }
 
 cmd_remove() {

@@ -51,6 +51,6 @@ Verification records checked steps and uses classified outcomes including `reach
 
 ## Program sandbox contract
 
-Program artifacts move through create, validate, test, approve, activate, and retire. A validation request returns a validated or rejected result with HTTP 200; it returns HTTP 501 when the runtime or sandbox supervisor is absent, before source execution. Active execution is bounded by the configured timeout and heap and observes dual control by default.
+Program artifacts move through create, validate, test, approve, activate, and retire. A validation request returns a validated or rejected result with HTTP 200; it returns HTTP 501 when the runtime or sandbox supervisor is absent, before source execution. Active execution is bounded by the configured timeout and heap. Dual control is disabled by default and becomes mandatory only when the operator explicitly sets `RAVENROOT_ARTIFACT_DUAL_CONTROL=true`.
 
 For operational procedure see [Embedded-viewer operations](../operator-guide/embed-operations.md). For security rationale see [Embed, privacy, and audit](../security/embed-privacy.md).

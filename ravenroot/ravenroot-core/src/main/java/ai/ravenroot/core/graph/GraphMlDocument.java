@@ -271,7 +271,8 @@ final class GraphMlDocument {
             builder.setErrorHandler(new DefaultHandler());
             return builder.parse(new ByteArrayInputStream(input));
         } catch (SAXException | IOException exception) {
-            throw compatibilityFailure(Sentence.UNSAFE_COMPATIBILITY_XML, null, exception);
+            throw GraphMlRejection.compatibilityFailureFromException(
+                    Sentence.UNSAFE_COMPATIBILITY_XML, exception);
         } catch (ParserConfigurationException exception) {
             throw new IllegalStateException("Cannot configure the GraphML parser", exception);
         }

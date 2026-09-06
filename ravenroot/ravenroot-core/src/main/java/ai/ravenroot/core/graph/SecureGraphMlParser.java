@@ -88,7 +88,8 @@ final class SecureGraphMlParser {
                 output.write(buffer, 0, read);
             }
         } catch (IOException error) {
-            throw parseFailure(MALFORMED_XML, Sentence.DOCUMENT_UNREADABLE, null, error);
+            throw GraphMlRejection.parseFailureFromException(
+                    MALFORMED_XML, Sentence.DOCUMENT_UNREADABLE, error);
         }
     }
 

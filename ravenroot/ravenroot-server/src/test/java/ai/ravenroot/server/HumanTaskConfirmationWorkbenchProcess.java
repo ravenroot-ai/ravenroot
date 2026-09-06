@@ -14,6 +14,7 @@ import ai.ravenroot.api.node.NodeConfiguration;
 import ai.ravenroot.api.node.NodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.GraphDefinitionReferences;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
@@ -46,6 +47,7 @@ import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.sql.DriverManager;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
@@ -83,14 +85,20 @@ public final class HumanTaskConfirmationWorkbenchProcess {
     // abandoned fixture claim short so VERIFY proves lease fencing/reclaim without spending the
     // whole test at the production-sized lease boundary.
     static final Duration FIXTURE_WORK_CLAIM_LEASE = Duration.ofSeconds(5);
+    static final Duration FIXTURE_RECOVERY_DRIVER_INTERVAL = Duration.ofMillis(100);
+    // The final parent-side probe runs only after VERIFY exits. It therefore waits through the
+    // complete visibility interval plus ten driver ticks before asking the durable store whether
+    // any trigger escaped acknowledgement.
+    static final Duration NO_REPLAY_VISIBILITY_WINDOW = FIXTURE_WORK_CLAIM_LEASE.plus(
+            FIXTURE_RECOVERY_DRIVER_INTERVAL.multipliedBy(10));
     // VERIFY permits the abandoned lease to elapse once, then three further lease periods for the
     // 100 ms driver tick, SQLite commit, and pinned graph continuation. The budget stays coupled
     // to the fencing interval under test instead of masking a stale claim with a generic timeout.
     static final Duration VERIFY_COMPLETION_TIMEOUT = FIXTURE_WORK_CLAIM_LEASE.multipliedBy(4);
-    // A child can spend the normal task/bootstrap budget before it starts lease-aware VERIFY work.
-    // The parent consumes this value so its readiness deadline cannot race the child’s derived
-    // recovery budget.
-    static final Duration VERIFY_READY_TIMEOUT = Duration.ofSeconds(30).plus(VERIFY_COMPLETION_TIMEOUT);
+    // A child can consume the existing 45-second parent bootstrap budget before it starts
+    // lease-aware VERIFY work. Keep both budgets so parent readiness cannot race the child’s
+    // derived recovery budget.
+    static final Duration VERIFY_READY_TIMEOUT = Duration.ofSeconds(45).plus(VERIFY_COMPLETION_TIMEOUT);
 
     private HumanTaskConfirmationWorkbenchProcess() {
     }
@@ -135,7 +143,7 @@ public final class HumanTaskConfirmationWorkbenchProcess {
             var recovery = new ExecutionRecoveryService(store, List.of(TENANT), workerId, 100,
                     FIXTURE_WORK_CLAIM_LEASE, RepeatabilityDeclarations.NONE_DECLARED,
                     new HumanTaskHandlerDispatcher(store, tasks, continuation));
-            try (var driver = new ExecutionRecoveryDriver(recovery, Duration.ofMillis(100));
+            try (var driver = new ExecutionRecoveryDriver(recovery, FIXTURE_RECOVERY_DRIVER_INTERVAL);
                  var application = new DefaultRavenrootApplication(engine, monitor, behaviors,
                     environment.artifacts(), environment.programRuntime(), ExecutionIdentitySource.randomUuids(),
                     store, 1, UnknownBehaviorPolicy.passThrough(), definitions, null, tasks,
@@ -171,7 +179,7 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                         assertAttentionFixture(tasks);
                     }
                     if (arguments.phase() == Phase.VERIFY) {
-                        awaitCompletedProcesses(store, tasks);
+                        awaitCompletedProcesses(store, tasks, arguments.database());
                     }
                     emit(arguments.phase() == Phase.FIRST ? TASKS_READY : RECOVERY_READY,
                             arguments, tasks, graphVersion);
@@ -252,7 +260,8 @@ public final class HumanTaskConfirmationWorkbenchProcess {
         }
     }
 
-    private static void awaitCompletedProcesses(SqliteExecutionStore store, HumanTaskService tasks)
+    private static void awaitCompletedProcesses(SqliteExecutionStore store, HumanTaskService tasks,
+                                                Path database)
             throws InterruptedException {
         long deadline = System.nanoTime() + VERIFY_COMPLETION_TIMEOUT.toNanos();
         while (System.nanoTime() < deadline) {
@@ -261,11 +270,37 @@ public final class HumanTaskConfirmationWorkbenchProcess {
                     .findProcessInstance(task.key()).toCompletableFuture().join()
                     .map(process -> process.status() == ProcessInstanceStatus.COMPLETED)
                     .orElse(false));
-            if (complete) return;
+            if (complete && handlersAcknowledged(database, items)) return;
             Thread.sleep(25);
         }
-        throw new IllegalStateException("verify child did not complete both durable continuations within "
+        throw new IllegalStateException("verify child did not complete and acknowledge both durable "
+                + "continuations within "
                 + VERIFY_COMPLETION_TIMEOUT + " after the fixture claim lease " + FIXTURE_WORK_CLAIM_LEASE);
+    }
+
+    /**
+     * Reads the exact fixture handler acknowledgements from SQLite without adding a production
+     * observation hook. Completion is durable before recovery acknowledgement, so VERIFY must not
+     * report ready in that interval or the parent could stop it with a live, lease-hidden trigger.
+     */
+    private static boolean handlersAcknowledged(Path database, List<DurableHumanTask> tasks) {
+        String sql = "SELECT EXISTS (SELECT 1 FROM work_acknowledgement "
+                + "WHERE tenant_id = ? AND process_instance_id = ? AND work_item_id = ?)";
+        try (var connection = DriverManager.getConnection("jdbc:sqlite:" + database.toAbsolutePath());
+             var statement = connection.prepareStatement(sql)) {
+            for (DurableHumanTask task : tasks) {
+                statement.setString(1, task.key().tenantId());
+                statement.setString(2, task.key().processInstanceId().toString());
+                statement.setString(3, task.request().taskId().toString());
+                try (var result = statement.executeQuery()) {
+                    if (!result.next() || result.getInt(1) != 1) return false;
+                }
+            }
+            return true;
+        } catch (java.sql.SQLException unavailable) {
+            throw new IllegalStateException("verify child could not observe durable handler acknowledgement",
+                    unavailable);
+        }
     }
 
     private static String graphVersion(HumanTaskService tasks) {

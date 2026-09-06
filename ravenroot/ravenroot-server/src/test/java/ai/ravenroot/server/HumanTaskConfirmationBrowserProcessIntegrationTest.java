@@ -66,7 +66,12 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
             assertEquals(Phase.VERIFY, verify.phase());
             assertEquals(2, verify.locatorCount(), verify.json());
         }
+        awaitNoReplayVisibilityWindow();
         assertDurableSettlement(output, verify);
+    }
+
+    private static void awaitNoReplayVisibilityWindow() throws InterruptedException {
+        Thread.sleep(HumanTaskConfirmationWorkbenchProcess.NO_REPLAY_VISIBILITY_WINDOW);
     }
 
     private static void assertDurableSettlement(Path output, Ready verify) throws Exception {
@@ -99,7 +104,7 @@ class HumanTaskConfirmationBrowserProcessIntegrationTest {
             assertTrue(store.claimPendingWork(TENANT, "human-task-confirmation-parent-probe", 100,
                     HumanTaskConfirmationWorkbenchProcess.FIXTURE_WORK_CLAIM_LEASE)
                     .toCompletableFuture().join().isEmpty(),
-                    "third child left no replayable continuation");
+                    "third child left no replayable continuation after the complete visibility window");
         }
     }
 

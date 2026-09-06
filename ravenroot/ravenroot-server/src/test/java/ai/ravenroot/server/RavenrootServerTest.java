@@ -878,22 +878,26 @@ class RavenrootServerTest {
             var method = RavenrootServer.class.getDeclaredMethod("protectedRequest",
                     com.sun.net.httpserver.HttpHandler.class);
             method.setAccessible(true);
+            var configurationMethod = RavenrootServer.class.getDeclaredMethod("configuration",
+                    com.sun.net.httpserver.HttpExchange.class);
+            configurationMethod.setAccessible(true);
             com.sun.net.httpserver.HttpHandler probe = exchange -> {
                 try {
                     barrier.await(5, TimeUnit.SECONDS);
-                    byte[] body = AuthenticatedPrincipalAttribute.require(exchange).tenantId()
-                            .getBytes(StandardCharsets.UTF_8);
-                    exchange.sendResponseHeaders(200, body.length);
-                    exchange.getResponseBody().write(body);
-                    exchange.close();
+                    configurationMethod.invoke(server, exchange);
                 } catch (Exception failure) {
                     throw new IOException(failure);
                 }
             };
             var protectedProbe = (com.sun.net.httpserver.HttpHandler) method.invoke(server, probe);
+            var cleaned = new java.util.concurrent.atomic.AtomicInteger();
+            com.sun.net.httpserver.HttpHandler observingProbe = exchange -> {
+                protectedProbe.handle(exchange);
+                if (AuthenticatedPrincipalAttribute.find(exchange).isEmpty()) cleaned.incrementAndGet();
+            };
             var field = RavenrootServer.class.getDeclaredField("server");
             field.setAccessible(true);
-            ((com.sun.net.httpserver.HttpServer) field.get(server)).createContext("/principal-probe", protectedProbe);
+            ((com.sun.net.httpserver.HttpServer) field.get(server)).createContext("/principal-probe", observingProbe);
             server.start();
             URI uri = URI.create("http://localhost:" + server.port() + "/principal-probe");
             HttpClient client = HttpClient.newHttpClient();
@@ -901,8 +905,11 @@ class RavenrootServerTest {
                     .GET().build(), HttpResponse.BodyHandlers.ofString());
             var b = client.sendAsync(HttpRequest.newBuilder(uri).header("Authorization", "Bearer tenant-b")
                     .GET().build(), HttpResponse.BodyHandlers.ofString());
-            assertEquals("tenant-a", a.get(10, TimeUnit.SECONDS).body());
-            assertEquals("tenant-b", b.get(10, TimeUnit.SECONDS).body());
+            assertTrue(a.get(10, TimeUnit.SECONDS).body()
+                    .contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"));
+            assertTrue(b.get(10, TimeUnit.SECONDS).body()
+                    .contains("\"workspace\":{\"tenantId\":\"tenant-b\"}"));
+            assertEquals(2, cleaned.get());
         }
     }
 

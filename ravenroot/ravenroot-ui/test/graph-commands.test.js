@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 import {
+  commandPositionNodeIds,
   applyCommand,
   batchUpdateNodePropertiesCommand,
   commandTargets,
@@ -162,6 +163,18 @@ describe('graph command primitives', () => {
       removeNodesCommand(['n1']),
       moveNodesCommand([{ id: 'n2', ox: 1, oy: 2 }]),
     ]))).toEqual({ nodeIds: ['n1', 'n2'], edgeIds: ['e1', 'e2'] });
+  });
+
+  it('reports only move-owned node positions, recursing into grouped commands', () => {
+    expect(commandPositionNodeIds(compositeCommand([
+      removeNodesCommand(['removed']),
+      insertNodesCommand([{ node: { id: 'inserted' }, index: 0 }]),
+      moveNodesCommand([{ id: 'moved', ox: 1, oy: 2 }]),
+      compositeCommand([
+        moveNodesCommand([{ id: 'nested', ox: 3, oy: 4 }]),
+        updateNodeCommand('metadata', { name: 'changed' }),
+      ]),
+    ]))).toEqual(['moved', 'nested']);
   });
 
   it('preflights a property batch before mutation and leaves every map unchanged on failure', () => {

@@ -30,9 +30,10 @@ function renderer() {
     adapterIdOf, catalogPropertyHasDeclaredDefault, isPropertyVisible, isPropertyRequiredNow);
 }
 
-const property = (name, displayName, type, required, defaultValue = '', allowedValues = []) => ({
+const property = (name, displayName, type, required, defaultValue = '', allowedValues = [], extra = {}) => ({
   name, displayName, type, required, description: `${displayName} help`, defaultValue,
   allowedValues, adapterBinding: false, visibleWhen: null, requiredWhen: null,
+  ...extra,
 });
 
 describe('human-task catalog controls', () => {
@@ -40,10 +41,11 @@ describe('human-task catalog controls', () => {
     const descriptor = {
       behavior: 'human-task', displayName: 'Human task',
       properties: [
-        property('title', 'Title', 'STRING', true),
+        property('title', 'Title', 'STRING', true, '', [], { maximumUtf8Bytes: 512 }),
         property('description', 'Description', 'TEXT', false),
         property('responseKind', 'Response kind', 'STRING', false, 'MAP', ['SCALAR', 'LIST', 'MAP']),
-        property('expiresAfterSeconds', 'Expire after (seconds)', 'INTEGER', false, '604800'),
+        property('expiresAfterSeconds', 'Expire after (seconds)', 'INTEGER', false, '604800', [],
+          { minimumValue: '1', maximumValue: '5184000' }),
       ],
     };
     const host = document.createElement('form');
@@ -59,6 +61,10 @@ describe('human-task catalog controls', () => {
     expect(kind.tagName).toBe('SELECT');
     expect([...kind.options].map(option => option.value)).toEqual(['SCALAR', 'LIST', 'MAP']);
     expect(expiry.type).toBe('number');
+    expect(expiry.min).toBe('1');
+    expect(expiry.max).toBe('5184000');
+    expect(title.dataset.maximumUtf8Bytes).toBe('512');
+    expect(host.textContent).toContain('Maximum 512 UTF-8 bytes');
     const controls = [title, description, kind, expiry];
     expect(new Set(controls.map(control => control.id)).size).toBe(controls.length);
     for (const control of controls) {

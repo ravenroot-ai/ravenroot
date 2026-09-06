@@ -589,6 +589,12 @@ public final class RouteTable {
                     true, true, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.INTERNAL_ERROR.code()), READ, true),
+            new RouteDescriptor(Set.of("GET"), "/v1/human-tasks/attention",
+                    "Lists authorized actionable embedded Human Tasks for an exact durable graph "
+                            + "context, or recovers one actionable task by its exact task and generation locator.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), READ, true),
             new RouteDescriptor(Set.of("POST"),
                     "/v1/human-tasks/{taskId}/{decision}",
                     "Resolves, denies, or cancels one tenant-scoped human task under its required "
@@ -597,6 +603,14 @@ public final class RouteTable {
                     true, false, 200,
                     concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
                             ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
+            new RouteDescriptor(Set.of("POST"),
+                    "/v1/human-tasks/{taskId}/confirmation/{action}",
+                    "Applies one generation-fenced built-in confirmation action with bounded separate "
+                            + "decision metadata and returns only its safe terminal task projection.",
+                    true, false, 200,
+                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code(),
+                            ErrorCode.UNKNOWN_RESOURCE.code(), ErrorCode.CONFLICT.code(),
+                            ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("POST"), "/v1/agent-authority",
                     "Dispatch context for the authenticated durable agent-authority trip/reset controls. "
                             + "Bare and unknown operations are nondisclosing 404 responses.",

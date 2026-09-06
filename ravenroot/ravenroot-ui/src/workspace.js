@@ -148,6 +148,13 @@ export function createDocumentRecord({
       stopRequested: false,
       observationUnavailable: false,
     },
+    humanTasks: {
+      deploymentId: null,
+      graphVersion: null,
+      projection: null,
+      attentionSignature: '',
+      pageSignature: '',
+    },
   };
 }
 

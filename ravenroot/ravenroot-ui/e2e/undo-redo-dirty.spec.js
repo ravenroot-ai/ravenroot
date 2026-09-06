@@ -28,6 +28,20 @@ function elementIds(page, selector) {
 const BASE_NODES = ['dosomething', 'end', 'error', 'start'];
 const BASE_EDGES = ['edge-dosomething-end', 'edge-dosomething-error', 'edge-start-dosomething'];
 
+const liveCanvas = page => page.evaluate(() => ({
+  positions: Object.fromEntries(window.cy.nodes().map(node => [node.id(), node.position()])),
+  viewport: { zoom: window.cy.zoom(), pan: window.cy.pan() },
+}));
+
+async function setDivergentLiveCanvas(page) {
+  await page.evaluate(() => {
+    window.cy.stop(true);
+    window.cy.getElementById('end').position({ x: 873, y: 419 });
+    window.cy.viewport({ zoom: 0.79, pan: { x: 123, y: 77 } });
+  });
+  return liveCanvas(page);
+}
+
 test('adds a node, undoes it and redoes it from the toolbar', async ({ page }) => {
   await startEditableWorkflow(page);
   await expect(page.locator('#btn-undo')).toBeDisabled();
@@ -83,6 +97,41 @@ test('undoes a delete that took incident edges with it as a single step', async 
   await expect(page.evaluate(() => window.cy.getElementById('edge-1').data('source'))).resolves.toBe('start');
 });
 
+test('structural add and delete history retain live positions and viewport of surviving nodes', async ({ page }) => {
+  await startEditableWorkflow(page);
+
+  await page.locator('#btn-add-node').click();
+  await page.locator('#node-editor button[type="submit"]').click();
+  const insertedPosition = await page.evaluate(() => window.cy.getElementById('node-1').position());
+  const authored = await setDivergentLiveCanvas(page);
+  await page.locator('#btn-undo').click();
+  expect((await liveCanvas(page)).viewport).toEqual(authored.viewport);
+  expect(await page.evaluate(() => window.cy.getElementById('end').position()))
+    .toEqual(authored.positions.end);
+  await page.locator('#btn-redo').click();
+  expect((await liveCanvas(page)).viewport).toEqual(authored.viewport);
+  expect(await page.evaluate(() => window.cy.getElementById('end').position()))
+    .toEqual(authored.positions.end);
+  expect(await page.evaluate(() => window.cy.getElementById('node-1').position()))
+    .toEqual(insertedPosition);
+
+  await page.evaluate(() => {
+    window.cy.$(':selected').unselect();
+    window.cy.getElementById('start').select();
+  });
+  const restoredPosition = await page.evaluate(() => window.cy.getElementById('start').position());
+  await page.locator('body').press('Delete');
+  const afterDelete = await setDivergentLiveCanvas(page);
+  await page.locator('#btn-undo').click();
+  expect((await liveCanvas(page)).viewport).toEqual(afterDelete.viewport);
+  expect(await page.evaluate(() => window.cy.getElementById('end').position()))
+    .toEqual(afterDelete.positions.end);
+  expect(await page.evaluate(() => window.cy.getElementById('start').position()))
+    .toEqual(restoredPosition);
+  await page.locator('#btn-redo').click();
+  expect(await liveCanvas(page)).toEqual(afterDelete);
+});
+
 // The opening layout is animated, so a position read too early is a frame of an animation rather
 // than the document's coordinates. Poll until two consecutive reads agree.
 async function settledPositions(page) {
@@ -131,6 +180,30 @@ test('undoes a multi-node drag as a single step and restores both positions', as
   await page.locator('#btn-undo').click();
   expect(await settledPositions(page)).toEqual(before);
   await expect(page.locator('#btn-undo')).toBeDisabled();
+});
+
+test('move history restores command positions without moving an unrelated live-position node', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('#dirty-state')).toHaveText(SAVED);
+  const before = await settledPositions(page);
+  const box = await page.locator('#cy').boundingBox();
+  const from = await page.evaluate(() => window.cy.getElementById('start').renderedPosition());
+  await page.mouse.move(box.x + from.x, box.y + from.y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + from.x + 54, box.y + from.y + 38, { steps: 12 });
+  await page.mouse.up();
+  const moved = await page.evaluate(() => window.cy.getElementById('start').position());
+  expect(moved).not.toEqual(before.start);
+  const live = await setDivergentLiveCanvas(page);
+
+  await page.locator('#btn-undo').click();
+  expect(await page.evaluate(() => window.cy.getElementById('start').position())).toEqual(before.start);
+  expect(await page.evaluate(() => window.cy.getElementById('end').position())).toEqual(live.positions.end);
+  expect((await liveCanvas(page)).viewport).toEqual(live.viewport);
+  await page.locator('#btn-redo').click();
+  expect(await page.evaluate(() => window.cy.getElementById('start').position())).toEqual(moved);
+  expect(await page.evaluate(() => window.cy.getElementById('end').position())).toEqual(live.positions.end);
+  expect((await liveCanvas(page)).viewport).toEqual(live.viewport);
 });
 
 test('drives undo, redo and save from the keyboard and clears the dirty state on save', async ({ page }) => {

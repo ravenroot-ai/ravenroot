@@ -1,8 +1,15 @@
+import {
+  validateHumanTaskAttention,
+  validateHumanTaskCapability,
+  validateHumanTaskRow,
+} from './human-task-attention.js';
+
 const DEFAULT_MAX_FRAME_BYTES = 64 * 1024;
 const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
 const MIN_RETRY_DELAY_MS = 250;
 const MAX_RETRY_DELAY_MS = 30_000;
+const HUMAN_TASK_DECISION_OUTCOMES = new Set(['APPLIED', 'ALREADY_APPLIED']);
 
 export const MAX_GRAPH_DOCUMENT_BYTES = 256 * 1024 * 1024;
 
@@ -15,9 +22,11 @@ export function validateRuntimeConfiguration(value) {
       || value.graphDocumentMaxBytes > MAX_GRAPH_DOCUMENT_BYTES) {
     throw new Error('Runtime configuration is not a valid schema version 1 document');
   }
+  const humanTasks = value.humanTasks == null ? null : validateHumanTaskCapability(value.humanTasks);
   return {
     schemaVersion: 1,
     graphDocumentMaxBytes: value.graphDocumentMaxBytes,
+    ...(humanTasks ? { humanTasks } : {}),
   };
 }
 
@@ -127,6 +136,8 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
+      || (value.graphVersion !== null && value.graphVersion !== undefined
+        && (typeof value.graphVersion !== 'string' || !value.graphVersion))
       || (value.diagnostic !== null && value.diagnostic !== undefined
         && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
     throw new Error('Deployment response is not a valid process-local status');
@@ -449,6 +460,68 @@ export class RavenrootRuntimeClient {
       headers: { Accept: 'application/json' },
       signal,
     });
+  }
+
+  /** Reads the bounded, tenant-authorized actionable Human Task projection for one exact graph
+   * context. The runtime configuration supplies page and polling limits; this method supplies no
+   * browser-owned defaults. */
+  async humanTaskAttention(filters = {}, { signal, capability } = {}) {
+    const policy = validateHumanTaskCapability(capability);
+    const hasDeployment = typeof filters?.deploymentId === 'string' && filters.deploymentId.length > 0;
+    const hasProcess = typeof filters?.processInstanceId === 'string' && filters.processInstanceId.length > 0;
+    const hasGraph = typeof filters?.graphVersion === 'string' && filters.graphVersion.length > 0;
+    const hasTask = typeof filters?.taskId === 'string' && filters.taskId.length > 0;
+    const hasGeneration = filters?.generation !== undefined && filters?.generation !== null;
+    const hasContextPart = hasGraph || hasDeployment || hasProcess
+      || filters?.traversalId != null || filters?.nodeId != null;
+    if (hasTask !== hasGeneration
+        || (!hasTask && (!hasGraph || hasDeployment === hasProcess))
+        || (hasTask && hasContextPart && (!hasGraph || hasDeployment === hasProcess))
+        || (hasGeneration && (!Number.isSafeInteger(filters.generation) || filters.generation < 1))) {
+      throw new Error('Human Task attention requires an exact task locator or graph and deployment or process context');
+    }
+    const requestedLimit = filters?.limit ?? policy.attentionPageSize;
+    if (!Number.isSafeInteger(requestedLimit) || requestedLimit < 1
+        || requestedLimit > policy.attentionPageSizeMax) {
+      throw new Error('Human Task attention page size is outside the advertised policy');
+    }
+    const params = new URLSearchParams();
+    for (const key of ['graphVersion', 'deploymentId', 'processInstanceId', 'traversalId', 'nodeId',
+      'taskId', 'generation', 'limit', 'cursor']) {
+      const value = filters?.[key];
+      if (value === undefined || value === null || value === '') continue;
+      params.set(key, String(value));
+    }
+    params.set('limit', String(requestedLimit));
+    const result = await this.#json(`/v1/human-tasks/attention?${params}`, {
+      method: 'GET', headers: { Accept: 'application/json' }, signal,
+    });
+    return validateHumanTaskAttention(result, policy, { ...filters, limit: Number(params.get('limit')) });
+  }
+
+  /** Applies one explicit simple-confirmation action. A comment is decision metadata in this JSON
+   * resource; the server constructs the fixed resolve payload separately. */
+  async confirmHumanTask(taskId, generation, action, comment = '', { signal, capability } = {}) {
+    const policy = validateHumanTaskCapability(capability);
+    const id = String(taskId || '');
+    const normalizedAction = String(action || '').toLowerCase();
+    if (!id || !Number.isSafeInteger(generation) || generation < 1
+        || !['resolve', 'deny', 'cancel'].includes(normalizedAction)) {
+      throw new Error('Human Task confirmation requires task id, generation, and a permitted action');
+    }
+    const result = await this.#json(`/v1/human-tasks/${encodeURIComponent(id)}/confirmation/`
+      + `${normalizedAction}?generation=${generation}`, {
+      method: 'POST',
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json; charset=utf-8' },
+      body: JSON.stringify({ schemaVersion: 1, comment: String(comment ?? '') }), signal,
+    });
+    if (!result || typeof result !== 'object' || Array.isArray(result)
+        || result.schemaVersion !== 1 || !HUMAN_TASK_DECISION_OUTCOMES.has(result.outcome)
+        || !result.task) {
+      throw new Error('Human Task confirmation response is invalid');
+    }
+    return Object.freeze({ schemaVersion: 1, outcome: result.outcome,
+      task: validateHumanTaskRow(result.task, policy) });
   }
 
   async nodeTypes() {

@@ -30,6 +30,16 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCursor;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
 import ai.ravenroot.api.persistence.HumanTaskStatus;
@@ -162,6 +172,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     private final Duration journalRetention;
     private final Duration terminalRetention;
     private final Duration executionResultRetention;
+    private final HumanTaskPolicy humanTaskPolicy;
     private final Map<ResultKey, DurableExecutionResult> executionResults = new LinkedHashMap<>();
     private final Map<String, Instant> executionResultsRetainedFrom = new LinkedHashMap<>();
 
@@ -171,6 +182,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     public InMemoryExecutionStore(Clock clock) {
         this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW);
+    }
+
+    /** Reference store using the supplied Human Task page policy. */
+    public InMemoryExecutionStore(Clock clock, HumanTaskPolicy humanTaskPolicy) {
+        this(clock, DEFAULT_MAX_LEASE_TTL, DEFAULT_MAX_PAYLOAD_BYTES, DEFAULT_MAX_CLOCK_SKEW,
+                DEFAULT_JOURNAL_RETENTION, DEFAULT_TERMINAL_RETENTION, DEFAULT_TERMINAL_RETENTION,
+                humanTaskPolicy);
     }
 
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes) {
@@ -215,6 +233,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
                                   Duration maxClockSkew, Duration journalRetention,
                                   Duration terminalRetention, Duration executionResultRetention) {
+        this(clock, maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                terminalRetention, executionResultRetention, HumanTaskPolicy.DEFAULTS);
+    }
+
+    public InMemoryExecutionStore(Clock clock, Duration maxLeaseTtl, int maxPayloadBytes,
+                                  Duration maxClockSkew, Duration journalRetention,
+                                  Duration terminalRetention, Duration executionResultRetention,
+                                  HumanTaskPolicy humanTaskPolicy) {
         this.executionResultRetention =
                 Objects.requireNonNull(executionResultRetention, "executionResultRetention");
         if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
@@ -261,9 +287,25 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         }
         this.maxPayloadBytes = maxPayloadBytes;
         this.maxClockSkew = Objects.requireNonNull(maxClockSkew, "maxClockSkew");
+        this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         if (maxClockSkew.isNegative()) {
             throw new IllegalArgumentException("maxClockSkew cannot be negative");
         }
+    }
+
+    @Override
+    public int maxHumanTaskPageSize() {
+        return humanTaskPolicy.inboxMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionPageSize() {
+        return humanTaskPolicy.confirmation().attentionMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskAttentionNodeCounts() {
+        return HumanTaskPolicy.Confirmation.HARD_MAX_ATTENTION_NODE_COUNTS;
     }
 
     @Override
@@ -287,6 +329,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 StoreCapability.DURABLE_HANDLERS,
                 StoreCapability.PROCESS_INVENTORY, StoreCapability.INVENTORY_RETENTION,
                 StoreCapability.TOOL_APPROVALS, StoreCapability.HUMAN_TASKS,
+                StoreCapability.HUMAN_TASK_CONFIRMATIONS,
                 StoreCapability.EXECUTION_PAUSES, StoreCapability.AGENT_AUTHORITY_BUDGETS,
                 // EXECUTION_RESULTS joins them on the same rule and makes no durability
                 // claim: idempotent refusal, tenant scoping, the four read states and
@@ -305,6 +348,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     @Override
     public int maxPayloadBytes() {
         return maxPayloadBytes;
+    }
+
+    @Override
+    public int maxHumanTaskResponsePayloadBytes() {
+        return ai.ravenroot.api.payload.PayloadLimits.HARD_MAX_ENCODED_BYTES;
     }
 
     @Override
@@ -329,8 +377,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             // Decidable from the request alone, so it happens before the monitor is even entered.
             requireNoFencingTokenUnderNotPresent(batch);
             batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
-            batch.handlerTransitions().forEach(transition ->
-                    requireWithinPayloadLimit(transition.outcomePayload()));
+            batch.handlerTransitions().forEach(transition -> {
+                if (!isHumanTaskResolution(batch, transition)) {
+                    requireWithinPayloadLimit(transition.outcomePayload());
+                }
+            });
             batch.idempotency().ifPresent(write -> {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
@@ -413,6 +464,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                                 ? existing.retainedUntil : plusClamped(now, terminalRetention))
                         : null;
 
+                var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
+                        : new LinkedHashMap<>(existing.humanTasks);
                 var handlers = existing == null ? new LinkedHashMap<UUID, DurableHandler>()
                         : new LinkedHashMap<>(existing.handlers);
                 // Handler writes fold after the aggregate, because a registration may name an
@@ -420,7 +473,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // the same batch added. Both are validated against the POST-fold aggregate; folding
                 // them first would force a caller to split one atomic wait, or one atomic re-entry,
                 // across two batches and reopen exactly the crash window PERS-05 exists to close.
-                applyHandlerWrites(key, batch, folded, handlers, revision);
+                applyHandlerWrites(key, batch, folded, handlers, humanTasks, revision);
 
                 var approvals = existing == null ? new LinkedHashMap<UUID, DurableToolApproval>()
                         : new LinkedHashMap<>(existing.approvals);
@@ -448,8 +501,6 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
                     }
                 }
-                var humanTasks = existing == null ? new LinkedHashMap<UUID, DurableHumanTask>()
-                        : new LinkedHashMap<>(existing.humanTasks);
                 applyHumanTaskWrites(key, batch, folded, pin, humanTasks, revision, now);
 
                 var executionPauses = existing == null
@@ -1834,6 +1885,152 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
+    @Override
+    public CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            Objects.requireNonNull(authorization, "authorization");
+            if (query.limit() > maxHumanTaskAttentionPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid("human-task page limit must be between 1 and "
+                        + maxHumanTaskAttentionPageSize()));
+            }
+            HumanTaskAttentionCursor.Boundary boundary;
+            try {
+                boundary = query.cursor().map(cursor -> cursor.boundary(
+                        tenantId, query, authorization)).orElse(null);
+            } catch (IllegalArgumentException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+            synchronized (monitor) {
+                var pageWindow = new java.util.PriorityQueue<AuthorizedHumanTask>(
+                        query.limit() + 1, AUTHORIZED_HUMAN_TASK_ORDER.reversed());
+                var perNode = new java.util.TreeMap<String, long[]>();
+                long pending = 0;
+                long escalated = 0;
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)
+                            || !query.graphVersion().equals(entry.graphVersionPin.reference())
+                            || query.processInstanceId().isPresent()
+                            && !query.processInstanceId().orElseThrow()
+                                    .equals(entry.state.processInstanceId())
+                            || query.deploymentId().isPresent()
+                            && !query.deploymentId().equals(entry.origin.deploymentId())) {
+                        continue;
+                    }
+                    for (DurableHumanTask task : entry.humanTasks.values()) {
+                        if ((task.status() != HumanTaskStatus.WAITING
+                                && task.status() != HumanTaskStatus.ESCALATED)
+                                || !query.graphVersion().equals(
+                                        task.request().graphVersionPin().reference())
+                                || query.traversalId().isPresent()
+                                && !query.traversalId().orElseThrow()
+                                        .equals(task.request().traversalId())
+                                || query.nodeId().isPresent()
+                                && !query.nodeId().orElseThrow().equals(task.request().nodeId())
+                                || query.taskId().isPresent()
+                                && !query.taskId().orElseThrow().equals(task.request().taskId())
+                                || query.generation().isPresent()
+                                && query.generation().orElseThrow() != task.generation()) {
+                            continue;
+                        }
+                        List<HumanTaskConfirmationAction> actions = authorization
+                                .permittedActions(task.request());
+                        if (actions.isEmpty()) continue;
+                        pending++;
+                        if (task.status() == HumanTaskStatus.ESCALATED) escalated++;
+                        if (query.nodeId().isEmpty()) {
+                            long[] node = perNode.get(task.request().nodeId());
+                            if (node == null) {
+                                if (perNode.size() == maxHumanTaskAttentionNodeCounts()) {
+                                    throw failure(new ExecutionStoreFailure.HumanTaskAttentionTooLarge(
+                                            (long) perNode.size() + 1,
+                                            maxHumanTaskAttentionNodeCounts()));
+                                }
+                                node = new long[2];
+                                perNode.put(task.request().nodeId(), node);
+                            }
+                            node[0]++;
+                            if (task.status() == HumanTaskStatus.ESCALATED) node[1]++;
+                        }
+                        if (boundary == null || after(task, boundary)) {
+                            pageWindow.add(new AuthorizedHumanTask(
+                                    task, entry.origin.deploymentId(), actions));
+                            if (pageWindow.size() > query.limit() + 1) pageWindow.poll();
+                        }
+                    }
+                }
+                var orderedWindow = new ArrayList<>(pageWindow);
+                orderedWindow.sort(AUTHORIZED_HUMAN_TASK_ORDER);
+                int end = Math.min(query.limit(), orderedWindow.size());
+                List<HumanTaskAttentionItem> page = orderedWindow.subList(0, end).stream()
+                        .map(InMemoryExecutionStore::attentionItem).toList();
+                Optional<HumanTaskAttentionCursor> next = orderedWindow.size() > end
+                        ? Optional.of(HumanTaskAttentionCursor.issue(tenantId, query, authorization,
+                                page.getLast().createdAt(), page.getLast().taskId()))
+                        : Optional.empty();
+                List<HumanTaskNodeAttentionCounts> nodeCounts = perNode.entrySet().stream()
+                        .map(entry -> new HumanTaskNodeAttentionCounts(
+                                entry.getKey(), entry.getValue()[0], entry.getValue()[1]))
+                        .toList();
+                return new HumanTaskAttentionPage(page, next,
+                        new HumanTaskAttentionCounts(pending, escalated), nodeCounts);
+            }
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return complete(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(locator, "locator");
+            Objects.requireNonNull(authorization, "authorization");
+            synchronized (monitor) {
+                for (Entry entry : instances.values()) {
+                    if (!tenantId.equals(entry.tenantId)) continue;
+                    DurableHumanTask task = entry.humanTasks.get(locator.taskId());
+                    if (task == null || task.generation() != locator.generation()
+                            || task.status() != HumanTaskStatus.WAITING
+                            && task.status() != HumanTaskStatus.ESCALATED) continue;
+                    List<HumanTaskConfirmationAction> actions = authorization
+                            .permittedActions(task.request());
+                    if (actions.isEmpty()) return Optional.empty();
+                    return Optional.of(attentionItem(new AuthorizedHumanTask(
+                            task, entry.origin.deploymentId(), actions)));
+                }
+                return Optional.empty();
+            }
+        });
+    }
+
+    private static final Comparator<AuthorizedHumanTask> AUTHORIZED_HUMAN_TASK_ORDER =
+            Comparator.comparing((AuthorizedHumanTask row) -> row.task().createdAt())
+                    .thenComparing(row -> row.task().request().taskId().toString());
+
+    private static boolean after(DurableHumanTask task, HumanTaskAttentionCursor.Boundary boundary) {
+        int time = task.createdAt().compareTo(boundary.createdAt());
+        return time > 0 || time == 0
+                && task.request().taskId().toString().compareTo(boundary.taskId().toString()) > 0;
+    }
+
+    private static HumanTaskAttentionItem attentionItem(AuthorizedHumanTask row) {
+        DurableHumanTask task = row.task();
+        HumanTaskRegistration request = task.request();
+        return new HumanTaskAttentionItem(request.taskId(), task.generation(), task.status(),
+                request.graphVersionPin().reference(), row.deploymentId(),
+                task.key().processInstanceId(), request.traversalId(), request.nodeId(),
+                task.createdAt(), request.expiresAt(), request.escalateAt(),
+                request.confirmationPresentation(), request.confirmationLimits().maxPromptUtf8Bytes(),
+                request.confirmationLimits().maxActionLabelUtf8Bytes(),
+                request.confirmationLimits().maxCommentUtf8Bytes(),
+                row.actions());
+    }
+
+
     private void applyHumanTaskWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
                                       GraphVersionPin pin,
                                       Map<UUID, DurableHumanTask> tasks, long revision, Instant now) {
@@ -1857,9 +2054,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 continue;
             }
-            if (registration.responseSchema().maxBytes() > maxPayloadBytes()) {
+            try {
+                humanTaskPolicy.requireNewRegistration(registration, now);
+            } catch (IllegalArgumentException refused) {
+                throw failure(ExecutionStoreFailure.invalid(refused.getMessage()));
+            }
+            if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
                 throw failure(new ExecutionStoreFailure.PayloadTooLarge(
-                        registration.responseSchema().maxBytes(), maxPayloadBytes()));
+                        registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
             }
             if (!now.isBefore(registration.expiresAt())) {
                 throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
@@ -1880,7 +2082,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 throw failure(ExecutionStoreFailure.invalid("correlation key "
                         + registration.correlationKey() + " already identifies a live human task"));
             }
-            tasks.put(registration.taskId(), DurableHumanTask.waiting(key, registration, revision));
+            tasks.put(registration.taskId(), DurableHumanTask.waiting(key, registration, revision, now));
         }
         for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
             DurableHumanTask current = tasks.get(transition.taskId());
@@ -2014,12 +2216,13 @@ public final class InMemoryExecutionStore implements ExecutionStore {
      * committed one only after {@link #apply(ExecutionBatch)} finishes validating.</p>
      */
     private void applyHandlerWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
-                                    Map<UUID, DurableHandler> handlers, long revision) {
+                                    Map<UUID, DurableHandler> handlers,
+                                    Map<UUID, DurableHumanTask> humanTasks, long revision) {
         for (HandlerRegistration registration : batch.handlersToRegister()) {
             registerHandler(key, folded, handlers, registration, revision);
         }
         for (HandlerTransition transition : batch.handlerTransitions()) {
-            transitionHandler(batch, folded, handlers, transition, revision);
+            transitionHandler(batch, folded, handlers, humanTasks, transition, revision);
         }
     }
 
@@ -2059,7 +2262,8 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private void transitionHandler(ExecutionBatch batch, ProcessInstance folded,
-                                   Map<UUID, DurableHandler> handlers, HandlerTransition transition,
+                                   Map<UUID, DurableHandler> handlers,
+                                   Map<UUID, DurableHumanTask> humanTasks, HandlerTransition transition,
                                    long revision) {
         DurableHandler current = handlers.get(transition.handlerId());
         if (current == null) {
@@ -2076,6 +2280,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
             throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
                     current.status(), transition.next()));
         }
+        requireHandlerOutcomeWithinLimit(batch, humanTasks, transition);
         if (transition.next().resumesProcess()) {
             requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
                     "handler " + current.handlerId() + " resume");
@@ -2311,6 +2516,30 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         if (payload.size() > maxPayloadBytes) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), maxPayloadBytes));
         }
+    }
+
+    private void requireHandlerOutcomeWithinLimit(ExecutionBatch batch,
+                                                  Map<UUID, DurableHumanTask> humanTasks,
+                                                  HandlerTransition transition) {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= maxPayloadBytes) return;
+        DurableHumanTask task = isHumanTaskResolution(batch, transition)
+                ? humanTasks.get(transition.handlerId()) : null;
+        if (task == null) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) return false;
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
     }
 
     // ---------------------------------------------------------------- event journal and outbox
@@ -2699,6 +2928,10 @@ public final class InMemoryExecutionStore implements ExecutionStore {
     }
 
     private record WorkClaim(int deliveryAttempt, Instant visibleAgainAt) {
+    }
+
+    private record AuthorizedHumanTask(DurableHumanTask task, Optional<String> deploymentId,
+                                       List<HumanTaskConfirmationAction> actions) {
     }
 
     private record ScheduledAttempt(UUID traversalId, UUID invocationId, NodeAttempt attempt,

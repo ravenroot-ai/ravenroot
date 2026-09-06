@@ -172,6 +172,12 @@ describe('multi-selection patch planning', () => {
       .toMatch(/catalog choices/);
     expect(validateMultiPropertyValue(property('count', 'INTEGER'), '1.2')).toMatch(/integer/);
     expect(validateMultiPropertyValue(property('count', 'INTEGER'), '9223372036854775808')).toMatch(/64-bit/);
+    expect(validateMultiPropertyValue(property('count', 'INTEGER',
+      { minimumValue: '1', maximumValue: '3' }), '4')).toMatch(/at most 3/);
+    expect(validateMultiPropertyValue(property('title', 'STRING',
+      { maximumUtf8Bytes: 3 }), 'éé')).toMatch(/3 UTF-8 bytes/);
+    expect(validateMultiPropertyValue(property('roles', 'TEXT',
+      { maximumItems: 1, maximumItemUtf8Bytes: 3 }), 'one,two')).toMatch(/more than 1 items/);
     expect(validateMultiPropertyValue(property('ratio', 'DECIMAL'), '1.2e3')).toBe('');
     expect(validateMultiPropertyValue(property('url', 'URI'), '/relative')).toMatch(/absolute URI/);
     expect(validateMultiPropertyValue(property('url', 'URI'), ' https://example.test/path '))

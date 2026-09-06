@@ -141,11 +141,9 @@ class StandardBehaviorFactoriesTest {
                 descriptor.resolveOutcomes(name -> properties.get(name).defaultValue()));
 
         var node = node("human-task", Map.of("title", "Review release"));
-        var failure = org.junit.jupiter.api.Assertions.assertThrows(java.util.concurrent.ExecutionException.class,
-                () -> registry.create(node).orElseThrow().handle(new NodeMessage(TestIdentities.TENANT_A,
-                        EXECUTION_ID, UUID.randomUUID(), node.id(), null, Map.of()))
-                        .toCompletableFuture().get(1, TimeUnit.SECONDS));
-        assertTrue(failure.getCause().getMessage().contains("requires durable human-task"));
+        var failure = org.junit.jupiter.api.Assertions.assertThrows(IllegalStateException.class,
+                () -> registry.create(node));
+        assertTrue(failure.getMessage().contains("requires durable human-task"));
     }
 
     @Test

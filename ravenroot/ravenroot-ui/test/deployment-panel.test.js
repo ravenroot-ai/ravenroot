@@ -14,7 +14,8 @@ import {
 // `index.html`, the same discipline `credential-panel.test.js` uses, so this file cannot keep passing
 // after the shipped window drifts from what it exercises.
 
-const READY = { deploymentId: 'orders-v3', state: 'READY', sourceCount: 0, scope: 'LOCAL_PROCESS', diagnostic: null };
+const READY = { deploymentId: 'orders-v3', state: 'READY', sourceCount: 0, graphVersion: 'graph-v3',
+  scope: 'LOCAL_PROCESS', diagnostic: null };
 
 let dialog;
 
@@ -118,9 +119,10 @@ describe('what the window renders', () => {
 describe('registering from the active document', () => {
   it('registers then starts, in that order, under the typed id', async () => {
     const client = stubClient();
+    const onRegistered = vi.fn();
     const window_ = createDeploymentsWindow({
-      dialog, client, pollMs: 0,
-      currentDocument: () => ({ displayName: 'Orders', graphMl: '<graphml/>' }),
+      dialog, client, pollMs: 0, onRegistered,
+      currentDocument: () => ({ documentId: 'document-1', displayName: 'Orders', graphMl: '<graphml/>' }),
     });
     field('deployment-id-input').value = 'orders-v3';
 
@@ -131,6 +133,8 @@ describe('registering from the active document', () => {
     const registerOrder = client.registerDeployment.mock.invocationCallOrder[0];
     const startOrder = client.startDeployment.mock.invocationCallOrder[0];
     expect(registerOrder).toBeLessThan(startOrder);
+    expect(onRegistered).toHaveBeenCalledWith(expect.objectContaining({ deploymentId: 'orders-v3',
+      graphVersion: 'graph-v3' }), expect.objectContaining({ documentId: 'document-1' }));
     // Cleared on success so the next registration starts from a blank id, exactly like the
     // credential window clears its value on a successful store.
     expect(field('deployment-id-input').value).toBe('');
@@ -177,6 +181,16 @@ describe('registering from the active document', () => {
 });
 
 describe('row actions', () => {
+  it('publishes an explicit server-pinned deployment context for the active graph', async () => {
+    const onDeploymentSelected = vi.fn();
+    const client = stubClient({ deployments: vi.fn(async () => [READY]) });
+    const window_ = createDeploymentsWindow({ dialog, client, pollMs: 0, onDeploymentSelected });
+    await window_.refresh();
+
+    field('deployment-list').querySelector('[data-deployment-context]').click();
+    expect(onDeploymentSelected).toHaveBeenCalledWith(READY);
+  });
+
   it('starts a REGISTERED/STOPPED row on its own Start button', async () => {
     const stopped = { ...READY, state: 'STOPPED' };
     const client = stubClient({ deployments: vi.fn(async () => [stopped]) });

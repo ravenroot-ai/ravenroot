@@ -9,6 +9,10 @@ Use the canvas to create a valid document without losing the GraphML contract.
 3. Connect with pointer drag or press **E**, choose a direction with the arrow keys, and confirm with **Enter**. **Escape** cancels; **R** and **Shift+R** reconnect edge endpoints. Creating a new edge remains explicit: complete its Inspector form with **Add edge**.
 4. Use multi-selection, undo, and redo before export; then validate the saved document with `ravenroot validate`.
 
+Inspector saves change graph content without choosing a presentation for you. **Save node**, **Save edge**,
+valid autosaves, undo, and redo retain the active document's Design arrangement, positions, viewport, and
+compatible edge routes. Use an explicit **Arrange** command when you want to reposition the graph.
+
 ## Authority boundary
 
 An author controls document structure, labels, and behavior properties. Catalog installation, credentials, and deployment remain outside the workspace.

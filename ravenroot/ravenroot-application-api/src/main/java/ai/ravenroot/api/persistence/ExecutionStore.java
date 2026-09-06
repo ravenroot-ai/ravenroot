@@ -516,7 +516,21 @@ public interface ExecutionStore extends AutoCloseable {
      * @return positive implementation limit.
      */
     default int maxHumanTaskPageSize() {
-        return 100;
+        return HumanTaskPolicy.DEFAULTS.inboxMaxPageSize();
+    }
+
+    /**
+     * Stable adapter capacity for a durable Human Task response.
+     *
+     * <p>This is separate from {@link #maxPayloadBytes()} because a Human Task pins its response
+     * contract when it is registered. An adapter may keep a smaller general execution-payload
+     * budget, but this capacity must cover both newly accepted policy values and every older pinned
+     * task it can reopen.</p>
+     *
+     * @return positive encoded-response byte capacity.
+     */
+    default int maxHumanTaskResponsePayloadBytes() {
+        return maxPayloadBytes();
     }
 
     /**

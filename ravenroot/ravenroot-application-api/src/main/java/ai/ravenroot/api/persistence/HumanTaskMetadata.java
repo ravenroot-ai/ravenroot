@@ -9,10 +9,10 @@ import java.nio.charset.StandardCharsets;
  * @param description optional task description, represented by an empty string when absent.
  */
 public record HumanTaskMetadata(String title, String description) {
-    /** Maximum encoded title size. */
-    public static final int MAX_TITLE_UTF8_BYTES = 256;
-    /** Maximum encoded description size. */
-    public static final int MAX_DESCRIPTION_UTF8_BYTES = 4 * 1024;
+    /** Technical encoded title ceiling; the operator policy normally supplies a smaller maximum. */
+    public static final int MAX_TITLE_UTF8_BYTES = HumanTaskPolicy.HARD_MAX_TITLE_UTF8_BYTES;
+    /** Technical description ceiling; the operator policy normally supplies a smaller maximum. */
+    public static final int MAX_DESCRIPTION_UTF8_BYTES = HumanTaskPolicy.HARD_MAX_DESCRIPTION_UTF8_BYTES;
 
     /** Validates the bounded static display copy. */
     public HumanTaskMetadata {

@@ -63,6 +63,7 @@ import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ToolApprovalRegistration;
 import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
+import ai.ravenroot.api.payload.PayloadLimits;
 
 import java.nio.file.Path;
 import java.sql.Connection;
@@ -241,38 +242,61 @@ public final class SqliteExecutionStore implements ExecutionStore {
     private final Path databaseFile;
     private final Clock clock;
     private final SqliteStoreConfig config;
+    private final ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy;
     private final CommitBoundary commitBoundary;
     private final ExecutorService worker;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final Connection connection;
 
     public SqliteExecutionStore(Path databaseFile, Clock clock) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, SqliteStoreConfig.defaults());
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, SqliteStoreConfig.defaults(),
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    public SqliteExecutionStore(Path databaseFile, Clock clock,
+                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, SqliteStoreConfig.defaults(), humanTaskPolicy);
     }
 
     public SqliteExecutionStore(Path databaseFile, Clock clock, SqliteStoreConfig config) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, config);
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, config,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
     }
 
     public SqliteExecutionStore(SqliteStoreLocation location, Clock clock) {
-        this(location, clock, SqliteStoreConfig.defaults());
+        this(location, clock, SqliteStoreConfig.defaults(),
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
     }
 
     public SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config) {
-        this(location, clock, config, CommitBoundary.NONE);
+        this(location, clock, config, ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS);
+    }
+
+    public SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config,
+                                ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy) {
+        this(location, clock, config, humanTaskPolicy, CommitBoundary.NONE);
     }
 
     SqliteExecutionStore(Path databaseFile, Clock clock, SqliteStoreConfig config,
                          CommitBoundary commitBoundary) {
-        this(SqliteStoreLocation.ofFile(databaseFile), clock, config, commitBoundary);
+        this(SqliteStoreLocation.ofFile(databaseFile), clock, config,
+                ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS, commitBoundary);
     }
 
     SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config,
+                         CommitBoundary commitBoundary) {
+        this(location, clock, config, ai.ravenroot.api.persistence.HumanTaskPolicy.DEFAULTS,
+                commitBoundary);
+    }
+
+    SqliteExecutionStore(SqliteStoreLocation location, Clock clock, SqliteStoreConfig config,
+                         ai.ravenroot.api.persistence.HumanTaskPolicy humanTaskPolicy,
                          CommitBoundary commitBoundary) {
         this.location = Objects.requireNonNull(location, "location");
         this.databaseFile = location.databaseFile();
         this.clock = Objects.requireNonNull(clock, "clock");
         this.config = Objects.requireNonNull(config, "config");
+        this.humanTaskPolicy = Objects.requireNonNull(humanTaskPolicy, "humanTaskPolicy");
         this.commitBoundary = Objects.requireNonNull(commitBoundary, "commitBoundary");
         this.worker = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "ravenroot-sqlite-" + this.databaseFile.getFileName());
@@ -305,6 +329,19 @@ public final class SqliteExecutionStore implements ExecutionStore {
     }
 
     @Override
+    public int maxHumanTaskPageSize() {
+        return humanTaskPolicy.inboxMaxPageSize();
+    }
+
+    @Override
+    public int maxHumanTaskResponsePayloadBytes() {
+        // Rows accepted by older configurations must remain resolvable after restart. The adapter
+        // therefore publishes the stable structured-payload ceiling rather than today's general
+        // execution-payload setting or the current Human Task policy.
+        return PayloadLimits.HARD_MAX_ENCODED_BYTES;
+    }
+
+    @Override
     public Duration maxClockSkew() {
         return config.maxClockSkew();
     }
@@ -332,8 +369,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
             });
-            batch.handlerTransitions().forEach(transition ->
-                    requireWithinPayloadLimit(transition.outcomePayload()));
+            batch.handlerTransitions().forEach(transition -> {
+                if (!isHumanTaskResolution(batch, transition)) {
+                    requireWithinPayloadLimit(transition.outcomePayload());
+                }
+            });
             batch.toolApprovalsToRegister().forEach(registration -> {
                 requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(),
                         "application/json"));
@@ -2767,6 +2807,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
                     current.status(), transition.next()));
         }
+        requireHandlerOutcomeWithinLimit(key, batch, transition);
         if (transition.next().resumesProcess()) {
             requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
                     "handler " + current.handlerId() + " resume");
@@ -3620,9 +3661,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 }
                 continue;
             }
-            if (registration.responseSchema().maxBytes() > maxPayloadBytes()) {
+            try {
+                humanTaskPolicy.requireNewRegistration(registration, now);
+            } catch (IllegalArgumentException refused) {
+                throw failure(ExecutionStoreFailure.invalid(refused.getMessage()));
+            }
+            if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
                 throw failure(new ExecutionStoreFailure.PayloadTooLarge(
-                        registration.responseSchema().maxBytes(), maxPayloadBytes()));
+                        registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
             }
             if (!now.isBefore(registration.expiresAt())) {
                 throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
@@ -3687,9 +3733,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 + "requester_subject, requester_principal_type, requester_issuer, graph_version_pin, "
                 + "escalate_at_epoch_second, escalate_at_nano, expires_at_epoch_second, expires_at_nano, "
                 + "resolved_outcome, denied_outcome, expired_outcome, cancelled_outcome, "
+                + "decision_body_max_bytes, response_max_depth, response_max_collection_size, response_max_value_count, "
+                + "response_max_text_length, response_max_key_length, write_attempts, "
                 + "continuation_version, continuation, continuation_digest, status, actor, generation, revision";
         try (PreparedStatement statement = connection.prepareStatement(
-                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(37) + "?)")) {
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?,".repeat(44) + "?)")) {
             int index = 1;
             statement.setString(index++, task.key().tenantId());
             statement.setString(index++, task.key().processInstanceId().toString());
@@ -3725,6 +3773,13 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(index++, request.reentryMapping().deniedOutcome());
             statement.setString(index++, request.reentryMapping().expiredOutcome());
             statement.setString(index++, request.reentryMapping().cancelledOutcome());
+            statement.setInt(index++, request.executionLimits().decisionBodyMaxBytes());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxDepth());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxCollectionSize());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxValueCount());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxTextLength());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxKeyLength());
+            statement.setInt(index++, request.executionLimits().writeAttempts());
             statement.setInt(index++, request.continuationVersion());
             statement.setBytes(index++, request.continuation());
             statement.setString(index++, request.continuationDigest());
@@ -3827,6 +3882,16 @@ public final class SqliteExecutionStore implements ExecutionStore {
                     new HumanTaskReentryMapping(rows.getString("resolved_outcome"),
                             rows.getString("denied_outcome"), rows.getString("expired_outcome"),
                             rows.getString("cancelled_outcome")),
+                    new ai.ravenroot.api.persistence.HumanTaskExecutionLimits(
+                            new ai.ravenroot.api.payload.PayloadLimits(
+                                    rows.getInt("response_max_bytes"),
+                                    rows.getInt("response_max_depth"),
+                                    rows.getInt("response_max_collection_size"),
+                                    rows.getInt("response_max_value_count"),
+                                    rows.getInt("response_max_text_length"),
+                                    rows.getInt("response_max_key_length")),
+                            rows.getInt("decision_body_max_bytes"),
+                            rows.getInt("write_attempts")),
                     rows.getInt("continuation_version"), rows.getBytes("continuation"),
                     rows.getString("continuation_digest"));
             return new DurableHumanTask(key, request,
@@ -3992,6 +4057,32 @@ public final class SqliteExecutionStore implements ExecutionStore {
         if (payload.size() > config.maxPayloadBytes()) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), config.maxPayloadBytes()));
         }
+    }
+
+    private void requireHandlerOutcomeWithinLimit(ExecutionKey key, ExecutionBatch batch,
+                                                  HandlerTransition transition) throws SQLException {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= config.maxPayloadBytes()) return;
+        if (!isHumanTaskResolution(batch, transition)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        DurableHumanTask task = readHumanTask(key.tenantId(), transition.handlerId());
+        if (task == null || !task.key().equals(key)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) return false;
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
     }
 
     private void requireLeaseTtl(Duration ttl) {

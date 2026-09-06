@@ -6,10 +6,18 @@ import java.nio.charset.StandardCharsets;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** The version and schema rules, which are the part of API-01 a client actually has to program to. */
 class PayloadEnvelopeTest {
+    @Test
+    void schemaLabelProtocolBoundaryIsPublicAndExact() {
+        assertTrue(PayloadEnvelope.isValidLabel("a".repeat(PayloadEnvelope.MAX_LABEL_LENGTH)));
+        assertFalse(PayloadEnvelope.isValidLabel("a".repeat(PayloadEnvelope.MAX_LABEL_LENGTH + 1)));
+        assertFalse(PayloadEnvelope.isValidLabel("schema with spaces"));
+    }
 
     /** {@code PayloadJson.readEnvelope} takes only {@code byte[]}; see {@code PayloadJsonTest}. */
     private static PayloadEnvelope readEnvelope(String json, PayloadLimits limits) {

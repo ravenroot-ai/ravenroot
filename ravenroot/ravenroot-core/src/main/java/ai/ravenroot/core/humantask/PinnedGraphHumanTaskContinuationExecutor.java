@@ -5,7 +5,6 @@ import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadJson;
-import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.ExecutionKey;
@@ -306,7 +305,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
                 result = runner.executeAfterHumanTask(task.request().requester(),
                         task.key().processInstanceId(), claim.traversalId(), task.request().nodeId(),
                         task.request().graphVersionPin().reference(), recorder, result(task, handler),
-                        checkpoint.budget());
+                        checkpoint.budget(), task.request().executionLimits().responsePayload());
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, () -> close(binding));
                 setupFailure = cleanup(setupFailure, runner::close);
@@ -371,8 +370,7 @@ public final class PinnedGraphHumanTaskContinuationExecutor implements HumanTask
         body.put("schemaVersion", task.request().responseSchema().schemaVersion());
         if (task.status() == HumanTaskStatus.RESOLVED) {
             PayloadEnvelope envelope = PayloadJson.readEnvelope(handler.outcomePayload().bytes(),
-                    new PayloadLimits(task.request().responseSchema().maxBytes(),
-                            32, 1024, 4096, 16 * 1024, 256));
+                    task.request().executionLimits().responsePayload());
             body.put("response", envelope.toJava());
         }
         return new NodeResult(task.request().reentryMapping().outcomeFor(task.status()),

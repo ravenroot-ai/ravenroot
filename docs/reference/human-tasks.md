@@ -9,20 +9,44 @@ after a complete server restart.
 
 The node publishes all of its fields through `GET /v1/node-types`, so the generic editor renders
 labelled keyboard controls without a human-task-specific form. `title` is required and limited to
-256 UTF-8 bytes; `description` is optional and limited to 4 KiB. Both are static graph-authored text.
-They never interpolate the incoming payload or attributes, and the inbox never includes those
-unrestricted execution values.
+the deployment's operator policy; `description` is optional and uses the same policy. Both are static
+graph-authored text. They never interpolate the incoming payload or attributes, and the inbox never
+includes those unrestricted execution values.
 
 The response declaration consists of an exact media type, schema name, schema version, top-level
-kind (`SCALAR`, `LIST`, or `MAP`), and a byte ceiling of at most 256 KiB. A resolving request must be
-a Ravenroot `ravenroot.payload/1` envelope matching every part of that declaration. Responder roles
-and scopes are comma-separated conjunctions: a responder must hold every declared token. The
-original requester can cancel its own task even when it is not an authorized responder.
+kind (`SCALAR`, `LIST`, or `MAP`), and a byte ceiling bounded by the deployment's operator policy. A
+resolving request must be a Ravenroot `ravenroot.payload/1` envelope matching every part of that
+declaration. Responder roles and scopes are comma-separated conjunctions: a responder must hold every
+declared token. The original requester can cancel its own task even when it is not an authorized
+responder. Both schema name and schema version use the fixed ASCII alphanumeric `PayloadEnvelope`
+token grammar plus `._-:+/` and its 128-unit cap. The operator setting may narrow the schema-name
+budget but cannot widen it; schema version has the fixed protocol bound and no separate operator
+setting.
+
+The service applies this admission contract to every current task creation. Supported durable adapters
+apply the same check only after exact deduplication, so an exact replay of an already accepted request
+remains idempotent after a policy change. Pre-existing tasks with stored labels that do not satisfy the
+current payload-envelope rule can still be listed, read, and cancelled. Resolving one is refused because
+Ravenroot cannot create a compatible response envelope; this preserves the durable record and its
+cancellation path without treating an unrepresentable label as a valid current wire contract.
 
 `expiresAfterSeconds` creates a durable expiry timer. A non-zero `escalateAfterSeconds` creates a
 second durable timer that moves the task to `ESCALATED` while leaving it resolvable. Both delays are
-bounded to 30 days and escalation must precede expiry. The four terminal dispositions select the
-configured `resolvedOutcome`, `deniedOutcome`, `expiredOutcome`, or `cancelledOutcome`.
+bounded by the deployment's operator policy and escalation must precede expiry. The four terminal
+dispositions select the configured `resolvedOutcome`, `deniedOutcome`, `expiredOutcome`, or
+`cancelledOutcome`.
+
+## Operator policy
+
+Set the Human Task policy before startup through the documented server properties or environment
+variables. It covers graph defaults and ceilings, authorization and display metadata, the decision
+HTTP body, inbox pagination, structured-response parsing, and durable write retries. A graph can only
+narrow the configured response ceiling. The server pins resolved limits on registration, so a later
+policy change does not change an existing durable task after recovery: this includes its separately
+pinned raw-envelope decision-body cap, parser budgets, and write-retry budget. See [Configuration
+and deployment defaults](configuration.md#human-task-operational-policy) for every setting, default,
+range, precedence rule, and deployment mapping. Text and object-key parser budgets count UTF-16 code
+units; all `*-bytes` settings remain UTF-8 byte budgets.
 
 Correlation and deduplication are deliberately fixed. The task and handler share a deterministic
 task ID derived from the original tenant, process, traversal, invocation, and attempt. The attempt

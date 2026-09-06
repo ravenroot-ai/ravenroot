@@ -35,6 +35,13 @@ const CATALOG = JSON.stringify([{
       required: true,
     }),
     property('notes', 'Notes', 'TEXT', 'Long-form notes.'),
+    property('boundedTitle', 'Bounded title', 'STRING', 'UTF-8 bounded title.', {
+      maximumUtf8Bytes: 3,
+    }),
+    property('roles', 'Roles', 'TEXT', 'Comma-separated roles.', {
+      maximumItems: 2,
+      maximumItemUtf8Bytes: 3,
+    }),
     property('expression', 'Expression', 'CEL_EXPRESSION', 'A CEL expression.'),
     property('mode', 'Mode', 'STRING', 'How the fixture behaves.', {
       required: true,
@@ -46,6 +53,8 @@ const CATALOG = JSON.stringify([{
     }),
     property('retries', 'Retries', 'INTEGER', 'Maximum retry count.', {
       defaultValue: '3',
+      minimumValue: '1',
+      maximumValue: '5',
     }),
     property('ratio', 'Ratio', 'DECIMAL', 'A decimal ratio.', {
       defaultValue: '0.5',
@@ -161,7 +170,7 @@ test('generated property controls expose their labels, descriptions, states, and
   await field(page, 'notes').fill('Round-trip notes');
   await field(page, 'expression').fill('payload.ready');
   await field(page, 'enabled').selectOption('true');
-  await field(page, 'retries').fill('9');
+  await field(page, 'retries').fill('5');
   await field(page, 'ratio').fill('0.75');
   await field(page, 'endpoint').fill('https://example.test/service');
   await page.locator('#node-editor button[type="submit"]').click();
@@ -173,13 +182,42 @@ test('generated property controls expose their labels, descriptions, states, and
   await expect(field(page, 'notes')).toHaveValue('Round-trip notes');
   await expect(field(page, 'expression')).toHaveValue('payload.ready');
   await expect(field(page, 'enabled')).toHaveValue('true');
-  await expect(field(page, 'retries')).toHaveValue('9');
+  await expect(field(page, 'retries')).toHaveValue('5');
   await expect(field(page, 'ratio')).toHaveValue('0.75');
   await expect(field(page, 'endpoint')).toHaveValue('https://example.test/service');
 
   await field(page, 'adapterRuntime').locator('xpath=ancestor::div[contains(@class,"catalog-property")]')
     .scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('catalog-properties-desktop.png'), fullPage: true });
+});
+
+test('catalog policy bounds handle blank custom and invalid authoring values in the browser', async ({ page }) => {
+  await startEditableWorkflow(page);
+  await openFixtureEditor(page);
+  const title = field(page, 'boundedTitle');
+  const roles = field(page, 'roles');
+  const retries = field(page, 'retries');
+
+  await expect(title).toHaveValue('');
+  await expect(title).toHaveJSProperty('validity.valid', true);
+  await expect(retries).toHaveValue('3');
+  await expect(retries).toHaveAttribute('min', '1');
+  await expect(retries).toHaveAttribute('max', '5');
+
+  await retries.fill('6');
+  await expect(retries).toHaveJSProperty('validity.valid', false);
+  await retries.fill('5');
+  await expect(retries).toHaveJSProperty('validity.valid', true);
+
+  await title.fill('éé');
+  await expect(title).toHaveJSProperty('validity.valid', false);
+  await title.fill('é');
+  await expect(title).toHaveJSProperty('validity.valid', true);
+
+  await roles.fill('one,two,tri');
+  await expect(roles).toHaveJSProperty('validity.valid', false);
+  await roles.fill('one,two');
+  await expect(roles).toHaveJSProperty('validity.valid', true);
 });
 
 test('property IDs stay stable through conditional rerenders and remain disjoint across documents', async ({ page }, testInfo) => {

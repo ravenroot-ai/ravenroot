@@ -26,6 +26,7 @@ import java.util.UUID;
  * @param escalateAt optional durable escalation deadline.
  * @param expiresAt required durable expiry deadline.
  * @param reentryMapping terminal status to graph-outcome mapping.
+ * @param executionLimits recovery-sensitive response and store-retry limits.
  * @param continuationVersion version of the trusted graph continuation envelope.
  * @param continuation bounded opaque continuation bytes; never projected to responders.
  * @param continuationDigest content binding for the continuation bytes.
@@ -46,6 +47,7 @@ public record HumanTaskRegistration(
         Optional<Instant> escalateAt,
         Instant expiresAt,
         HumanTaskReentryMapping reentryMapping,
+        HumanTaskExecutionLimits executionLimits,
         int continuationVersion,
         byte[] continuation,
         String continuationDigest) {
@@ -78,8 +80,49 @@ public record HumanTaskRegistration(
                                  Instant expiresAt, HumanTaskReentryMapping reentryMapping) {
         this(taskId, traversalId, invocationId, attemptId, nodeId, correlationKey, deduplicationKey,
                 metadata, responseSchema, responderRequirements, requester, graphVersionPin,
-                escalateAt, expiresAt, reentryMapping, 1, new byte[0],
+                escalateAt, expiresAt, reentryMapping,
+                HumanTaskExecutionLimits.legacy(responseSchema.maxBytes()), 1, new byte[0],
                 ToolApprovalRegistration.digest(new byte[0]));
+    }
+
+    /**
+     * Compatibility constructor preserving the canonical registration shape before Human Task
+     * execution limits were persisted explicitly. It derives the historical parser, raw-body, and
+     * write-attempt contract from {@code responseSchema} while preserving the supplied trusted
+     * continuation envelope.
+     *
+     * @param taskId deterministic task identity
+     * @param traversalId suspended traversal identity
+     * @param invocationId suspended node invocation identity
+     * @param attemptId suspended node attempt identity
+     * @param nodeId graph node awaiting the decision
+     * @param correlationKey generic handler correlation key
+     * @param deduplicationKey generic handler deduplication key
+     * @param metadata bounded graph-authored display copy
+     * @param responseSchema exact bounded response contract
+     * @param responderRequirements authorization required from a responder
+     * @param requester security context that created the task
+     * @param graphVersionPin immutable graph version used for re-entry
+     * @param escalateAt optional durable escalation deadline
+     * @param expiresAt required durable expiry deadline
+     * @param reentryMapping terminal status to graph-outcome mapping
+     * @param continuationVersion positive version of the trusted graph continuation envelope
+     * @param continuation bounded opaque continuation bytes, copied on construction
+     * @param continuationDigest SHA-256 content binding for {@code continuation}
+     */
+    public HumanTaskRegistration(UUID taskId, UUID traversalId, UUID invocationId, UUID attemptId,
+                                 String nodeId, String correlationKey, String deduplicationKey,
+                                 HumanTaskMetadata metadata, HumanTaskResponseSchema responseSchema,
+                                 HandlerAuthorization responderRequirements, SecurityContext requester,
+                                 GraphVersionPin graphVersionPin, Optional<Instant> escalateAt,
+                                 Instant expiresAt, HumanTaskReentryMapping reentryMapping,
+                                 int continuationVersion, byte[] continuation,
+                                 String continuationDigest) {
+        this(taskId, traversalId, invocationId, attemptId, nodeId, correlationKey, deduplicationKey,
+                metadata, responseSchema, responderRequirements, requester, graphVersionPin,
+                escalateAt, expiresAt, reentryMapping,
+                HumanTaskExecutionLimits.legacy(responseSchema.maxBytes()),
+                continuationVersion, continuation, continuationDigest);
     }
 
     /** Validates identity, bounds, deadlines, authorization, and re-entry state. */
@@ -102,6 +145,11 @@ public record HumanTaskRegistration(
             throw new IllegalArgumentException("escalateAt must be before expiresAt");
         }
         reentryMapping = Objects.requireNonNull(reentryMapping, "reentryMapping");
+        executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
+        if (executionLimits.responsePayload().maxEncodedBytes() != responseSchema.maxBytes()) {
+            throw new IllegalArgumentException(
+                    "response payload encoded-byte limit must match response schema maxBytes");
+        }
         if (continuationVersion < 1) {
             throw new IllegalArgumentException("continuationVersion must be positive");
         }
@@ -137,6 +185,7 @@ public record HumanTaskRegistration(
                 && requester.equals(other.requester) && graphVersionPin.equals(other.graphVersionPin)
                 && escalateAt.equals(other.escalateAt) && expiresAt.equals(other.expiresAt)
                 && reentryMapping.equals(other.reentryMapping)
+                && executionLimits.equals(other.executionLimits)
                 && continuationVersion == other.continuationVersion
                 && Arrays.equals(continuation, other.continuation)
                 && continuationDigest.equals(other.continuationDigest);
@@ -146,7 +195,7 @@ public record HumanTaskRegistration(
         int result = Objects.hash(taskId, traversalId, invocationId, attemptId, nodeId,
                 correlationKey, deduplicationKey, metadata, responseSchema, responderRequirements,
                 requester, graphVersionPin, escalateAt, expiresAt, reentryMapping,
-                continuationVersion, continuationDigest);
+                executionLimits, continuationVersion, continuationDigest);
         return 31 * result + Arrays.hashCode(continuation);
     }
 
@@ -174,6 +223,7 @@ public record HumanTaskRegistration(
                 && requester.equals(other.requester)
                 && graphVersionPin.equals(other.graphVersionPin)
                 && reentryMapping.equals(other.reentryMapping)
+                && executionLimits.equals(other.executionLimits)
                 && continuationVersion == other.continuationVersion
                 && Arrays.equals(continuation, other.continuation)
                 && continuationDigest.equals(other.continuationDigest)

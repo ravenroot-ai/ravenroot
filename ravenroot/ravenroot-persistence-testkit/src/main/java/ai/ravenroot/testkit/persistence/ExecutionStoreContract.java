@@ -50,7 +50,9 @@ import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
@@ -77,6 +79,7 @@ import ai.ravenroot.api.persistence.ToolApprovalStatus;
 import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.execution.NodeCommand;
 import ai.ravenroot.api.payload.PayloadKind;
+import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.SecurityContext;
 import org.junit.jupiter.api.AfterEach;
@@ -3214,6 +3217,47 @@ public abstract class ExecutionStoreContract {
                                 await(store().load(secondProcess.key())).revision()))
                         .registerHumanTask(secondProcess.registration()).build())));
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+
+        HumanTaskRegistration policyInvalid = copyHumanTask(fixture.registration(), UUID.randomUUID(),
+                "human-dedup-policy-invalid", "human-correlation-policy-invalid");
+        policyInvalid = new HumanTaskRegistration(policyInvalid.taskId(), policyInvalid.traversalId(),
+                policyInvalid.invocationId(), policyInvalid.attemptId(), policyInvalid.nodeId(),
+                policyInvalid.correlationKey(), policyInvalid.deduplicationKey(),
+                new HumanTaskMetadata("x".repeat(
+                        HumanTaskPolicy.DEFAULTS.maxTitleUtf8Bytes() + 1), "description"),
+                policyInvalid.responseSchema(), policyInvalid.responderRequirements(),
+                policyInvalid.requester(), policyInvalid.graphVersionPin(), policyInvalid.escalateAt(),
+                policyInvalid.expiresAt(), policyInvalid.reentryMapping(), policyInvalid.executionLimits(),
+                policyInvalid.continuationVersion(), policyInvalid.continuation(),
+                policyInvalid.continuationDigest());
+        HumanTaskFixture invalidProcess = runningHumanTaskFixture(newKey(), policyInvalid);
+        ExecutionStoreFailure policyRefused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(invalidProcess.key())
+                        .expecting(RevisionExpectation.exactly(
+                                await(store().load(invalidProcess.key())).revision()))
+                        .registerHumanTask(invalidProcess.registration()).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, policyRefused);
+
+        HumanTaskRegistration invalidVersion = copyHumanTask(fixture.registration(), UUID.randomUUID(),
+                "human-dedup-version-invalid", "human-correlation-version-invalid");
+        invalidVersion = new HumanTaskRegistration(invalidVersion.taskId(),
+                invalidVersion.traversalId(), invalidVersion.invocationId(), invalidVersion.attemptId(),
+                invalidVersion.nodeId(), invalidVersion.correlationKey(), invalidVersion.deduplicationKey(),
+                invalidVersion.metadata(), new HumanTaskResponseSchema(
+                        invalidVersion.responseSchema().contentType(), invalidVersion.responseSchema().schema(),
+                        "version with spaces", invalidVersion.responseSchema().kind(),
+                        invalidVersion.responseSchema().maxBytes()), invalidVersion.responderRequirements(),
+                invalidVersion.requester(), invalidVersion.graphVersionPin(), invalidVersion.escalateAt(),
+                invalidVersion.expiresAt(), invalidVersion.reentryMapping(), invalidVersion.executionLimits(),
+                invalidVersion.continuationVersion(), invalidVersion.continuation(),
+                invalidVersion.continuationDigest());
+        HumanTaskFixture invalidVersionProcess = runningHumanTaskFixture(newKey(), invalidVersion);
+        ExecutionStoreFailure versionRefused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(invalidVersionProcess.key())
+                        .expecting(RevisionExpectation.exactly(
+                                await(store().load(invalidVersionProcess.key())).revision()))
+                        .registerHumanTask(invalidVersionProcess.registration()).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, versionRefused);
     }
 
     @Test
@@ -3321,7 +3365,8 @@ public abstract class ExecutionStoreContract {
                 template.responderRequirements(),
                 new SecurityContext("request", key.tenantId(), "requester", PrincipalType.USER, "issuer"),
                 template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
-                template.reentryMapping(), template.continuationVersion(), template.continuation(),
+                template.reentryMapping(), template.executionLimits(),
+                template.continuationVersion(), template.continuation(),
                 template.continuationDigest()));
     }
 
@@ -3338,6 +3383,7 @@ public abstract class ExecutionStoreContract {
                 new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
                 clock().instant().plus(Duration.ofMinutes(5)),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
+                HumanTaskPolicy.DEFAULTS.executionLimits(4096),
                 2, new byte[] {1, 2, 3}, digest(new byte[] {1, 2, 3}));
     }
 
@@ -3347,6 +3393,7 @@ public abstract class ExecutionStoreContract {
                 source.attemptId(), source.nodeId(), correlationKey, deduplicationKey, source.metadata(),
                 source.responseSchema(), source.responderRequirements(), source.requester(),
                 source.graphVersionPin(), source.escalateAt(), source.expiresAt(), source.reentryMapping(),
+                source.executionLimits(),
                 source.continuationVersion(), source.continuation(), source.continuationDigest());
     }
 

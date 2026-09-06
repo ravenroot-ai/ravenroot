@@ -234,6 +234,7 @@ jobs:
           ./scripts/tests/test_service.sh
           ./scripts/tests/test_execution_store_platform.sh
           ./scripts/tests/test_execution_store_platform_regression.sh
+          ./scripts/tests/test_human_task_platform_configuration.sh
       - name: Validate the Compose definition
         run: docker compose --file compose.yaml config --quiet
       - name: Check whitespace
@@ -321,6 +322,7 @@ jobs:
           ./scripts/tests/test_service.sh
           ./scripts/tests/test_execution_store_platform.sh
           ./scripts/tests/test_execution_store_platform_regression.sh
+          ./scripts/tests/test_human_task_platform_configuration.sh
 
   full-source-policy:
     name: full-source-policy

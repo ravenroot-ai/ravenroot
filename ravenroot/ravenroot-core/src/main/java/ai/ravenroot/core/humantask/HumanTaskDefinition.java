@@ -4,6 +4,7 @@ import ai.ravenroot.api.persistence.HandlerAuthorization;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -15,7 +16,19 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
                                   HandlerAuthorization responderRequirements,
                                   Optional<Duration> escalationDelay,
                                   Duration expiryDelay,
-                                  HumanTaskReentryMapping reentryMapping) {
+                                  HumanTaskReentryMapping reentryMapping,
+                                  HumanTaskExecutionLimits executionLimits) {
+    /** Compatibility constructor using the legacy response and retry budgets. */
+    public HumanTaskDefinition(HumanTaskMetadata metadata,
+                               HumanTaskResponseSchema responseSchema,
+                               HandlerAuthorization responderRequirements,
+                               Optional<Duration> escalationDelay,
+                               Duration expiryDelay,
+                               HumanTaskReentryMapping reentryMapping) {
+        this(metadata, responseSchema, responderRequirements, escalationDelay, expiryDelay,
+                reentryMapping, HumanTaskExecutionLimits.legacy(responseSchema.maxBytes()));
+    }
+
     public HumanTaskDefinition {
         Objects.requireNonNull(metadata, "metadata");
         Objects.requireNonNull(responseSchema, "responseSchema");
@@ -27,6 +40,11 @@ public record HumanTaskDefinition(HumanTaskMetadata metadata,
             throw new IllegalArgumentException("escalationDelay must be shorter than expiryDelay");
         }
         Objects.requireNonNull(reentryMapping, "reentryMapping");
+        executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
+        if (executionLimits.responsePayload().maxEncodedBytes() != responseSchema.maxBytes()) {
+            throw new IllegalArgumentException(
+                    "response payload encoded-byte limit must match response schema maxBytes");
+        }
     }
 
     private static void requirePositive(Duration value, String name) {

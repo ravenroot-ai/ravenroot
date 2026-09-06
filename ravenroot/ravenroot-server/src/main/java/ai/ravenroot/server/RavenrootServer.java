@@ -18,6 +18,7 @@ import ai.ravenroot.api.payload.PayloadException;
 import ai.ravenroot.api.payload.PayloadJson;
 import ai.ravenroot.api.payload.PayloadLimits;
 import ai.ravenroot.api.payload.PayloadValue;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.programming.ArtifactLifecycleAuditSink;
 import ai.ravenroot.api.programming.GeneratedArtifact;
 import ai.ravenroot.api.programming.ProgramDeadlineExceededException;
@@ -317,6 +318,7 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installed only when the execution store supports first-class durable human tasks. */
     private ai.ravenroot.core.humantask.HumanTaskService humanTasks;
     private java.util.function.Consumer<String> humanTaskSweep = ignored -> { };
+    private HumanTaskPolicy humanTaskPolicy = HumanTaskPolicy.DEFAULTS;
     /** Installed only by the packaged composition when durable agent authority is enabled. */
     /**
      * The manifest projection, or {@code null} when this host composes no manifest store and the
@@ -1024,10 +1026,17 @@ public final class RavenrootServer implements AutoCloseable {
     /** Installs the transport-neutral human-task authority before listener start. */
     synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
                                         java.util.function.Consumer<String> sweep) {
+        installHumanTasks(tasks, sweep, HumanTaskPolicy.DEFAULTS);
+    }
+
+    synchronized void installHumanTasks(ai.ravenroot.core.humantask.HumanTaskService tasks,
+                                        java.util.function.Consumer<String> sweep,
+                                        HumanTaskPolicy policy) {
         if (started.get()) throw new IllegalStateException("human tasks must be installed before start");
         if (humanTasks != null) throw new IllegalStateException("human tasks are already installed");
         humanTasks = java.util.Objects.requireNonNull(tasks, "tasks");
         humanTaskSweep = java.util.Objects.requireNonNull(sweep, "sweep");
+        humanTaskPolicy = java.util.Objects.requireNonNull(policy, "policy");
     }
 
     /**
@@ -2320,6 +2329,11 @@ public final class RavenrootServer implements AutoCloseable {
                 // block saving or submitting a graph that leaves it blank.
                 + ",\"adapterBinding\":" + property.adapterBinding()
                 + ",\"allowedValues\":" + values
+                + ",\"minimumValue\":\"" + escape(property.minimumValue()) + "\""
+                + ",\"maximumValue\":\"" + escape(property.maximumValue()) + "\""
+                + ",\"maximumUtf8Bytes\":" + property.maximumUtf8Bytes()
+                + ",\"maximumItems\":" + property.maximumItems()
+                + ",\"maximumItemUtf8Bytes\":" + property.maximumItemUtf8Bytes()
                 // Absent conditions are emitted as null, never as an always-true condition.
                 // A consumer must be able to tell "no condition declared" from "a condition that
                 // happens to hold", because only the first means the field is unconditional.
@@ -2581,7 +2595,8 @@ public final class RavenrootServer implements AutoCloseable {
             java.util.Optional<java.util.UUID> cursor;
             java.util.Set<ai.ravenroot.api.persistence.HumanTaskStatus> statuses;
             try {
-                limit = Integer.parseInt(parameters.getOrDefault("limit", "50"));
+                limit = Integer.parseInt(parameters.getOrDefault("limit",
+                        Integer.toString(humanTaskPolicy.inboxDefaultPageSize())));
                 includeTerminal = Boolean.parseBoolean(parameters.getOrDefault("includeTerminal", "false"));
                 cursor = parameters.containsKey("cursor")
                         ? java.util.Optional.of(java.util.UUID.fromString(parameters.get("cursor")))
@@ -2629,7 +2644,7 @@ public final class RavenrootServer implements AutoCloseable {
         try {
             result = switch (segments[1]) {
                 case "resolve" -> service.resolve(context, taskId, generation,
-                        humanTaskResponse(exchange));
+                        humanTaskResponse(exchange, context, taskId, service));
                 case "deny" -> service.deny(context, taskId, generation);
                 case "cancel" -> service.cancel(context, taskId, generation);
                 default -> throw new IllegalStateException("unreachable human-task operation");
@@ -2657,9 +2672,12 @@ public final class RavenrootServer implements AutoCloseable {
         }
     }
 
-    private ai.ravenroot.api.persistence.OpaquePayload humanTaskResponse(HttpExchange exchange)
+    private ai.ravenroot.api.persistence.OpaquePayload humanTaskResponse(
+            HttpExchange exchange, ai.ravenroot.api.security.RequestContext context,
+            java.util.UUID taskId, ai.ravenroot.core.humantask.HumanTaskService service)
             throws IOException {
-        int limit = ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes();
+        int limit = service.authorizedResponseBodyLimit(context, taskId)
+                .orElse(humanTaskPolicy.decisionBodyMaxBytes());
         byte[] body;
         try (var input = exchange.getRequestBody()) {
             body = input.readNBytes(limit + 1);

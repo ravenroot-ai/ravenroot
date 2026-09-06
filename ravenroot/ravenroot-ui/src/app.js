@@ -5458,6 +5458,10 @@ function renderNodeForm(model, creating) {
     if (!catalogEditorDescriptor || !event.target.closest('[data-catalog-property]')) return;
     refreshConditionalCatalogProperties(catalogEditorDescriptor, catalogFieldOwner);
   });
+  document.getElementById('catalog-properties')?.addEventListener('input', event => {
+    const field = event.target.closest('[data-catalog-property]');
+    if (field) validateCatalogEncodedField(field);
+  });
   form.addEventListener('submit', event => {
     event.preventDefault();
     if (layoutBusy) return showFormError(form, 'Layout in progress');
@@ -5736,6 +5740,18 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // `invokesModelProvider`, which reads the same capability set the runtime reads.
       if (invokesModelProvider(descriptor)) stateText = appendSentence(stateText, PROVIDER_CONFIG_POINTER);
     }
+    if (property.maximumUtf8Bytes > 0) {
+      helpText = appendSentence(helpText, `Maximum ${property.maximumUtf8Bytes} UTF-8 bytes.`);
+    }
+    if (property.maximumItems > 0) {
+      helpText = appendSentence(helpText,
+        `Maximum ${property.maximumItems} comma-separated items; ${property.maximumItemUtf8Bytes} UTF-8 bytes each.`);
+    }
+    const numericBounds = `${property.minimumValue != null && property.minimumValue !== '' ? ` min="${escapeAttribute(property.minimumValue)}"` : ''}`
+      + `${property.maximumValue != null && property.maximumValue !== '' ? ` max="${escapeAttribute(property.maximumValue)}"` : ''}`;
+    const encodedBounds = `${property.maximumUtf8Bytes > 0 ? ` data-maximum-utf8-bytes="${property.maximumUtf8Bytes}"` : ''}`
+      + `${property.maximumItems > 0 ? ` data-maximum-items="${property.maximumItems}"` : ''}`
+      + `${property.maximumItemUtf8Bytes > 0 ? ` data-maximum-item-utf8-bytes="${property.maximumItemUtf8Bytes}"` : ''}`;
     // Stated unconditionally for the shape, not only while the value happens to be undeclared.
     // The hint is rendered once and is not re-rendered on a plain value change (only
     // `refreshConditionalCatalogProperties` re-renders, and only when a CONDITION changed), so a
@@ -5827,7 +5843,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
       // instead is PRESERVE, never invent — see the two options below.
       control = `<select data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${secretReferenceOptionsHtml(String(value))}</select>`;
     } else if (property.type === 'TEXT' || property.type === 'CEL_EXPRESSION') {
-      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${accessibility} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
+      control = `<textarea data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}"${encodedBounds}${accessibility} ${nativeRequired ? 'required' : ''}>${escapeHtml(value)}</textarea>`;
     } else if (property.type === 'BOOLEAN') {
       // Same defect as the closed-choice branch above, muter -- `String(value) !== 'true'` is
       // true for ANY value that is not the exact string "true", so a stored value that merely FAILED
@@ -5853,7 +5869,7 @@ function catalogPropertyFieldsHtml(descriptor, values, owner) {
     } else {
       const inputType = property.type === 'INTEGER' || property.type === 'DECIMAL' ? 'number' : 'text';
       const step = property.type === 'DECIMAL' ? ' step="any"' : '';
-      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step} value="${escapeAttribute(value)}"${accessibility} ${nativeRequired ? 'required' : ''}>`;
+      control = `<input data-catalog-property="${escapeAttribute(property.name)}" data-catalog-type="${property.type}" type="${inputType}"${step}${numericBounds}${encodedBounds} value="${escapeAttribute(value)}"${accessibility} ${nativeRequired ? 'required' : ''}>`;
     }
     // `hidden`, never omitted from the render. `readCatalogPropertyEditor` collects every
     // `[data-catalog-property]` control that EXISTS in the form regardless of `hidden` — submit
@@ -5987,6 +6003,24 @@ function readCatalogPropertyEditor(form) {
     propertyTypes[name] = catalogTypeToGraphMl(field.dataset.catalogType);
   });
   return { properties, propertyTypes };
+}
+
+function validateCatalogEncodedField(field) {
+  const byteLength = value => new TextEncoder().encode(value).length;
+  const value = String(field.value ?? '');
+  const maximum = Number(field.dataset.maximumUtf8Bytes || 0);
+  const maximumItems = Number(field.dataset.maximumItems || 0);
+  const maximumItem = Number(field.dataset.maximumItemUtf8Bytes || 0);
+  let error = maximum > 0 && byteLength(value) > maximum
+    ? `Maximum ${maximum} UTF-8 bytes.` : '';
+  const items = value === '' ? [] : value.split(',');
+  if (!error && maximumItems > 0 && items.length > maximumItems) {
+    error = `Maximum ${maximumItems} comma-separated items.`;
+  }
+  if (!error && maximumItem > 0 && items.some(item => byteLength(item.trim()) > maximumItem)) {
+    error = `Each item is limited to ${maximumItem} UTF-8 bytes.`;
+  }
+  field.setCustomValidity(error);
 }
 
 function catalogTypeToGraphMl(type) {

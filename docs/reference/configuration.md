@@ -60,6 +60,75 @@ same composition root.
 A refusal exposes a closed code such as `GRAPH_LIMIT_FAN_OUT_EXCEEDED` or
 `GRAPH_LIMIT_TRAVERSAL_STEPS_EXCEEDED`, never graph content or payload values.
 
+## Human Task operational policy
+
+Human Task limits are one immutable server policy shared by graph authoring, catalog projection,
+HTTP admission, persistence, and recovery. Set a JVM property
+`ravenroot.human-task.<suffix>` or its environment counterpart
+`RAVENROOT_HUMAN_TASK_<SUFFIX>`; a non-blank JVM property takes precedence. An absent or blank
+property falls through to the environment variable, and an absent or blank environment variable uses
+the default below. Values are read at process startup and require a restart to change.
+
+| Server property / environment variable | Default | Valid range | Scope |
+|---|---:|---|---|
+| `ravenroot.human-task.default-response-bytes` / `RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES` | 65,536 | 1–67,108,864; no greater than `max-response-bytes` | default graph response ceiling |
+| `ravenroot.human-task.max-response-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES` | 262,144 | 1–67,108,864; no greater than `max-decision-body-bytes` | largest graph response ceiling |
+| `ravenroot.human-task.default-escalation-seconds` / `RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS` | 0 | 0–2,147,483,646; zero or below `default-expiry-seconds`; no greater than `max-escalation-seconds` | default escalation delay; zero disables it |
+| `ravenroot.human-task.max-escalation-seconds` / `RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS` | 2,591,999 | 0–2,147,483,646; below `max-expiry-seconds` | largest graph escalation delay |
+| `ravenroot.human-task.default-expiry-seconds` / `RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS` | 604,800 | 1–2,147,483,647; no greater than `max-expiry-seconds` | default expiry delay |
+| `ravenroot.human-task.max-expiry-seconds` / `RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS` | 2,592,000 | 1–2,147,483,647; above `max-escalation-seconds` | largest graph expiry delay |
+| `ravenroot.human-task.max-title-bytes` / `RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES` | 256 | 1–67,108,864 | UTF-8 title budget |
+| `ravenroot.human-task.max-description-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES` | 4,096 | 1–67,108,864 | UTF-8 description budget |
+| `ravenroot.human-task.max-response-schema-bytes` / `RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES` | 128 | 1–128 | ASCII `PayloadEnvelope` schema-name budget; schema version uses the fixed protocol bound |
+| `ravenroot.human-task.max-authorization-tokens` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS` | 16 | 1–256 | required responder role/scope tokens |
+| `ravenroot.human-task.max-authorization-token-bytes` / `RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES` | 256 | 1–4,096 | UTF-8 bytes in one authorization token |
+| `ravenroot.human-task.max-decision-body-bytes` / `RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES` | 262,144 | 1–67,108,864; at least `max-response-bytes` | raw encoded PayloadEnvelope HTTP decision body |
+| `ravenroot.human-task.default-page-size` / `RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE` | 50 | 1–1,000; no greater than `max-page-size` | inbox page size when `limit` is omitted |
+| `ravenroot.human-task.max-page-size` / `RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE` | 100 | 1–1,000 | largest requested inbox page |
+| `ravenroot.human-task.response-max-depth` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH` | 32 | 1–256 | structured response nesting depth |
+| `ravenroot.human-task.response-max-collection-size` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE` | 1,024 | 1–1,000,000 | entries in one response collection |
+| `ravenroot.human-task.response-max-value-count` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT` | 4,096 | 1–5,000,000 | values across one response |
+| `ravenroot.human-task.response-max-text-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH` | 16,384 | 1–67,108,864 | UTF-16 code units in one text value |
+| `ravenroot.human-task.response-max-key-length` / `RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH` | 256 | 1–4,096 | UTF-16 code units in one object key |
+| `ravenroot.human-task.write-attempts` / `RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS` | 3 | 1–32 | durable Human Task write retries |
+
+For example, use
+`-Dravenroot.human-task.max-response-bytes=524288` or
+`RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES=524288`; the property form wins when both are present.
+Docker Compose forwards this environment family, and the Helm chart exposes the same values under
+`humanTask`; a blank Helm string deliberately selects the server default. Helm validates the listed
+individual technical ranges, while the server validates the relational constraints before it opens a
+listener. A malformed, overflowed, or inconsistent non-blank value refuses startup without echoing
+the supplied value. The direct `ravenroot/scripts/server.sh` launcher inherits the same environment;
+Ravenroot ships no tracked environment-file template or environment generator.
+
+The UTF-8 unit applies only to fields named `*-bytes`. Response text and key lengths instead count
+UTF-16 code units, including two units for one supplementary Unicode code point. The resource caps
+on inbox pages, write attempts, and authorization tokens bound SQLite page materialization,
+conflict-path retry work, and persisted authorization material respectively. Each responder axis
+(roles and scopes) may carry 256 tokens; at 4,096 bytes per token, the two sets together are bounded
+to 2 MiB of raw token text before delimiter and collection overhead.
+
+The Human Task policy must also compose with graph execution limits at startup. Its
+`max-response-bytes` cannot exceed `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES`, and its value plus a
+256-byte Human Task metadata reserve cannot exceed `RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES`.
+Raise the paired graph limit before raising a valid Human Task response limit; an incompatible
+combination refuses startup before the listener opens.
+
+A graph may narrow a configured response ceiling but cannot widen the server policy. The resolved
+response limit, raw-envelope decision-body cap, parser budgets, and write-retry budget are pinned
+with a durable task, so changing a deployment policy cannot silently reinterpret a task created under
+an earlier policy. Human Task retention remains part of durable execution-store retention and cascade
+policy; there is no separate Human Task retention or outstanding-task quota.
+
+Response media-type identity, schema name/version, payload-envelope identity, deterministic task ID,
+and generation fencing are per-task wire or persistence contracts. Schema names and schema versions
+use the existing ASCII alphanumeric `PayloadEnvelope` token grammar plus `._-:+/` and its fixed
+128-unit cap, so bytes and units are identical. The configured schema-name budget may narrow that
+bound; schema version has no separate operator setting. The former larger policy maximum was never a
+usable wire label. These contracts are deliberately not global operator settings because changing them
+would make existing clients or durable records ambiguous.
+
 ## Identity and browser controls
 
 Local-token mode requires a token of at least 32 characters. OIDC configuration names issuer, audience, and JWKS URI. Published container deployments use OIDC as the external authentication contract.

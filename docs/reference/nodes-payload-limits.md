@@ -32,9 +32,10 @@ An unavailable privileged dependency does not become available because its ident
 | `json-parse` | `source` | string template | `{{payload}}` |
 | `json-path` | `path` | string | required RFC 9535 expression |
 | `template` | `template` | string | required template text |
-| `human-task` | `title` / `description` | string / text | required ≤256 UTF-8 bytes / optional ≤4 KiB |
-| `human-task` | `responseKind` / `maxResponseBytes` | enum / integer | `MAP` / 65,536 (maximum 262,144) |
-| `human-task` | `escalateAfterSeconds` / `expiresAfterSeconds` | integer / integer | 0 (disabled) / 604,800; maximum 2,592,000 |
+| `human-task` | `title` / `description` | string / text | required / optional; UTF-8 budgets come from the Human Task operator policy |
+| `human-task` | `responseKind` / `maxResponseBytes` | enum / integer | `MAP` / policy default; graph value may narrow the policy ceiling |
+| `human-task` | `responseSchema` / `responseSchemaVersion` | string / string | `ravenroot.human-task.response` / `1`; fixed 1–128 ASCII `PayloadEnvelope` labels, with the policy able to narrow only `responseSchema` |
+| `human-task` | `escalateAfterSeconds` / `expiresAfterSeconds` | integer / integer | policy defaults and ceilings; zero escalation disables it and escalation precedes expiry |
 
 `delay` preserves payload and attributes and returns `continue`. `json-parse` accepts top-level scalars, arrays, or objects; 64-bit integers remain integers and fractional or exponent numbers become doubles. Invalid JSON fails. `json-path` returns an ordered array and returns `[]` when nothing matches.
 
@@ -53,4 +54,4 @@ JSONPath additionally limits query length to 32,768 UTF-16 code units, selectors
 
 Limit violations are classified failures and never silently truncate a value or clamp a query. For route semantics see [Executions and outcomes](execution-events.md); for security ownership see [Input, secrets, and egress](../security/input-secrets-egress.md).
 
-See [Durable human tasks](human-tasks.md) for the full response, authorization, timer, re-entry, and inbox contract.
+See [Durable human tasks](human-tasks.md) for the full response, authorization, timer, re-entry, and inbox contract, and [Configuration and deployment defaults](configuration.md#human-task-operational-policy) for the operator-owned Human Task values and ranges.

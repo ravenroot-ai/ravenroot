@@ -90,6 +90,42 @@ class ExecutionTerminationReasonContractTest {
                 ProcessInstanceStatus.COMPLETED, Map.of(), ExecutionTerminationReason.CANCELLED));
     }
 
+    /**
+     * The same refusal for every member of the vocabulary, driven off {@code values()} rather than
+     * off a list written here.
+     *
+     * <p>Written this way because the defect it guards is specific: a gate that names members passes
+     * unchanged when a member is added, so the new value is silently loaded and believed on exactly
+     * the contradictory rows the gate exists to catch — and no test fails to say so. Enumerating
+     * {@code values()} makes the next member's refusal automatic, and makes a deliberate exemption a
+     * visible edit here rather than an omission somewhere else.</p>
+     *
+     * <p>The invariant is a property of the vocabulary, not of any one member: every reason in it
+     * describes a termination that reached no end node and produced no result, which is precisely why
+     * each is recorded beside {@code FAILED}.</p>
+     */
+    @Test
+    @DisplayName("every termination reason is refused on a completed or non-terminal aggregate")
+    void everyTerminationReasonIsRefusedOnACompletedOrNonTerminalAggregate() {
+        for (ExecutionTerminationReason reason : ExecutionTerminationReason.values()) {
+            assertThrows(IllegalArgumentException.class, () -> new Traversal(TRAVERSAL, "start",
+                            TraversalStatus.COMPLETED, Map.of(), reason),
+                    () -> reason + " on a COMPLETED traversal claims a run both stopped short and "
+                            + "produced a result, and must be classified as corrupt");
+            assertThrows(IllegalArgumentException.class, () -> new Traversal(TRAVERSAL, "start",
+                            TraversalStatus.RUNNING, Map.of(), reason),
+                    () -> reason + " on a RUNNING traversal claims a termination that has not happened");
+            assertThrows(IllegalArgumentException.class, () -> new ProcessInstance(INSTANCE,
+                            ProcessInstanceStatus.COMPLETED, Map.of(), reason),
+                    () -> reason + " on a COMPLETED process instance is the instance-level twin of the "
+                            + "same contradiction");
+            assertThrows(IllegalArgumentException.class, () -> new ProcessInstance(INSTANCE,
+                            ProcessInstanceStatus.RUNNING, Map.of(), reason),
+                    () -> reason + " on a RUNNING process instance claims a termination that has not "
+                            + "happened");
+        }
+    }
+
     @Test
     @DisplayName("a terminating transition carries the reason with the status, not after it")
     void aTerminatingTransitionCarriesTheReasonWithTheStatus() {

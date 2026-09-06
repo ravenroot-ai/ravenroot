@@ -109,10 +109,14 @@ describe('a document opening does not apply a constant divorced from the working
       .toMatch(assignment);
   });
 
-  it('resets the working-view font size only when the document actually changed', () => {
-    const body = functionBody(APP_SOURCE, 'initCy');
-    const guardedBlock = body.slice(body.indexOf('if (documentChanged)'), body.indexOf('if (documentChanged)') + 400);
-    expect(guardedBlock).toContain('fontSize = DEFAULT_FONT_SIZE;');
+  it('keeps the activated font on load and resets it at the explicit replacement boundary', () => {
+    // Restored documents have already applied their saved font to the working view. Reassigning
+    // it inside initialization would erase that value, or revive a replaced record's old value.
+    expect(functionBody(APP_SOURCE, 'initCy')).not.toMatch(/\bfontSize\s*=(?!=)/);
+    const replacement = functionBody(APP_SOURCE, 'completeReplaceActiveDocument');
+    expect(replacement).toContain('fontSize = DEFAULT_FONT_SIZE;');
+    expect(replacement.indexOf('fontSize = DEFAULT_FONT_SIZE;'))
+      .toBeLessThan(replacement.indexOf('initLoadedGraph('));
   });
 });
 

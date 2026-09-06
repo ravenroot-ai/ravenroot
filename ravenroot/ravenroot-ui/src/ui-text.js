@@ -1,4 +1,12 @@
 const ENGLISH_MESSAGES = Object.freeze({
+  'commands.edit.groupSelection.label': 'Group selection',
+  'commands.edit.groupSelection.help': 'Create a named visual group from two or more selected real nodes',
+  'commands.view.toggleGroup.label': 'Expand / collapse group',
+  'commands.view.toggleGroup.help': 'Toggle the selected visual group without changing execution or zoom',
+  'commands.edit.renameGroup.label': 'Rename group',
+  'commands.edit.replaceGroupMembers.label': 'Replace members with selection',
+  'commands.edit.ungroup.label': 'Ungroup',
+  'commands.edit.removeGroupMetadata.label': 'Remove unsupported visual group metadata',
   'commands.file.new.label': 'New Document',
   'commands.file.open.label': 'Open…',
   'commands.file.replaceActive.label': 'Replace Active…',

@@ -1,11 +1,57 @@
 import { readFileSync } from 'node:fs';
 import { resolve as resolvePath } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { mountD3ElasticRenderer } from '../src/viewer-elastic-renderer.js';
 
 describe('shared D3 Elastic renderer', () => {
+  it('projects groups without replacing, reheating or stopping the canonical simulation and restores temporary pins', () => {
+    document.body.innerHTML = '<svg id="elastic"></svg>';
+    let frame = null;
+    vi.stubGlobal('requestAnimationFrame', callback => { frame = callback; return 1; });
+    vi.stubGlobal('cancelAnimationFrame', () => { frame = null; });
+    const renderer = mountD3ElasticRenderer({ svg: document.querySelector('svg'),
+      nodes: [{ id: 'a', label: 'A', r: 10, color: '#fff', x: 10, y: 20, fx: 10 },
+        { id: 'b', label: 'B', r: 10, color: '#fff', x: 80, y: 20 },
+        { id: 'c', label: 'C', r: 10, color: '#fff', x: 180, y: 80 }],
+      links: [{ id: 'e1', source: 'a', target: 'b', baseWidth: 1.8, restLen: 70, color: '#fff' },
+        { id: 'e2', source: 'b', target: 'c', baseWidth: 1.8, restLen: 70, color: '#fff' }],
+      width: 400, height: 200, palette: {}, initialTransform: { k: 1.3, x: 21, y: -9 },
+    });
+    const stop = vi.spyOn(renderer.simulation, 'stop');
+    const restart = vi.spyOn(renderer.simulation, 'restart');
+    const groups = [{ id: 'g', name: 'Section', memberNodeIds: ['a', 'b'], anchorNodeId: 'a', collapsed: false }];
+    const before = renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, vx: node.vx, vy: node.vy, fx: node.fx, fy: node.fy }));
+    const alpha = renderer.simulation.alpha();
+    renderer.setVisualGroups({ groups, state: { g: { collapsed: true } }, animate: true });
+    renderer.simulation.tick(4); renderer.paint();
+    expect(renderer.nodes.map(node => [node.id, node.x, node.y])).toEqual(before.map(node => [node.id, node.x, node.y]));
+    expect(renderer.simulation.alpha()).toBeLessThan(alpha);
+    expect(stop).not.toHaveBeenCalled(); expect(restart).not.toHaveBeenCalled();
+    renderer.finishVisualGroupTransition();
+    expect(renderer.nodes.map(node => ({ id: node.id, x: node.x, y: node.y, vx: node.vx, vy: node.vy, fx: node.fx, fy: node.fy }))).toEqual(before);
+    expect(renderer.simulation.nodes()).toBe(renderer.nodes);
+    expect(renderer.getVisibleGraph().nodes.some(node => node.id === 'b')).toBe(false);
+    expect(document.querySelector('.d3-zoom-group').getAttribute('transform')).toBe('translate(21,-9) scale(1.3)');
+    renderer.updateNode('b', { runtimeObserved: true, runtimeState: 'failed' });
+    expect(document.querySelector('[data-member-observations]').getAttribute('data-member-observations')).toContain('"failed":1');
+    // A settled simulation also remains settled; toggling never calls restart or changes alpha.
+    renderer.simulation.stop().alpha(0); stop.mockClear();
+    renderer.setVisualGroups({ groups, state: {}, animate: false });
+    expect(renderer.simulation.alpha()).toBe(0); expect(stop).not.toHaveBeenCalled();
+    expect(restart).not.toHaveBeenCalled();
+    renderer.setVisualGroups({ groups, state: { g: { collapsed: true } }, selectedGroupId: 'g', focusGroupId: 'g' });
+    const restoredSummary = document.querySelector('[aria-label="Expand visual group Section, 2 members"]');
+    expect(restoredSummary.getAttribute('data-selected')).toBe('true');
+    expect(document.activeElement).toBe(restoredSummary);
+    const headerId = renderer.visualGroupProjection.groups[0].headerId;
+    renderer.setVisualGroups({ groups, state: {}, selection: [headerId], focus: headerId });
+    const restoredHeader = document.querySelector('[aria-label="Collapse visual group Section, 2 members"]');
+    expect(restoredHeader.getAttribute('data-selected')).toBe('true');
+    expect(document.activeElement).toBe(restoredHeader);
+    renderer.destroy(); vi.unstubAllGlobals();
+  });
   it('mounts a real SVG force renderer and tears it down deterministically', () => {
     document.body.innerHTML = '<svg id="elastic"></svg>';
     const svg = document.querySelector('#elastic');

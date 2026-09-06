@@ -74,6 +74,10 @@ export function createDocumentRecord({
     },
     // Owned by app.js, one per document. Held here so the record is the single home of the state.
     cy: null,
+    visualGroupState: {},
+    visualGroupPresentationDirty: false,
+    canvasState: null,
+    visualGroupsRenderer: null,
     // The pane is built BEFORE the canvas and the canvas is created inside it, because moving a
     // `.doc-canvas` after the fact stops its Cytoscape instance painting for good (UI-03). Both are
     // held here so a document carries its own DOM rather than the layout
@@ -183,7 +187,7 @@ export function forkDocumentRecord(source, { documentId = createDocumentIncarnat
   if (!source) throw new TypeError('A source document is required');
   const forkGraph = graph || structuredClone(source.graph);
   if (forkGraph?.nodes) forkGraph.nodeMap = Object.fromEntries(forkGraph.nodes.map(node => [node.id, node]));
-  return createDocumentRecord({
+  const fork = createDocumentRecord({
     id: documentId, documentId, tenantId, graph: forkGraph, history, name,
     displayName: `${source.displayName || source.name || 'workflow'} — fork`,
     mode: DOCUMENT_MODES.DRAFT,
@@ -194,6 +198,14 @@ export function forkDocumentRecord(source, { documentId = createDocumentIncarnat
       deploymentId: null,
     },
   });
+  fork.visualGroupState = structuredClone(source.visualGroupState || {});
+  fork.visualGroupPresentationDirty = Boolean(source.visualGroupPresentationDirty);
+  fork.canvasState = source.canvasState ? structuredClone(source.canvasState) : null;
+  fork.renderMode = source.renderMode;
+  fork.layoutMode = source.layoutMode;
+  fork.visualStyle = source.visualStyle;
+  fork.fontSize = source.fontSize;
+  return fork;
 }
 
 export function createDocumentIncarnation() {
@@ -331,7 +343,8 @@ export function documentForRuntimeEvent(workspace, event) {
 // the one the user is most likely to have forgotten. The caller writes the working view back into
 // the active record first, so that "dirty" here means every document's own history.
 export function hasUnsavedWork(workspace) {
-  return workspace.documents.some(document_ => Boolean(document_.history?.isDirty()));
+  return workspace.documents.some(document_ => Boolean(document_.history?.isDirty())
+    || (documentIsEditable(document_) && document_.visualGroupPresentationDirty));
 }
 
 export function bindExecution(document, executionId, graphVersion = null, reconciliationClient = null,

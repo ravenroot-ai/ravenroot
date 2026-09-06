@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+  <key id="kind" for="node" attr.name="kind" attr.type="string"/>
+  <key id="behavior" for="node" attr.name="behavior" attr.type="string"/>
+  <key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>
+  <key id="parallel" for="edge" attr.name="parallel" attr.type="boolean"/>
+  <key id="groups" for="graph" attr.name="ravenroot.ui.visualGroups" attr.type="string"/>
+  <graph id="visual-group-parity" edgedefault="directed">
+    <data key="groups">{"version":1,"groups":[{"id":"group-work","name":"Processing","memberNodeIds":["work","branch"],"anchorNodeId":"work","collapsed":true}]}</data>
+    <node id="start"><data key="kind">START</data></node>
+    <node id="work"><data key="kind">BEHAVIOR</data><data key="behavior">passthrough</data></node>
+    <node id="branch"><data key="kind">PASSTHROUGH</data></node>
+    <node id="end"><data key="kind">END</data></node>
+    <node id="error"><data key="kind">ERROR</data></node>
+    <edge id="start-work" source="start" target="work"><data key="outcome">continue</data><data key="parallel">true</data></edge>
+    <edge id="work-branch" source="work" target="branch"><data key="outcome">continue</data></edge>
+    <edge id="branch-end" source="branch" target="end"><data key="outcome">success</data></edge>
+    <edge id="branch-error" source="branch" target="error"><data key="outcome">failed</data></edge>
+  </graph>
+</graphml>

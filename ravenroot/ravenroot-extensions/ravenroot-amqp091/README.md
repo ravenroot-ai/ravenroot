@@ -1,5 +1,7 @@
 # Ravenroot AMQP 0-9-1 extension
 
+The optional package identity is `ai.ravenroot.extensions.amqp091`.
+
 This extension contributes `amqp.publish` for bounded AMQP 0-9-1 publication and `amqp.consume` for
 long-lived manual-ack queue consumption through the official RabbitMQ Java client. It is an extension artifact: it is not bundled in the
 standard image and must be installed and enabled under the operator's extension policy.
@@ -46,6 +48,18 @@ unavailable value fails closed. Process environment values remain fixed for the 
 require a restart to change. `SecretValue` and the mutable protocol copy are cleared on every exit path.
 The RabbitMQ client itself accepts a Java `String` password, so clearing is best-effort at the extension
 boundary, consistent with the SDK's `SecretValue` contract.
+
+### Exact node properties
+
+| Node | Required string properties | Optional properties and defaults |
+|---|---|---|
+| `amqp.publish` | `brokerProfile` | strings `exchange`, `routingKey`, `contentType`, `contentEncoding`, `messageId`, `correlationId`, `replyTo`, `type`, `appId`; text `headers`; integers `priority`, `expirationMs`, `confirmTimeoutMs`, `maxConcurrency`, `retries`; Boolean `mandatory=true`, `persistent=false`; `recovery.repeatable` has no default |
+| `amqp.consume` | `brokerProfile` | string `queue`; integers `prefetch`, `maxInFlight`, `retryBackoffMs`, `maxRetryBackoffMs`, `drainTimeoutMs`, `poisonAttempts`; `poisonPolicy=profile` (`profile` or `dead-letter`); conditional `deadLetterMode=broker-dlx`; `checkpointPolicy=require-durable` |
+
+Blank optional numeric or string fields use the operator profile. Every numeric value can only
+tighten its profile rule, except the consumer reconnect fields whose direction is stated below.
+`deadLetterMode` applies only when `poisonPolicy=dead-letter`. The consumer has no attempt-level
+recovery-repeatability field because durable delivery custody and acknowledgement govern repetition.
 
 ## Inspector and payload
 

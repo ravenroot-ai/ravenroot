@@ -1,5 +1,7 @@
 # Ravenroot filesystem extension
 
+The optional package identity is `ai.ravenroot.extensions.filesystem`.
+
 This optional node package contributes `filesystem.read` and `filesystem.write`. It is not part of
 core or the standard image. An operator must build, install and explicitly enable the bundle:
 
@@ -11,6 +13,14 @@ core or the standard image. An operator must build, install and explicitly enabl
 The graph names only an opaque `filesystemProfile`, a slash-separated relative `path`, and optional
 tighter `maxBytes`, `deadlineMs`, encoding and write mode. It cannot provide a root, operating-system
 path, permission, glob, credential or concurrency ceiling.
+
+| Node | Exact properties |
+|---|---|
+| `filesystem.read` | required strings `filesystemProfile`, `path`; optional string `encoding` (`text` or `base64`, profile/default behavior when blank); optional integers `maxBytes`, `deadlineMs` that only tighten the profile |
+| `filesystem.write` | required strings `filesystemProfile`, `path`; optional string `encoding`; optional `mode` (`create-new` or `replace`, default `create-new`); optional integers `maxBytes`, `deadlineMs`; `recovery.repeatable` has no default |
+
+No credential, service-grant, egress, absolute-path, append, delete, ownership, or permission property
+applies. `replace` may become ambiguous at the final move, so repeatability is a graph-author decision.
 
 ## Operator profile
 

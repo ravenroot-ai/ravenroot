@@ -2,7 +2,7 @@
 
 The catalog returned by `GET /v1/node-types` is authoritative for the running deployment. The UI renders its palette and Inspector controls from this contract.
 
-## Shipped behavior families
+## Default core behavior families
 
 | Identifier | Purpose | Privileged dependency |
 |---|---|---|
@@ -16,11 +16,14 @@ The catalog returned by `GET /v1/node-types` is authoritative for the running de
 | `human-task` | Park for a durable authorized human decision | Durable execution store |
 | `json-parse` | Parse JSON text into a structured value | None |
 | `json-path` | Select ordered values with RFC 9535 JSONPath | JSONPath evaluator |
-| `llm-prompt` | Invoke a configured model profile | Model adapter and credential |
-| `agent` | Invoke a bounded agent runtime and tool set | Agent adapter and allowlist |
 | `program` | Execute an approved artifact | Sandbox supervisor |
 
 An unavailable privileged dependency does not become available because its identifier appears in a graph.
+
+Optional first-party packages contribute 42 additional node types only after explicit bundle
+installation and activation. See the [bundle reference](bundles/) and the
+[coverage inventory](coverage-inventory.md). In particular, `llm-prompt` and `agent` belong to the
+optional AI bundle and are not part of the default core catalog.
 
 `boundary-guard` declares the fixed outcomes `continue` and `violation`. It requires `policyId`, `policyVersion`, and `policyDigest`; the digest pins all effective immutable profile data. The default catalog includes the node but resolves no profiles, so it fails closed until an application supplies an operator-owned resolver. See [Publication boundary policies](../security/publication-boundaries.md) for candidate authoring, rule composition, provider re-evaluation, and limitations.
 
@@ -29,7 +32,7 @@ An unavailable privileged dependency does not become available because its ident
 | Behavior | Property | Type | Default or domain |
 |---|---|---|---|
 | `delay` | `durationMs` | integer | default 1000; 0–86,400,000 |
-| `json-parse` | `source` | string template | `{{payload}}` |
+| `json-parse` | `source` | string template | `{% raw %}{{payload}}{% endraw %}` |
 | `json-path` | `path` | string | required RFC 9535 expression |
 | `template` | `template` | string | required template text |
 | `human-task` | `title` / `description` | string / text | required / optional; UTF-8 budgets come from the Human Task operator policy |

@@ -57,6 +57,18 @@ which prevents traversal and single/double-decoding ambiguity. The core independ
 operator origin, DNS and reserved-network policy, TLS, no redirects, signed header authority, byte
 ceilings, deadline and admission.
 
+### Exact node properties
+
+| Node | Required strings | Optional properties and defaults |
+|---|---|---|
+| `object.get` | `storageProfile`, `key` | `encoding=base64` (`text` or `base64`); integers `maxBytes`, `timeoutMs`, `maxConcurrency` inherit and only tighten the profile |
+| `object.put` | `storageProfile`, `key` | integers `maxBytes`, `timeoutMs`, `maxConcurrency` inherit and only tighten the profile |
+| `object.list` | `storageProfile` | string `prefix`; comma-separated `projection`; integer `maxResults=100` (1–1000); integers `timeoutMs`, `maxConcurrency`; integer `retries=0` (0–3); `recovery.repeatable` has no default |
+| `object.delete` | `storageProfile`, `key` | integers `timeoutMs`, `maxConcurrency`; `recovery.repeatable` has no default |
+
+Payload fields such as PUT `contentType` and DELETE `versionId` are not node properties. Credentials,
+origins, buckets, signing, and operation authority never apply as graph fields.
+
 ## Payloads and results
 
 `object.get.v1` has only `version`. A successful result is `object.get.result.v1`, with `text` or

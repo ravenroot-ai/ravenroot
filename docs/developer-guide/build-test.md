@@ -9,6 +9,11 @@ Build the complete distribution with JDK 21, Maven, Node.js 20.19 or later, and 
 - Exercise both Pekko and any installed Akka adapter, Test and Run modes, restart recovery, authentication refusal, and extension absence.
 - Reproduce UI behavior against the live node catalog rather than a separately maintained palette fixture.
 
+Use the complete [command-line tools reference](../reference/command-line-tools.md) for `dev.sh`,
+`service.sh`, `plugin.sh`, and the application CLI. Bundle-reference changes begin in the extension
+module README and are published with `python3 scripts/publish_bundle_reference.py`; check mode is a
+required drift gate.
+
 ## Boundary
 
 A change is complete when its machine contract, executable test, and user-facing English documentation agree. Build success alone does not establish compatibility.

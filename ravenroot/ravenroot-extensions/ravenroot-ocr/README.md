@@ -4,6 +4,11 @@
 It invokes one local Tesseract process under an operator-owned profile; it does not expose a generic
 command runner and does not add URL, filesystem-path, PDF, vendor, or credential authority to a graph.
 
+`ocr.extract` requires string `ocrProfile` and string `language`. Optional integer `deadlineMs`,
+`maxInputBytes`, `maxOutputBytes`, and `maxConcurrency` are blank by default and can only tighten the
+operator profile. No command, argument, path, credential, egress, retry, or idempotency property
+applies. It emits `continue` only after producing the bounded result below.
+
 Build and validate the plugin bundle from the repository root:
 
 ```sh

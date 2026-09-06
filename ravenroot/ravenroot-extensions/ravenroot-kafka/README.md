@@ -1,9 +1,23 @@
 # Ravenroot Kafka extension
 
+The optional package identity is `ai.ravenroot.extensions.kafka`.
+
 `kafka.produce` produces one bounded record and `kafka.consume` hosts a long-lived consumer group
 through Apache Kafka client 4.1.2. This is an optional
 extension artifact: it is absent from the standard image and palette until an operator builds,
 installs, and explicitly enables a plugin bundle containing `KafkaNodePackage`.
+
+## Exact node properties
+
+| Node | Required string properties | Optional properties and defaults |
+|---|---|---|
+| `kafka.produce` | `clusterProfile` | string `topic`, `correlationId`; integers `timeoutMs`, `maxConcurrency`, `maxRecordBytes`; `recovery.repeatable` has no default |
+| `kafka.consume` | `clusterProfile` | `subscriptionMode=profile` (`profile`, `topics`, `pattern`); conditional strings `topics` and `topicPattern`; string `group`; `staticMember=profile` (`profile`, `dynamic`); integers `maxInFlight`, `pollTimeoutMs`, `drainTimeoutMs`, `retryBackoffMs`, `maxRetryBackoffMs`, `poisonAttempts`; `poisonPolicy=profile` (`profile`, `halt`, `dead-letter`); conditional string `deadLetterTopic`; `checkpointPolicy=require-durable` |
+
+Blank strings and integers inherit the operator profile and can only narrow its authority or limits.
+`topics` applies only in `topics` mode, `topicPattern` only in `pattern` mode, and `deadLetterTopic`
+only with `poisonPolicy=dead-letter`. The consumer's offset contract replaces attempt-level recovery
+repeatability; the producer's author declaration is safe only with downstream deduplication.
 
 ## Operator profile and security
 

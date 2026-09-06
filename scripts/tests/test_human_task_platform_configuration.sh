@@ -32,6 +32,13 @@ RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT
 RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH
 RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH
 RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS
+RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES
+RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
+RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
+RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
+RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS
+RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE
+RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE
 EOF
 
 # The source configuration is the authority for this carrier test. Refuse a platform-only field or
@@ -71,6 +78,13 @@ RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT=4096
 RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH=16384
 RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH=256
 RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS=3
+RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES=4096
+RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES=64
+RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES=4096
+RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS=1000
+RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS=10000
+RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE=20
+RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE=100
 EOF
 
 CUSTOMS="$TEMP_DIR/customs"
@@ -95,6 +109,13 @@ RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT=2048
 RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH=8192
 RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH=128
 RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS=5
+RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES=65536
+RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES=256
+RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES=16384
+RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS=300000
+RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS=300000
+RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE=100
+RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE=100
 EOF
 
 compose_config() {
@@ -238,7 +259,11 @@ if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example
   exit 1
 fi
 
-for invalid in humanTask.maxResponseSchemaBytes=129 humanTask.maxAuthorizationTokens=257 humanTask.maxPageSize=1001 humanTask.writeAttempts=33; do
+for invalid in humanTask.maxResponseSchemaBytes=129 humanTask.maxAuthorizationTokens=257 humanTask.maxPageSize=1001 humanTask.writeAttempts=33 \
+  humanTask.maxConfirmationPromptBytes=65537 humanTask.maxConfirmationActionLabelBytes=257 \
+  humanTask.maxDecisionCommentBytes=16385 humanTask.attentionPollMillis=300001 \
+  humanTask.attentionPollBackoffMaxMillis=300001 humanTask.defaultAttentionPageSize=101 \
+  humanTask.maxAttentionPageSize=101; do
   if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
     --set-string auth.audience=ravenroot-human-task-test \
     --set-string auth.jwksUri=https://idp.example.test/jwks \
@@ -248,12 +273,17 @@ for invalid in humanTask.maxResponseSchemaBytes=129 humanTask.maxAuthorizationTo
   fi
 done
 
-if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
-  --set-string auth.audience=ravenroot-human-task-test \
-  --set-string auth.jwksUri=https://idp.example.test/jwks \
-  --set-string humanTask.maxResponseBytes=not-a-number >"$TEMP_DIR/helm-invalid-shape.out" 2>&1; then
-  echo 'Helm accepted a malformed Human Task policy value.' >&2
-  exit 1
-fi
+for invalid in humanTask.maxResponseBytes=not-a-number humanTask.maxConfirmationPromptBytes=not-a-number \
+  humanTask.maxConfirmationActionLabelBytes=not-a-number humanTask.maxDecisionCommentBytes=not-a-number \
+  humanTask.attentionPollMillis=not-a-number humanTask.attentionPollBackoffMaxMillis=not-a-number \
+  humanTask.defaultAttentionPageSize=not-a-number humanTask.maxAttentionPageSize=not-a-number; do
+  if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
+    --set-string auth.audience=ravenroot-human-task-test \
+    --set-string auth.jwksUri=https://idp.example.test/jwks \
+    --set-string "$invalid" >"$TEMP_DIR/helm-invalid-shape.out" 2>&1; then
+    echo "Helm accepted a malformed Human Task policy value: $invalid" >&2
+    exit 1
+  fi
+done
 
 echo 'Human Task Compose and Helm configuration contracts passed.'

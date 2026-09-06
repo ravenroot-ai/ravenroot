@@ -1,0 +1,88 @@
+# Ravenroot Matrix extension
+
+`ravenroot-matrix` is an optional node package for sending room messages and receiving bounded room
+timeline events with the Matrix Client-Server API. Install the artifact and register
+`ai.ravenroot.extensions.matrix.MatrixNodePackage` explicitly. Removing that registration and the
+artifact removes the integration without changing the engine.
+
+Set `RAVENROOT_MATRIX_CONFIG` to canonical Base64-encoded JSON. The decoded document has this shape:
+
+```json
+{
+  "store": {
+    "path": "/var/lib/ravenroot/matrix-sync.db",
+    "maxDeliveries": 100000,
+    "retentionHours": 168,
+    "maxSources": 1000
+  },
+  "profiles": {
+    "operations": {
+      "tenantId": "tenant-a",
+      "homeserverOrigin": "https://matrix.example.org/",
+      "userId": "@ravenroot:example.org",
+      "rooms": ["!operations:example.org"],
+      "eventTypes": ["m.room.message"],
+      "credentialBindingId": "matrix-bearer",
+      "credentialReference": "matrix-access-token",
+      "initialSyncMode": "deliver-bounded",
+      "initialSince": "operator-reviewed-since-token",
+      "limits": {
+        "requestTimeoutMs": 35000,
+        "maxRequestBytes": 1048576,
+        "maxResponseBytes": 8388608,
+        "maxTextChars": 4000,
+        "maxConcurrency": 4,
+        "maxPerSecond": 20,
+        "pollTimeoutMs": 30000,
+        "retryBackoffMs": 1000,
+        "maxEventsPerSync": 100
+      }
+    }
+  }
+}
+```
+
+The operator must grant the package exact egress to each HTTPS homeserver origin, `GET` and `PUT`,
+the request headers `accept`, `content-type`, and `user-agent`, and the response header
+`content-type`. Bind `credentialBindingId` to the origin with placement `Authorization` and prefix
+`Bearer `. The graph contains only the opaque profile name and optional tighter limits; Ravenroot's
+managed HTTP service resolves the tenant-scoped access token and injects it after package policy
+checks. Provision that token for the configured `userId`; the profile records the intended bot
+identity, but this module does not call `whoami` to prove the token subject. The package never
+constructs an Authorization header.
+
+`matrix.send` accepts only `matrix.message.v1` with `version`, `roomId`, `text`, and
+`correlationId`. It uses Matrix's idempotent room-send transaction path and returns a bounded,
+content-free `matrix.message.result.v1`. A graph can narrow the configured room, timeout, text size,
+and concurrency. The package does not retry an outcome-ambiguous transport or provider failure.
+
+`matrix.sync` is a deployment-owned long-poll source. It uses an ordinary bot/client access token and
+the Client-Server `/sync` endpoint. It does not implement Application Service callbacks, expose an
+`hs_token`, or decrypt encrypted room events. Allowed rooms and event types come only from the
+operator profile. Profile concurrency and rate limits are shared with sends and with every sync
+source using that tenant/profile.
+
+Each cursor and event binding is scoped by tenant, profile, deployment, and node. Two deployments
+sharing a profile therefore cannot advance each other's cursor. A source advances its persisted
+cursor only after every selected event has an acknowledgeable durable-ingress receipt. On restart it
+re-fetches the last uncommitted page; event IDs are bound to a stable canonical projection of the
+selected event fields. Mutable `unsigned` data such as homeserver-local `age` is excluded from that
+binding. Run one active application replica for a deployment unless the surrounding deployment
+system provides single-owner fencing.
+
+For a source with no cursor, `initialSyncMode: "skip"` deliberately checkpoints the first snapshot
+without delivering it. `deliver-bounded` delivers the first page and may start from an operator
+provided `initialSince`. Any allowed-room timeline marked `limited`, or any page over
+`maxEventsPerSync`, fails closed and leaves the cursor unchanged. Recover by obtaining an earlier
+valid `since` token and creating an explicitly fresh deployment/node cursor namespace with that
+reviewed `initialSince`, or by deliberately creating a fresh source namespace in `skip` mode after
+accepting the history loss. Changing `initialSince` does not override an existing persisted cursor.
+Ravenroot never silently advances past a detected gap.
+
+The SQLite file stores scoped cursor values, structural event IDs, canonical event digests, and
+timestamps; it stores no access token and no message body. Capacity, lock deadlines, cancellation,
+cursor compare-and-set, replay, and event-ID/body collisions fail closed.
+
+Protocol references: [Matrix `/sync`](https://spec.matrix.org/latest/client-server-api/#get_matrixclientv3sync),
+[room event send](https://spec.matrix.org/latest/client-server-api/#put_matrixclientv3roomsroomidsendeventtypetxnid),
+and [unsigned event data](https://spec.matrix.org/latest/client-server-api/#unsigneddata).

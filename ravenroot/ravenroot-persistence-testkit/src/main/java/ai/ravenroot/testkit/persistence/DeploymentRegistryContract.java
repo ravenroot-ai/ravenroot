@@ -37,19 +37,23 @@ import static org.junit.jupiter.api.Assertions.*;
  * drifting into two lists that agree only by accident, which is exactly how a command quietly ends up
  * with no scenario at all. {@link #lifecycleCommandMatrix()} is public for that reuse.</p>
  *
- * <h2>What this suite does not yet cover, stated rather than implied</h2>
+ * <h2>What this suite does not cover, and where those rows actually live</h2>
+ * <p>A suite that must run against any adapter can only assert what every adapter has. Three rows the
+ * acceptance criteria name are therefore <em>not</em> here, and two of them are now proved elsewhere
+ * rather than left open:</p>
  * <ul>
  *   <li><b>Partition.</b> Two live authorities disagreeing needs a durable adapter with real
  *       cross-process exclusion; the reference adapter is one map in one JVM, so a "partition" test
- *       against it would assert only that the test set two fields.</li>
- *   <li><b>Slow shutdown.</b> A drain that outlives its bound needs a runtime target to be slow.
- *       {@link LifecycleCommand.Drain#bound()} is the parameter that test will drive.</li>
- *   <li><b>Restart under load.</b> The half-open barrier is asserted here only as the generation
- *       arithmetic; that work admitted at {@code G} completes while work admitted after enters at
- *       {@code G + 1} needs something actually executing.</li>
+ *       against it would assert only that the test set two fields. It is driven against the durable
+ *       adapter by that module's own killed-holder cell.</li>
+ *   <li><b>Slow shutdown.</b> A drain that outlives its bound needs a runtime target to be slow, and
+ *       {@link LifecycleCommand.Drain#bound()} is the parameter it drives. The coordinator suite owns
+ *       that row, because a registry has no runtime to be slow.</li>
+ *   <li><b>Restart under load.</b> The half-open barrier is asserted here only as generation
+ *       arithmetic. That work admitted at {@code G} completes while work admitted afterwards enters at
+ *       {@code G + 1} needs something actually executing, and no implementor of the lifecycle port
+ *       admits work yet — so this one is still genuinely open rather than relocated.</li>
  * </ul>
- * <p>All three arrive with the durable adapter. The hooks are named above so the gap is legible
- * instead of being discovered by someone assuming the suite already closed it.</p>
  */
 public abstract class DeploymentRegistryContract {
     private static final Instant START = Instant.parse("2026-08-01T00:00:00Z");

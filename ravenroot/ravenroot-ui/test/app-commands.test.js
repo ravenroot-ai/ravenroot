@@ -38,8 +38,12 @@ describe('application command catalog', () => {
       canDuplicateSelectedNode: true,
     };
     expect(byId['file.replaceActive'].isEnabled(context)).toBe(true);
+    expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false }))
+      .toBe(true);
     expect(byId['file.fork'].isEnabled(context)).toBe(false);
     expect(byId['file.fork'].isEnabled({ ...context, documentEditable: false, documentMode: 'test' })).toBe(true);
+    expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: true, documentMode: 'test' }))
+      .toBe(false);
     expect(byId['file.replaceActive'].isEnabled({ ...context, documentEditable: false, documentMode: 'deployed' }))
       .toBe(false);
     expect(byId['file.save'].isEnabled({ ...context, documentEditable: false })).toBe(true);

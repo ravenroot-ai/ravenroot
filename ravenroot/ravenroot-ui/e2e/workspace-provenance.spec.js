@@ -343,6 +343,7 @@ test('Test creates an immutable exact snapshot and Fork creates a distinct edita
     buffer: Buffer.from(postedGraph),
   });
   await expect(page.locator('#graph-mode-label')).toContainText('Test · Read-only');
+  await expect(page.locator('#info-body')).toContainText('Only Draft documents can be replaced');
   expect(await page.evaluate(() => JSON.stringify(window.ravenroot.activeDocument().graph)))
     .toBe(immutableBefore);
 

@@ -2936,8 +2936,8 @@ function completeReplaceActiveDocument(target, graph, name) {
 function requestReplaceActiveDocument(graph, name, origin = document.activeElement) {
   captureActiveDocument();
   const target = workspace.active;
-  if (target && !documentIsEditable(target)) {
-    showInspectorMessage('Test and deployed snapshots are read-only. Fork this document to edit it.');
+  if (target && target.mode !== DOCUMENT_MODES.DRAFT) {
+    showInspectorMessage('Only Draft documents can be replaced. Fork this read-only document first.');
     return false;
   }
   if (!target || !target.history?.isDirty()) return completeReplaceActiveDocument(target, graph, name);

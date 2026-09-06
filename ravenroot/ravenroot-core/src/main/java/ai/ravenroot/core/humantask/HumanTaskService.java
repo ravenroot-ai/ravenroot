@@ -320,12 +320,6 @@ public final class HumanTaskService {
         Objects.requireNonNull(context, "context");
         DurableHumanTask task = await(store.loadHumanTask(context.tenantId(), taskId)).orElse(null);
         if (task == null) return new HumanTaskResult(HumanTaskResult.Code.NOT_FOUND, null, null);
-        try {
-            comment = normalizePinnedComment(task, comment);
-        } catch (IllegalArgumentException refused) {
-            auditOnly(task, "HUMAN_TASK_COMMENT_REFUSED", context.requestId());
-            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
-        }
         String actor = SecurityContext.of(context).qualifiedIdentity();
         Set<String> roles = context.roles().stream().map(Role::name).collect(Collectors.toUnmodifiableSet());
         boolean requesterCancellation = target == HumanTaskStatus.CANCELLED
@@ -334,6 +328,12 @@ public final class HumanTaskService {
                 && !task.request().responderRequirements().satisfiedBy(roles, context.scopes())) {
             auditOnly(task, "HUMAN_TASK_UNAUTHORIZED", context.requestId());
             return new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, task, null);
+        }
+        try {
+            comment = normalizePinnedComment(task, comment);
+        } catch (IllegalArgumentException refused) {
+            auditOnly(task, "HUMAN_TASK_COMMENT_REFUSED", context.requestId());
+            return new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, task, null);
         }
         boolean possibleRedelivery = task.status() == target
                 && task.generation() == expectedGeneration + 1;
@@ -549,11 +549,33 @@ public final class HumanTaskService {
     }
 
     private static String normalizePinnedComment(DurableHumanTask task, String comment) {
-        var limits = task.request().confirmationLimits();
-        var pinned = new HumanTaskPolicy.Confirmation(limits.maxPromptUtf8Bytes(),
-                limits.maxActionLabelUtf8Bytes(), limits.maxCommentUtf8Bytes(), 1, 1);
-        return pinned.normalizeComment(comment,
-                task.request().confirmationPresentation().commentRequirement());
+        comment = comment == null ? "" : comment.strip();
+        var requirement = task.request().confirmationPresentation().commentRequirement();
+        if (requirement == ai.ravenroot.api.persistence.HumanTaskCommentRequirement.DISALLOWED
+                && !comment.isEmpty()) {
+            throw new IllegalArgumentException("decision comment is not allowed by this presentation");
+        }
+        if (requirement == ai.ravenroot.api.persistence.HumanTaskCommentRequirement.REQUIRED
+                && comment.isEmpty()) {
+            throw new IllegalArgumentException("decision comment is required by this presentation");
+        }
+        for (int index = 0; index < comment.length(); index++) {
+            char unit = comment.charAt(index);
+            if (Character.isHighSurrogate(unit)) {
+                if (index + 1 == comment.length() || !Character.isLowSurrogate(comment.charAt(index + 1))) {
+                    throw new IllegalArgumentException("decision comment contains malformed Unicode");
+                }
+                index++;
+            } else if (Character.isLowSurrogate(unit)
+                    || (Character.isISOControl(unit) && unit != '\n' && unit != '\t')) {
+                throw new IllegalArgumentException("decision comment contains invalid control or Unicode data");
+            }
+        }
+        if (comment.getBytes(StandardCharsets.UTF_8).length
+                > task.request().confirmationLimits().maxCommentUtf8Bytes()) {
+            throw new IllegalArgumentException("decision comment exceeds pinned byte limit");
+        }
+        return comment;
     }
 
     private EventEnvelope event(ExecutionKey key, StoredProcessInstance stored,

@@ -67,6 +67,27 @@ class DurableHumanTaskModelTest {
     }
 
     @Test
+    void requiredDecisionCommentsDoNotBlockAutomaticEscalationOrExpiry() {
+        HumanTaskRegistration source = embeddedRegistration();
+        HumanTaskRegistration required = new HumanTaskRegistration(source.taskId(), source.traversalId(),
+                source.invocationId(), source.attemptId(), source.nodeId(), source.correlationKey(),
+                source.deduplicationKey(), source.metadata(), source.responseSchema(),
+                source.responderRequirements(), source.requester(), source.graphVersionPin(),
+                source.escalateAt(), source.expiresAt(), source.reentryMapping(), source.executionLimits(),
+                source.continuationVersion(), source.continuation(), source.continuationDigest(),
+                new HumanTaskConfirmationPresentation(1, "Confirm this task.",
+                        HumanTaskCommentRequirement.REQUIRED,
+                        Set.of(HumanTaskConfirmationAction.RESOLVE), "Confirm", "", ""),
+                source.confirmationLimits());
+        DurableHumanTask waiting = DurableHumanTask.waiting(KEY, required, 7L);
+        DurableHumanTask escalated = waiting.apply(new HumanTaskTransition.Escalated(
+                waiting.request().taskId(), 1L), 8L);
+        assertEquals(HumanTaskStatus.ESCALATED, escalated.status());
+        assertEquals(HumanTaskStatus.EXPIRED, escalated.apply(new HumanTaskTransition.Expired(
+                escalated.request().taskId(), 2L), 9L).status());
+    }
+
+    @Test
     void displayAndSchemaInputsAreBoundedBeforePersistence() {
         assertThrows(IllegalArgumentException.class, () -> new HumanTaskMetadata(
                 "é".repeat(HumanTaskMetadata.MAX_TITLE_UTF8_BYTES), "description"));

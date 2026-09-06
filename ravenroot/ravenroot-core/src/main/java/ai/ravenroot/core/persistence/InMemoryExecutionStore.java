@@ -1849,13 +1849,12 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                                 "human-task cursor does not belong to this tenant"));
                     }
                 }
-                UUID effectiveCursor = cursor;
-                DurableHumanTask cursorTask = effectiveCursor == null ? null : tenantTasks.stream()
-                        .filter(task -> task.request().taskId().equals(effectiveCursor)).findFirst().orElseThrow();
+                String cursorText = cursor == null ? null : cursor.toString();
                 List<DurableHumanTask> matching = tenantTasks.stream()
-                        .filter(task -> cursorTask == null || compareHumanTaskPosition(task, cursorTask) > 0)
+                        .filter(task -> cursorText == null
+                                || task.request().taskId().toString().compareTo(cursorText) > 0)
                         .filter(task -> query.admits(task.status()))
-                        .sorted(InMemoryExecutionStore::compareHumanTaskPosition)
+                        .sorted(Comparator.comparing(task -> task.request().taskId().toString()))
                         .limit(query.limit() + 1L).toList();
                 int end = Math.min(query.limit(), matching.size());
                 List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
@@ -1866,11 +1865,6 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         });
     }
 
-    private static int compareHumanTaskPosition(DurableHumanTask left, DurableHumanTask right) {
-        int created = left.createdAt().compareTo(right.createdAt());
-        return created != 0 ? created : left.request().taskId().toString()
-                .compareTo(right.request().taskId().toString());
-    }
 
     private void applyHumanTaskWrites(ExecutionKey key, ExecutionBatch batch, ProcessInstance folded,
                                       GraphVersionPin pin,

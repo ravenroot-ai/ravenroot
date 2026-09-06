@@ -51,6 +51,10 @@ import ai.ravenroot.api.persistence.HandlerStatus;
 import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationLimits;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
 import ai.ravenroot.api.persistence.HumanTaskPage;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
@@ -3331,6 +3335,47 @@ public abstract class ExecutionStoreContract {
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, oversized);
     }
 
+    @Test
+    final void embeddedPresentationLimitsAndCommentRoundTripThroughTheStore() {
+        assumeCapability(StoreCapability.HUMAN_TASKS);
+        ExecutionKey key = newKey();
+        HumanTaskRegistration source = humanTaskRegistration(key, UUID.randomUUID(), UUID.randomUUID(),
+                UUID.randomUUID(), UUID.randomUUID(), "embedded-dedup", "embedded-correlation");
+        HumanTaskRegistration embedded = new HumanTaskRegistration(source.taskId(), source.traversalId(),
+                source.invocationId(), source.attemptId(), source.nodeId(), source.correlationKey(),
+                source.deduplicationKey(), source.metadata(), source.responseSchema(),
+                source.responderRequirements(), source.requester(), source.graphVersionPin(),
+                source.escalateAt(), source.expiresAt(), source.reentryMapping(), source.executionLimits(),
+                source.continuationVersion(), source.continuation(), source.continuationDigest(),
+                new HumanTaskConfirmationPresentation(1, "Confirm after review.",
+                        HumanTaskCommentRequirement.OPTIONAL,
+                        Set.of(HumanTaskConfirmationAction.RESOLVE, HumanTaskConfirmationAction.DENY,
+                                HumanTaskConfirmationAction.CANCEL), "Confirm", "Deny", "Cancel"),
+                new HumanTaskConfirmationLimits(4096, 64, 4096));
+        HumanTaskFixture fixture = runningHumanTaskFixture(key, embedded);
+        StoredProcessInstance current = await(store().load(key));
+        await(store().apply(ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(current.revision()))
+                .registerHumanTask(fixture.registration()).build()));
+
+        transitionHumanTask(fixture, new HumanTaskTransition.Denied(embedded.taskId(), 1,
+                "issuer|USER|responder", "requires documented exception"));
+        DurableHumanTask stored = await(store().loadHumanTask(key.tenantId(), embedded.taskId())).orElseThrow();
+
+        assertEquals(1, stored.request().confirmationPresentation().version());
+        assertEquals("Confirm after review.", stored.request().confirmationPresentation().prompt());
+        assertEquals(4096, stored.request().confirmationLimits().maxCommentUtf8Bytes());
+        assertEquals(HumanTaskStatus.DENIED, stored.status());
+        assertEquals("issuer|USER|responder", stored.actor());
+        assertEquals("requires documented exception", stored.decisionComment());
+        assertEquals(2L, stored.generation());
+        transitionHumanTask(fixture, new HumanTaskTransition.Denied(embedded.taskId(), 1,
+                "issuer|USER|responder", "requires documented exception"));
+        ExecutionStoreFailure changed = failureOf(() -> transitionHumanTask(fixture,
+                new HumanTaskTransition.Denied(embedded.taskId(), 1,
+                        "issuer|USER|responder", "changed comment")));
+        assertInstanceOf(ExecutionStoreFailure.HumanTaskNotResolvable.class, changed);
+    }
+
     private HumanTaskFixture waitingHumanTask(ExecutionKey key, UUID taskId, String deduplicationKey,
                                               String correlationKey) {
         UUID traversalId = UUID.randomUUID();
@@ -3368,7 +3413,8 @@ public abstract class ExecutionStoreContract {
                 template.graphVersionPin(), template.escalateAt(), template.expiresAt(),
                 template.reentryMapping(), template.executionLimits(),
                 template.continuationVersion(), template.continuation(),
-                template.continuationDigest()));
+                template.continuationDigest(), template.confirmationPresentation(),
+                template.confirmationLimits()));
     }
 
     private HumanTaskRegistration humanTaskRegistration(ExecutionKey key, UUID taskId, UUID traversalId,

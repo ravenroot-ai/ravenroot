@@ -3615,24 +3615,16 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         .filter(query::admits).toList();
                 if (admitted.isEmpty()) return new HumanTaskPage(List.of(), Optional.empty());
                 var matching = new ArrayList<DurableHumanTask>();
-                DurableHumanTask cursor = query.cursor().isPresent()
-                        ? readHumanTask(tenantId, query.cursor().orElseThrow()) : null;
                 String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ?"
-                        + (cursor != null ? " AND (t.created_at_epoch_second > ? OR "
-                                + "(t.created_at_epoch_second = ? AND (t.created_at_nano > ? OR "
-                                + "(t.created_at_nano = ? AND t.task_id > ?))))" : "")
+                        + (query.cursor().isPresent() ? " AND t.task_id > ?" : "")
                         + " AND t.status IN (" + admitted.stream().map(ignored -> "?")
                                 .collect(java.util.stream.Collectors.joining(",")) + ")"
-                        + " ORDER BY t.created_at_epoch_second, t.created_at_nano, t.task_id LIMIT ?";
+                        + " ORDER BY t.task_id LIMIT ?";
                 try (PreparedStatement statement = connection.prepareStatement(sql)) {
                     int parameter = 1;
                     statement.setString(parameter++, tenantId);
-                    if (cursor != null) {
-                        statement.setLong(parameter++, cursor.createdAt().getEpochSecond());
-                        statement.setLong(parameter++, cursor.createdAt().getEpochSecond());
-                        statement.setInt(parameter++, cursor.createdAt().getNano());
-                        statement.setInt(parameter++, cursor.createdAt().getNano());
-                        statement.setString(parameter++, cursor.request().taskId().toString());
+                    if (query.cursor().isPresent()) {
+                        statement.setString(parameter++, query.cursor().orElseThrow().toString());
                     }
                     for (HumanTaskStatus status : admitted) statement.setString(parameter++, status.name());
                     statement.setInt(parameter, query.limit() + 1);

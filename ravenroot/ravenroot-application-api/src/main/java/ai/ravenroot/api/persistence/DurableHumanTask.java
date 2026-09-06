@@ -78,7 +78,8 @@ public record DurableHumanTask(ExecutionKey key, HumanTaskRegistration request,
                     + transition.next());
         }
         String nextActor = transition.actor().isBlank() ? actor : transition.actor();
-        String normalizedComment = normalizePinnedComment(transition.comment());
+        String normalizedComment = decisionTransition(transition)
+                ? normalizePinnedComment(transition.comment()) : "";
         if (!normalizedComment.equals(transition.comment())) {
             throw new IllegalArgumentException("decision comment must already be normalized");
         }
@@ -128,5 +129,11 @@ public record DurableHumanTask(ExecutionKey key, HumanTaskRegistration request,
             throw new IllegalArgumentException("decision comment exceeds pinned byte limit");
         }
         return comment;
+    }
+
+    private static boolean decisionTransition(HumanTaskTransition transition) {
+        return transition instanceof HumanTaskTransition.Resolved
+                || transition instanceof HumanTaskTransition.Denied
+                || transition instanceof HumanTaskTransition.Cancelled;
     }
 }

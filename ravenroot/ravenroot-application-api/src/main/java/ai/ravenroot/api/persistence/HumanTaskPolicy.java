@@ -1,8 +1,13 @@
 package ai.ravenroot.api.persistence;
 
+import ai.ravenroot.api.payload.PayloadEnvelope;
 import ai.ravenroot.api.payload.PayloadLimits;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
+import java.util.Objects;
+import java.util.Set;
 
 /**
  * One immutable operator-owned policy for Human Task authoring, HTTP, persistence, and recovery.
@@ -122,6 +127,69 @@ public record HumanTaskPolicy(
         return new HumanTaskExecutionLimits(new PayloadLimits(graphResponseBytes,
                 responseMaxDepth, responseMaxCollectionSize, responseMaxValueCount,
                 responseMaxTextLength, responseMaxKeyLength), decisionBodyMaxBytes, writeAttempts);
+    }
+
+    /**
+     * Applies the complete active policy to a registration that is about to become durable.
+     *
+     * <p>Callers must perform exact durable deduplication first. That ordering lets a replay of the
+     * same logical request remain idempotent after policy changes, while every new
+     * registration passes through this single authority.</p>
+     */
+    public void requireNewRegistration(HumanTaskRegistration registration, Instant now) {
+        Objects.requireNonNull(registration, "registration");
+        Objects.requireNonNull(now, "now");
+        requireUtf8(registration.metadata().title(), maxTitleUtf8Bytes, "title");
+        requireUtf8(registration.metadata().description(), maxDescriptionUtf8Bytes, "description");
+        int responseBytes = registration.responseSchema().maxBytes();
+        if (responseBytes < 1 || responseBytes > maxResponseBytes) {
+            throw invalidRegistration("response max bytes exceed active policy");
+        }
+        requireUtf8(registration.responseSchema().schema(), maxResponseSchemaUtf8Bytes,
+                "response schema");
+        if (!PayloadEnvelope.isValidLabel(registration.responseSchema().schema())) {
+            throw invalidRegistration("response schema violates the payload label protocol");
+        }
+        if (!PayloadEnvelope.isValidLabel(registration.responseSchema().schemaVersion())) {
+            throw invalidRegistration("response schema version violates the payload label protocol");
+        }
+        requireTokens(registration.responderRequirements().requiredRoles(), "required roles");
+        requireTokens(registration.responderRequirements().requiredScopes(), "required scopes");
+        requireDelay(registration.expiresAt(), now, maxExpirySeconds, "expiry");
+        registration.escalateAt().ifPresent(deadline ->
+                requireDelay(deadline, now, maxEscalationSeconds, "escalation"));
+        HumanTaskExecutionLimits expected = executionLimits(responseBytes);
+        if (!expected.equals(registration.executionLimits())) {
+            throw invalidRegistration("pinned execution limits do not match active policy");
+        }
+    }
+
+    private void requireTokens(Set<String> tokens, String name) {
+        if (tokens.size() > maxAuthorizationTokens) {
+            throw invalidRegistration(name + " exceed active policy count");
+        }
+        for (String token : tokens) {
+            requireUtf8(token, maxAuthorizationTokenUtf8Bytes, name + " token");
+        }
+    }
+
+    private static void requireUtf8(String value, int maximum, String name) {
+        if (value.getBytes(StandardCharsets.UTF_8).length > maximum) {
+            throw invalidRegistration(name + " exceeds active policy byte limit");
+        }
+    }
+
+    private static void requireDelay(Instant deadline, Instant now, long maximumSeconds,
+                                     String name) {
+        Duration remaining = Duration.between(now, deadline);
+        if (remaining.isZero() || remaining.isNegative()
+                || remaining.compareTo(Duration.ofSeconds(maximumSeconds)) > 0) {
+            throw invalidRegistration(name + " is outside active policy");
+        }
+    }
+
+    private static IllegalArgumentException invalidRegistration(String reason) {
+        return new IllegalArgumentException("human-task registration refused: " + reason);
     }
 
     private static void positive(int value, String name) {

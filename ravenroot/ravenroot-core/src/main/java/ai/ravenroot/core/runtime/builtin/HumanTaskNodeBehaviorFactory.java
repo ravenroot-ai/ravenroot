@@ -57,8 +57,10 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
                 NodePropertyDescriptor.boundedText("responseSchema", "Response schema",
                         NodePropertyType.STRING, false, "Bounded response schema identifier.",
                         "ravenroot.human-task.response", policy.maxResponseSchemaUtf8Bytes(), 0, 0),
-                NodePropertyDescriptor.optional("responseSchemaVersion", "Response schema version",
-                        NodePropertyType.STRING, "Exact response schema version required at resolution.", "1"),
+                NodePropertyDescriptor.boundedText("responseSchemaVersion", "Response schema version",
+                        NodePropertyType.STRING, false,
+                        "Exact protocol label required at resolution.", "1",
+                        ai.ravenroot.api.payload.PayloadEnvelope.MAX_LABEL_LENGTH, 0, 0),
                 choice("responseKind", "Response kind", "Required top-level response shape.",
                         PayloadKind.MAP.name(), "SCALAR", "LIST", "MAP"),
                 NodePropertyDescriptor.optionalBounded("maxResponseBytes", "Maximum response bytes",
@@ -147,10 +149,13 @@ final class HumanTaskNodeBehaviorFactory implements NodeBehaviorFactory {
         if (!ai.ravenroot.api.payload.PayloadEnvelope.isValidLabel(responseSchema)) {
             throw invalid(node, "responseSchema", "must be a valid payload schema label");
         }
+        String responseSchemaVersion = NodeProperties.string(node, "responseSchemaVersion", "1");
+        if (!ai.ravenroot.api.payload.PayloadEnvelope.isValidLabel(responseSchemaVersion)) {
+            throw invalid(node, "responseSchemaVersion", "must be a valid payload schema label");
+        }
         return new HumanTaskDefinition(new HumanTaskMetadata(title, description),
                 new HumanTaskResponseSchema(NodeProperties.string(node, "responseContentType",
-                        RESPONSE_CONTENT_TYPE), responseSchema, NodeProperties.string(node,
-                        "responseSchemaVersion", "1"), kind, maxBytes),
+                        RESPONSE_CONTENT_TYPE), responseSchema, responseSchemaVersion, kind, maxBytes),
                 new HandlerAuthorization(tokens(node, "authorizedRoles"),
                         tokens(node, "authorizedScopes")),
                 escalationSeconds == 0 ? Optional.empty()

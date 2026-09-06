@@ -4,10 +4,12 @@ import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
+import ai.ravenroot.core.runtime.BehaviorRegistry;
 import org.junit.jupiter.api.Test;
 
-import java.util.function.Function;
+import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,6 +31,7 @@ class HumanTaskPolicyCatalogTest {
         assertEquals(512, properties.get("title").maximumUtf8Bytes());
         assertEquals(8192, properties.get("description").maximumUtf8Bytes());
         assertEquals(128, properties.get("responseSchema").maximumUtf8Bytes());
+        assertEquals(128, properties.get("responseSchemaVersion").maximumUtf8Bytes());
         assertEquals(37, properties.get("authorizedRoles").maximumItems());
         assertEquals(513, properties.get("authorizedScopes").maximumItemUtf8Bytes());
         assertEquals(d.defaultResponseBytes() < policy.defaultResponseBytes(), true,
@@ -36,11 +39,27 @@ class HumanTaskPolicyCatalogTest {
     }
 
     @Test
-    void payloadSchemaWireGrammarIsRejectedAtGraphAdmission() {
-        var factory = new HumanTaskNodeBehaviorFactory(null, HumanTaskPolicy.DEFAULTS);
-        var invalid = new GraphNode("review", NodeKind.BEHAVIOR, "human-task",
-                Map.of("title", "Review", "responseSchema", "schema with spaces"));
-        var failure = assertThrows(IllegalArgumentException.class, () -> factory.create(invalid));
-        assertEquals(true, failure.getMessage().contains("responseSchema"));
+    void payloadSchemaAndVersionWireGrammarAreEnforcedAtGraphAdmission() {
+        var registry = BehaviorRegistry.standard();
+        for (String value : List.of("schema with spaces", "schema!", "s".repeat(129))) {
+            var invalidSchema = new GraphNode("review", NodeKind.BEHAVIOR, "human-task",
+                    Map.of("title", "Review", "responseSchema", value));
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> registry.create(invalidSchema));
+            assertEquals(true, failure.getMessage().contains("responseSchema"));
+        }
+        for (String value : List.of("version with spaces", "version!", "v".repeat(129))) {
+            var invalidVersion = new GraphNode("review", NodeKind.BEHAVIOR, "human-task",
+                    Map.of("title", "Review", "responseSchema", "response",
+                            "responseSchemaVersion", value));
+            var failure = assertThrows(IllegalArgumentException.class,
+                    () -> registry.create(invalidVersion));
+            assertEquals(true, failure.getMessage().contains("responseSchemaVersion"));
+        }
+
+        var boundary = new GraphNode("review", NodeKind.BEHAVIOR, "human-task",
+                Map.of("title", "Review", "responseSchema", "s".repeat(128),
+                        "responseSchemaVersion", "v".repeat(128)));
+        assertEquals(true, registry.create(boundary).isPresent());
     }
 }

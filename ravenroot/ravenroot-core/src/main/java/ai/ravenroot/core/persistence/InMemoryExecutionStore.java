@@ -1888,6 +1888,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 }
                 continue;
             }
+            try {
+                humanTaskPolicy.requireNewRegistration(registration, now);
+            } catch (IllegalArgumentException refused) {
+                throw failure(ExecutionStoreFailure.invalid(refused.getMessage()));
+            }
             if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
                 throw failure(new ExecutionStoreFailure.PayloadTooLarge(
                         registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));

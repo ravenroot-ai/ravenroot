@@ -52,6 +52,7 @@ import ai.ravenroot.api.persistence.HandlerTransition;
 import ai.ravenroot.api.persistence.HumanTaskMetadata;
 import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
 import ai.ravenroot.api.persistence.HumanTaskPage;
+import ai.ravenroot.api.persistence.HumanTaskPolicy;
 import ai.ravenroot.api.persistence.HumanTaskQuery;
 import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
 import ai.ravenroot.api.persistence.HumanTaskRegistration;
@@ -3216,6 +3217,47 @@ public abstract class ExecutionStoreContract {
                                 await(store().load(secondProcess.key())).revision()))
                         .registerHumanTask(secondProcess.registration()).build())));
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
+
+        HumanTaskRegistration policyInvalid = copyHumanTask(fixture.registration(), UUID.randomUUID(),
+                "human-dedup-policy-invalid", "human-correlation-policy-invalid");
+        policyInvalid = new HumanTaskRegistration(policyInvalid.taskId(), policyInvalid.traversalId(),
+                policyInvalid.invocationId(), policyInvalid.attemptId(), policyInvalid.nodeId(),
+                policyInvalid.correlationKey(), policyInvalid.deduplicationKey(),
+                new HumanTaskMetadata("x".repeat(
+                        HumanTaskPolicy.DEFAULTS.maxTitleUtf8Bytes() + 1), "description"),
+                policyInvalid.responseSchema(), policyInvalid.responderRequirements(),
+                policyInvalid.requester(), policyInvalid.graphVersionPin(), policyInvalid.escalateAt(),
+                policyInvalid.expiresAt(), policyInvalid.reentryMapping(), policyInvalid.executionLimits(),
+                policyInvalid.continuationVersion(), policyInvalid.continuation(),
+                policyInvalid.continuationDigest());
+        HumanTaskFixture invalidProcess = runningHumanTaskFixture(newKey(), policyInvalid);
+        ExecutionStoreFailure policyRefused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(invalidProcess.key())
+                        .expecting(RevisionExpectation.exactly(
+                                await(store().load(invalidProcess.key())).revision()))
+                        .registerHumanTask(invalidProcess.registration()).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, policyRefused);
+
+        HumanTaskRegistration invalidVersion = copyHumanTask(fixture.registration(), UUID.randomUUID(),
+                "human-dedup-version-invalid", "human-correlation-version-invalid");
+        invalidVersion = new HumanTaskRegistration(invalidVersion.taskId(),
+                invalidVersion.traversalId(), invalidVersion.invocationId(), invalidVersion.attemptId(),
+                invalidVersion.nodeId(), invalidVersion.correlationKey(), invalidVersion.deduplicationKey(),
+                invalidVersion.metadata(), new HumanTaskResponseSchema(
+                        invalidVersion.responseSchema().contentType(), invalidVersion.responseSchema().schema(),
+                        "version with spaces", invalidVersion.responseSchema().kind(),
+                        invalidVersion.responseSchema().maxBytes()), invalidVersion.responderRequirements(),
+                invalidVersion.requester(), invalidVersion.graphVersionPin(), invalidVersion.escalateAt(),
+                invalidVersion.expiresAt(), invalidVersion.reentryMapping(), invalidVersion.executionLimits(),
+                invalidVersion.continuationVersion(), invalidVersion.continuation(),
+                invalidVersion.continuationDigest());
+        HumanTaskFixture invalidVersionProcess = runningHumanTaskFixture(newKey(), invalidVersion);
+        ExecutionStoreFailure versionRefused = failureOf(() -> await(store().apply(
+                ExecutionBatch.to(invalidVersionProcess.key())
+                        .expecting(RevisionExpectation.exactly(
+                                await(store().load(invalidVersionProcess.key())).revision()))
+                        .registerHumanTask(invalidVersionProcess.registration()).build())));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, versionRefused);
     }
 
     @Test
@@ -3341,8 +3383,7 @@ public abstract class ExecutionStoreContract {
                 new GraphVersionPin("graph-v1"), Optional.of(clock().instant().plus(Duration.ofMinutes(1))),
                 clock().instant().plus(Duration.ofMinutes(5)),
                 new HumanTaskReentryMapping("resolved", "denied", "expired", "cancelled"),
-                new HumanTaskExecutionLimits(new PayloadLimits(4096, 7, 23, 41, 3072, 99),
-                        8192, 5),
+                HumanTaskPolicy.DEFAULTS.executionLimits(4096),
                 2, new byte[] {1, 2, 3}, digest(new byte[] {1, 2, 3}));
     }
 

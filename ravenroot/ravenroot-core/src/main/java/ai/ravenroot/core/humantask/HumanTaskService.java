@@ -41,6 +41,8 @@ import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
+import java.time.DateTimeException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -141,7 +143,8 @@ public final class HumanTaskService {
                 message.invocationId(), message.attemptId(), message.nodeId(), taskId.toString(),
                 "human-task:" + message.attemptId(), definition.metadata(), definition.responseSchema(),
                 definition.responderRequirements(), message.security(), recorder.graphVersionPin(),
-                definition.escalationDelay().map(now::plus), now.plus(definition.expiryDelay()),
+                definition.escalationDelay().map(delay -> deadline(now, delay, "escalation")),
+                deadline(now, definition.expiryDelay(), "expiry"),
                 definition.reentryMapping(), definition.executionLimits(), continuationVersion, continuation,
                 ai.ravenroot.api.persistence.ToolApprovalRegistration.digest(continuation));
         DurableHumanTask existing = await(store.loadHumanTask(key.tenantId(), taskId)).orElse(null);
@@ -150,6 +153,7 @@ public final class HumanTaskService {
                     ? HumanTaskResult.Code.ALREADY_APPLIED : HumanTaskResult.Code.ALREADY_SETTLED,
                     existing, resumeTraversalOf(existing));
         }
+        policy.requireNewRegistration(registration, now);
         var timers = new ArrayList<TimerSchedule>();
         OpaquePayload identity = identityPayload(taskId, HumanTaskStatus.WAITING, 1);
         registration.escalateAt().ifPresent(when -> timers.add(new TimerSchedule(escalationTimerId(taskId), when,
@@ -167,6 +171,15 @@ public final class HumanTaskService {
                         registration.traversalId(), HumanTaskStatus.WAITING, 1));
         DurableHumanTask created = await(store.loadHumanTask(key.tenantId(), taskId)).orElseThrow();
         return new HumanTaskResult(HumanTaskResult.Code.CREATED, created, null);
+    }
+
+    private static Instant deadline(Instant now, Duration delay, String name) {
+        try {
+            return now.plus(delay);
+        } catch (DateTimeException | ArithmeticException invalid) {
+            throw new IllegalArgumentException(
+                    "human-task registration refused: " + name + " is outside active policy");
+        }
     }
 
     private record LiveBinding(ExecutionRecorder recorder,

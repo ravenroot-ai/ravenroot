@@ -180,7 +180,7 @@ export function createAppCommands(actions, { t = uiText } = {}) {
     // The layered drawings are additive: a sibling group after the established arrangements, so
     // the existing four keep their ids, order and contiguity, and the menu separates the two sets.
     arrangement('hierarchical-new', 50, 'design-arrange-layered'),
-    arrangement('flow-new', 60, 'design-arrange-layered'),
+    arrangement('layered-down', 60, 'design-arrange-layered'),
 
     { id: 'run.play', group: 'execution', order: 10,
       placements: ['menu.run', 'toolbar.primary', 'help'], execute: actions.play,

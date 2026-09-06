@@ -13,17 +13,23 @@ import {
 const testBench = readFileSync(new URL('../test/fixtures/layout-test-bench.graphml', import.meta.url), 'utf8');
 
 const ESTABLISHED = ['Arrange — Hierarchical', 'Arrange — Flow', 'Arrange — Organic'];
-const LAYERED = ['Arrange — Hierarchical (new)', 'Arrange — Flow (new)'];
+const HIERARCHICAL_NEW = 'Arrange — Hierarchical (new)';
+const LAYERED_DOWN = 'Arrange — Layered (top-down)';
+const LAYERED = [HIERARCHICAL_NEW, LAYERED_DOWN];
+// The axis layers advance along. Every criterion below is the same on either axis; only the
+// reading of "column" changes, from a column of nodes to a row of them.
+const AXIS = new Map([[HIERARCHICAL_NEW, 'x'], [LAYERED_DOWN, 'y']]);
 // The fan exemption is bounded at what each drawing produces plus a stated margin: none for
-// Hierarchical (new) on the bench, one of 909 px for Flow (new); one per mode on the 200-node
-// graph, 5035 px (orthogonal) and 4688 px (polyline).
+// either mode on the bench; one per mode on the 200-node graph.
 const FAN_BOUNDS = {
-  bench: new Map([['Arrange — Hierarchical (new)', { count: 0, longest: 0 }], ['Arrange — Flow (new)', { count: 1, longest: 1000 }]]),
-  large: { count: 1, longest: 5600 },
+  bench: new Map([[HIERARCHICAL_NEW, { count: 0, longest: 0 }], [LAYERED_DOWN, { count: 0, longest: 0 }]]),
+  large: { count: 1, longest: 7300 },
 };
+// Both layered drawings are measured against the established arrangement of the same family: the
+// top-down one has no established counterpart of its own, so it is held to the same bar.
 const COUNTERPART = new Map([
-  ['Arrange — Hierarchical (new)', 'Arrange — Hierarchical'],
-  ['Arrange — Flow (new)', 'Arrange — Flow'],
+  [HIERARCHICAL_NEW, 'Arrange — Hierarchical'],
+  [LAYERED_DOWN, 'Arrange — Hierarchical'],
 ]);
 const NODE_SIZE = 80;
 const PEERS = ['product-architecture', 'core-runtime', 'integrations', 'frontend', 'graph-rendering', 'qa',
@@ -53,13 +59,25 @@ const positions = page => page.evaluate(() => Object.fromEntries(
 // points as they are, Bézier runs sampled. The same sampler serves every arrangement, so the
 // numbers compare like with like.
 const geometry = page => page.evaluate(() => {
+  const drawing = window.cy.scratch('_rrLayeredDrawing');
   const nodes = window.cy.nodes().map(node => {
     const position = node.position();
     const width = node.outerWidth();
     const height = node.outerHeight();
     const box = node.boundingBox({ includeLabels: true, includeOverlays: false, includeEdges: false });
     const body = { left: position.x - width / 2, right: position.x + width / 2, top: position.y - height / 2, bottom: position.y + height / 2 };
-    const label = box.y2 > body.bottom + 0.5 ? { left: box.x1, right: box.x2, top: body.bottom, bottom: box.y2 } : null;
+    // The name is painted under the card, or beside it in the top-down drawing. The painted
+    // placement says which — a wide name under a narrow card also overhangs sideways, so the
+    // overhang alone cannot tell them apart. A label beside the card is one line tall inside the
+    // card's own height, which the union bounding box cannot show, so its height is read from the
+    // drawing that measured it on this canvas.
+    const beside = node.style('text-halign') === 'right';
+    const lineHeight = drawing?.boxes?.get(node.id())?.labelHeight ?? height;
+    const label = beside
+      ? (box.x2 > body.right + 0.5
+        ? { left: body.right, right: box.x2, top: position.y - lineHeight / 2, bottom: position.y + lineHeight / 2 }
+        : null)
+      : (box.y2 > body.bottom + 0.5 ? { left: box.x1, right: box.x2, top: body.bottom, bottom: box.y2 } : null);
     return { id: node.id(), x: position.x, y: position.y, kind: node.data('kind'), body, label };
   });
   const edges = window.cy.edges().map(edge => {
@@ -92,16 +110,15 @@ const geometry = page => page.evaluate(() => {
       sourceEndpoint: edge.style('source-endpoint'), targetEndpoint: edge.style('target-endpoint'),
     };
   });
-  const drawing = window.cy.scratch('_rrLayeredDrawing');
   return { nodes, edges, elapsedMs: drawing ? drawing.elapsedMs : null };
 });
 
-function judge(sample) {
+function judge(sample, axis = 'x') {
   const polylines = sample.edges.filter(edge => edge.source !== edge.target && edge.points.length > 1);
-  const { columnOf } = geometryColumns(sample.nodes);
+  const { columnOf } = geometryColumns(sample.nodes, { axis });
   // Layer discreteness is judged against a layering computed from the graph alone, so a scatter
   // of nodes fails it instead of clustering into as many columns as it has nodes.
-  const layering = layerDiscreteness(sample.nodes, sample.edges);
+  const layering = layerDiscreteness(sample.nodes, sample.edges, { axis });
   // Piled edges are judged at the stroke width; the fan a node's adjacent ports form is the one
   // exception the criteria allow, reported apart so it stays visible.
   const runs = sharedRuns(polylines, { minLength: NODE_SIZE, tolerance: 3, ignoreSharedEndpoints: true });
@@ -180,7 +197,7 @@ test.describe('Layered arrangements on the test bench', () => {
     const walls = new Map();
     for (const label of [...ESTABLISHED, ...LAYERED]) {
       walls.set(label, await arrange(page, label));
-      verdicts.set(label, judge(await geometry(page)));
+      verdicts.set(label, judge(await geometry(page), AXIS.get(label) || 'x'));
       await screenshots(page, label);
     }
     const rows = [...verdicts].map(([label, verdict]) => ({ arrangement: label, wallMs: walls.get(label) ?? '', ...verdict }));
@@ -216,8 +233,10 @@ test.describe('Layered arrangements on the test bench', () => {
     expect(verdict.columns).toBeGreaterThan(verdict.layerCount);
     expect(verdict.nonMonotone).toBeGreaterThan(0);
     expect(verdict.peerColumns).toBeGreaterThan(1);
-    await arrange(page, 'Arrange — Hierarchical (new)');
+    await arrange(page, HIERARCHICAL_NEW);
     expect(judge(await geometry(page)).layered).toBe(true);
+    await arrange(page, LAYERED_DOWN);
+    expect(judge(await geometry(page), 'y').layered).toBe(true);
   });
 
   test('is deterministic, records one undo entry, keeps edge identity and leaves Keep positions alone', async ({ page }) => {
@@ -244,6 +263,26 @@ test.describe('Layered arrangements on the test bench', () => {
       await expect.poll(() => positions(page)).toEqual(initial);
       await expect.poll(() => page.evaluate(() => window.ravenroot.activeDocument().history.depth())).toBe(0);
     }
+  });
+
+  test('moves the node names beside the cards for the top-down drawing and puts them back after', async ({ page }) => {
+    const placements = () => page.evaluate(() => [...new Set(window.cy.nodes()
+      .map(node => `${node.style('text-halign')}/${node.style('text-valign')}`))].sort());
+    expect(await placements()).toEqual(['center/bottom']);
+    await arrange(page, LAYERED_DOWN);
+    expect(await placements()).toEqual(['right/center']);
+    // A restyle of the nodes — here a label-size change — must not drag the names back under the
+    // cards while the drawing that routes through those channels is still on screen.
+    await page.locator('#font-slider').fill('16');
+    await page.locator('#font-slider').dispatchEvent('input');
+    expect(await placements()).toEqual(['right/center']);
+    expect(judge(await geometry(page), 'y').throughLabels).toBe(0);
+    // Any other arrangement, layered or not, gets the editor's own placement back.
+    await arrange(page, HIERARCHICAL_NEW);
+    expect(await placements()).toEqual(['center/bottom']);
+    await arrange(page, LAYERED_DOWN);
+    await arrange(page, 'Arrange — Organic');
+    expect(await placements()).toEqual(['center/bottom']);
   });
 
   test('is Design-only and sits after the established arrangements in the Layout menu', async ({ page }) => {
@@ -278,7 +317,7 @@ test.describe('Layered arrangements on parallel edges', () => {
       <edge id="ll" source="loop" target="loop"><data key="outcome">again</data></edge>
     </graph></graphml>`;
 
-  test('gives every parallel edge its own east and west port and keeps the self-loop', async ({ page }) => {
+  test('gives every parallel edge its own outgoing and incoming port and keeps the self-loop', async ({ page }) => {
     await page.goto('/');
     await page.evaluate(xml => window.ravenroot.replaceActiveDocumentFromText(xml, 'parallel.graphml'), parallel);
     await expect(page.locator('.doc-pane--active')).not.toHaveAttribute('aria-busy', 'true', { timeout: 15_000 });
@@ -289,8 +328,16 @@ test.describe('Layered arrangements on parallel edges', () => {
       expect(bundle).toHaveLength(3);
       expect(new Set(bundle.map(edge => edge.sourceEndpoint)).size).toBe(3);
       expect(new Set(bundle.map(edge => edge.targetEndpoint)).size).toBe(3);
-      expect(bundle.every(edge => !edge.sourceEndpoint.startsWith('-'))).toBe(true);
-      expect(bundle.every(edge => edge.targetEndpoint.startsWith('-'))).toBe(true);
+      // An endpoint is "<dx>px <dy>px" from the node centre. Each edge leaves on the far side of
+      // the source along the axis of flow and arrives on the near side of the target: east/west
+      // in the left-to-right drawing, south/north in the top-down one.
+      const along = (endpoint, axis) => {
+        const parts = /^(-?[\d.]+)px\s+(-?[\d.]+)px$/.exec(endpoint);
+        return Number(parts[axis === 'x' ? 1 : 2]);
+      };
+      const axis = AXIS.get(label);
+      expect(bundle.every(edge => along(edge.sourceEndpoint, axis) > 0)).toBe(true);
+      expect(bundle.every(edge => along(edge.targetEndpoint, axis) < 0)).toBe(true);
       expect(bundle.every(edge => ['round-segments', 'segments', 'straight'].includes(edge.curveStyle))).toBe(true);
       expect(sample.edges.find(edge => edge.id === 'll').edgeType).toBe('self');
     }
@@ -339,7 +386,7 @@ test.describe('Layered arrangements on a large graph', () => {
       expect(sample.elapsedMs, `${label}: engine time on 200 nodes / 400 edges`).toBeLessThan(5000);
       expect(sample.edges).toHaveLength(400);
       expect(labelOverlaps(sample.nodes)).toEqual([]);
-      const verdict = judge(sample);
+      const verdict = judge(sample, AXIS.get(label) || 'x');
       expect(verdict.piles, `${label}: unrelated edges drawn on top of each other`).toBe(0);
       expect(verdict.fans, `${label}: fans on the large graph`).toBeLessThanOrEqual(FAN_BOUNDS.large.count);
       expect(verdict.longestFan, `${label}: longest fan run on the large graph`).toBeLessThanOrEqual(FAN_BOUNDS.large.longest);

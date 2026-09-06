@@ -137,12 +137,15 @@ operator grant. The current package requirements are exact:
 | `ai.ravenroot.extensions.jdbc` | `credential-resolution` |
 | `ai.ravenroot.extensions.kafka` | None |
 | `ai.ravenroot.extensions.mail` | None |
+| `ai.ravenroot.extensions.matrix` | `outbound-http` |
+| `ai.ravenroot.extensions.mattermost` | `credential-resolution`, `outbound-http` |
 | `ai.ravenroot.extensions.ocr` | None |
 | `ai.ravenroot.extensions.storage` | `outbound-http` |
 | `ai.ravenroot.extensions.openapi.client` | `outbound-http` |
 | `ai.ravenroot.extensions.openapi.server` | None |
 | `ai.ravenroot.extensions.slack` | `credential-resolution`, `outbound-http` |
 | `ai.ravenroot.extensions.spel` | None |
+| `ai.ravenroot.extensions.teams` | `credential-resolution`, `outbound-http` |
 | `ai.ravenroot.extensions.telegram` | None |
 | `ai.ravenroot.extensions.websocket` | `outbound-websocket` |
 <!-- node-package-required-services:end -->

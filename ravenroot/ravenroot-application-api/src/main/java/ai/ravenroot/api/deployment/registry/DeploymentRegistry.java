@@ -19,13 +19,69 @@ public interface DeploymentRegistry extends AutoCloseable {
         STOP_FIRST
     }
 /**
- * Defines the desired kind contract exposed to Ravenroot integrators.
+ * The lifecycle level a deployment is asked to converge to (ADR 0038 D5).
+ *
+ * <p>The five members form a totally ordered lattice of restriction, exposed as
+ * {@link #restriction()} rather than as {@code ordinal()} so that the declaration order stays free
+ * to preserve the two members that existed before this axis was named. Precedence between competing
+ * commands is decided on that number: {@code Stop} outranks {@code Drain} outranks {@code Pause}
+ * because each closes strictly more than the one below it, and a deployment that is already
+ * converging to a more restrictive level must not be pulled back by a less restrictive command that
+ * arrives late.</p>
+ *
+ * <p>The ranks are spaced by ten rather than consecutive so that a command with no level of its own
+ * can still be ranked among them. {@code LifecycleCommand.Cancel} is exactly that case: it is a
+ * barrier, it outranks a drain and is outranked by a stop, and there is no room between consecutive
+ * integers to say so. Spacing keeps the one published scale authoritative instead of growing a
+ * second, parallel ordering for barriers.</p>
+ *
+ * <p>Only {@link #RUNNING} selects a graph version, because only {@link #RUNNING} answers the
+ * question "which version should be active"; every other level is a statement about admission and
+ * ownership of a deployment that already knows its own activation. The version a paused or draining
+ * deployment still holds is reported by {@link Observation#activeVersion()}, which is evidence
+ * rather than intent.</p>
  */
     enum DesiredKind {
-        /** Requests that the deployment be stopped. */
-        STOPPED,
-        /** Requests that the deployment be running. */
-        RUNNING
+        /** Requests that the deployment be stopped: admission closed, work finished, resources released. */
+        STOPPED(30),
+        /** Requests that the deployment be running and admitting work. */
+        RUNNING(0),
+        /**
+         * Requests that admission be closed while accepted work is retained rather than finished.
+         *
+         * <p>Resumable, and the only level {@code Resume} may return from. The operator reason for a
+         * pause travels on the command record, never on {@code DeploymentStatus}, whose invariant
+         * that only degraded and failed states carry a cause is deliberately left intact.</p>
+         */
+        PAUSED(10),
+        /** Requests that admission be closed and accepted work be carried to completion. */
+        DRAINED(20),
+        /** Requests that the deployment be removed, leaving an auditable tombstone. Absorbing. */
+        REMOVED(40);
+
+        /** Position in the restriction lattice; higher closes strictly more than lower. */
+        private final int restriction;
+
+        DesiredKind(int restriction) { this.restriction = restriction; }
+
+/**
+ * Returns this level's position in the restriction lattice.
+ * @return monotone restriction rank, higher meaning strictly more closed.
+ */
+        public int restriction() { return restriction; }
+
+/**
+ * Whether this level closes at least as much as {@code other}, which is the precedence test.
+ * @param other level to compare this one against.
+ * @return whether this level is at least as restrictive as {@code other}.
+ */
+        public boolean atLeastAsRestrictiveAs(DesiredKind other) { return restriction >= other.restriction; }
+
+/**
+ * Whether this level still selects a graph version and an update strategy. Only {@code RUNNING} does.
+ * @return whether a {@link Desired} of this kind carries a version and an update strategy.
+ */
+        public boolean carriesVersion() { return this == RUNNING; }
     }
 /**
  * Defines the observed kind contract exposed to Ravenroot integrators.
@@ -46,12 +102,23 @@ public interface DeploymentRegistry extends AutoCloseable {
         /** Has stopped. */
         STOPPED,
         /** Failed to reach or retain its desired state. */
-        FAILED
+        FAILED,
+        /**
+         * Admission is closed by an operator hold and accepted work is retained, not finished.
+         *
+         * <p>Added beside {@link #DRAINING} because the two are genuinely different observations: a
+         * draining deployment is finishing what it holds and will not be asked to serve again, a
+         * paused one is holding what it has and can be resumed. Reporting a pause as
+         * {@code DRAINING} would tell an operator that work is completing when it is not.</p>
+         */
+        PAUSED,
+        /** Drain has completed: nothing is in flight, and the activation has not been released. */
+        DRAINED
     }
 
 /**
  * Defines the desired contract exposed to Ravenroot integrators.
- * @param kind requested lifecycle state; {@code RUNNING} requires a version and update strategy.
+ * @param kind requested lifecycle level; only {@code RUNNING} carries a version and update strategy.
  * @param desiredVersion the desired version constraint applied while processing the request.
  * @param updateStrategy update strategy supplied to this declaration.
  * @param generation monotonically increasing desired-state generation, beginning at zero.
@@ -64,8 +131,8 @@ public interface DeploymentRegistry extends AutoCloseable {
             if (kind == null || generation < 0) throw new IllegalArgumentException("invalid desired state");
             if (kind == DesiredKind.RUNNING && (desiredVersion == null || desiredVersion < 1 || updateStrategy == null))
                 throw new IllegalArgumentException("RUNNING requires version and strategy");
-            if (kind == DesiredKind.STOPPED && (desiredVersion != null || updateStrategy != null))
-                throw new IllegalArgumentException("STOPPED has no version or strategy");
+            if (!kind.carriesVersion() && (desiredVersion != null || updateStrategy != null))
+                throw new IllegalArgumentException(kind + " has no version or strategy");
         }
     }
 /**
@@ -83,7 +150,10 @@ public interface DeploymentRegistry extends AutoCloseable {
             if (state == null || observedAt == null || observedGeneration < 0) throw new IllegalArgumentException("invalid observation");
             if (activeVersion != null && activeVersion < 1) throw new IllegalArgumentException("activeVersion");
             boolean requiresActiveVersion = switch (state) {
-                case READY, DEGRADED, DRAINING, STOPPING -> true;
+                // PAUSED and DRAINED join this arm because neither releases the activation: a
+                // deployment that is holding or has finished its work is still bound to the version
+                // it was running, and reporting it without one would lose which version is held.
+                case READY, DEGRADED, DRAINING, STOPPING, PAUSED, DRAINED -> true;
                 case COLD, STARTING, STOPPED, FAILED -> false;
             };
             if (requiresActiveVersion != (activeVersion != null))
@@ -183,21 +253,50 @@ public interface DeploymentRegistry extends AutoCloseable {
         public CreateCommand { validate(tenantId, key, digest); }
     }
 /**
- * Defines the command contract exposed to Ravenroot integrators.
+ * Identity and concurrency expectations carried by every mutation of an existing deployment.
+ *
+ * <h2>Two expectations, because there are two questions</h2>
+ * <p>{@code expectedRevision} asks "has anything been written since I read", and
+ * {@code expectedGeneration} asks "is the lifecycle still where I decided against" (ADR 0038 D1,
+ * D10). They are not redundant: a lease renewal by the current owner advances the revision without
+ * touching the generation, so a revision-only expectation would refuse a lifecycle command for a
+ * reason unrelated to the lifecycle; and a caller replaying an accepted command sees a revision it
+ * cannot predict while the generation it decided against is exactly what it wants to pin.</p>
+ *
+ * <p>Mutations that are not lifecycle decisions — appending a version, observing, reporting a
+ * failure, and every lease operation — pass {@link GenerationExpectation#any()}, which is what the
+ * pre-existing constructors supply, so that a write which genuinely has no opinion about the
+ * lifecycle does not acquire one by omission.</p>
  * @param tenantId stable tenant id for this declaration.
  * @param deploymentId stable deployment id for this declaration.
  * @param key client-chosen idempotency key for this mutation.
  * @param digest content digest of the graph artifact to deploy.
  * @param expectedRevision exact aggregate revision required for compare-and-set.
+ * @param expectedGeneration deployment generation this mutation was decided against.
  */
     record Command(String tenantId, DeploymentId deploymentId, String key, String digest,
-                   RevisionExpectation.Exactly expectedRevision) {
+                   RevisionExpectation.Exactly expectedRevision, GenerationExpectation expectedGeneration) {
 /**
- * Requires a deployment target and an exact revision before an existing deployment can change.
+ * Requires a deployment target, an exact revision, and a stated generation expectation.
  */
         public Command {
             validate(tenantId, key, digest);
-            if (deploymentId == null || expectedRevision == null) throw new IllegalArgumentException("invalid command");
+            if (deploymentId == null || expectedRevision == null || expectedGeneration == null)
+                throw new IllegalArgumentException("invalid command");
+        }
+
+        /**
+         * The pre-generation shape, retained so that every mutation which is not a lifecycle decision
+         * keeps compiling and keeps meaning exactly what it meant: no opinion about the generation.
+ * @param tenantId stable tenant id for this declaration.
+ * @param deploymentId stable deployment id for this declaration.
+ * @param key stable key for this declaration.
+ * @param digest SHA-256 digest of the graph artifact to deploy.
+ * @param expectedRevision exact aggregate revision required for compare-and-set.
+         */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation.Exactly expectedRevision) {
+            this(tenantId, deploymentId, key, digest, expectedRevision, GenerationExpectation.any());
         }
 
         /**
@@ -211,7 +310,21 @@ public interface DeploymentRegistry extends AutoCloseable {
          */
         public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
                        RevisionExpectation expectedRevision) {
-            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision));
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision), GenerationExpectation.any());
+        }
+
+        /**
+         * The shared-supertype boundary for a lifecycle decision, which states both expectations.
+ * @param tenantId stable tenant id for this declaration.
+ * @param deploymentId stable deployment id for this declaration.
+ * @param key stable key for this declaration.
+ * @param digest SHA-256 digest of the graph artifact to deploy.
+ * @param expectedRevision shared expectation narrowed to an exact CAS revision.
+ * @param expectedGeneration deployment generation this mutation was decided against.
+         */
+        public Command(String tenantId, DeploymentId deploymentId, String key, String digest,
+                       RevisionExpectation expectedRevision, GenerationExpectation expectedGeneration) {
+            this(tenantId, deploymentId, key, digest, requireExact(expectedRevision), expectedGeneration);
         }
 
         private static RevisionExpectation.Exactly requireExact(RevisionExpectation expectation) {
@@ -231,17 +344,32 @@ public interface DeploymentRegistry extends AutoCloseable {
         public Page { items = List.copyOf(items); }
     }
 /**
- * Defines the limits contract exposed to Ravenroot integrators.
+ * Bounds an adapter publishes so a caller can size its own behaviour against them, not guess.
+ *
+ * <h2>Why the skew allowance is published rather than assumed</h2>
+ * <p>Lease expiry is evaluated against the <em>store's</em> clock and never the caller's, which is
+ * what makes takeover decidable at all. A holder that wants to stop working before it can be fenced
+ * therefore has to know how far its own clock may be trusted against the authority's;
+ * {@code maxClockSkew} is that allowance, stated by the adapter instead of each caller inventing a
+ * constant. A caller renews at {@code expiresAt - maxClockSkew}, and a takeover decided at the
+ * authority is correct even when the previous holder still believes it has time (ADR 0038 D2).</p>
+ *
+ * <p>Zero is permitted and means exactly what it says: an adapter whose clock is the caller's clock,
+ * such as a single-process reference implementation, allows no skew because there is none to
+ * allow.</p>
  * @param maximumPageSize the maximum page size constraint applied while processing the request.
  * @param maximumLeaseTtl maximum lease ttl supplied to this declaration.
+ * @param maxClockSkew non-negative allowance between the store's clock and a caller's.
  */
-    record Limits(int maximumPageSize, Duration maximumLeaseTtl) {
+    record Limits(int maximumPageSize, Duration maximumLeaseTtl, Duration maxClockSkew) {
 /**
- * Requires a positive page bound and a positive maximum lease duration.
+ * Requires a positive page bound, a positive maximum lease duration, and a non-negative skew allowance.
  */
         public Limits {
             if (maximumPageSize < 1 || maximumLeaseTtl == null || maximumLeaseTtl.isNegative()
-                    || maximumLeaseTtl.isZero()) throw new IllegalArgumentException("invalid limits");
+                    || maximumLeaseTtl.isZero() || maxClockSkew == null || maxClockSkew.isNegative()
+                    || maxClockSkew.compareTo(maximumLeaseTtl) >= 0)
+                throw new IllegalArgumentException("invalid limits");
         }
     }
 /**

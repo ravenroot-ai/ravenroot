@@ -2,6 +2,8 @@ const ENGLISH_MESSAGES = Object.freeze({
   'commands.file.new.label': 'New Document',
   'commands.file.open.label': 'Open…',
   'commands.file.replaceActive.label': 'Replace Active…',
+  'commands.file.fork.label': 'Fork as Draft',
+  'commands.file.fork.help': 'Create a new editable draft from this immutable graph snapshot.',
   'commands.file.save.label': 'Save GraphML',
   'commands.file.save.help': 'Save the workflow as GraphML',
   'commands.file.close.label': 'Close Document',

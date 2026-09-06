@@ -190,6 +190,47 @@ expired results in this release** — no CLI verb, no HTTP route, no scheduler c
 record naming the tenant, the count removed, and the operator, whether it succeeded or was refused, so
 a gap in the result table is distinguishable from unaccounted-for loss.
 
+## Deployment lifecycle records
+
+An adopter who wires the SQLite deployment registry gets four new tables in the same database file
+the execution store already uses: the deployment aggregate itself, its immutable graph versions, the
+lease that says which process currently owns it, and the command ledger that makes a retried
+lifecycle command idempotent. Co-location is the same decision graph definitions and execution
+manifests already follow — one backup captures a deployment together with the executions that ran
+under it, and one schema version describes both, so a binary cannot open a file whose executions it
+understands and whose deployments it does not.
+
+**Upgrading is a schema addition and nothing else.** A database file written by an earlier release
+upgrades in place by adding those four tables; no existing table is altered, no index is dropped, no
+row is rewritten, and no data is migrated. The execution store's own schema is untouched. The usual
+downgrade rule applies unchanged: a file upgraded by this release is refused by a build that predates
+it, so take a backup before upgrading if you may need to roll the binary back.
+
+**Ownership is a lease and a fence, evaluated against the store's clock.** Exactly one process at a
+time may drive a deployment's runtime, and a process that loses ownership is refused on its next
+write rather than being asked to notice on its own. A lease is never reaped in the background: it is
+judged lazily, when someone presents a token, which is why a process that is killed still excludes a
+successor until its window lapses. That interval is the lease TTL and not a bug to engineer away — it
+is the only thing that makes "one current owner" decidable when the previous owner cannot be asked.
+The fencing counter lives with the deployment rather than with the lease, so releasing a lease, or
+losing one to a crash, never lets a token be reissued.
+
+**The command ledger is bounded, and nothing purges it for you in this release.** Every recorded
+lifecycle command carries an expiry, and the adapter exposes a tenant-scoped
+`purgeExpiredCommandRecords` that removes the ones past it. As with the durable inventory, the
+idempotency ledger and retained execution results, **no CLI verb, HTTP route or scheduler calls it**:
+it is reachable today only by an embedder composing the registry directly. Until one exists, the
+ledger grows with the number of lifecycle commands the installation has ever accepted. Each entry is
+a handful of small columns and none of them is reachable once expired, so the cost is disk rather
+than correctness — but size the store with that in mind if you drive lifecycle commands at volume,
+and note that an unbounded ledger is first noticed when it is too large to migrate.
+
+**Nothing on the external surface reaches any of this yet.** The HTTP routes, the CLI verbs and
+`openapi.json` keep exactly the behaviour they had; no running service accepts a lifecycle command in
+this vocabulary, and a deployment's lifecycle in a shipped Ravenroot is still the process-local one.
+What these tables give an adopter today is a durable authority to compose against, not a change to
+what an operator can do from the outside.
+
 ## Verification
 
 After recovery, prove `/ready`, inspect retained terminal results, resume an event cursor, and execute a bounded Test graph before reopening Run traffic. Also confirm that a process instance discoverable through the durable inventory before the restart is still discoverable afterward, and read each instance's reported disposition rather than only its lifecycle status: `PARKED` means an attempt's real-world effect outcome is still unresolved and awaits a human decision (see [Durable process inventory](../architecture/process-inventory.md)), and it can appear on an otherwise-finished instance, so do not treat a terminal status alone as "nothing left to do."

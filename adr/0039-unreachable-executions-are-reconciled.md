@@ -1,4 +1,4 @@
-# ADR 0038: Unreachable executions are reconciled, not waited out
+# ADR 0039: Unreachable executions are reconciled, not waited out
 
 - Status: Accepted
 - Date: 2026-09-06

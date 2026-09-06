@@ -29,12 +29,15 @@ import ai.ravenroot.extensions.github.GithubNodePackage;
 import ai.ravenroot.extensions.jdbc.JdbcNodePackage;
 import ai.ravenroot.extensions.kafka.KafkaNodePackage;
 import ai.ravenroot.extensions.mail.MailNodePackage;
+import ai.ravenroot.extensions.matrix.MatrixNodePackage;
+import ai.ravenroot.extensions.mattermost.MattermostNodePackage;
 import ai.ravenroot.extensions.ocr.OcrNodePackage;
 import ai.ravenroot.extensions.openapi.client.OpenApiClientNodePackage;
 import ai.ravenroot.extensions.openapi.server.OpenApiServerNodePackage;
 import ai.ravenroot.extensions.slack.SlackNodePackage;
 import ai.ravenroot.extensions.spel.SpelNodePackage;
 import ai.ravenroot.extensions.storage.StorageNodePackage;
+import ai.ravenroot.extensions.teams.TeamsNodePackage;
 import ai.ravenroot.extensions.telegram.TelegramNodePackage;
 import ai.ravenroot.extensions.websocket.WebSocketNodePackage;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
@@ -64,7 +67,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/** Runtime-backed publication gate for the public 53-node catalog and its admission-ready examples. */
+/** Runtime-backed publication gate for the public 59-node catalog and its admission-ready examples. */
 final class PublishedNodeContractTest {
     private static final String UPDATE_PROPERTY = "ravenroot.docs.update";
     private static final Path REPOSITORY = repositoryRoot();
@@ -75,7 +78,7 @@ final class PublishedNodeContractTest {
     @Test
     void publishedDescriptorSnapshotMatchesRuntimeCatalog() throws Exception {
         List<NodeTypeDescriptor> descriptors = descriptors();
-        assertEquals(53, descriptors.size(), "the documented baseline must classify every supported node");
+        assertEquals(59, descriptors.size(), "the documented baseline must classify every supported node");
         String actual = snapshot(descriptors);
         update(SNAPSHOT, actual);
         assertEquals(Files.readString(SNAPSHOT), actual,
@@ -331,10 +334,11 @@ final class PublishedNodeContractTest {
     private static List<NodePackage> packages() {
         return List.of(new AiNodePackage(), new AmqpNodePackage(), new DiscordNodePackage(),
                 new FilesystemNodePackage(), new GitWorkspaceNodePackage(), new GithubNodePackage(),
-                new JdbcNodePackage(), new KafkaNodePackage(), new MailNodePackage(), new StorageNodePackage(),
+                new JdbcNodePackage(), new KafkaNodePackage(), new MailNodePackage(), new MatrixNodePackage(),
+                new MattermostNodePackage(), new StorageNodePackage(),
                 new OcrNodePackage(), new OpenApiClientNodePackage(), new OpenApiServerNodePackage(),
-                new SlackNodePackage(), new SpelNodePackage(), new TelegramNodePackage(),
-                new WebSocketNodePackage());
+                new SlackNodePackage(), new SpelNodePackage(), new TeamsNodePackage(),
+                new TelegramNodePackage(), new WebSocketNodePackage());
     }
 
     private static GraphNode exampleAction(String behavior) throws Exception {

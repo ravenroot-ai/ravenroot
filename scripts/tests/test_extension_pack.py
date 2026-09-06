@@ -30,10 +30,13 @@ def dependency(artifact: str, *, version: str = "${project.version}") -> ET.Elem
 class ExtensionPackContractTest(unittest.TestCase):
     def test_repository_pack_matches_every_production_node_package(self):
         expected = check_pack()
-        self.assertEqual(len(expected), 17)
+        self.assertEqual(len(expected), 20)
         self.assertIn("ravenroot-discord", expected)
         self.assertIn("ravenroot-github", expected)
         self.assertIn("ravenroot-slack", expected)
+        self.assertIn("ravenroot-matrix", expected)
+        self.assertIn("ravenroot-mattermost", expected)
+        self.assertIn("ravenroot-teams", expected)
         self.assertIn("ravenroot-object-storage", expected)
         self.assertNotIn("ravenroot-server", expected)
 

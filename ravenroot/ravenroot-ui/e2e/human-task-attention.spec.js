@@ -13,11 +13,13 @@ const property = (name, displayName, defaultValue, extra = {}) => ({ name, displ
   allowedValues: [], adapterBinding: false, visibleWhen: null, requiredWhen: null, ...extra });
 const HUMAN_TASK = { behavior: 'human-task', displayName: 'Human task', category: 'Human workflow',
   description: 'Durable confirmation.', visualType: 'flow', agentic: false,
-  capabilities: ['durable', 'human-task'], defaultNature: 'WORKER', allowedNatures: ['WORKER'],
+  capabilities: ['durable', 'human-task', 'embedded-confirmation-v1'], defaultNature: 'WORKER',
+  allowedNatures: ['WORKER'],
   natureProperty: 'runtime.nature', defaultMaxConcurrency: 1, maxConcurrencyCeiling: 1,
   maxConcurrencyProperty: 'runtime.maxConcurrency', properties: [
-    property('title', 'Title', ''), property('description', 'Description', '', { type: 'TEXT' }),
-    property('responseContentType', 'Response media type', 'application/json'),
+    property('title', 'Title', '', { required: true }),
+    property('description', 'Description', '', { type: 'TEXT' }),
+    property('responseContentType', 'Response media type', 'application/vnd.ravenroot.payload+json'),
     property('responseSchema', 'Response schema', 'ravenroot.human-task.response'),
     property('responseSchemaVersion', 'Response schema version', '1'),
     property('responseKind', 'Response kind', 'MAP', { allowedValues: ['SCALAR', 'LIST', 'MAP'] }),
@@ -49,6 +51,7 @@ let decisionMode;
 let attentionMode;
 let requests;
 let capabilityResponse;
+let catalogResponse;
 
 function task(id, generation, status = 'WAITING') {
   return { taskId: id, generation, status, graphVersion: 'graph-v1', deploymentId: null,
@@ -76,7 +79,7 @@ function startService() {
     requests.push(url.pathname + url.search);
     if (url.pathname === '/v1/configuration') return json(response, 200, {
       schemaVersion: 1, graphDocumentMaxBytes: 10 * 1024 * 1024, humanTasks: capabilityResponse }, headers);
-    if (url.pathname === '/v1/node-types') return json(response, 200, [HUMAN_TASK], headers);
+    if (url.pathname === '/v1/node-types') return json(response, 200, catalogResponse, headers);
     if (url.pathname === '/v1/events') { response.writeHead(204, headers).end(); return; }
     if (url.pathname === '/v1/executions') return json(response, 200, { executionId: 'traversal-v1',
       processInstanceId: 'process-v1', graphVersion: 'graph-v1', executionPolicy: 'durable' }, headers);
@@ -100,15 +103,15 @@ function startService() {
     const match = url.pathname.match(/^\/v1\/human-tasks\/([^/]+)\/confirmation\/(resolve|deny|cancel)$/);
     if (match) {
       const selected = tasks.find(entry => entry.taskId === decodeURIComponent(match[1]));
-      if (decisionMode === 'unauthorized') return json(response, 403, { error: 'access denied' }, headers);
+      if (decisionMode === 'unauthorized') return json(response, 404, { error: 'not found' }, headers);
       if (decisionMode === 'network') { request.socket.destroy(); return; }
       if (decisionMode === 'stale') {
         decisionMode = 'normal'; selected.generation += 1;
-        return json(response, 200, { schemaVersion: 1, outcome: 'STALE_GENERATION', task: selected }, headers);
+        return json(response, 409, { error: 'Human Task generation no longer matches' }, headers);
       }
       if (decisionMode === 'expired') {
         selected.status = 'EXPIRED'; selected.availableActions = [];
-        return json(response, 200, { schemaVersion: 1, outcome: 'EXPIRED', task: selected }, headers);
+        return json(response, 409, { error: 'Human Task is no longer actionable' }, headers);
       }
       selected.status = match[2] === 'resolve' ? 'RESOLVED' : match[2] === 'deny' ? 'DENIED' : 'CANCELLED';
       selected.availableActions = [];
@@ -129,6 +132,7 @@ async function connectAndCreate(page) {
   await page.locator('#btn-modify').click();
   await page.locator('#node-catalog [data-catalog-add="human-task"]').click();
   await page.locator('#node-editor input[name="id"]').fill('human-confirmation');
+  await page.locator('[data-catalog-property="title"]').fill('Confirm durable task');
   await page.locator('[data-catalog-property="confirmationPresentationVersion"]').selectOption('1');
   await page.locator('#node-editor button[type="submit"]').click();
   await page.evaluate(() => {
@@ -157,6 +161,7 @@ test.beforeEach(async () => {
   attentionMode = 'normal';
   requests = [];
   capabilityResponse = { ...CAPABILITY };
+  catalogResponse = [HUMAN_TASK];
   await startService();
 });
 test.afterEach(async () => new Promise(resolve => {
@@ -171,7 +176,25 @@ test('generic authoring opts into the versioned confirmation and preserves its c
   expect(properties.confirmationPresentationVersion).toBe('1');
   expect(properties.confirmationPrompt).toBe('Confirm this task.');
   expect(properties.confirmationActions).toBe('RESOLVE,DENY,CANCEL');
+  expect(properties.responseContentType).toBe('application/vnd.ravenroot.payload+json');
   expect(properties.responseKind).toBe('MAP');
+});
+
+test('a catalog that cannot admit new confirmations omits authoring while runtime capability remains',
+  async ({ page }) => {
+  capabilityResponse = { ...CAPABILITY, confirmationPromptMaxUtf8Bytes: 4,
+    confirmationActionLabelMaxUtf8Bytes: 2, commentMaxUtf8Bytes: 8 };
+  catalogResponse = [{ ...HUMAN_TASK,
+    capabilities: HUMAN_TASK.capabilities.filter(value => value !== 'embedded-confirmation-v1'),
+    properties: HUMAN_TASK.properties.filter(value => !value.name.startsWith('confirmation')) }];
+  await page.goto('/');
+  await page.locator('#service-url').fill(SERVICE_ORIGIN);
+  page.once('dialog', dialog => dialog.accept());
+  await page.locator('#service-url').press('Tab');
+  await page.locator('#btn-new').click();
+  await page.locator('#btn-modify').click();
+  await page.locator('#node-catalog [data-catalog-add="human-task"]').click();
+  await expect(page.locator('[data-catalog-property^="confirmation"]')).toHaveCount(0);
 });
 
 test('two tasks page independently and explicit decisions remove the final non-colour halo', async ({ page }) => {
@@ -251,7 +274,9 @@ test('stale generation and ambiguous network loss reconcile without an automatic
   decisionMode = 'stale';
   await page.locator('[data-human-task-id="task-1"]').click();
   await page.locator('[data-human-task-action="RESOLVE"]').click();
+  await expect(page.locator('[data-human-task-error]')).toContainText('HTTP 409 POST');
   await expect(page.locator('[data-human-task-id="task-1"]')).toHaveAttribute('data-human-task-generation', '2');
+  await page.locator('[data-human-task-close]').click();
 
   decisionMode = 'network';
   await page.locator('[data-human-task-id="task-1"]').click();
@@ -287,6 +312,25 @@ test('browser reload restores an exact task only after the service origin and to
   expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
 });
 
+test('an outage suspends stale modal details and retains only the exact recovery locator', async ({ page }) => {
+  await connectAndCreate(page);
+  await runAndSelect(page);
+  await page.locator('[data-human-task-id="task-1"]').click();
+  const locator = await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('ravenroot.human-task.selection.v1')));
+  await expect(page.locator('#human-task-dialog')).toBeVisible();
+
+  attentionMode = 'network';
+  await expect(page.locator('.human-task-status')).toContainText('could not be refreshed');
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+  expect(await page.evaluate(() =>
+    JSON.parse(localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(locator);
+
+  attentionMode = 'normal';
+  await expect(page.locator('#human-task-dialog')).toBeVisible();
+  await expect(page.locator('[data-human-task-identity]')).toContainText('Task task-1');
+});
+
 test('unauthorized, expiry, cancellation and poll reconnect states stay deterministic', async ({ page }) => {
   await connectAndCreate(page);
   await runAndSelect(page);
@@ -295,14 +339,16 @@ test('unauthorized, expiry, cancellation and poll reconnect states stay determin
   decisionMode = 'unauthorized';
   await page.locator('[data-human-task-id="task-1"]').click();
   await page.locator('[data-human-task-action="RESOLVE"]').click();
-  await expect(page.locator('[data-human-task-error]')).toContainText('Access revoked');
+  await expect(page.locator('[data-human-task-error]')).toContainText('HTTP 404 POST');
   await expect(page.locator('#human-task-dialog')).toBeVisible();
   await page.locator('[data-human-task-close]').click();
 
   decisionMode = 'expired';
   await page.locator('[data-human-task-id="task-1"]').click();
   await page.locator('[data-human-task-action="RESOLVE"]').click();
+  await expect(page.locator('[data-human-task-error]')).toContainText('HTTP 409 POST');
   await expect(page.locator('.human-task-status')).toContainText('1 actionable task');
+  await page.locator('[data-human-task-close]').click();
   expect(tasks[0].status).toBe('EXPIRED');
 
   attentionMode = 'network';

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  humanTaskServiceOrigin,
   humanTaskContext,
   nextHumanTaskBackoff,
   nodeAttention,
@@ -102,6 +103,12 @@ describe('Human Task capability and attention projection', () => {
     expect(humanTaskContext({ execution: { graphVersion: null } })).toBeNull();
     expect(humanTaskContext({ execution: { graphVersion: 'v7' }, humanTasks: {
       deploymentId: 'd7', graphVersion: null } })).toBeNull();
+  });
+
+  it('persists the effective page origin when the runtime uses its same-origin default', () => {
+    expect(humanTaskServiceOrigin('', 'http://127.0.0.1:51492')).toBe('http://127.0.0.1:51492');
+    expect(humanTaskServiceOrigin('https://runtime.example/base', 'https://editor.example'))
+      .toBe('https://runtime.example/base');
   });
 
   it('measures comments as UTF-8 and never substitutes a browser limit', () => {

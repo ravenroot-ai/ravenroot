@@ -77,7 +77,7 @@ import { createCredentialsWindow } from './credential-panel.js';
 // client -- it is not a separate transport, unlike credentials, because `/v1/deployments` is already
 // part of `RavenrootRuntimeClient`. The Deployments window owns registration and control.
 import { createDeploymentsWindow } from './deployment-panel.js';
-import { humanTaskContext } from './human-task-attention.js';
+import { humanTaskContext, humanTaskServiceOrigin } from './human-task-attention.js';
 import { createHumanTaskController } from './human-task-controller.js';
 import { createHumanTaskDecisionDialog, renderHumanTaskInspector } from './human-task-ui.js';
 import {
@@ -755,10 +755,14 @@ function clearHumanTaskSelection() {
   }
 }
 
+function currentHumanTaskServiceOrigin(client = runtimeClient) {
+  return humanTaskServiceOrigin(client?.baseUrl, globalThis.location?.origin);
+}
+
 function rememberHumanTaskSelection(task) {
   try {
     localStorage.setItem(HUMAN_TASK_SELECTION_KEY, JSON.stringify({
-      serviceOrigin: runtimeClient?.baseUrl || '', taskId: task.taskId, generation: task.generation,
+      serviceOrigin: currentHumanTaskServiceOrigin(), taskId: task.taskId, generation: task.generation,
     }));
   } catch {
     // The durable service remains authoritative; this only forfeits browser-reload convenience.
@@ -885,6 +889,12 @@ function humanTaskPageSignature(page) {
 function receiveHumanTaskProjection(state) {
   const owner = humanTaskControllerOwner;
   if (!owner) return;
+  if (state.kind === 'error' && humanTaskDecisionDialog?.selected()) {
+    // A failed authoritative refresh makes every displayed task detail stale. Close the modal so
+    // the normal reconnect controls remain reachable, retaining only the opaque locator. A later
+    // successful poll or authentication rebuilds the form through the exact authorized lookup.
+    humanTaskDecisionDialog.suspend();
+  }
   const signature = state.kind === 'ready' ? [...state.nodeCounts.entries()]
     .map(([nodeId, count]) => `${nodeId}:${count.pending}:${count.escalated}`).sort().join('|') : state.kind;
   const changed = owner.humanTasks.attentionSignature !== signature;
@@ -901,6 +911,9 @@ function receiveHumanTaskProjection(state) {
     announceGraph(total ? `${total} Human Task${total === 1 ? '' : 's'} need attention`
       + `${escalated ? `; ${escalated} escalated` : ''}.` : 'No Human Tasks need attention.');
   }
+  if (state.kind === 'ready' && !humanTaskDecisionDialog?.selected()) {
+    void recoverHumanTaskSelection(owner);
+  }
 }
 
 function configureHumanTasks(owner = workspace.active) {
@@ -915,7 +928,8 @@ async function recoverHumanTaskSelection(owner) {
   const capability = currentHumanTaskCapability();
   if (!client || !capability) return;
   const locator = readHumanTaskSelection();
-  if (!locator || locator.serviceOrigin !== client.baseUrl || typeof locator.taskId !== 'string'
+  if (!locator || locator.serviceOrigin !== currentHumanTaskServiceOrigin(client)
+      || typeof locator.taskId !== 'string'
       || !Number.isSafeInteger(locator.generation) || locator.generation < 1) return;
   try {
     // The locator deliberately carries no graph, deployment, process, presentation, or auth data.
@@ -9941,6 +9955,9 @@ function authenticateRuntime() {
   }
   runtimeTokenProvider.setAccessToken(token);
   hasRuntimeToken = true;
+  // Force any selected confirmation to be rehydrated under the replacement authority. Suspending
+  // keeps only its opaque locator; a successful exact lookup will reopen with server-owned details.
+  humanTaskDecisionDialog?.suspend();
   refreshCommands();
   connectRuntime();
 }
@@ -9953,6 +9970,7 @@ function revokeRuntimeAccess() {
   runtimeClient = null;
   runtimeConfigurationRequest = null;
   runtimeConfiguration = null;
+  humanTaskDecisionDialog?.suspend();
   void configureHumanTasks();
   document.getElementById('access-token').value = '';
   // The credential window loses its client with everything else. `setClient(null)` empties the
@@ -13485,7 +13503,7 @@ humanTaskDecisionDialog = createHumanTaskDecisionDialog({
         { capability });
       clearHumanTaskSelection();
       addActivityMessage('human task', `${action.toLowerCase()} · task ${shortId(task.taskId)} · ${result.outcome}`,
-        ['APPLIED', 'RESOLVED', 'DENIED', 'CANCELLED'].includes(result.outcome) ? 'completed' : 'failed');
+        'completed');
       await humanTaskController.refresh();
       return result;
     } catch (error) {

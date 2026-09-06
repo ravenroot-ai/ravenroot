@@ -57,4 +57,35 @@ describe('Human Task inspector and decision dialog', () => {
     expect(submitted).toHaveBeenCalledWith(expect.objectContaining({ task, action: 'RESOLVE',
       comment: '\u{1F642}\u{1F642}' }));
   });
+
+  it('suspends stale presentation during reauthentication without clearing the durable locator', () => {
+    const doc = dialogDocument();
+    const closed = vi.fn();
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'), onClose: closed });
+    controller.open(task, capability);
+    controller.suspend();
+    expect(doc.getElementById('d').open).toBe(false);
+    expect(controller.selected()).toBeNull();
+    expect(closed).not.toHaveBeenCalled();
+  });
+
+  it('suspends immediately when authentication changes during an uncertain decision', async () => {
+    const doc = dialogDocument();
+    const closed = vi.fn();
+    let rejectDecision;
+    const pending = new Promise((_resolve, reject) => { rejectDecision = reject; });
+    const controller = createHumanTaskDecisionDialog({ dialog: doc.getElementById('d'), onClose: closed,
+      onSubmit: () => pending });
+    controller.open(task, capability);
+    doc.querySelector('[data-human-task-action="RESOLVE"]').click();
+
+    controller.suspend();
+    expect(doc.getElementById('d').open).toBe(false);
+    expect(controller.selected()).toBeNull();
+    rejectDecision(new Error('connection lost'));
+    await pending.catch(() => {});
+    await Promise.resolve();
+    expect(doc.querySelector('[data-human-task-error]').hidden).toBe(true);
+    expect(closed).not.toHaveBeenCalled();
+  });
 });

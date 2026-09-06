@@ -224,6 +224,10 @@ export function humanTaskContext(documentRecord) {
     processInstanceId: String(execution.processInstanceId) };
 }
 
+export function humanTaskServiceOrigin(clientBaseUrl, pageOrigin) {
+  return String(clientBaseUrl || pageOrigin || '');
+}
+
 export function nodeAttention(items) {
   const result = new Map();
   for (const item of items || []) {

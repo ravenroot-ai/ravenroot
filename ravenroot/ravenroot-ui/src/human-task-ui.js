@@ -105,7 +105,7 @@ export function renderHumanTaskInspector(host, state, nodeId, {
 }
 
 export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => ({}), onClose = () => {} } = {}) {
-  if (!dialog) return { open() {}, close() {}, selected: () => null };
+  if (!dialog) return { open() {}, close() {}, suspend() {}, selected: () => null };
   const prompt = dialog.querySelector('[data-human-task-prompt]');
   const identity = dialog.querySelector('[data-human-task-identity]');
   const commentField = dialog.querySelector('[data-human-task-comment-field]');
@@ -116,6 +116,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   let task = null;
   let capability = null;
   let submitting = false;
+  let suspended = false;
 
   function say(message = '') {
     error.textContent = message;
@@ -139,6 +140,16 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     onClose();
   }
 
+  function suspend() {
+    suspended = true;
+    task = null;
+    capability = null;
+    comment.value = '';
+    say();
+    if (dialog.open && typeof dialog.close === 'function') dialog.close();
+    else dialog.removeAttribute('open');
+  }
+
   async function decide(action) {
     if (!task || !capability || submitting) return;
     const check = validateDecisionComment(comment.value, task.presentation.commentRequirement,
@@ -149,12 +160,14 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     try {
       await onSubmit({ task, action, comment: check.value });
     } catch (failure) {
-      say(failure?.message || 'The decision outcome is unknown. Refresh before trying another action.');
+      if (!suspended) {
+        say(failure?.message || 'The decision outcome is unknown. Refresh before trying another action.');
+      }
       return;
     } finally {
       setBusy(false);
     }
-    close();
+    if (!suspended) close();
   }
 
   actions.addEventListener('click', event => {
@@ -171,6 +184,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
 
   return {
     open(nextTask, nextCapability) {
+      suspended = false;
       task = nextTask;
       capability = nextCapability;
       prompt.textContent = task.presentation.prompt;
@@ -197,7 +211,7 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
       dialog.showModal ? dialog.showModal() : dialog.setAttribute('open', '');
       (mode === 'REQUIRED' ? comment : actions.querySelector('button'))?.focus();
     },
-    close,
+    close, suspend,
     selected: () => task && { taskId: task.taskId, generation: task.generation },
   };
 }

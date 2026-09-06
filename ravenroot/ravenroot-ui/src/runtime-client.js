@@ -9,6 +9,7 @@ const DEFAULT_MAX_RETRIES = 5;
 const DEFAULT_RETRY_DELAY_MS = 1_000;
 const MIN_RETRY_DELAY_MS = 250;
 const MAX_RETRY_DELAY_MS = 30_000;
+const HUMAN_TASK_DECISION_OUTCOMES = new Set(['APPLIED', 'ALREADY_APPLIED']);
 
 export const MAX_GRAPH_DOCUMENT_BYTES = 256 * 1024 * 1024;
 
@@ -135,6 +136,8 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
       || !LOCAL_DEPLOYMENT_STATES.has(value.state)
       || !Number.isSafeInteger(value.sourceCount) || value.sourceCount < 0
       || value.scope !== 'LOCAL_PROCESS'
+      || (value.graphVersion !== null && value.graphVersion !== undefined
+        && (typeof value.graphVersion !== 'string' || !value.graphVersion))
       || (value.diagnostic !== null && value.diagnostic !== undefined
         && (typeof value.diagnostic !== 'string' || value.diagnostic.length > 192))) {
     throw new Error('Deployment response is not a valid process-local status');
@@ -513,7 +516,7 @@ export class RavenrootRuntimeClient {
       body: JSON.stringify({ schemaVersion: 1, comment: String(comment ?? '') }), signal,
     });
     if (!result || typeof result !== 'object' || Array.isArray(result)
-        || result.schemaVersion !== 1 || typeof result.outcome !== 'string' || !result.outcome
+        || result.schemaVersion !== 1 || !HUMAN_TASK_DECISION_OUTCOMES.has(result.outcome)
         || !result.task) {
       throw new Error('Human Task confirmation response is invalid');
     }

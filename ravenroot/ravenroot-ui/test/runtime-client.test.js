@@ -129,6 +129,22 @@ describe('embedded Human Task runtime client', () => {
     expect(request.body).not.toContain('payload');
     expect(request.headers.Authorization).toBe('Bearer token');
   });
+
+  it('accepts exact replay as reconciled success and rejects unsupported success outcomes', async () => {
+    const response = outcome => ({ ok: true, status: 200, text: async () => JSON.stringify({
+      schemaVersion: 1, outcome, task: { ...task, status: 'RESOLVED', availableActions: [] } }) });
+    const replayClient = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue(response('ALREADY_APPLIED')), accessToken: 'token',
+    });
+    await expect(replayClient.confirmHumanTask('task-1', 2, 'resolve', 'Reviewed', { capability }))
+      .resolves.toMatchObject({ outcome: 'ALREADY_APPLIED', task: { status: 'RESOLVED' } });
+
+    const unknownClient = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue(response('MAYBE_APPLIED')), accessToken: 'token',
+    });
+    await expect(unknownClient.confirmHumanTask('task-1', 2, 'resolve', 'Reviewed', { capability }))
+      .rejects.toThrow(/confirmation response is invalid/);
+  });
 });
 
 describe('process-local source session client', () => {
@@ -177,7 +193,7 @@ describe('process-local source session client', () => {
 describe('process-local deployment client', () => {
   const ready = {
     deploymentId: 'deployment-1', state: 'READY', sourceCount: 0,
-    scope: 'LOCAL_PROCESS', diagnostic: null,
+    graphVersion: 'graph-v1', scope: 'LOCAL_PROCESS', diagnostic: null,
   };
 
   it('uses the dedicated authenticated register, observe, start, and stop routes', async () => {
@@ -273,6 +289,8 @@ describe('process-local deployment client', () => {
     expect(() => validateLocalDeploymentStatus({ ...ready, state: 'LISTENING' }, 'deployment-1'))
       .toThrow(/process-local status/);
     expect(() => validateLocalDeploymentStatus({ ...ready, sourceCount: -1 }, 'deployment-1'))
+      .toThrow(/process-local status/);
+    expect(() => validateLocalDeploymentStatus({ ...ready, graphVersion: '' }, 'deployment-1'))
       .toThrow(/process-local status/);
     expect(() => validateLocalDeploymentStatus({ ...ready, deploymentId: 'sibling' }, 'deployment-1'))
       .toThrow(/does not match/);

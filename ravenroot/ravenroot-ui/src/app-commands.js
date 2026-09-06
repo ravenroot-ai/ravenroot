@@ -117,6 +117,22 @@ export function createAppCommands(actions, { t = uiText } = {}) {
       isEnabled: context => authoring(context) && context.hasSelection,
       shortcuts: [global({ key: 'Delete' }), global({ key: 'Backspace' })],
     },
+    { id: 'edit.groupSelection', group: 'visual-groups', order: 100,
+      placements: ['menu.edit', 'help'], execute: actions.groupSelection,
+      isEnabled: context => authoring(context) && context.canGroupSelection,
+      shortcuts: [global({ key: 'g', primary: true })] },
+    { id: 'view.toggleGroup', group: 'visual-groups', order: 101,
+      placements: ['menu.edit', 'help'], execute: actions.toggleGroup,
+      isEnabled: context => context.hasVisualGroup },
+    ...['renameGroup', 'replaceGroupMembers', 'ungroup'].map((id, index) => ({
+      id: `edit.${id}`, group: 'visual-groups', order: 102 + index,
+      placements: ['menu.edit', 'help'], execute: actions[id],
+      isEnabled: context => authoring(context) && (id === 'replaceGroupMembers' ? context.hasManagedVisualGroup : context.hasVisualGroup)
+        && (id !== 'replaceGroupMembers' || context.selectedRealNodeCount >= 2),
+    })),
+    { id: 'edit.removeGroupMetadata', group: 'visual-groups', order: 105,
+      placements: ['menu.edit'], execute: actions.removeGroupMetadata,
+      isEnabled: context => authoring(context) && context.invalidGroupMetadata },
     // Only offered while the document has not already declared join semantics -- migrating a
     // document that already has the marker is a defined no-op (JoinSemantics.migrate is idempotent),
     // but a command an author can invoke for no visible effect is worse than one that is simply

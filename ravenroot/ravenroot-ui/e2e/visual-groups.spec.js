@@ -88,7 +88,7 @@ test('read-only presentation toggles do not mutate pinned graph or add history',
     owner._testPinnedGraph = JSON.stringify(owner.graph);
   });
   expect(await page.evaluate(() => window.cy.nodes('[rrVisualRole="summary"]').first().grabbable())).toBe(false);
-  await page.evaluate(() => window.cy.nodes('[rrVisualRole="summary"]').select());
+  await page.evaluate(() => { window.cy.nodes('[rrVisualRole="summary"]').select(); });
   await expect(page.locator('#btn-modify')).toBeDisabled();
   await page.getByRole('button', { name: 'Expand', exact: true }).click();
   await page.waitForFunction(() => !window.ravenroot.workspace.active.visualGroupsRenderer.isAnimating);

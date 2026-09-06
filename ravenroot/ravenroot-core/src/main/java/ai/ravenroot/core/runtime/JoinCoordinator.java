@@ -346,6 +346,27 @@ final class JoinCoordinator {
     }
 
     /**
+     * A join node this traversal currently has a branch parked at, or {@code null} when none has.
+     *
+     * <p>Exists so that a traversal ended from outside the graph can name a node rather than end
+     * anonymously. A cancellation reports "the first hop that did not run", and for a traversal
+     * stranded at a fan-in the honest answer is the join itself: the hop past it is what the parked
+     * branch was waiting to reach and never will.</p>
+     *
+     * <p>"A" rather than "the", deliberately. A traversal may be parked at more than one join, and
+     * this returns the first in the order joins were reached rather than pretending to rank them.
+     * A verdict naming one real join is more useful than one naming none, and any ranking this
+     * method invented would be a claim about causality it has no evidence for.</p>
+     */
+    String anyParkedJoinNodeId() {
+        return locals.values().stream()
+                .filter(local -> local.liveWaiterCount() > 0)
+                .map(local -> local.key.joinNodeId())
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
      * Presents one branch result at {@code joinNodeId}.
      *
      * <p>The returned stage carries the decision. A {@link JoinDecision.Wait} branch does not resolve
@@ -447,6 +468,35 @@ final class JoinCoordinator {
      * exact shape of leak that only appears once the system is under real fault load.</p>
      */
     CompletionStage<Void> terminate() {
+        return terminate(null);
+    }
+
+    /**
+     * The same release, with a verdict attached to the branches it strands.
+     *
+     * <p>Reconciliation of an unreachable traversal ends it through exactly this method rather than
+     * through a mechanism of its own, because the release a traversal already performs on every
+     * completion path is precisely what a stuck traversal needs and never reaches: it completes the
+     * parked branches, cancels the timers and does both <em>without waiting for the store</em> —
+     * which matters here more than anywhere, since a store that stopped answering is one of the ways
+     * a traversal becomes unreachable in the first place.</p>
+     *
+     * <p>The verdict rides as the {@linkplain Throwable#initCause cause} of the join failure the
+     * stranded branches receive, so it reaches the traversal's terminal handler through the failure
+     * that is already propagating rather than through a second channel that could disagree with it.
+     * {@link ExecutionTermination} is then the one place that decides what the termination was, for
+     * this path exactly as for every other.</p>
+     *
+     * <p>Exactly-once is this method's existing contract, not a new one: the second caller is handed
+     * the first caller's stage and completes nothing again. So a reconciliation racing a cancellation,
+     * a shutdown or a late completion cannot strand the branches twice, cannot release the traversal's
+     * capacity twice, and cannot overwrite a result the winner already recorded — whichever call
+     * arrives first supplies the verdict, and a later one supplies nothing at all.</p>
+     *
+     * @param verdict why this traversal is being released, or {@code null} for the ordinary
+     *                completion paths, where the release is teardown and carries no verdict of its own
+     */
+    CompletionStage<Void> terminate(Throwable verdict) {
         boolean alreadyIdle;
         List<LocalJoin> reached;
         CompletableFuture<Void> released;
@@ -482,8 +532,28 @@ final class JoinCoordinator {
             // A consumer that BLOCKS on this stage from inside a parked branch's continuation would
             // deadlock itself; consumers must compose continuations instead.
             released = new CompletableFuture<>();
-            termination = released.thenCompose(ignored -> drained)
+            CompletionStage<Void> discarded = released.thenCompose(ignored -> drained)
                     .thenCompose(ignored -> discardRecords(reached));
+            // A reconciled traversal does not wait for its records to be discarded, and this is the
+            // one place where that is not a shortcut but the consequence of the verdict.
+            //
+            // `drained` completes when this coordinator's last store operation returns. For an
+            // unreachable traversal, an operation that will never return is precisely what the
+            // criterion found: no node is running, no deadline is armed, and a branch is parked
+            // because the arrival that would settle it went into a call that never came back.
+            // Sequencing the traversal's own ending behind that call therefore makes recovery
+            // conditional on the exact dependency whose failure created the condition -- the
+            // traversal stays open, its result never settles, and reconciliation achieves nothing
+            // it could not have achieved by doing nothing. This is the same correction that already
+            // moved the in-memory release out from behind the drain, applied one level up.
+            //
+            // The discard is not abandoned, only detached: the chain above stays armed, so a store
+            // that answers later still discards these records. What is given up is the guarantee
+            // that a caller seeing this stage complete may assert the records are gone -- given up
+            // only for a traversal reconciled by verdict, and given up in favour of the traversal
+            // reaching a terminal state at all. A record left behind by a store that never answers
+            // is recovery's to reclaim; a traversal that can never end is nobody's.
+            termination = verdict == null ? discarded : released;
             mine = termination;
         }
         // Process memory is released here, unconditionally, and NOT behind the drain. Everything
@@ -492,7 +562,7 @@ final class JoinCoordinator {
         // control — a store that never answers left the timeout armed and the parked branches
         // pending, and the runner's bounded wait then walked away from both. The store record is
         // the only thing that genuinely needs the drain, so it is the only thing still behind it.
-        releaseInMemory(reached);
+        releaseInMemory(reached, verdict);
         // Set between the call above and completing `released`, and nowhere else: this is the one
         // instant at which every LocalJoin#releaseWaiters() this coordinator will ever run has
         // returned, so `abandonedBranch` cannot change again. See its own Javadoc for why this is a
@@ -528,10 +598,10 @@ final class JoinCoordinator {
      * cancellation, so a timer created after this method has run is cancelled by the thread that
      * created it rather than left armed.
      */
-    private void releaseInMemory(List<LocalJoin> reached) {
+    private void releaseInMemory(List<LocalJoin> reached, Throwable verdict) {
         for (LocalJoin local : reached) {
             local.cancelTimeout();
-            local.releaseWaiters();
+            local.releaseWaiters(verdict);
         }
     }
 
@@ -1169,7 +1239,7 @@ final class JoinCoordinator {
          * <p>The latch used to be one-shot for the whole join, which is right while a join fires once
          * and wrong the moment it re-arms: the second lap's branches would find it already tripped and
          * be answered {@code LATE} inline instead of parking, and a bucket left incomplete at the end
-         * of the traversal would then have nothing parked for {@link #releaseWaiters()} to find — so
+         * of the traversal would then have nothing parked for {@link #releaseWaiters(Throwable)} to find — so
          * the traversal would report success with an iteration silently dropped, which is exactly the
          * same lost-terminal defect, moved one layer down.</p>
          *
@@ -1180,7 +1250,7 @@ final class JoinCoordinator {
         /** Guards {@link #waiters} and {@link #releasedEveryBucket}. */
         private final Object waitersLock = new Object();
         /**
-         * Set by {@link #releaseWaiters()} so that a branch arriving at {@link #waiter(int)} after the
+         * Set by {@link #releaseWaiters(Throwable)} so that a branch arriving at {@link #waiter(int)} after the
          * traversal ended is answered inline rather than parking on a bucket created after the sweep.
          *
          * <p>With one shared latch this was implicit: a bucket that does not exist could not be
@@ -1742,7 +1812,7 @@ final class JoinCoordinator {
          *
          * <p>Dependents therefore run synchronously on the completing thread, inside this method. A
          * caller that must be sure of what a waiter observes at the instant of delivery has to have
-         * finished preparing the verdict before calling — see {@link #releaseWaiters()}.
+         * finished preparing the verdict before calling — see {@link #releaseWaiters(Throwable)}.
          *
          * @param lap which iteration is being answered; only branches parked on it are completed,
          *            because a firing of bucket k tells a branch parked on bucket k+1 nothing
@@ -1803,7 +1873,7 @@ final class JoinCoordinator {
          * {@link #abandonedBranchFailure()} lets the runner refuse to call that traversal a success.
          * </p>
          */
-        private void releaseWaiters() {
+        private void releaseWaiters(Throwable verdict) {
             // The iteration that was still being filled when the traversal ended. Its branches are the
             // ones that are outstanding; earlier laps completed and later ones cannot exist, because a
             // lap only begins when its predecessor fires. Reporting the whole of `payloads` and
@@ -1837,6 +1907,16 @@ final class JoinCoordinator {
                     .map(branch -> branchFailures.get(BranchId.atLap(branch, lap)))
                     .filter(java.util.Objects::nonNull)
                     .forEach(failure::addSuppressed);
+            // The cause, not a suppressed: ExecutionTermination classifies a termination by walking
+            // the cause chain, and a verdict hung off the suppressed array would be invisible to it.
+            // Set before completeAllWaiters for the same reason the suppressed causes above are —
+            // the waiters are handed this very instance, and a consumer that classifies it on
+            // completion must not see it half-built. Only ever set here, and only when a caller
+            // supplied one: the ordinary completion paths release with no verdict, and a join
+            // failure that reports a quorum it could not reach is exactly what they should carry.
+            if (verdict != null) {
+                failure.initCause(verdict);
+            }
             // Every bucket, because the traversal is over for all of them, and because a branch parked
             // on the incomplete lap is precisely what must stop this traversal reporting success.
             // The latch is per bucket because a shared latch would already be open after the first

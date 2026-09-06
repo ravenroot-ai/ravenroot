@@ -160,10 +160,12 @@ public record Traversal(UUID traversalId, String ingressNodeId, TraversalStatus 
             throw new IllegalArgumentException("A traversal that is " + status
                     + " has not terminated and cannot carry the termination reason " + terminationReason);
         }
-        if (terminationReason == ExecutionTerminationReason.CANCELLED
-                && status != TraversalStatus.FAILED) {
-            throw new IllegalArgumentException(
-                    "A cancelled traversal reaches no end node and is recorded as FAILED, not " + status);
+        // The invariant, not a list of members -- see ProcessInstance's twin for the full argument.
+        // Every reason in this vocabulary describes a traversal that reached no end node, so a reason
+        // beside any terminal status other than FAILED is a contradictory row, whichever reason it is.
+        if (status != TraversalStatus.FAILED) {
+            throw new IllegalArgumentException("A traversal carrying the termination reason "
+                    + terminationReason + " reaches no end node and is recorded as FAILED, not " + status);
         }
     }
 

@@ -351,11 +351,16 @@ public record ProcessInstance(UUID processInstanceId, ProcessInstanceStatus stat
             throw new IllegalArgumentException("A process instance that is " + status
                     + " has not terminated and cannot carry the termination reason " + terminationReason);
         }
-        if (terminationReason == ExecutionTerminationReason.CANCELLED
-                && status != ProcessInstanceStatus.FAILED) {
-            throw new IllegalArgumentException(
-                    "A cancelled process instance produces no result and is recorded as FAILED, not "
-                            + status);
+        // The invariant, not a list of members. Every reason in this vocabulary describes a
+        // termination that produced no result -- a cancellation reaches no end node, and neither
+        // does an execution ended because it could no longer reach one -- so any reason beside a
+        // terminal status other than FAILED describes a run that both stopped short and produced a
+        // result, which no execution can do. Written as the invariant so that the gate covers a
+        // member added later by default: a guard that names members fails open on the next one,
+        // silently, and only for rows nobody is looking at.
+        if (status != ProcessInstanceStatus.FAILED) {
+            throw new IllegalArgumentException("A process instance carrying the termination reason "
+                    + terminationReason + " produces no result and is recorded as FAILED, not " + status);
         }
     }
 

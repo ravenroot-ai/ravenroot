@@ -147,6 +147,43 @@ describe('GraphML compatibility', () => {
     expect(serialized).toContain('attr.name="outcome"');
   });
 
+  it('preserves raw canonical properties while dedicated fields use normalized values', () => {
+    const doc = '<graphml xmlns="http://graphml.graphdrawing.org/xmlns">'
+      + '<key id="kind" for="node" attr.name="kind" attr.type="string"/>'
+      + '<key id="behavior" for="node" attr.name="behavior" attr.type="string"/>'
+      + '<key id="classname" for="node" attr.name="classname" attr.type="string"/>'
+      + '<key id="node-description" for="node" attr.name="description" attr.type="string"/>'
+      + '<key id="custom" for="node" attr.name="custom" attr.type="string"/>'
+      + '<key id="outcome" for="edge" attr.name="outcome" attr.type="string"/>'
+      + '<key id="edge-description" for="edge" attr.name="description" attr.type="string"/>'
+      + '<graph id="g" edgedefault="directed">'
+      + '<node id="a"><data key="kind"> START </data><data key="behavior"> greet </data>'
+      + '<data key="classname"> com.example.Greeter </data>'
+      + '<data key="node-description"> node description </data>'
+      + '<data key="custom"> custom value </data></node>'
+      + '<node id="b"/>'
+      + '<edge id="e" source="a" target="b"><data key="outcome"> completed </data>'
+      + '<data key="edge-description"> edge description </data></edge>'
+      + '</graph></graphml>';
+
+    const parsed = parseGraphML(doc);
+    const node = parsed.nodeMap.a;
+    const edge = parsed.edges[0];
+
+    expect(node.properties).toMatchObject({
+      kind: ' START ', behavior: ' greet ', classname: ' com.example.Greeter ',
+      description: ' node description ', custom: ' custom value ',
+    });
+    expect(edge.properties).toMatchObject({
+      outcome: ' completed ', description: ' edge description ',
+    });
+    expect(node).toMatchObject({
+      kind: 'START', behavior: 'greet', classname: 'com.example.Greeter',
+      description: 'node description',
+    });
+    expect(edge).toMatchObject({ outcome: 'completed', description: 'edge description' });
+  });
+
   it('classifies canonical suffix and successful status-code edges as outcome edges', () => {
     const doc = '<graphml xmlns="http://graphml.graphdrawing.org/xmlns" '
       + 'xmlns:y="http://www.yworks.com/xml/graphml">'

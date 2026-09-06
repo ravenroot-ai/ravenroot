@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -13,6 +14,7 @@ import java.util.Locale;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -168,6 +170,49 @@ class GraphMlRejectionPolicyTest {
         assertFalse(declared.stream()
                         .anyMatch(message -> message.toLowerCase(Locale.ROOT).contains(MARKER)),
                 "the declared vocabulary must be authored here, not derived from any document");
+    }
+
+    /** Cause attachment stays disabled for both public rejection types. */
+    @Test
+    void bothPublicRejectionTypesPermanentlyDisableCauses() {
+        var security = GraphMlRejection.parseFailureFromException(
+                GraphMlParseException.Reason.MALFORMED_XML,
+                GraphMlRejection.Sentence.DOCUMENT_NOT_WELL_FORMED, new IOException(MARKER));
+        var compatibility = GraphMlRejection.compatibilityFailureFromException(
+                GraphMlRejection.Sentence.SCALAR_MAPPING_FAILED,
+                new IllegalArgumentException(MARKER));
+
+        for (IllegalArgumentException rejection : List.of(security, compatibility)) {
+            assertNull(rejection.getCause());
+            assertEquals(0, rejection.getSuppressed().length);
+            assertThrows(IllegalStateException.class,
+                    () -> rejection.initCause(new IllegalArgumentException(MARKER)));
+            assertFalse(rejection.toString().contains(MARKER));
+        }
+        assertEquals(IOException.class.getName(), security.diagnosticDetail().get("exceptionClass"));
+        assertEquals(IllegalArgumentException.class.getName(),
+                compatibility.diagnosticDetail().get("exceptionClass"));
+    }
+
+    /** The secure reader applies the same cause policy to failures from its input stream. */
+    @Test
+    void unreadableInputRetainsOnlyTheExceptionClass() {
+        InputStream hostile = new InputStream() {
+            @Override
+            public int read() throws IOException {
+                throw new IOException(MARKER);
+            }
+        };
+
+        var rejection = assertThrows(GraphMlParseException.class,
+                () -> GraphManager.readGraphMl(hostile));
+
+        assertEquals(GraphMlParseException.Reason.MALFORMED_XML, rejection.reason());
+        assertEquals("Cannot read GraphML document", rejection.getMessage());
+        assertEquals(IOException.class.getName(),
+                rejection.diagnosticDetail().get("exceptionClass"));
+        assertNull(rejection.getCause());
+        assertFalse(rejection.toString().contains(MARKER));
     }
 
     private static GraphManager read(String graphMl) {

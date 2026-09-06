@@ -327,8 +327,8 @@ public final class GraphManager implements AutoCloseable {
             if (exception instanceof GraphMlCompatibilityException compatibilityException) {
                 throw compatibilityException;
             }
-            throw GraphMlRejection.compatibilityFailure(
-                    GraphMlRejection.Sentence.SCALAR_MAPPING_FAILED, null, exception);
+            throw GraphMlRejection.compatibilityFailureFromException(
+                    GraphMlRejection.Sentence.SCALAR_MAPPING_FAILED, exception);
         }
     }
 

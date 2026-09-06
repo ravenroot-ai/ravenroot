@@ -16,6 +16,8 @@ import ai.ravenroot.api.deployment.RequestReplyLimits;
 import ai.ravenroot.api.deployment.RequestReplyProjection;
 import ai.ravenroot.api.deployment.RequestReplyRefusal;
 import ai.ravenroot.api.deployment.TrustedIngress;
+import ai.ravenroot.api.deployment.lifecycle.DeploymentLifecycleTarget;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistry.ObservedKind;
 import ai.ravenroot.api.ingress.IngressRouteAuthority;
 import ai.ravenroot.api.ingress.IngressRouteOwner;
 import ai.ravenroot.api.ingress.ManagedIngress;
@@ -33,6 +35,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -69,8 +72,33 @@ import java.util.concurrent.locks.ReentrantLock;
  * {@link #stop} composed with {@link #start} -- nothing more -- so it inherits both operations'
  * single-flight guarantee rather than needing one of its own: two concurrent restarts still produce
  * at most one stop and one start underneath.
+ *
+ * <h2>Two interfaces, one runtime, and why that is not two lifecycles</h2>
+ * <p>This class also implements {@link DeploymentLifecycleTarget}, the port a durable lifecycle
+ * authority reaches through (ADR 0038 D9). The two interfaces are not two lifecycles racing each
+ * other over one deployment: {@link GraphDeployment} is the embedding process asking for a start or a
+ * stop, and the port is an authority carrying out a decision it has already made durable. They meet
+ * on the same {@link #lock}, the same {@link #status} and the same {@link #ingressGeneration}, so
+ * whichever of them moved the deployment last is what the other one reads. What the port adds is the
+ * generation: a level command carries the generation its decision was recorded at, and this class
+ * <em>adopts</em> that number rather than keeping a private counter beside it, because two monotonic
+ * generations for one deployment can only ever disagree.</p>
+ *
+ * <p><b>Nothing on the port reaches {@link ExecutionEngine#drain()} or {@link ExecutionEngine#close()},
+ * and the widest thing it reaches is {@link #stop()}</b> -- this deployment's own domain, sources and
+ * in-flight work. The engine is shared with every sibling deployment hosted beside this one, and ADR
+ * 0038 D9 exists to keep an operator draining one deployment from taking all of them down.</p>
+ *
+ * <h2>The half-open barrier, where it actually happens</h2>
+ * <p>{@link IngressView#offer} decides admission and assigns the arrival's generation in one step,
+ * under the same {@link #lock} {@link #barrier(long)} takes. That is what makes ADR 0038 D6's
+ * half-open interval true of real arrivals rather than of the arithmetic alone: an arrival cannot
+ * observe itself admitted and then read a generation a barrier has already closed, because there is
+ * no instant between the two for the barrier to run in. Admission closes at {@code G}, work already
+ * admitted completes under {@code G}, and everything arriving afterwards enters at {@code G + 1};
+ * every comparison below is exact equality and never an ordering test.</p>
  */
-public final class DefaultGraphDeployment implements GraphDeployment {
+public final class DefaultGraphDeployment implements GraphDeployment, DeploymentLifecycleTarget {
     /**
      * Provisional Phase A default for {@link TrustedIngress#bufferCapacity()}. Not derived from any
      * ADR formula -- there is none for this value -- chosen only to be a real, finite bound rather
@@ -106,6 +134,12 @@ public final class DefaultGraphDeployment implements GraphDeployment {
      * that a source is blocked on for every single event.
      */
     public static final Duration DEFAULT_STORE_CALL_BOUND = Duration.ofSeconds(10);
+
+    /**
+     * How often {@link #drain(Duration, long)} re-reads whether the deployment has gone quiet.
+     * Short enough that a drain reports promptly, long enough that a long bound is not a spin.
+     */
+    private static final Duration DRAIN_POLL_INTERVAL = Duration.ofMillis(5);
 
     private static final Executor VIRTUAL_THREADS = command -> Thread.startVirtualThread(command);
 
@@ -175,7 +209,94 @@ public final class DefaultGraphDeployment implements GraphDeployment {
     private GraphRunner runner;
     private List<SourceHandle> sources = List.of();
     private volatile ManagedIngress managedIngress;
+    /**
+     * The generation admission is currently open at, and the value every arrival admitted through
+     * {@link IngressView} is stamped with.
+     *
+     * <p>Derived rather than invented: a lifecycle authority naming a generation in
+     * {@link #start(long, long)}, {@link #closeAdmission(long)}, {@link #openAdmission(long)} or
+     * {@link #barrier(long)} sets this field to exactly that number. The {@code + 1} in
+     * {@link #nextIngressGeneration()} is the fallback for an embedded process that has no durable
+     * authority at all, not a second source of truth competing with one: a process-local counter that
+     * restarts at zero every process cannot fence anything across a restart, and a deployment driven
+     * by an authority never uses it.</p>
+     */
     private long ingressGeneration;
+    /**
+     * Whether a barrier governs the current generation, and which generation it opened.
+     *
+     * <p>Two fields rather than a sentinel generation: {@code DeploymentRegistry.Record} admits a
+     * generation of zero, so a zero here would have to mean both "no barrier" and "a barrier at
+     * generation zero", and the reading that silently wins is the one that ends nothing.</p>
+     *
+     * <p>Cleared by {@link #start(long, long)}, {@link #closeAdmission(long)} and
+     * {@link #openAdmission(long)}, because none of those ends work: a unit admitted before them
+     * completes under the generation it carries (ADR 0038 D6), and leaving a stale barrier standing
+     * would refuse it. Kept as the barrier's own generation rather than as a floor so the dispatch
+     * test is the exact equality D6 requires and never an ordering test.</p>
+     */
+    private boolean barrierStanding;
+    private long barrierGeneration;
+    /**
+     * The generation the current activation started at, and the one every source context this
+     * activation handed out is fenced to.
+     *
+     * <p>Not a rival to {@link #ingressGeneration}: it is that field's value at the last
+     * {@link #doStart}, and it is separate because the two answer different questions. Admission's
+     * generation moves whenever a lifecycle authority acts -- a pause, a resume, a barrier -- while a
+     * source's context stays valid across all of those, because none of them replaced the activation
+     * that built it. Fencing a source view against the admission generation would retire a live
+     * source's request/reply view the first time an operator paused and resumed the deployment, which
+     * is precisely the run it was supposed to survive. Only a real start moves this one.</p>
+     */
+    private long activationGeneration;
+    /** Admission closed by a lifecycle authority, with the activation deliberately retained. */
+    private boolean admissionFenced;
+    /** A {@link #drain(Duration, long)} is running and has not yet reported. */
+    private boolean draining;
+    /** The most recent drain finished inside its bound with nothing left in flight. */
+    private boolean drained;
+    /**
+     * The graph version a lifecycle authority activated, reported as {@link Reading#activeVersion()}.
+     *
+     * <p>{@code null} until an authority names one. An ordinary {@link #start(SecurityContext)} does
+     * not invent a number here: this deployment hosts one immutable document and {@link #graphVersion}
+     * is its real, content-addressed identity, while {@code Reading}'s version is the durable
+     * registry's monotonic one. Reporting a made-up long as the second would be evidence nobody
+     * recorded.</p>
+     */
+    private Long activatedVersion;
+    /**
+     * The identity the last {@link #start(SecurityContext)} ran as, retained so an authority-driven
+     * start has somebody to run as.
+     *
+     * <p>{@link DeploymentLifecycleTarget#start(long, long)} carries a generation and a version and
+     * no principal, deliberately: it is a port for effects, not an authorization boundary. Minting a
+     * principal here would let a lifecycle authority start a deployment under an identity nobody
+     * granted, so the identity is instead the one the composition root already established for this
+     * deployment. A deployment that has never been started in this process has none, and an
+     * authority-driven start fails rather than guessing.</p>
+     */
+    private SecurityContext lifecycleIdentity;
+    /** Generation the next {@link #doStart} must adopt, or {@code null} to advance the local counter. */
+    private Long pendingGeneration;
+    /**
+     * Every admitted unit of work that has not finished, and the generation it was admitted at.
+     *
+     * <p>Entries are added under {@link #lock} at admission and removed when the traversal completes.
+     * Bounded by {@link #ingressBufferCapacity} rather than by the deployment's lifetime: a unit holds
+     * an ingress permit for exactly as long as it holds an entry here.</p>
+     */
+    private final ConcurrentHashMap<UUID, Long> admitted = new ConcurrentHashMap<>();
+    /**
+     * How many admitted units the most recent {@link #barrier(long)} actually ended.
+     *
+     * <p>Counted from cancellations the runner accepted, never from the size of the barrier's own
+     * snapshot: a unit that finished between the snapshot and the cancellation completed under its own
+     * generation and was not ended by anything, and counting it here would claim one arrival landed on
+     * both sides of the barrier.</p>
+     */
+    private long endedByLastBarrier;
     private Semaphore ingressPermits;
     private CompletionStage<DeploymentStatus> inFlightStart;
     private CompletionStage<DeploymentStatus> inFlightStop;
@@ -608,6 +729,10 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         Objects.requireNonNull(security, "security");
         lock.lock();
         try {
+            // Retained before the early return, so an already-READY deployment still establishes the
+            // identity an authority-driven start will later need. See lifecycleIdentity for why this
+            // is captured rather than minted.
+            this.lifecycleIdentity = security;
             if (status.state() == DeploymentState.READY) {
                 return CompletableFuture.completedFuture(status);
             }
@@ -701,6 +826,364 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         return stop().thenCompose(ignored -> start(security));
     }
 
+    // ------------------------------------------------------------------ DeploymentLifecycleTarget
+
+    /**
+     * Activates this deployment's document at {@code graphVersion} and opens admission at
+     * {@code deploymentGeneration}.
+     *
+     * <h2>Why a version disagreement fails instead of being ignored</h2>
+     * <p>A {@code DefaultGraphDeployment} hosts one immutable GraphML document for its whole life --
+     * {@link #graphMl} is final and re-parsed on every start -- so it cannot activate a version it was
+     * not built with. An authority naming a different version is asking for something this runtime
+     * cannot do, and starting the document it does hold would report success for the wrong graph.
+     * Failing the stage classifies it as a lifecycle failure the operator can see; a rollout to a new
+     * version is a new registration, not a start.</p>
+     *
+     * @param graphVersion the durable registry's version for this activation, at least one.
+     * @param deploymentGeneration generation this activation is admitted under.
+     * @return stage completing when the deployment is activated and admitting.
+     */
+    @Override
+    public CompletionStage<Void> start(long graphVersion, long deploymentGeneration) {
+        if (graphVersion < 1) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("graphVersion must be at least 1"));
+        }
+        SecurityContext identity;
+        lock.lock();
+        try {
+            if (activatedVersion != null && activatedVersion != graphVersion) {
+                return CompletableFuture.failedFuture(new IllegalStateException(
+                        "this deployment hosts one graph document and cannot activate another version"));
+            }
+            identity = lifecycleIdentity;
+            if (identity == null) {
+                // Stated rather than worked around. See lifecycleIdentity: the port carries effects,
+                // not a principal, and inventing one here would start a deployment as somebody nobody
+                // authorized.
+                return CompletableFuture.failedFuture(new IllegalStateException(
+                        "no identity has been established for this deployment in this process"));
+            }
+            activatedVersion = graphVersion;
+            DeploymentState current = status.state();
+            if (current == DeploymentState.READY || current == DeploymentState.DEGRADED) {
+                // Already activated, so this start is only the admission half. Re-activating a running
+                // deployment would discard exactly the work an authority converging on RUNNING asked
+                // to keep, and it is what makes this operation idempotent per generation.
+                adoptGeneration(deploymentGeneration);
+                admissionFenced = false;
+                draining = false;
+                drained = false;
+                return CompletableFuture.completedFuture(null);
+            }
+            // Consumed by the doStart this call is about to reach. A start already in flight has
+            // consumed its own generation; the coordinator's per-deployment single flight is what
+            // keeps a second lifecycle command from arriving inside that window.
+            pendingGeneration = deploymentGeneration;
+        } finally {
+            lock.unlock();
+        }
+        return start(identity).thenAccept(ignoredStatus -> { });
+    }
+
+    @Override
+    public CompletionStage<Void> closeAdmission(long deploymentGeneration) {
+        lock.lock();
+        try {
+            if (admissionFenced && ingressGeneration == deploymentGeneration) {
+                return CompletableFuture.completedFuture(null);
+            }
+            adoptGeneration(deploymentGeneration);
+            admissionFenced = true;
+            // A close is not a drain: what was admitted is retained, not finished, and reporting
+            // DRAINED or DRAINING here would tell an operator that work is completing when it is not.
+            draining = false;
+            drained = false;
+        } finally {
+            lock.unlock();
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    @Override
+    public CompletionStage<Void> openAdmission(long deploymentGeneration) {
+        lock.lock();
+        try {
+            if (!admissionFenced && ingressGeneration == deploymentGeneration) {
+                return CompletableFuture.completedFuture(null);
+            }
+            adoptGeneration(deploymentGeneration);
+            admissionFenced = false;
+            draining = false;
+            drained = false;
+        } finally {
+            lock.unlock();
+        }
+        return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Ends the work admitted before this generation and admits everything afterwards at it.
+     *
+     * <h2>The half-open interval, as two steps that cannot be interleaved</h2>
+     * <p>The snapshot of what is being ended and the advance of {@link #ingressGeneration} happen in
+     * one critical section, under the same {@link #lock} {@link IngressView#offer} holds while it
+     * admits. An arrival therefore either registered before the snapshot -- in which case this barrier
+     * ends it -- or after the advance, in which case it carries this generation and is not in the
+     * snapshot. There is no third possibility, and that is the whole of ADR 0038 D6's "cannot escape
+     * both generations".</p>
+     *
+     * <p>The cancellations run outside the lock, because {@link GraphRunner#cancelTraversal} reaches
+     * live actors and holding a deployment-wide lock across that would let one slow node block every
+     * admission decision. Nothing is lost by releasing it first: the generation has already moved, so
+     * anything arriving during the cancellations is on the opening side by construction.</p>
+     *
+     * <p>This does not change how restrictive the deployment is. A barrier answers "not this work",
+     * never "not this deployment": a paused deployment is still paused when it completes, and a
+     * running one is still running.</p>
+     *
+     * @param deploymentGeneration generation the barrier opens; work carrying another one is ended.
+     * @return stage completing when the work from before the barrier has been ended.
+     */
+    @Override
+    public CompletionStage<Void> barrier(long deploymentGeneration) {
+        List<UUID> ending;
+        GraphRunner activeRunner;
+        lock.lock();
+        try {
+            if (barrierStanding && barrierGeneration == deploymentGeneration) {
+                return CompletableFuture.completedFuture(null);
+            }
+            activeRunner = runner;
+            ending = admitted.entrySet().stream()
+                    .filter(entry -> entry.getValue() != deploymentGeneration)
+                    .map(Map.Entry::getKey)
+                    .toList();
+            ingressGeneration = deploymentGeneration;
+            barrierStanding = true;
+            barrierGeneration = deploymentGeneration;
+            endedByLastBarrier = 0;
+        } finally {
+            lock.unlock();
+        }
+        GraphRunner cancelling = activeRunner;
+        return CompletableFuture.supplyAsync(() -> {
+            long ended = 0;
+            if (cancelling != null) {
+                for (UUID traversalId : ending) {
+                    // Counted only when the runner accepted the cancellation. A traversal that
+                    // finished between the snapshot and this call completed under its own generation
+                    // and was ended by nothing; counting it would claim one arrival landed on both
+                    // sides of this barrier.
+                    if (cancelling.cancelTraversal(traversalId)) {
+                        ended++;
+                    }
+                }
+            }
+            lock.lock();
+            try {
+                if (barrierStanding && barrierGeneration == deploymentGeneration) {
+                    endedByLastBarrier = ended;
+                }
+            } finally {
+                lock.unlock();
+            }
+            return (Void) null;
+        }, VIRTUAL_THREADS);
+    }
+
+    /**
+     * Carries admitted work to completion within {@code bound}, keeping the activation.
+     *
+     * <p>The bound is honoured here rather than by the caller, so a drain that ran out of time is
+     * reported as {@code false} instead of leaving the runtime draining while the authority records
+     * that it stopped. Timed on {@link System#nanoTime()} rather than on {@link #clock}: this is a
+     * duration, and a test clock that does not advance would turn a bounded wait into a hang.</p>
+     *
+     * @param bound positive maximum time admitted work is given to finish.
+     * @param deploymentGeneration generation the drain is carried out under.
+     * @return stage yielding whether everything finished inside the bound.
+     */
+    @Override
+    public CompletionStage<Boolean> drain(Duration bound, long deploymentGeneration) {
+        if (bound == null || bound.isZero() || bound.isNegative()) {
+            return CompletableFuture.failedFuture(
+                    new IllegalArgumentException("a drain requires a positive bound"));
+        }
+        lock.lock();
+        try {
+            adoptGeneration(deploymentGeneration);
+            admissionFenced = true;
+            draining = true;
+            drained = false;
+        } finally {
+            lock.unlock();
+        }
+        return CompletableFuture.supplyAsync(() -> {
+            long deadline = System.nanoTime() + bound.toNanos();
+            boolean finished;
+            while (true) {
+                finished = inFlight() == 0;
+                if (finished || System.nanoTime() - deadline >= 0) {
+                    break;
+                }
+                try {
+                    Thread.sleep(DRAIN_POLL_INTERVAL.toMillis());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    finished = inFlight() == 0;
+                    break;
+                }
+            }
+            lock.lock();
+            try {
+                draining = false;
+                drained = finished;
+            } finally {
+                lock.unlock();
+            }
+            return finished;
+        }, VIRTUAL_THREADS);
+    }
+
+    /**
+     * Releases this deployment's own domain, sources and in-flight work, and nothing it shares.
+     *
+     * <p>Implemented as {@link #stop()} and deliberately not as {@link #shutdown()}: the port cannot
+     * tell a {@code Stop} from an {@code Undeploy}, and only the composition root that owns the
+     * registration knows whether this deployment can ever start again. Choosing the terminal release
+     * here would strand what a source keeps across a restart the authority is entitled to ask for.</p>
+     *
+     * <p><b>This is the widest thing on the port, and it stops at this deployment's boundary.</b> The
+     * engine and the actor system it hosts are shared with every sibling and are never reached from
+     * here -- {@link ExecutionEngine#drain()} and {@link ExecutionEngine#close()} belong to the
+     * process's own shutdown, which is the only caller entitled to end them (ADR 0038 D9).</p>
+     *
+     * @param deploymentGeneration generation at which this deployment's domain is released.
+     * @return stage completing when this deployment holds nothing.
+     */
+    @Override
+    public CompletionStage<Void> terminateDomain(long deploymentGeneration) {
+        lock.lock();
+        try {
+            adoptGeneration(deploymentGeneration);
+            admissionFenced = true;
+            draining = false;
+            drained = false;
+        } finally {
+            lock.unlock();
+        }
+        return stop().thenAccept(ignoredStatus -> { });
+    }
+
+    @Override
+    public CompletionStage<Reading> observe() {
+        lock.lock();
+        try {
+            DeploymentState current = status.state();
+            ObservedKind kind = switch (current) {
+                case COLD -> ObservedKind.COLD;
+                case STARTING -> ObservedKind.STARTING;
+                case STOPPING -> ObservedKind.STOPPING;
+                case STOPPED -> ObservedKind.STOPPED;
+                case FAILED -> ObservedKind.FAILED;
+                // A held deployment keeps its activation and therefore keeps reporting READY through
+                // DeploymentStatus. The distinction an authority needs is which kind of hold it is,
+                // and that is the fence, not the state machine.
+                case READY -> admissionFenced ? heldKind() : ObservedKind.READY;
+                case DEGRADED -> admissionFenced ? heldKind() : ObservedKind.DEGRADED;
+            };
+            // Reported only while a domain is actually open: a stopped deployment activates nothing,
+            // and naming a version there would be evidence of an activation that has been released.
+            Long active = runner == null ? null : activatedVersion;
+            return CompletableFuture.completedFuture(new Reading(kind, active, inFlight()));
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Which kind of hold this deployment is under. Caller holds {@link #lock}. */
+    private ObservedKind heldKind() {
+        if (draining) {
+            return ObservedKind.DRAINING;
+        }
+        return drained ? ObservedKind.DRAINED : ObservedKind.PAUSED;
+    }
+
+    /**
+     * Admitted units that have not finished, counted from the ingress permits rather than from
+     * {@link #admitted}.
+     *
+     * <p>The permit is what every admitted unit holds -- request/reply admissions take one through
+     * {@link RequestReplyCoordinator} without ever appearing in {@link #admitted} -- so counting
+     * permits is the only count that covers all of them. {@link #admitted} answers a different
+     * question: which generation each arrival through {@link IngressView} was assigned.</p>
+     */
+    private long inFlight() {
+        Semaphore permits = ingressPermits;
+        return permits == null ? 0 : Math.max(0, ingressBufferCapacity - permits.availablePermits());
+    }
+
+    /**
+     * How many admitted units the most recent {@link #barrier(long)} ended.
+     *
+     * <p>Package-private evidence, not surface: it exists so the half-open interval can be asserted as
+     * an exact accounting -- every accepted arrival either completed or was ended, never neither and
+     * never both -- instead of being inferred from the two counts that would have to agree by
+     * accident.</p>
+     *
+     * @return the count the last barrier ended, or zero when no barrier has run.
+     */
+    long endedByLastBarrier() {
+        lock.lock();
+        try {
+            return endedByLastBarrier;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Adopts the generation an authority named and clears any barrier that governed the old one.
+     *
+     * <p>The clear is the point: a barrier ends work, and none of the operations that call this one
+     * does. Leaving the previous barrier's generation standing would refuse an arrival admitted at the
+     * new generation for a barrier that never applied to it. Caller holds {@link #lock}.</p>
+     */
+    private void adoptGeneration(long deploymentGeneration) {
+        ingressGeneration = deploymentGeneration;
+        barrierStanding = false;
+    }
+
+    /**
+     * The generation this start runs at: the one an authority named, or the next local one.
+     *
+     * <p>The local counter is the fallback for an embedded process with no durable authority, and it
+     * is honest about what it is -- it restarts at zero with the process and fences nothing across
+     * one. A deployment an authority drives never reaches it.</p>
+     */
+    private long nextIngressGeneration() {
+        lock.lock();
+        try {
+            Long adopted = pendingGeneration;
+            pendingGeneration = null;
+            ingressGeneration = adopted != null ? adopted : ingressGeneration + 1;
+            // Set here rather than where the start settles, because startSources hands every source
+            // its context -- and therefore its fence -- while this start is still running.
+            activationGeneration = ingressGeneration;
+            return ingressGeneration;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /** Undoes one admission: the generation assignment and the permit, in that order. */
+    private void releaseAdmission(UUID traversalId, Semaphore permits) {
+        admitted.remove(traversalId);
+        permits.release();
+    }
+
     @Override
     public TrustedIngress ingress() {
         return ingress;
@@ -731,7 +1214,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
             // Sources are discovered and started here -- while this graph's nodes are being spawned,
             // never earlier -- and only after the runner itself is built, so a source's start failure
             // rolls back a fully-formed runner rather than a half-built one.
-            generation = ++ingressGeneration;
+            generation = nextIngressGeneration();
             startedSources = startSources(security, openedManager, generation);
         } catch (RuntimeException | Error failure) {
             try {
@@ -773,6 +1256,13 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                             readyRunner.cancelTraversal(traversalId);
                         }
                     });
+            // A start opens admission at the generation this attempt adopted, and no barrier governs
+            // it: whatever a previous run held is gone with the domain that held it.
+            this.admissionFenced = false;
+            this.draining = false;
+            this.drained = false;
+            this.barrierStanding = false;
+            this.admitted.clear();
             this.status = DeploymentStatus.of(id, DeploymentState.READY);
             this.inFlightStart = null;
             return this.status;
@@ -879,6 +1369,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
             this.sources = List.of();
             this.ingressPermits = null;
             this.requestReplyCoordinator = null;
+            this.admitted.clear();
             this.status = DeploymentStatus.of(id, DeploymentState.FAILED, cause);
             this.inFlightStart = null;
         } finally {
@@ -968,6 +1459,9 @@ public final class DefaultGraphDeployment implements GraphDeployment {
             this.degradedSources.clear();
             this.ingressPermits = null;
             this.requestReplyCoordinator = null;
+            this.admitted.clear();
+            this.draining = false;
+            this.drained = false;
             this.status = DeploymentStatus.of(id, DeploymentState.STOPPED);
             this.inFlightStop = null;
             return this.status;
@@ -1094,7 +1588,7 @@ public final class DefaultGraphDeployment implements GraphDeployment {
             this.identity = identity;
             this.ingressOwner = ingressOwner;
             this.requestReplies = new SourceRequestReplyView(nodeId, ingressOwner == null
-                    ? ingressGeneration : ingressOwner.graphGeneration());
+                    ? activationGeneration : ingressOwner.graphGeneration());
         }
 
         @Override
@@ -1224,11 +1718,15 @@ public final class DefaultGraphDeployment implements GraphDeployment {
         RequestReplyCoordinator coordinator;
         DeploymentState current;
         long currentGeneration;
+        boolean fenced;
         lock.lock();
         try {
             coordinator = requestReplyCoordinator;
             current = status.state();
-            currentGeneration = ingressGeneration;
+            // The activation, not admission: a source view belongs to the run that created it, and a
+            // pause or a barrier does not end that run. See activationGeneration.
+            currentGeneration = activationGeneration;
+            fenced = admissionFenced;
         } finally {
             lock.unlock();
         }
@@ -1236,6 +1734,12 @@ public final class DefaultGraphDeployment implements GraphDeployment {
             return new RequestReplyGate(null, RequestReplyRefusal.ADMISSION_CLOSED);
         }
         if (current == DeploymentState.STOPPING || current == DeploymentState.STOPPED) {
+            return new RequestReplyGate(null, RequestReplyRefusal.ADMISSION_CLOSED);
+        }
+        // A lifecycle authority holding this deployment closes every admitting surface it has, not
+        // only the trusted ingress: a pause that still admitted request/reply would be a pause an
+        // operator could not rely on.
+        if (fenced) {
             return new RequestReplyGate(null, RequestReplyRefusal.ADMISSION_CLOSED);
         }
         if ((current != DeploymentState.READY && current != DeploymentState.DEGRADED) || coordinator == null) {
@@ -1470,42 +1974,58 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 throw new UnsupportedOperationException(
                         "Ingress to a named node is not yet implemented; use IngressTarget.start()");
             }
-            DeploymentState currentState;
             GraphRunner activeRunner;
             Semaphore permits;
+            UUID processInstanceId;
+            UUID traversalId;
+            long generation;
             lock.lock();
             try {
-                currentState = status.state();
+                DeploymentState currentState = status.state();
                 activeRunner = runner;
                 permits = ingressPermits;
+                if (currentState == DeploymentState.STOPPING || currentState == DeploymentState.STOPPED) {
+                    return IngressDisposition.REJECTED_ADMISSION_CLOSED;
+                }
+                // A lifecycle authority that closed admission is refused here rather than through the
+                // state machine, because Pause -- and the first half of Drain, Stop and Undeploy --
+                // deliberately retains the activation and therefore stays READY. Reading the state
+                // alone would admit into a deployment an operator is holding.
+                if (admissionFenced) {
+                    return IngressDisposition.REJECTED_ADMISSION_CLOSED;
+                }
+                // DEGRADED admits too: it means "serving with reduced capability... work is still being
+                // accepted". A source can enter
+                // DEGRADED through reportDegraded, so rejecting ingress here would contradict that state.
+                boolean admitting = currentState == DeploymentState.READY
+                        || currentState == DeploymentState.DEGRADED;
+                if (!admitting || activeRunner == null || permits == null) {
+                    return IngressDisposition.REJECTED_NOT_READY;
+                }
+                if (!permits.tryAcquire()) {
+                    return IngressDisposition.REJECTED_BUFFER_FULL;
+                }
+                processInstanceId = identitySource.nextProcessInstanceId();
+                traversalId = identitySource.nextTraversalId();
+                // The admission decision and the generation it is assigned are one step, taken under
+                // the lock a barrier also takes. Reading the generation afterwards would leave an
+                // instant in which an arrival is admitted and unassigned, and an arrival a barrier
+                // neither ended nor admitted is exactly the one ADR 0038 D6 forbids.
+                generation = ingressGeneration;
+                admitted.put(traversalId, generation);
             } finally {
                 lock.unlock();
             }
-            if (currentState == DeploymentState.STOPPING || currentState == DeploymentState.STOPPED) {
-                return IngressDisposition.REJECTED_ADMISSION_CLOSED;
-            }
-            // DEGRADED admits too: it means "serving with reduced capability... work is still being
-            // accepted". A source can enter
-            // DEGRADED through reportDegraded, so rejecting ingress here would contradict that state.
-            boolean admitting = currentState == DeploymentState.READY || currentState == DeploymentState.DEGRADED;
-            if (!admitting || activeRunner == null || permits == null) {
-                return IngressDisposition.REJECTED_NOT_READY;
-            }
-            if (!permits.tryAcquire()) {
-                return IngressDisposition.REJECTED_BUFFER_FULL;
-            }
-            UUID processInstanceId = identitySource.nextProcessInstanceId();
-            UUID traversalId = identitySource.nextTraversalId();
             ExecutionRecorder recorder;
             try {
                 recorder = openTraversalRecorder(security, processInstanceId, traversalId);
             } catch (ExecutionInstanceBusyException busy) {
                 // Fail closed. See IngressDisposition.REJECTED_INSTANCE_BUSY for why this is
                 // unreachable today and must not be deleted as dead code.
-                permits.release();
+                releaseAdmission(traversalId, permits);
                 return IngressDisposition.REJECTED_INSTANCE_BUSY;
             } catch (RuntimeException | Error recordFailure) {
-                permits.release();
+                releaseAdmission(traversalId, permits);
                 throw recordFailure;
             }
             try {
@@ -1514,16 +2034,41 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 // as a unit, which in the current scope (no cluster, no multi-attempt redelivery) is exactly
                 // what one accepted ingress event's traversal already is. Both are fixed for this one
                 // execute() call, so every event it produces carries the same pair.
-                executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
-                        .whenComplete((ignoredResult, ignoredError) -> {
-                            // Closed on TRAVERSAL completion, never on deployment stop: a
-                            // deployment that runs for days would otherwise hold every instance it
-                            // ever touched, and each held lease is an instance a recovery sweep is
-                            // correctly forbidden from reclaiming.
-                            permits.release();
-                        });
+                //
+                // Dispatched under the lock, and only while this arrival's own generation is still the
+                // one a barrier would open: the durable commit above runs outside the lock because it
+                // is I/O, and a barrier that ran during it has already closed this generation. Handing
+                // the runner a traversal afterwards would start work on the closing side of a barrier
+                // that had finished ending everything it could see.
+                //
+                // The cost was weighed rather than overlooked: this widens the critical section to
+                // cover the dispatch. Everything inside it is a map write and one message to an
+                // already-spawned actor -- execute() never waits for the traversal, which is what
+                // makes offer() return a disposition rather than a result -- so the section stays
+                // bounded by work this thread was going to do anyway. The alternative, dispatching
+                // outside and letting the barrier re-sweep for units that appeared behind it, trades a
+                // short lock for a convergence loop with no natural end.
+                lock.lock();
+                try {
+                    if (barrierStanding && generation != barrierGeneration) {
+                        closeQuietly(recorder);
+                        releaseAdmission(traversalId, permits);
+                        return IngressDisposition.REJECTED_ADMISSION_CLOSED;
+                    }
+                    executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
+                            .whenComplete((ignoredResult, ignoredError) -> {
+                                // Closed on TRAVERSAL completion, never on deployment stop: a
+                                // deployment that runs for days would otherwise hold every instance it
+                                // ever touched, and each held lease is an instance a recovery sweep is
+                                // correctly forbidden from reclaiming.
+                                admitted.remove(traversalId);
+                                permits.release();
+                            });
+                } finally {
+                    lock.unlock();
+                }
             } catch (RuntimeException | Error dispatchFailure) {
-                permits.release();
+                releaseAdmission(traversalId, permits);
                 throw dispatchFailure;
             }
             return IngressDisposition.ACCEPTED;
@@ -1552,26 +2097,33 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 throw new UnsupportedOperationException(
                         "Ingress to a named node is not yet implemented; use IngressTarget.start()");
             }
-            DeploymentState currentState;
             GraphRunner activeRunner;
             Semaphore permits;
+            long generation;
             lock.lock();
             try {
-                currentState = status.state();
+                DeploymentState currentState = status.state();
                 activeRunner = runner;
                 permits = ingressPermits;
+                if (currentState == DeploymentState.STOPPING || currentState == DeploymentState.STOPPED) {
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+                }
+                // Same fence, same reason, same instant as the volatile path: a held deployment is
+                // still READY, so its state cannot be what decides this.
+                if (admissionFenced) {
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+                }
+                boolean admitting = currentState == DeploymentState.READY
+                        || currentState == DeploymentState.DEGRADED;
+                if (!admitting || activeRunner == null || permits == null) {
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused("not ready");
+                }
+                if (!permits.tryAcquire()) {
+                    return new ai.ravenroot.api.deployment.IngressReceipt.Refused("buffer full");
+                }
+                generation = ingressGeneration;
             } finally {
                 lock.unlock();
-            }
-            if (currentState == DeploymentState.STOPPING || currentState == DeploymentState.STOPPED) {
-                return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
-            }
-            boolean admitting = currentState == DeploymentState.READY || currentState == DeploymentState.DEGRADED;
-            if (!admitting || activeRunner == null || permits == null) {
-                return new ai.ravenroot.api.deployment.IngressReceipt.Refused("not ready");
-            }
-            if (!permits.tryAcquire()) {
-                return new ai.ravenroot.api.deployment.IngressReceipt.Refused("buffer full");
             }
 
             String tenantId = security.tenantId();
@@ -1623,12 +2175,30 @@ public final class DefaultGraphDeployment implements GraphDeployment {
                 throw recordFailure;
             }
             try {
-                executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
-                        .whenComplete((ignoredResult, ignoredError) -> {
-                            permits.release();
-                        });
+                // Registered and dispatched under one lock, against the generation this arrival was
+                // admitted at. The durable commit above is I/O and cannot be held under the lock, so a
+                // barrier may have closed that generation while it ran; this is where that is decided,
+                // by the exact equality ADR 0038 D6 requires. The durable record stands either way and
+                // a redelivery of the same key is recognised as a Duplicate -- which is why refusing
+                // here loses nothing the source cannot re-offer.
+                lock.lock();
+                try {
+                    if (barrierStanding && generation != barrierGeneration) {
+                        closeQuietly(recorder);
+                        permits.release();
+                        return new ai.ravenroot.api.deployment.IngressReceipt.Refused("admission closed");
+                    }
+                    admitted.put(traversalId, generation);
+                    executeHosted(activeRunner, security, processInstanceId, traversalId, payload, recorder)
+                            .whenComplete((ignoredResult, ignoredError) -> {
+                                admitted.remove(traversalId);
+                                permits.release();
+                            });
+                } finally {
+                    lock.unlock();
+                }
             } catch (RuntimeException | Error dispatchFailure) {
-                permits.release();
+                releaseAdmission(traversalId, permits);
                 throw dispatchFailure;
             }
             return new ai.ravenroot.api.deployment.IngressReceipt.DurablyCommitted(idempotentKey);

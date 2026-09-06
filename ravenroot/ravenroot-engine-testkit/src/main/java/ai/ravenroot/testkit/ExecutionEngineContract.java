@@ -14,6 +14,12 @@ import ai.ravenroot.api.catalog.NodeOutcomeDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyDescriptor;
 import ai.ravenroot.api.catalog.NodePropertyType;
 import ai.ravenroot.api.catalog.NodeTypeDescriptor;
+import ai.ravenroot.api.deployment.DeploymentId;
+import ai.ravenroot.api.deployment.DeploymentState;
+import ai.ravenroot.api.deployment.IngressDisposition;
+import ai.ravenroot.api.deployment.IngressTarget;
+import ai.ravenroot.api.deployment.lifecycle.DeploymentLifecycleTarget;
+import ai.ravenroot.api.deployment.registry.DeploymentRegistry.ObservedKind;
 import ai.ravenroot.api.execution.EngineCapability;
 import ai.ravenroot.api.execution.EngineState;
 import ai.ravenroot.api.execution.ExecutionDomain;
@@ -35,6 +41,7 @@ import ai.ravenroot.core.graph.GraphEdge;
 import ai.ravenroot.core.graph.GraphNode;
 import ai.ravenroot.core.graph.NodeKind;
 import ai.ravenroot.core.runtime.BehaviorRegistry;
+import ai.ravenroot.core.runtime.DefaultGraphDeployment;
 import ai.ravenroot.core.runtime.DefaultRavenrootApplication;
 import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.core.runtime.GraphRunner;
@@ -1832,6 +1839,161 @@ public abstract class ExecutionEngineContract {
             traversal.getGraph().traversal().V().drop().iterate();
             return null;
         });
+    }
+
+    /**
+     * One deployment's own graph: {@code start -> served -> end}, where {@code served} counts. A
+     * sibling that still runs a traversal to completion is evidence its domain, its actors and the
+     * engine underneath all of them are alive -- which a status field alone would not be.
+     */
+    private static final String LIFECYCLE_ISOLATION_GRAPH = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <graphml xmlns="http://graphml.graphdrawing.org/xmlns">
+              <key id="node-kind" for="node" attr.name="kind" attr.type="string"/>
+              <key id="node-behavior" for="node" attr.name="behavior" attr.type="string"/>
+              <key id="edge-outcome" for="edge" attr.name="outcome" attr.type="string"/>
+              <graph id="lifecycle-isolation" edgedefault="directed">
+                <node id="error"><data key="node-kind">ERROR</data></node>
+                <node id="start"><data key="node-kind">START</data></node>
+                <node id="served">
+                  <data key="node-kind">BEHAVIOR</data>
+                  <data key="node-behavior">served</data>
+                </node>
+                <node id="end"><data key="node-kind">END</data></node>
+                <edge id="e1" source="start" target="served"><data key="edge-outcome">continue</data></edge>
+                <edge id="e2" source="served" target="end"><data key="edge-outcome">continue</data></edge>
+              </graph>
+            </graphml>
+            """;
+
+    /** One lifecycle command, as the sequence of port effects {@code LifecycleEffects} performs for it. */
+    private record LifecycleCase(String command, ObservedKind subjectBecomes,
+                                 ThrowingEffects effects) {
+    }
+
+    /** The effects one command performs, allowed to throw so a test need not wrap every join. */
+    @FunctionalInterface
+    private interface ThrowingEffects {
+        void applyTo(DeploymentLifecycleTarget target) throws Exception;
+    }
+
+    /**
+     * Issue 91's sixth acceptance criterion, on this engine specifically.
+     *
+     * <blockquote>No lifecycle command may terminate or drain the shared {@code ExecutionSystem} or
+     * another deployment's actors.</blockquote>
+     *
+     * <h2>Why this lives in the engine conformance suite and not in core</h2>
+     * <p>The claim is about a runtime that several deployments <em>share</em>, and Ravenroot ships two
+     * of them. Asserting it against one adapter would leave the other free to differ in exactly the
+     * place the criterion cares about: how an {@link ExecutionDomain} is closed, and what that closure
+     * reaches. {@code ravenroot-akka} and {@code ravenroot-pekko} both run this class, so acceptance is
+     * symmetric rather than being a property of whichever adapter the author happened to test.</p>
+     *
+     * <h2>What is asserted, and why it is not a status check</h2>
+     * <p>After every lifecycle command applied to one deployment, three things must hold: the engine is
+     * still {@link EngineState#RUNNING} -- {@link ExecutionEngine#drain()} and
+     * {@link ExecutionEngine#close()} are the only operations that could move it, and
+     * {@link DeploymentLifecycleTarget} exposes neither; the sibling still reports {@code READY}; and
+     * the sibling still <em>runs a traversal to completion</em>. The third is the one that matters,
+     * because a sibling whose actors had been terminated underneath it would keep reporting {@code READY}
+     * while serving nothing.</p>
+     *
+     * <p>{@code subjectBecomes} is asserted too, so a port that quietly did nothing could not pass this
+     * by leaving everything untouched. Each case proves the command reached its own deployment and
+     * stopped there.</p>
+     *
+     * @return one dynamic test per lifecycle command, sharing one engine and one sibling deployment.
+     */
+    @TestFactory
+    final Stream<DynamicTest> noLifecycleCommandReachesASiblingDeploymentOrTheEngineTheyShare() {
+        ExecutionEngine shared = engine();
+        var siblingServed = new AtomicInteger();
+        DefaultGraphDeployment sibling = lifecycleDeployment(shared, "sibling", siblingServed);
+        sibling.start(TCK_IDENTITY).toCompletableFuture().join();
+
+        Duration bound = Duration.ofSeconds(5);
+        List<LifecycleCase> cases = List.of(
+                new LifecycleCase("Start", ObservedKind.READY,
+                        target -> target.start(1, 2).toCompletableFuture().join()),
+                new LifecycleCase("Pause", ObservedKind.PAUSED,
+                        target -> target.closeAdmission(2).toCompletableFuture().join()),
+                new LifecycleCase("Resume", ObservedKind.READY, target -> {
+                    target.closeAdmission(2).toCompletableFuture().join();
+                    target.openAdmission(3).toCompletableFuture().join();
+                }),
+                new LifecycleCase("Drain", ObservedKind.DRAINED, target -> {
+                    target.closeAdmission(2).toCompletableFuture().join();
+                    target.drain(bound, 2).toCompletableFuture().join();
+                }),
+                new LifecycleCase("Cancel", ObservedKind.READY,
+                        target -> target.barrier(2).toCompletableFuture().join()),
+                new LifecycleCase("Restart", ObservedKind.READY, target -> {
+                    target.barrier(2).toCompletableFuture().join();
+                    target.start(1, 2).toCompletableFuture().join();
+                }),
+                new LifecycleCase("Stop", ObservedKind.STOPPED, target -> {
+                    target.closeAdmission(2).toCompletableFuture().join();
+                    target.terminateDomain(2).toCompletableFuture().join();
+                }),
+                new LifecycleCase("Undeploy(DRAIN_FIRST)", ObservedKind.STOPPED, target -> {
+                    target.closeAdmission(2).toCompletableFuture().join();
+                    target.drain(bound, 2).toCompletableFuture().join();
+                    target.terminateDomain(2).toCompletableFuture().join();
+                }),
+                new LifecycleCase("Undeploy(CANCEL_IN_FLIGHT)", ObservedKind.STOPPED, target -> {
+                    target.closeAdmission(2).toCompletableFuture().join();
+                    target.barrier(2).toCompletableFuture().join();
+                    target.terminateDomain(2).toCompletableFuture().join();
+                }),
+                new LifecycleCase("Undeploy(REFUSE_IF_BUSY)", ObservedKind.STOPPED, target -> {
+                    target.closeAdmission(2).toCompletableFuture().join();
+                    target.terminateDomain(2).toCompletableFuture().join();
+                }));
+
+        return cases.stream().map(lifecycle -> DynamicTest.dynamicTest(lifecycle.command(), () -> {
+            var subjectServed = new AtomicInteger();
+            DefaultGraphDeployment subject = lifecycleDeployment(shared,
+                    "subject-" + UUID.randomUUID(), subjectServed);
+            subject.start(TCK_IDENTITY).toCompletableFuture().join();
+
+            lifecycle.effects().applyTo(subject);
+
+            assertEquals(lifecycle.subjectBecomes(),
+                    subject.observe().toCompletableFuture().join().state(),
+                    lifecycle.command() + " must actually reach the deployment it addresses");
+            assertEquals(EngineState.RUNNING, shared.state(),
+                    lifecycle.command() + " must not drain or close the engine every deployment shares");
+            assertEquals(DeploymentState.READY, sibling.status().state(),
+                    lifecycle.command() + " must not move a sibling deployment");
+            assertEquals(ObservedKind.READY, sibling.observe().toCompletableFuture().join().state(),
+                    lifecycle.command() + " must not close a sibling's admission");
+
+            int servedBefore = siblingServed.get();
+            assertEquals(IngressDisposition.ACCEPTED,
+                    sibling.ingress().offer(TCK_IDENTITY, IngressTarget.start(), "ping"),
+                    lifecycle.command() + " must not close a sibling's ingress");
+            long deadline = System.nanoTime() + Duration.ofSeconds(20).toNanos();
+            while (siblingServed.get() <= servedBefore && System.nanoTime() - deadline < 0) {
+                Thread.sleep(5);
+            }
+            assertEquals(servedBefore + 1, siblingServed.get(),
+                    lifecycle.command() + " must leave a sibling's actors able to run a traversal");
+
+            subject.stop().toCompletableFuture().join();
+        }));
+    }
+
+    private static DefaultGraphDeployment lifecycleDeployment(ExecutionEngine engine, String id,
+                                                              AtomicInteger served) {
+        var behaviors = new BehaviorRegistry().register("served", message -> {
+            served.incrementAndGet();
+            return CompletableFuture.completedFuture(NodeResult.continueWith("served"));
+        });
+        return new DefaultGraphDeployment(DeploymentId.of(id), engine, behaviors, new ExecutionMonitor(),
+                ExecutionIdentitySource.randomUuids(),
+                LIFECYCLE_ISOLATION_GRAPH.getBytes(StandardCharsets.UTF_8),
+                DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY);
     }
 
     private static BehaviorRegistry passthroughRegistry() {

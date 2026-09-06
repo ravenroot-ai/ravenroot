@@ -3,7 +3,8 @@
 The optional interaction listener provides one versioned bidirectional protocol at
 `/v1/interactions`. It is disabled by default, binds to `127.0.0.1:8081` when enabled, and requires
 the exact WebSocket subprotocol `ravenroot.interactions.v1`. Ravenroot accepts no WebSocket
-extensions or compression.
+extensions or compression. A syntactically valid client extension offer is ignored, and the server
+negotiates no extension.
 
 ## Session sequence
 

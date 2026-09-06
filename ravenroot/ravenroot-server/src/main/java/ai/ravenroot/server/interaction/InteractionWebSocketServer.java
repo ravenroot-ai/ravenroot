@@ -146,8 +146,9 @@ public final class InteractionWebSocketServer implements AutoCloseable {
         if (!peerLimit.isAllowed()) return reject(response, callback, peerLimit.status());
         var shape = rateLimiter.checkRequestShape(headers, query);
         if (!shape.isAllowed()) return reject(response, callback, shape.status());
-        if (request.getHeaders().get("Authorization") != null || query != null
-                || !request.getExtensions().isEmpty()) return reject(response, callback, 400);
+        if (request.getHeaders().get("Authorization") != null || query != null) {
+            return reject(response, callback, 400);
+        }
         if (!request.getSubProtocols().equals(List.of(InteractionWebSocketConfiguration.SUBPROTOCOL))) {
             return reject(response, callback, 400);
         }
@@ -447,6 +448,13 @@ public final class InteractionWebSocketServer implements AutoCloseable {
         }
 
         private void ready(InteractionProtocol.Inbound message) throws AuthenticationException {
+            ensureAuthorized();
+            AuthenticatedPrincipal current = principal;
+            var limit = rateLimiter.checkIdentity(current.tenantId(), current.subject());
+            if (!limit.isAllowed()) {
+                close(1013, "capacity unavailable");
+                return;
+            }
             if (message instanceof InteractionProtocol.Acknowledge acknowledgement) {
                 if (!replayActive) {
                     close(1002, "resume required before acknowledgement");
@@ -501,17 +509,15 @@ public final class InteractionWebSocketServer implements AutoCloseable {
                 return;
             }
             try {
-                var limit = rateLimiter.checkIdentity(principal.tenantId(), principal.subject());
-                if (!limit.isAllowed()) {
-                    close(1013, "capacity unavailable");
-                    return;
-                }
                 RequestContext context = commandContext(principal);
                 HumanTaskResult result = switch (command.name()) {
                     case "human-task.resolve" -> {
                         int authorizedLimit = humanTasks.authorizedResponseBodyLimit(context, command.taskId())
                                 .orElse(-1);
-                        if (authorizedLimit < 0 || command.payload().length > authorizedLimit) {
+                        if (authorizedLimit < 0) {
+                            yield new HumanTaskResult(HumanTaskResult.Code.UNAUTHORIZED, null, null);
+                        }
+                        if (command.payload().length > authorizedLimit) {
                             yield new HumanTaskResult(HumanTaskResult.Code.PAYLOAD_REFUSED, null, null);
                         }
                         ensureAuthorized();

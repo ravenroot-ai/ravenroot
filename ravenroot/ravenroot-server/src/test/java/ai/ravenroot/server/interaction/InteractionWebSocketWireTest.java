@@ -127,6 +127,13 @@ class InteractionWebSocketWireTest {
                 assertTrue(result.contains("\"type\":\"error\""));
                 assertTrue(result.contains("\"code\":\"RESOURCE_REFUSED\""));
                 assertTrue(!result.contains("canary"));
+                socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-3\","
+                        + "\"command\":\"human-task.resolve\",\"taskId\":\""
+                        + java.util.UUID.randomUUID() + "\",\"generation\":1,\"payloadBase64\":\"\"}", true)
+                        .get(5, TimeUnit.SECONDS);
+                result = listener.messages.poll(5, TimeUnit.SECONDS);
+                assertTrue(result.contains("\"inReplyTo\":\"client-3\""));
+                assertTrue(result.contains("\"code\":\"RESOURCE_REFUSED\""));
                 socket.sendText("{\"version\":1,\"type\":\"resume\",\"afterJournalOffset\":"
                         + (lastOffset - 1) + "}", true).get(5, TimeUnit.SECONDS);
                 String event = listener.messages.poll(5, TimeUnit.SECONDS);
@@ -224,6 +231,11 @@ class InteractionWebSocketWireTest {
                     headers -> principal(java.time.Instant.MAX))) {
                 interactions.start();
                 assertTrue(rawHandshake(port, "Origin: https://console.example\r\n").contains(" 101 "));
+                String extensionOffer = rawHandshake(port, "Origin: https://console.example\r\n"
+                        + "Sec-WebSocket-Extensions: permessage-deflate\r\n");
+                assertTrue(extensionOffer.contains(" 101 "));
+                assertTrue(!extensionOffer.toLowerCase(java.util.Locale.ROOT)
+                        .contains("sec-websocket-extensions:"));
                 assertTrue(rawHandshake(port, "Origin: https://evil.example\r\n").contains(" 403 "));
                 assertTrue(rawHandshake(port, "Origin: https://console.example\r\nOrigin: https://evil.example\r\n")
                         .contains(" 400 "));
@@ -431,6 +443,42 @@ class InteractionWebSocketWireTest {
     }
 
     @Test
+    void repeatedValidDuplicateAcknowledgementsConsumeIdentityRateBudget(
+            @TempDir java.nio.file.Path directory) throws Exception {
+        int port = freePort();
+        Clock clock = Clock.systemUTC();
+        try (var engine = new PekkoExecutionEngine("interaction-ack-rate");
+             var store = new SqliteExecutionStore(directory.resolve("ack-rate.db"), clock)) {
+            var authorized = new AuthorizedRavenrootApplication(application(engine, store),
+                    new DefaultAuthorizationService(ignored -> { }), ignored -> { }, false);
+            AuthenticatedPrincipal principal = principal(java.time.Instant.MAX);
+            RequestContext context = new RequestContext("ack-rate-seed", principal.subject(), PrincipalType.USER,
+                    principal.issuer(), principal.tenantId(), principal.roles(), principal.scopes());
+            createHumanTask(store, clock, context);
+            var events = awaitEvents(authorized, context);
+            var last = events.getLast();
+            try (var interactions = new InteractionWebSocketServer(configuration(port), authorized,
+                    headers -> principal,
+                    new BrowserOriginPolicy(Set.of("https://console.example")), Duration.ofSeconds(30),
+                    rateLimiterWithPrincipalBurst(4), new HumanTaskService(store, clock), ignored -> { }, clock)) {
+                interactions.start();
+                var listener = new RecordingListener();
+                WebSocket socket = connect(port, listener);
+                authenticate(socket, listener);
+                socket.sendText("{\"version\":1,\"type\":\"resume\",\"afterJournalOffset\":"
+                        + (last.journalOffset() - 1) + "}", true).get(5, TimeUnit.SECONDS);
+                assertTrue(listener.messages.poll(5, TimeUnit.SECONDS).contains(last.eventId().toString()));
+                String acknowledgement = "{\"version\":1,\"type\":\"ack\",\"journalOffset\":"
+                        + last.journalOffset() + ",\"eventId\":\"" + last.eventId() + "\"}";
+                socket.sendText(acknowledgement, true).get(5, TimeUnit.SECONDS);
+                socket.sendText(acknowledgement, true).get(5, TimeUnit.SECONDS);
+                socket.sendText(acknowledgement, true).get(5, TimeUnit.SECONDS);
+                assertEquals(1013, listener.closeCode.get(5, TimeUnit.SECONDS));
+            }
+        }
+    }
+
+    @Test
     void purgedReplayCursorReportsCanonicalFloorBeforeClosing(@TempDir java.nio.file.Path directory)
             throws Exception {
         int port = freePort();
@@ -478,9 +526,29 @@ class InteractionWebSocketWireTest {
                     + extraHeaders + "\r\n";
             socket.getOutputStream().write(request.getBytes(StandardCharsets.US_ASCII));
             socket.getOutputStream().flush();
-            return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
-                    .readLine();
+            var response = new StringBuilder();
+            var reader = new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII));
+            for (String line = reader.readLine(); line != null && !line.isEmpty(); line = reader.readLine()) {
+                response.append(line).append('\n');
+            }
+            return response.toString();
         }
+    }
+
+    private static RateLimiter rateLimiterWithPrincipalBurst(int principalBurst) {
+        var defaults = RateLimitConfiguration.DEFAULTS;
+        var configuration = new RateLimitConfiguration(
+                defaults.addressRequestsPerSecond(), defaults.addressBurst(),
+                defaults.tenantRequestsPerSecond(), defaults.tenantBurst(),
+                1, principalBurst,
+                defaults.submissionsPerSecond(), defaults.submissionBurst(),
+                defaults.tenantConcurrentSubmissions(), defaults.globalActiveExecutions(),
+                defaults.tenantConcurrentStreams(), defaults.principalConcurrentStreams(),
+                defaults.streamQueueCapacity(), defaults.maxQueryBytes(), defaults.maxQueryParameters(),
+                defaults.maxHeaderCount(), defaults.maxHeaderBytes(), defaults.maxHeaderValueBytes(),
+                defaults.maxTrackedClients(), defaults.maxTrackedTenants(), defaults.maxTrackedPrincipals(),
+                defaults.idleEntryTtl(), defaults.executionMaxAge());
+        return new RateLimiter(configuration, TrustedProxyConfiguration.direct(), ignored -> { }, () -> 0L);
     }
 
     private static DefaultRavenrootApplication application(PekkoExecutionEngine engine,
@@ -535,7 +603,7 @@ class InteractionWebSocketWireTest {
         var definition = new ai.ravenroot.core.humantask.HumanTaskDefinition(
                 new ai.ravenroot.api.persistence.HumanTaskMetadata("Review", "Cancel this task."),
                 new ai.ravenroot.api.persistence.HumanTaskResponseSchema("application/octet-stream",
-                        "wire-test", "1", ai.ravenroot.api.payload.PayloadKind.BINARY, 4096),
+                        "wire-test", "1", ai.ravenroot.api.payload.PayloadKind.SCALAR, 4096),
                 ai.ravenroot.api.persistence.HandlerAuthorization.ofRoles(Role.PLATFORM_ADMIN.name()),
                 java.util.Optional.empty(), Duration.ofHours(1),
                 new ai.ravenroot.api.persistence.HumanTaskReentryMapping(

@@ -141,6 +141,32 @@ Complete admission-ready graphs:
 Use the exact send, query, move, and delete payloads from the reference. Successful actions emit
 bounded results on `continue`. Deployment activates consume, whose durable custody controls progress.
 
+## Matrix
+
+See the [`matrix` reference](bundles/matrix.md).
+
+Complete admission-ready graphs:
+
+- [`matrix.send`](../examples/nodes/matrix.send.graphml)
+- [`matrix.sync`](../examples/nodes/matrix.sync.graphml)
+
+Run send with the reference's `matrix.message.v1` payload; provider acceptance emits its
+content-free result. Deployment activates sync, which emits bounded `matrix.event.v1` events only
+after durable admission and advances its cursor without skipping an uncommitted event.
+
+## Mattermost
+
+See the [`mattermost` reference](bundles/mattermost.md).
+
+Complete admission-ready graphs:
+
+- [`mattermost.send`](../examples/nodes/mattermost.send.graphml)
+- [`mattermost.outgoing-webhook`](../examples/nodes/mattermost.outgoing-webhook.graphml)
+
+Run send with the reference's `mattermost.message.v1` payload; provider acceptance emits its
+content-free result. Deployment activates the outgoing-webhook route, which authenticates and
+narrows the callback before emitting `mattermost.outgoing-webhook.v1` after durable admission.
+
 ## Object storage
 
 See the [`object-storage` reference](bundles/object-storage.md).
@@ -214,6 +240,19 @@ Complete admission-ready graphs:
 
 With `{"customer":{"name":"Ada"}}`, transform emits `Ada`; decision preserves the payload and
 follows `true`. Both are deterministic and side-effect free.
+
+## Microsoft Teams
+
+See the [`teams` reference](bundles/teams.md).
+
+Complete admission-ready graphs:
+
+- [`teams.send`](../examples/nodes/teams.send.graphml)
+- [`teams.outgoing-webhook`](../examples/nodes/teams.outgoing-webhook.graphml)
+
+Run send with the reference's `teams.message.v1` payload; provider acceptance emits its
+content-free result. Deployment activates the outgoing-webhook route, which authenticates and
+narrows the callback before emitting `teams.outgoing-message.v1` after durable admission.
 
 ## Telegram
 

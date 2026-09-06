@@ -59,6 +59,10 @@ BUNDLES = (
     Bundle("mail", "ai.ravenroot.extensions.mail", (
         "mail.send", "mail.imap.query", "mail.imap.consume", "mail.imap.move", "mail.imap.delete",
     )),
+    Bundle("matrix", "ai.ravenroot.extensions.matrix", ("matrix.send", "matrix.sync")),
+    Bundle("mattermost", "ai.ravenroot.extensions.mattermost", (
+        "mattermost.send", "mattermost.outgoing-webhook",
+    )),
     Bundle("object-storage", "ai.ravenroot.extensions.storage", (
         "object.get", "object.put", "object.list", "object.delete",
     )),
@@ -71,6 +75,7 @@ BUNDLES = (
         "slack.events", "slack.commands", "slack.post-message",
     )),
     Bundle("spel", "ai.ravenroot.extensions.spel", ("spel.transform", "spel.decision")),
+    Bundle("teams", "ai.ravenroot.extensions.teams", ("teams.send", "teams.outgoing-webhook")),
     Bundle("telegram", "ai.ravenroot.extensions.telegram", (
         "telegram.send", "telegram.answer.callback", "telegram.edit.message", "telegram.delete.message",
     )),

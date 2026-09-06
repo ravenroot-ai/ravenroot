@@ -20,7 +20,7 @@ The catalog returned by `GET /v1/node-types` is authoritative for the running de
 
 An unavailable privileged dependency does not become available because its identifier appears in a graph.
 
-Optional first-party packages contribute 42 additional node types only after explicit bundle
+Optional first-party packages contribute 48 additional node types only after explicit bundle
 installation and activation. See the [bundle reference](bundles/) and the
 [coverage inventory](coverage-inventory.md). In particular, `llm-prompt` and `agent` belong to the
 optional AI bundle and are not part of the default core catalog.

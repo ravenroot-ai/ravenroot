@@ -169,6 +169,22 @@ class DurableSseReplayIntegrationTest {
                 // pass while every real EventSource client resumed from the wrong place.
                 assertEquals(offsets, replayed.stream().map(row -> ((Number) row.get(SSE_ID)).longValue()).toList(),
                         "each frame's SSE id must be its journalOffset: the id is the resumption cursor");
+                assertTrue(replayed.stream().allMatch(row -> Long.toString(((Number) row.get(SSE_ID)).longValue())
+                                .equals(row.get("id"))),
+                        "the common string identity must be the exact SSE resumption id: " + replayed);
+                assertTrue(replayed.stream().allMatch(row -> Long.valueOf(1).equals(row.get("schemaVersion"))
+                                && "DURABLE".equals(row.get("source"))),
+                        "every durable frame must declare one common schema and source: " + replayed);
+                var eventIds = replayed.stream().map(row -> UUID.fromString((String) row.get("eventId"))).toList();
+                assertEquals(eventIds.size(), eventIds.stream().distinct().count(),
+                        "the persisted event identity must remain unique through restart replay");
+                assertTrue(replayed.stream().map(row -> row.get("causationId")).filter(java.util.Objects::nonNull)
+                                .map(String.class::cast).map(UUID::fromString).anyMatch(eventIds::contains),
+                        "at least one replayed event must name its persisted causal predecessor");
+                assertTrue(replayed.stream().noneMatch(row -> row.containsKey("tenantId")
+                                || row.containsKey("correlationId") || row.containsKey("detail")
+                                || row.containsKey("activeInstances")),
+                        "tenant evidence, correlation evidence and live diagnostics are not durable wire fields");
                 // The second traversal's own shape: exactly one START-triggered NODE_STARTED for
                 // "work", one NODE_COMPLETED, plus the EXECUTION_STARTED that precedes them --
                 // the causal model, still intact end to end through a restart.
@@ -210,6 +226,10 @@ class DurableSseReplayIntegrationTest {
                     () -> "expected a declared truncation frame, got: " + body);
             assertTrue(body.contains("\"code\":\"STREAM_RETENTION_EXCEEDED\""), body);
             assertTrue(body.contains("\"retainedFrom\":42"), body);
+            assertFalse(body.contains("\"schemaVersion\""),
+                    "a retention control is not an execution-event envelope");
+            assertFalse(body.contains("\"source\""),
+                    "a retention control must not fabricate execution-event identity");
         }
     }
 
@@ -221,13 +241,29 @@ class DurableSseReplayIntegrationTest {
             var durable = get(server, "/v1/events", 0L);
             assertEquals("DURABLE", durable.headers().firstValue("X-Ravenroot-Event-Source").orElseThrow());
             assertEquals("DURABLE", durable.headers().firstValue("X-Ravenroot-Event-Continuity").orElseThrow());
+            assertEquals("1", durable.headers().firstValue("X-Ravenroot-Event-Schema-Version").orElseThrow());
             durable.body().close();
 
+            long beyondJavaScriptIntegerPrecision = 9_007_199_254_740_993L;
+            var started = TEST_CLIENT.send(HttpRequest.newBuilder(
+                            URI.create("http://127.0.0.1:" + server.port() + "/v1/executions"))
+                            .timeout(TEST_TIMEOUT).POST(HttpRequest.BodyPublishers.ofString(CHAIN_GRAPH)).build(),
+                    HttpResponse.BodyHandlers.ofString());
+            assertEquals(202, started.statusCode(), started.body());
+            fake.appendLive(liveEvent(beyondJavaScriptIntegerPrecision, fake.acceptedTraversal()));
             var diagnostics = get(server, "/v1/events?include=diagnostics", 0L);
             assertEquals("RING", diagnostics.headers().firstValue("X-Ravenroot-Event-Source").orElseThrow());
             assertEquals("PROCESS_LOCAL",
                     diagnostics.headers().firstValue("X-Ravenroot-Event-Continuity").orElseThrow());
-            diagnostics.body().close();
+            assertEquals("1", diagnostics.headers().firstValue("X-Ravenroot-Event-Schema-Version").orElseThrow());
+            var live = readAvailableEvents(diagnostics);
+            assertEquals(1, live.size());
+            assertEquals("RING", live.getFirst().get("source"));
+            assertEquals(Long.toString(beyondJavaScriptIntegerPrecision), live.getFirst().get("id"));
+            assertEquals(beyondJavaScriptIntegerPrecision, ((Number) live.getFirst().get(SSE_ID)).longValue());
+            assertEquals(beyondJavaScriptIntegerPrecision, ((Number) live.getFirst().get("sequence")).longValue());
+            assertEquals("NODE_STARTED", live.getFirst().get("eventType"));
+            assertEquals("NODE_STARTED", live.getFirst().get("type"));
 
             var invalid = get(server, "/v1/events?include=everything", 0L);
             assertEquals(400, invalid.statusCode());
@@ -590,6 +626,13 @@ class DurableSseReplayIntegrationTest {
                 new DisabledLoopbackAuthenticator());
     }
 
+    private static ExecutionEvent liveEvent(long sequence, UUID traversal) {
+        return new ExecutionEvent(sequence, Instant.EPOCH, "local", "private-request", "engine", "v1",
+                UUID.fromString("00000000-0000-0000-0000-000000000070"), traversal, null, null,
+                ai.ravenroot.api.application.ExecutionEventType.NODE_STARTED, "work", 1, false,
+                "private-detail");
+    }
+
     /** A stream that ignores interruption and can only be released by closing its owner. */
     private static final class CloseControlledInputStream extends InputStream {
         private final java.util.concurrent.CountDownLatch closed = new java.util.concurrent.CountDownLatch(1);
@@ -625,8 +668,10 @@ class DurableSseReplayIntegrationTest {
      */
     private static final class DurableJournalFakeApplication implements RavenrootApplication {
         private final List<DurableExecutionEvent> backlog = new ArrayList<>();
+        private final List<ExecutionEvent> liveBacklog = new ArrayList<>();
         private long truncatedAfter;
         private long retainedFrom;
+        private volatile UUID acceptedTraversal;
         private volatile Consumer<ExecutionEvent> listener;
         private final java.util.concurrent.CountDownLatch listenerReady = new java.util.concurrent.CountDownLatch(1);
 
@@ -676,9 +721,18 @@ class DurableSseReplayIntegrationTest {
         @Override public GraphSummary inspectGraphMl(InputStream graphMl) { throw new UnsupportedOperationException(); }
         @Override public ExecutionSubmission startGraphMl(ai.ravenroot.api.security.SecurityContext security,
                                                           UUID executionId, InputStream graphMl, Object payload) {
-            throw new UnsupportedOperationException();
+            acceptedTraversal = executionId;
+            return new ExecutionSubmission(executionId, "v1");
         }
-        @Override public List<ExecutionEvent> executionEventsAfter(long sequence) { return List.of(); }
+
+        UUID acceptedTraversal() {
+            return java.util.Objects.requireNonNull(acceptedTraversal, "the test execution was not accepted");
+        }
+        @Override public List<ExecutionEvent> executionEventsAfter(long sequence) {
+            synchronized (liveBacklog) {
+                return liveBacklog.stream().filter(event -> event.sequence() > sequence).toList();
+            }
+        }
         @Override public AutoCloseable subscribeToExecutionEvents(Consumer<ExecutionEvent> newListener) {
             this.listener = newListener;
             listenerReady.countDown();
@@ -698,6 +752,12 @@ class DurableSseReplayIntegrationTest {
                             "NODE_COMPLETED", UUID.randomUUID(), UUID.randomUUID(), null, null,
                             UUID.randomUUID(), "req", "v1", Instant.EPOCH, "work"));
                 }
+            }
+        }
+
+        void appendLive(ExecutionEvent event) {
+            synchronized (liveBacklog) {
+                liveBacklog.add(event);
             }
         }
 

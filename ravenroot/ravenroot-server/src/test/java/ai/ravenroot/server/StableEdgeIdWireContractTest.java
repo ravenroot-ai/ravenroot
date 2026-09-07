@@ -28,11 +28,18 @@ class StableEdgeIdWireContractTest {
         ExecutionEvent event = edgeEvent(edgeId);
         String recentJson = RavenrootServer.executionEventJson(event);
         byte[] liveFrame = RavenrootServer.executionEventFrame(event);
+        String liveText = new String(liveFrame, StandardCharsets.UTF_8);
+        String liveBody = liveText.substring(liveText.indexOf("data: ") + 6).trim();
+        String streamPrefix = "{\"schemaVersion\":1,\"source\":\"RING\",\"id\":\""
+                + Long.MIN_VALUE + "\",\"eventType\":\"EDGE_TRAVERSED\",";
 
         assertTrue(recentJson.contains("\"edgeId\":\"" + escapedId + "\""),
                 "the shared recent/live projection must preserve every escaped identity byte");
-        assertEquals(recentJson, new String(liveFrame, StandardCharsets.UTF_8)
-                .substring(new String(liveFrame, StandardCharsets.UTF_8).indexOf("data: ") + 6).trim());
+        assertEquals(streamPrefix + recentJson.substring(1), liveBody,
+                "the stream-only envelope must leave the polling projection byte-identical");
+        assertEquals(99, liveBody.getBytes(StandardCharsets.UTF_8).length
+                        - recentJson.getBytes(StandardCharsets.UTF_8).length,
+                "the maximal signed cursor and event type consume the measured fixed envelope reserve");
         assertTrue(liveFrame.length < StableEdgeId.SSE_FRAME_MAX_BYTES,
                 () -> "complete SSE frame is " + liveFrame.length + " bytes");
         assertTrue(StableEdgeId.SSE_FRAME_MAX_BYTES - liveFrame.length
@@ -87,7 +94,13 @@ class StableEdgeIdWireContractTest {
         DurableExecutionEvent event = durableEdgeEvent(edgeId, graphVersion, "source");
 
         byte[] durableFrame = RavenrootServer.durableExecutionEventFrame(event);
+        String durableText = new String(durableFrame, StandardCharsets.UTF_8);
+        String durablePrefix = "{\"schemaVersion\":1,\"source\":\"DURABLE\",\"id\":\""
+                + Long.MAX_VALUE + "\",\"eventId\":\"" + event.eventId() + "\",";
 
+        assertTrue(durableText.contains("data: " + durablePrefix));
+        assertEquals(113, durablePrefix.getBytes(StandardCharsets.UTF_8).length - 1,
+                "the maximal durable cursor and real UUID consume the measured fixed envelope reserve");
         assertTrue(durableFrame.length < StableEdgeId.SSE_FRAME_MAX_BYTES,
                 () -> "saturated durable frame is " + durableFrame.length + " bytes");
         assertTrue(durableFrame.length - StableEdgeId.MAX_UTF8_BYTES * 6

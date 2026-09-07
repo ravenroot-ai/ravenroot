@@ -103,10 +103,18 @@ async function selectDeploymentContext(page, ready) {
 }
 
 async function selectHumanTaskNode(page) {
-  await page.evaluate(nodeId => {
+  const point = await page.evaluate(nodeId => {
     const active = window.ravenroot.activeDocument();
-    active.cy.getElementById(nodeId).emit('tap');
+    const node = active.cy.getElementById(nodeId);
+    const position = node.renderedPosition();
+    const bounds = active.cy.container().getBoundingClientRect();
+    return { x: bounds.left + position.x, y: bounds.top + position.y };
   }, NODE_ID);
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(() => page.evaluate(nodeId => {
+    const selected = window.ravenroot.activeDocument().cy.nodes(':selected');
+    return { count: selected.length, nodeId: selected.length === 1 ? selected.first().id() : null };
+  }, NODE_ID)).toEqual({ count: 1, nodeId: NODE_ID });
   await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks', { timeout: 20_000 });
   await expect(page.locator('[data-human-task-id]')).toHaveCount(2);
   await expect.poll(() => page.evaluate(nodeId => {
@@ -176,6 +184,11 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     const recovery = await startPhase(request, 'recovery');
     expect(recovery).toMatchObject({ serviceOrigin: first.serviceOrigin, graphVersion: first.graphVersion,
       deploymentId: first.deploymentId, locators: first.locators });
+    let deploymentRegistrations = 0;
+    page.on('request', request_ => {
+      const url = new URL(request_.url());
+      if (request_.method() === 'POST' && url.pathname === '/v1/deployments') deploymentRegistrations += 1;
+    });
     const exactRequest = page.waitForRequest(request_ => {
       const url = new URL(request_.url());
       return url.pathname === '/v1/human-tasks/attention'
@@ -188,13 +201,43 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     expect(exactUrl.searchParams.has('deploymentId')).toBe(false);
     expect(exactUrl.searchParams.has('processInstanceId')).toBe(false);
     await assertPinnedDialog(page, storedLocator.taskId);
-    await expect(page.locator('.human-task-status')).toContainText('2 actionable tasks');
+    const retainedContext = await page.evaluate(() => ({
+      selected: window.ravenroot.activeDocument().cy.nodes(':selected').length,
+      humanTasks: { ...window.ravenroot.activeDocument().humanTasks },
+    }));
+    expect(retainedContext).toMatchObject({ selected: 0, humanTasks: {
+      deploymentId: recovery.deploymentId, graphVersion: recovery.graphVersion,
+    } });
+    await page.locator('[data-human-task-close]').click();
+    await expect(page.locator('#menu-run')).toBeFocused();
+
+    const scopedRequest = page.waitForRequest(request_ => {
+      const url = new URL(request_.url());
+      return url.pathname === '/v1/human-tasks/attention'
+        && url.searchParams.get('graphVersion') === recovery.graphVersion
+        && url.searchParams.get('deploymentId') === recovery.deploymentId
+        && url.searchParams.get('nodeId') === NODE_ID;
+    });
+    await selectHumanTaskNode(page);
+    const scopedUrl = new URL((await scopedRequest).url());
+    expect(scopedUrl.searchParams.has('processInstanceId')).toBe(false);
+    expect(scopedUrl.searchParams.has('taskId')).toBe(false);
+    expect(deploymentRegistrations).toBe(0);
     await expect(page.locator('[data-human-task-id]')).toHaveCount(2);
+    const recoveredAccessibility = summarizeViolations(await scanForViolations(page,
+      { include: ['#info-body'] }));
+    logSummary('Recovered Human Task Inspector', recoveredAccessibility);
+    await testInfo.attach('real-human-task-recovered-inspector-axe.json', {
+      body: Buffer.from(JSON.stringify(recoveredAccessibility, null, 2)), contentType: 'application/json',
+    });
     const recoveredScreenshot = testInfo.outputPath('real-human-task-recovered.png');
     await page.screenshot({ path: recoveredScreenshot, fullPage: true });
     await testInfo.attach('real-human-task-recovered.png', {
       path: recoveredScreenshot, contentType: 'image/png',
     });
+
+    await page.locator(`[data-human-task-id="${storedLocator.taskId}"]`).click();
+    await assertPinnedDialog(page, storedLocator.taskId);
 
     const decisionUrl = `${recovery.serviceOrigin}/v1/human-tasks/${encodeURIComponent(storedLocator.taskId)}`
       + `/confirmation/resolve?generation=${storedLocator.generation}`;
@@ -227,6 +270,7 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
 
     const remaining = page.locator('[data-human-task-id]');
     await expect(remaining).toHaveCount(1);
+    await expect(remaining).toBeFocused();
     const remainingTaskId = await remaining.getAttribute('data-human-task-id');
     expect(remainingTaskId).not.toBe(storedLocator.taskId);
     await remaining.click();
@@ -242,6 +286,9 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     }, NODE_ID)).toEqual({ label: expect.not.stringContaining('⚑'), pending: 0, escalated: 0,
       pulsing: false });
     expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+    expect(await page.evaluate(() => ({ ...window.ravenroot.activeDocument().humanTasks })))
+      .toEqual(retainedContext.humanTasks);
+    expect(deploymentRegistrations).toBe(0);
 
     await stopPhase(request);
   });

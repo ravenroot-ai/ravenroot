@@ -167,6 +167,54 @@ async function runAndSelect(page, graphVersion = executionContext.graphVersion) 
   });
 }
 
+async function holdExactRecovery(page, outcome) {
+  await connectAndCreate(page);
+  await runAndSelect(page);
+  await page.locator('[data-human-task-id="task-1"]').click();
+  const original = await page.evaluate(() => JSON.parse(
+    localStorage.getItem('ravenroot.human-task.selection.v1')));
+  // A native modal correctly blocks pointer interaction outside itself. DOM activation exercises
+  // the unchanged revoke lifecycle while deliberately retaining the opaque locator.
+  await page.evaluate(() => document.getElementById('btn-revoke').click());
+  await expect(page.locator('#runtime-connection')).toHaveClass(/revoked/);
+
+  let started = 0;
+  let finished = 0;
+  let release;
+  const released = new Promise(resolve => { release = resolve; });
+  await page.route('**/v1/human-tasks/attention?*', async route => {
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('taskId') !== original.taskId
+        || url.searchParams.get('generation') !== String(original.generation)) {
+      await route.continue(); return;
+    }
+    started += 1;
+    await released;
+    try {
+      if (outcome === 'empty') {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({
+          schemaVersion: 1, items: [], nextCursor: null,
+          counts: { pending: 0, escalated: 0 }, nodeCounts: [],
+        }) });
+      } else if (outcome === 'error') {
+        await route.abort('connectionfailed');
+      } else {
+        await route.continue();
+      }
+    } finally {
+      finished += 1;
+    }
+  });
+  await page.locator('#access-token').fill('replacement-token');
+  await page.locator('#access-token').press('Enter');
+  await expect.poll(() => started).toBeGreaterThan(0);
+  await expect(page.locator('[data-human-task-id="task-1"]')).toBeVisible();
+  return { original, release: async () => {
+    release();
+    await expect.poll(() => finished).toBe(started);
+  } };
+}
+
 test.beforeEach(async () => {
   tasks = [task('task-1', 1, 'ESCALATED'), task('task-2', 2)];
   decisionMode = 'normal';
@@ -397,6 +445,35 @@ test('browser reload restores an exact task only after the service origin and to
   expect(tasks[0].status).toBe('DENIED');
   expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
 });
+
+for (const outcome of ['success', 'empty', 'error']) {
+  test(`a late exact recovery ${outcome} stays inert after the user closes the task`, async ({ page }) => {
+    const held = await holdExactRecovery(page, outcome);
+    await page.locator('[data-human-task-id="task-1"]').click();
+    await expect(page.locator('#human-task-dialog')).toBeVisible();
+    await page.locator('[data-human-task-close]').click();
+    expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+
+    await held.release();
+    await expect(page.locator('#human-task-dialog')).toBeHidden();
+    expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
+  });
+
+  test(`a late exact recovery ${outcome} cannot replace a freshly selected task generation`, async ({ page }) => {
+    const held = await holdExactRecovery(page, outcome);
+    await page.locator('.human-task-pagination .btn', { hasText: 'Next' }).click();
+    await page.locator('[data-human-task-id="task-2"]').click();
+    const replacement = { serviceOrigin: SERVICE_ORIGIN, taskId: 'task-2', generation: 2 };
+    expect(await page.evaluate(() => JSON.parse(
+      localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(replacement);
+
+    await held.release();
+    await expect(page.locator('#human-task-dialog')).toBeVisible();
+    await expect(page.locator('[data-human-task-identity]')).toContainText('Task task-2');
+    expect(await page.evaluate(() => JSON.parse(
+      localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(replacement);
+  });
+}
 
 test('an outage suspends stale modal details and retains only the exact recovery locator', async ({ page }) => {
   await connectAndCreate(page);

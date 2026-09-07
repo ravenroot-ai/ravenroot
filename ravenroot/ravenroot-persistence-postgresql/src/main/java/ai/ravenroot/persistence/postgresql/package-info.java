@@ -37,10 +37,9 @@
  * then the batch that references both, and the deployment registry that decides which version is
  * meant to be running is read in the same place. That ordering is safe because a later step can
  * check the earlier one's row inside its own transaction, and it stops being safe the moment the
- * rows live in
- * databases that can fail independently. Splitting them does not weaken a guarantee gradually; it
- * removes the only mechanism by which an accepted execution is known to have its exact definition
- * and manifest.</p>
+ * rows live in databases that can fail independently. Splitting them does not weaken a guarantee
+ * gradually; it removes the only mechanism by which an accepted execution is known to have its exact
+ * definition and manifest.</p>
  *
  * <p><strong>Lease correctness is bounded by clock skew between hosts.</strong> The store evaluates
  * expiry on its injected {@link java.time.Clock}, which with several processes means whichever

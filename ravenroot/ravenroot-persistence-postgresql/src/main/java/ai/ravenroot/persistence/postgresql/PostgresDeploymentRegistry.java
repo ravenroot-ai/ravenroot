@@ -154,7 +154,23 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
 
     private static final Duration DEFAULT_COMMAND_RETENTION = Duration.ofDays(7);
 
-    /** Matches the single-host adapter's exactly, so a deployment can move between the two. */
+    /**
+     * The bounds this registry publishes, chosen to equal the single-host adapter's so that a
+     * deployment moving between the two does not discover a different limit.
+     *
+     * <p>That equality is a <strong>convention, not an invariant</strong>, and nothing in this build
+     * holds the two in step. The single-host adapter is a module this one does not depend on and must
+     * not, so no assertion here can read its values, and the shared conformance suite does not pin them
+     * either — it checks each adapter's own limits for internal consistency, which these satisfy at any
+     * number. An editor changing one side is therefore not stopped by anything, and the claim is
+     * written as what it is so that a reader does not take a stronger guarantee from it than exists.</p>
+     *
+     * <p>The three numbers also coincide with {@code maxInventoryPageSize}, {@code maxLeaseTtl} and
+     * {@code maxClockSkew} in {@link PostgresStoreConfig#defaults()}, and that coincidence is
+     * deliberately not turned into a derivation: a deployment lease is not an execution lease and a
+     * deployment listing page is not an inventory page, so reading them from the store config would
+     * make an adopter widening one silently move the other.</p>
+     */
     private static final Limits LIMITS = new Limits(100, Duration.ofMinutes(5), Duration.ofSeconds(5));
 
     /**
@@ -240,16 +256,51 @@ public final class PostgresDeploymentRegistry implements DeploymentRegistry {
      */
     public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
                                       Duration commandRetention) {
+        this(dataSource, clock, ids, commandRetention, PostgresStoreConfig.defaults());
+    }
+
+    /**
+     * Opens the registry with explicit contention settings as well.
+     *
+     * <p>Every shorter constructor applies {@link PostgresStoreConfig#defaults()}, and this is the one
+     * form that lets a deployment change them. Only three of the record's fields reach this class, and
+     * they are the three {@link Transactions} reads: {@code lockTimeout}, {@code statementTimeout} and
+     * {@code serializationRetries}. They matter here for the same reason they matter to the execution
+     * store — a registry contended by several hosts waits on {@code deployment}'s row lock on every
+     * mutation — and a deployment that had tuned them for its execution store while this registry
+     * stayed at the defaults would be running the same database under two different contention
+     * policies without anything saying so.</p>
+     *
+     * <p>The record's remaining fields are the execution store's published bounds and are deliberately
+     * <em>not</em> consulted here. In particular {@link #limits()} is not derived from
+     * {@code maxLeaseTtl}, {@code maxClockSkew} or {@code maxInventoryPageSize}: a deployment lease is
+     * not an execution lease and a deployment listing page is not an inventory page, so wiring them
+     * together would let an adopter widening an inventory page silently change what this registry
+     * publishes to its callers. There is no further overload between this one and the four-argument
+     * form on purpose — one constructor per subset of five parameters is how a constructor set stops
+     * being readable, and this one is the complete form.</p>
+     *
+     * @param dataSource the database this registry shares with the deployment's other stores.
+     * @param clock time authority for every instant this registry records or evaluates expiry against.
+     * @param ids server-side seam that mints a stable identity for each newly created deployment.
+     * @param commandRetention how long a {@code deployment_command} row survives past its recording
+     *                         before {@link #purgeExpiredCommandRecords} may remove it; must be
+     *                         positive.
+     * @param config the lock timeout, statement timeout and serialization-retry budget this registry's
+     *               transactions run under.
+     */
+    public PostgresDeploymentRegistry(DataSource dataSource, Clock clock, DeploymentIdSource ids,
+                                      Duration commandRetention, PostgresStoreConfig config) {
         Objects.requireNonNull(dataSource, "dataSource");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.ids = Objects.requireNonNull(ids, "ids");
         Objects.requireNonNull(commandRetention, "commandRetention");
+        Objects.requireNonNull(config, "config");
         if (commandRetention.isNegative() || commandRetention.isZero()) {
             throw new IllegalArgumentException("commandRetention must be positive");
         }
         this.commandRetention = commandRetention;
-        this.transactions = new Transactions(dataSource, PostgresStoreConfig.defaults(),
-                CommitBoundary.NONE);
+        this.transactions = new Transactions(dataSource, config, CommitBoundary.NONE);
         // Named and daemon so a thread dump says which registry is blocked and a forgotten close cannot
         // hold the JVM open. Unbounded because the DataSource is the real bound: a task that cannot get
         // a connection blocks there, which is where the deployment configured the limit.

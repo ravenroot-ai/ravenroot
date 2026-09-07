@@ -132,6 +132,39 @@ apply here.
   gives a deployment a recovery point between snapshots; the store has no separate journal an operator
   should replay by hand.
 
+### Restoring in practice
+
+A **full restore** needs no special handling: `pg_dump` writes every table's rows before it creates any
+key or foreign-key constraint, so nothing is enforced while the rows are loading and the order the
+tables happen to be dumped in cannot matter. Neither `--disable-triggers` nor a schema-and-data split
+is required, and neither should be used.
+
+A **data-only restore into an already-migrated database** also needs no `--disable-triggers`, because
+this schema's references form a tree with no cycle and `pg_dump --data-only` orders the tables by that
+dependency. Two things do have to be handled, and both fail loudly rather than silently:
+
+- Exclude the schema's own bookkeeping tables from the dump. The target writes them when it migrates,
+  and the version table holds a single row that the restore collides with.
+- Empty the target of rows the migration itself seeded. A freshly migrated database is not an empty
+  one — the schema seeds a store-global row so that every reader finds one rather than having to decide
+  what an absent row means — and restoring over it violates that row's key.
+
+Pass `--exit-on-error` to `pg_restore` in either case. Without it, `pg_restore` continues past a failed
+statement and still exits successfully, so a restore that dropped rows on constraint errors is
+indistinguishable from a clean one.
+
+Restore as a role that owns the schema, or pass `--no-owner` and `--no-acl`: a restore performed by a
+role that cannot reassign ownership fails on the ownership statements rather than on the data.
+
+### What integrity means here
+
+The store's referential integrity spans more than its foreign keys. An execution manifest's digest is
+derived across its own row *and* its node-package rows, so a restore that brought the manifests and
+dropped their packages violates no constraint, loads no row incorrectly, and is still wrong — the
+manifest is refused with a digest mismatch when it is next read. A restore is therefore verified by
+reading the store back through its own interfaces, not by counting rows or trusting that the database
+raised nothing.
+
 ## Retention
 
 Retention windows are configuration of the adapter and are enforced by explicit purge operations,

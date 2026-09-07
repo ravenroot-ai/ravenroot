@@ -452,9 +452,18 @@ final class JoinTimeoutPauseBudgetTest {
         try (var fixture = new Fixture(2, 2)) {
             var scheduler = fixture.engine.manualScheduler();
             scheduler.blockInsideSchedule();
+            var arrivalFailure = new AtomicReference<Throwable>();
+            Thread arrival = null;
             try {
                 fixture.start();
-                fixture.arrive(0);
+                fixture.awaitInsideBranch(0);
+                arrival = Thread.ofVirtual().name("join-pause-arrival").start(() -> {
+                    try {
+                        fixture.arrive(0);
+                    } catch (Throwable failure) {
+                        arrivalFailure.set(failure);
+                    }
+                });
                 fixture.awaitDeadlineArmed();
                 assertTrue(scheduler.awaitInsideSchedule(BOUND.toMillis()),
                         "the join deadline must reach the scheduler callback");
@@ -487,6 +496,17 @@ final class JoinTimeoutPauseBudgetTest {
             } finally {
                 // A failed rendezvous must not leave the scheduler callback blocking fixture cleanup.
                 scheduler.releaseSchedule();
+                if (arrival != null) {
+                    arrival.join(BOUND.toMillis());
+                    if (arrival.isAlive()) {
+                        arrival.interrupt();
+                        arrival.join(BOUND.toMillis());
+                    }
+                    assertFalse(arrival.isAlive(), "the owned join-arrival thread did not terminate");
+                }
+                if (arrivalFailure.get() != null) {
+                    throw new AssertionError("the owned join-arrival thread failed", arrivalFailure.get());
+                }
             }
         }
     }

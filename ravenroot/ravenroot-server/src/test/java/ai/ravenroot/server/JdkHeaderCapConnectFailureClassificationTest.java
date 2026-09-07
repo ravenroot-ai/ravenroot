@@ -28,25 +28,11 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
  * not of JVM-wide static-initializer ordering, so it needs no process boundary to demonstrate.
  *
  * <p>{@code anAnsweredProbeAgainstARealServerIsConfirmedOk} below creates its own plain
- * {@code com.sun.net.httpserver.HttpServer} -- exactly the "foreign server" {@code
- * JdkHeaderCapOrderingHazardTest} demonstrates is dangerous in a fresh JVM, and exactly what {@code
- * security/TestOidcProvider.java} already guards against for this module's own shared Surefire JVM (see
- * its Javadoc). This class had no such guard: run in isolation, or ahead of any test that constructs a
- * real {@link RavenrootServer}, its nude {@code HttpServer.create()} used to be the first thing in the
- * whole process to touch {@code sun.net.httpserver}, permanently locking {@code
- * sun.net.httpserver.ServerConfig} onto the JDK's 380 KiB default before {@code RavenrootServer}'s own
- * static initializer runs. A later test in the same JVM that starts a real {@code
- * RavenrootServer} -- {@code DrainSequencingTest} is one case, but any of the seventeen other test
- * classes in this module that construct one would do -- failed with the cap-initialization diagnostic,
- * accusing an inert property even though it was set correctly by the class that lost
- * a race this class's own test fixture created. Nor did this class protect itself even partially: JUnit 5
- * declares no stable method order absent an explicit {@code @TestMethodOrderer}, and this class has none
- * so a clean reactor build cannot depend on which class the filesystem hands Surefire first. The
- * static initializer below uses the same guard as {@code TestOidcProvider}, so this class's own probe
- * server is not the first thing in the JVM to touch
- * {@code sun.net.httpserver}. See {@code docs/qa/what-the-testkits-do-not-cover.md}
- * ("An unguarded HttpServer.create() can make a filtered run accuse the cap initialization of a defect
- * belonging to another class") for the full mechanism and measurement.
+     * {@code com.sun.net.httpserver.HttpServer} -- exactly the "foreign server" {@code
+     * JdkHeaderCapOrderingHazardTest} demonstrates is dangerous when the JVM argument is absent. The
+     * normal server-module Surefire fork now starts with the cap through its composable extra argument,
+     * before any test class can run. The static initializer below remains a local defense for direct,
+     * non-Maven launches of this class; it is no longer the module-wide ordering mechanism.
  */
 class JdkHeaderCapConnectFailureClassificationTest {
 

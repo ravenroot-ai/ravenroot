@@ -18,9 +18,14 @@ import ai.ravenroot.server.security.RequestAuthenticator;
 import ai.ravenroot.server.security.SecurityHeadersPolicy;
 import com.sun.net.httpserver.HttpServer;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.Socket;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -29,9 +34,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Run out of process by {@link JdkHeaderCapOrderingHazardTest}, this boundary reproduces or refutes
- * two claims about {@link RavenrootServer}'s static initializer -- see that class's "Set here,
- * verified at {@code start()}" Javadoc.
+ * Run out of process by {@link JdkHeaderCapOrderingHazardTest}, this boundary verifies the test
+ * fork's command-line header cap and reproduces the runtime fallback when that argument is absent.
  *
  * <p>Deliberately a separate, freshly launched JVM rather than an in-process JUnit fixture: both claims
  * are about which code touches {@code com.sun.net.httpserver} <em>first</em> in a process, which this
@@ -54,11 +58,20 @@ import java.util.stream.Collectors;
  * one place setting it is guaranteed to apply before any class loads), with no foreign server. Prints
  * the property's value exactly as {@link RavenrootServer} leaves it, so the test can assert the static
  * initializer left an operator's own value untouched.</p>
+ * <p>{@link #BARE_SERVER_UP}, {@link #BELOW_CONFIGURED_CAP_ANSWERED}, and
+ * {@link #ABOVE_CONFIGURED_CAP_REJECTED}: for {@code args[0] = "configured-bare-first"} -- launched
+ * with the exact header-cap argument observed in the parent Surefire JVM. A zero-context JDK server
+ * is created and started before active use of {@link RavenrootServer}; a real request above the JDK
+ * default but below the configured value receives the JDK's 404, while a request above the configured
+ * value is rejected by the established server connection.</p>
  */
 final class JdkHeaderCapOrderingHazardBoundary {
     static final String FOREIGN_SERVER_UP = "FOREIGN_SERVER_UP";
     static final String HAZARD_DETECTED = "HAZARD_DETECTED";
     static final String HAZARD_NOT_DETECTED = "HAZARD_NOT_DETECTED";
+    static final String BARE_SERVER_UP = "BARE_SERVER_UP";
+    static final String BELOW_CONFIGURED_CAP_ANSWERED = "BELOW_CONFIGURED_CAP_ANSWERED";
+    static final String ABOVE_CONFIGURED_CAP_REJECTED = "ABOVE_CONFIGURED_CAP_REJECTED";
     /**
      * Named for what it literally reads -- {@code System.getProperty}, i.e. the static property, not the
      * JDK's own live cap. The two can diverge, so a name like "EFFECTIVE_PROPERTY" would be inaccurate.
@@ -93,9 +106,66 @@ final class JdkHeaderCapOrderingHazardBoundary {
         String scenario = args.length > 0 ? args[0] : "";
         switch (scenario) {
             case "foreign-first" -> foreignFirst();
+            case "configured-bare-first" -> configuredBareFirst();
             case "operator-override" -> operatorOverride();
             case "overflow-override" -> overflowOverride();
             default -> throw new IllegalArgumentException("unknown scenario: " + scenario);
+        }
+    }
+
+    /** Proves the fork argument is effective before the first bare server initializes JDK state. */
+    private static void configuredBareFirst() throws Exception {
+        int jdkDefault = 380 * 1024;
+        int framingMargin = 8 * 1024;
+        int configured = Integer.parseInt(System.getProperty("sun.net.httpserver.maxReqHeaderSize", ""));
+        int belowConfigured = Math.subtractExact(configured, framingMargin);
+        if (belowConfigured <= Math.addExact(jdkDefault, framingMargin)) {
+            throw new IllegalArgumentException("configured header cap leaves no checked probe interval: " + configured);
+        }
+        int aboveConfigured = Math.addExact(configured, framingMargin);
+
+        InetAddress loopback = InetAddress.getByName("127.0.0.1");
+        HttpServer bare = HttpServer.create(new InetSocketAddress(loopback, 0), 0);
+        bare.start();
+        System.out.println(BARE_SERVER_UP);
+        System.out.flush();
+        try {
+            var target = new InetSocketAddress(loopback, bare.getAddress().getPort());
+            String statusLine = requestStatusLine(target, belowConfigured);
+            if ("HTTP/1.1 404 Not Found".equals(statusLine)) {
+                System.out.println(BELOW_CONFIGURED_CAP_ANSWERED);
+            } else {
+                throw new IllegalStateException("below-cap bare-server request was not answered with 404: " + statusLine);
+            }
+
+            RavenrootServer.HeaderCapProbeResult above = RavenrootServer.probeHeaderCap(target, aboveConfigured);
+            if (above.outcome() == RavenrootServer.HeaderCapProbeOutcome.CAP_CONFIRMED_WRONG) {
+                System.out.println(ABOVE_CONFIGURED_CAP_REJECTED);
+            } else {
+                throw new IllegalStateException("above-cap request was not rejected: " + above.outcome());
+            }
+            System.out.flush();
+        } finally {
+            bare.stop(0);
+        }
+        System.exit(0);
+    }
+
+    private static String requestStatusLine(InetSocketAddress target, int headerValueBytes) throws Exception {
+        try (var socket = new Socket()) {
+            socket.connect(target, 5_000);
+            socket.setSoTimeout(5_000);
+            OutputStream output = socket.getOutputStream();
+            output.write(("GET /header-cap-boundary HTTP/1.1\r\nHost: " + target.getHostString()
+                    + ":" + target.getPort() + "\r\nX-Probe: ").getBytes(StandardCharsets.US_ASCII));
+            byte[] chunk = "a".repeat(8_192).getBytes(StandardCharsets.US_ASCII);
+            for (int remaining = headerValueBytes; remaining > 0; remaining -= Math.min(remaining, chunk.length)) {
+                output.write(chunk, 0, Math.min(remaining, chunk.length));
+            }
+            output.write("\r\nConnection: close\r\n\r\n".getBytes(StandardCharsets.US_ASCII));
+            output.flush();
+            return new BufferedReader(new InputStreamReader(socket.getInputStream(), StandardCharsets.US_ASCII))
+                    .readLine();
         }
     }
 

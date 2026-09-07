@@ -149,9 +149,14 @@ dependency. Two things do have to be handled, and both fail loudly rather than s
   one — the schema seeds a store-global row so that every reader finds one rather than having to decide
   what an absent row means — and restoring over it violates that row's key.
 
-Pass `--exit-on-error` to `pg_restore` in either case. Without it, `pg_restore` continues past a failed
-statement and still exits successfully, so a restore that dropped rows on constraint errors is
-indistinguishable from a clean one.
+Pass `--exit-on-error` to `pg_restore` in either case. Without it the restore continues past a failed
+statement and finishes having applied only part of the dump; it does report this — the exit status is
+1 and the last line reads `errors ignored on restore: N` — but by then the damage is done, and the
+flag is what stops it at the first error instead.
+
+The failure that *is* silent belongs to the other tool. A plain-format dump is restored with `psql`,
+which by default reports every error and then exits 0, so a restore that loaded nothing at all is
+indistinguishable from a clean one. Pass `-v ON_ERROR_STOP=1` whenever restoring that way.
 
 Restore as a role that owns the schema, or pass `--no-owner` and `--no-acl`: a restore performed by a
 role that cannot reassign ownership fails on the ownership statements rather than on the data.

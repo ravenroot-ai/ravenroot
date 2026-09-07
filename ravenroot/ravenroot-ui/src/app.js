@@ -11219,7 +11219,6 @@ async function playGraph(mode = 'test') {
   // now, not read from whichever document may become active while a delayed terminal GET is pending.
   syncGraphPositions();
   const graphMl = serializeGraphML(graphForAuthorizedExecution(owner, ownerGraph));
-  const testProjectionGraph = mode === 'test' ? canonicalGraphSnapshot(ownerGraph) : null;
   const payload = document.getElementById('execution-payload').value;
   const displayName = graphDisplayName;
   const ownerCy = cy;
@@ -11309,34 +11308,20 @@ async function playGraph(mode = 'test') {
       graphMl, payload);
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION
         || owner.execution.reconciliationClient !== executionClient) return;
-    let executionOwner = owner;
-    if (mode === 'test' && owner.mode !== DOCUMENT_MODES.TEST) {
-      setDocumentExecution(owner, null, null);
-      testProjectionGraph.nodeMap = Object.fromEntries(
-        testProjectionGraph.nodes.map(node => [node.id, node]));
-      const projectionId = openDocument({
-        name: owner.name,
-        displayName: allocateDocumentDisplayName(`${owner.displayName} · test`),
-        graph: testProjectionGraph,
-        tenantId: owner.tenantId,
-        mode: DOCUMENT_MODES.TEST,
-        provenance: {
-          originMode: owner.mode,
-          sourceDocumentId: owner.documentId,
-          sourceGraphVersion: submission.graphVersion,
-          deploymentId: null,
-        },
-      });
-      executionOwner = workspace.find(projectionId);
-    }
-    setDocumentExecution(executionOwner, submission.executionId, submission.graphVersion, executionClient,
+    // Test and Run are executions of the immutable GraphML captured above, not document lifecycle
+    // operations. Keep the binding on the document that submitted that snapshot: creating a Test
+    // projection here used to change focus, identity, editability, history and viewport merely
+    // because an asynchronous POST completed. The owner reference is also the routing fence for
+    // later events, so a response received after the user switches panes still cannot attach to the
+    // newly active document.
+    setDocumentExecution(owner, submission.executionId, submission.graphVersion, executionClient,
       submission.processInstanceId ?? null);
-    void reconcileTestCompletion(executionOwner, submission.executionId, executionClient);
-    if (workspace.activeId !== executionOwner.id) return;
+    void reconcileTestCompletion(owner, submission.executionId, executionClient);
+    if (workspace.activeId !== owner.id) return;
     addActivityMessage('accepted',
       `${submission.executionPolicy || 'policy unreported'} · execution ${shortId(submission.executionId)} · graph ${shortId(submission.graphVersion)}`,
       'completed');
-    if (executionOwner.execution.finished.has(submission.executionId)) refreshCommands();
+    if (owner.execution.finished.has(submission.executionId)) refreshCommands();
     scheduleWorkspacePersistence();
   } catch (error) {
     if (workspace.find(owner.id) !== owner || owner.execution.executionId !== PENDING_EXECUTION

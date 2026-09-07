@@ -2,7 +2,6 @@ package ai.ravenroot.observability.otel;
 
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
-import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry;
 
 import io.opentelemetry.api.OpenTelemetry;
@@ -111,46 +110,6 @@ class CardinalityAllowlistTest {
     }
 
     @Test
-    void resultPayloadRejectionsProduceExactlyTwoIdentifierFreeSeries() {
-        for (int i = 0; i < DISTINCT_VALUES; i++) {
-            bridge.recordResultPayloadAdmission(i % 2 == 0
-                    ? ResultPayloadState.WITHHELD : ResultPayloadState.UNCONVERTIBLE);
-        }
-
-        MetricData rejections = onlyMetric("ravenroot.execution.result_payload_rejections");
-        assertEquals(2, rejections.getLongSumData().getPoints().size(),
-                "two hundred refusals must produce only the two fixed payload-state series");
-        assertEquals(DISTINCT_VALUES, rejections.getLongSumData().getPoints().stream()
-                .mapToLong(point -> point.getValue()).sum());
-        assertEquals(Set.of("WITHHELD", "UNCONVERTIBLE"), rejections.getLongSumData().getPoints().stream()
-                .map(point -> point.getAttributes().get(TelemetryBridge.METRIC_ATTR_RESULT_PAYLOAD_STATE))
-                .collect(java.util.stream.Collectors.toSet()));
-        Set<AttributeKey<?>> expectedKeys = Set.of(TelemetryBridge.METRIC_ATTR_RESULT_PAYLOAD_STATE);
-        for (PointData point : rejections.getLongSumData().getPoints()) {
-            // OpenTelemetry 1.65.0 exposes ReadOnlyArrayMap.KeySetView here. Its SetView base
-            // implements Set directly without overriding Object.equals(), so comparing that view
-            // to Set.of(...) tests object identity rather than Set membership. Copy through the
-            // iterator into a standard immutable Set before making the exact-keyset assertion.
-            Set<AttributeKey<?>> actualKeys = Set.copyOf(point.getAttributes().asMap().keySet());
-            assertEquals(expectedKeys, actualKeys,
-                    "the result-rejection metric must carry no tenant, payload, traversal or node dimension");
-        }
-    }
-
-    @Test
-    void resultPayloadMetricRefusesStatesOutsideItsTwoValueDomain() {
-        for (ResultPayloadState state : List.of(ResultPayloadState.NONE, ResultPayloadState.RETAINED,
-                ResultPayloadState.EXPIRED)) {
-            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                    () -> bridge.recordResultPayloadAdmission(state), state.name());
-        }
-        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException.class,
-                () -> bridge.recordResultPayloadAdmission(null), "null");
-        assertTrue(metrics.collectAllMetrics().stream()
-                .noneMatch(metric -> metric.getName().equals("ravenroot.execution.result_payload_rejections")));
-    }
-
-    @Test
     void everyRecordedMetricAttributeIsInTheAllowlist() {
         UUID processInstanceId = UUID.randomUUID();
         UUID traversalId = UUID.randomUUID();
@@ -171,7 +130,6 @@ class CardinalityAllowlistTest {
         bridge.accept(new ExecutionEvent(5, t0.plusMillis(4), TENANT_ID, REQUEST_ID, "test", "v1",
                 processInstanceId, traversalId, null, null, ExecutionEventType.EXECUTION_COMPLETED, null, 0, false,
                 "done", null));
-        bridge.recordResultPayloadAdmission(ResultPayloadState.WITHHELD);
 
         for (MetricData metric : metrics.collectAllMetrics()) {
             for (PointData point : metric.getData().getPoints()) {
@@ -257,23 +215,22 @@ class CardinalityAllowlistTest {
     }
 
     /**
-     * The structural guard: the allowlist holds exactly the six bounded dimensions and nothing
+     * The structural guard: the allowlist holds exactly the five bounded dimensions and nothing
      * else, and every identifier that must never be a label is still refused.
      *
      * <p>The exact size is asserted rather than only the membership, and the number is meant to be
      * edited deliberately. Each entry costs a multiplicative factor on every metric's series count, so
      * an addition is a capacity decision; a test that only checked membership would let one arrive
-     * unnoticed inside an unrelated change. The six are: the event type, a fixed enum; the node
-     * type, bounded by the installed catalog; the retry classification, a four-member enum fixed in
-     * source; the agent-budget dimension and outcome enums; and the result-payload refusal state,
-     * whose producer and bridge both accept exactly two values. None grows with traffic, which is
-     * the property this list encodes.</p>
+     * unnoticed inside an unrelated change. The five are: the event type, a fixed enum; the node
+     * type, bounded by the installed catalog; and the retry classification, a four-member enum fixed
+     * in source; plus the agent-budget dimension and outcome enums. None grows with traffic, which
+     * is the property this list encodes.</p>
      */
     @Test
     void theAllowlistHoldsExactlyItsBoundedEntriesAndStillRefusesInstanceIdentifiers() {
-        assertEquals(6, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
+        assertEquals(5, TelemetryBridge.METRIC_LABEL_ALLOWLIST.size(),
                 "the allowlist should carry event_type, node_type, retry_classification, and the two "
-                        + "fixed agent-budget enums plus result_payload_state and nothing "
+                        + "fixed agent-budget enums and nothing "
                         + "else: " + TelemetryBridge.METRIC_LABEL_ALLOWLIST);
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(TelemetryBridge.METRIC_ATTR_NODE_TYPE));
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
@@ -282,8 +239,6 @@ class CardinalityAllowlistTest {
                 TelemetryBridge.METRIC_ATTR_AGENT_DIMENSION));
         assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
                 TelemetryBridge.METRIC_ATTR_AGENT_OUTCOME));
-        assertTrue(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(
-                TelemetryBridge.METRIC_ATTR_RESULT_PAYLOAD_STATE));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(AttributeKey.stringKey("ravenroot.node_id")));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(AttributeKey.stringKey("ravenroot.tenant_id")));
         assertFalse(TelemetryBridge.METRIC_LABEL_ALLOWLIST.contains(

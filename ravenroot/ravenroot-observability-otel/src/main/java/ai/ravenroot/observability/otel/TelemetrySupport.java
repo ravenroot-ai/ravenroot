@@ -27,9 +27,9 @@ import java.util.Optional;
  *
  * <h2>Disabled by default means absent wiring, not an inert object</h2>
  * <p>{@link #install} on a disabled {@link TelemetryConfiguration} returns immediately, before any
- * OpenTelemetry SDK type is constructed and before either {@code ExecutionMonitor} subscription is
- * installed. A caller does not need to branch on {@code configuration.enabled()} itself; calling
- * this method is always correct, and its cost when disabled is the one boolean check inside it.</p>
+ * OpenTelemetry SDK type is constructed and before {@code ExecutionMonitor.subscribe} is ever
+ * called. A caller does not need to branch on {@code configuration.enabled()} itself; calling this
+ * method is always correct, and its cost when disabled is the one boolean check inside it.</p>
  */
 public final class TelemetrySupport {
 
@@ -76,15 +76,12 @@ public final class TelemetrySupport {
                 .build();
 
         TelemetryBridge bridge = new TelemetryBridge(sdk);
-        AutoCloseable unsubscribeEvents = monitor.subscribe(bridge);
-        AutoCloseable unsubscribeResultPayloadAdmissions =
-                monitor.subscribeResultPayloadAdmissions(bridge::recordResultPayloadAdmission);
+        AutoCloseable unsubscribe = monitor.subscribe(bridge);
         if (agentBudgets != null) agentBudgets.install(bridge);
 
         return Optional.of(() -> {
             if (agentBudgets != null) agentBudgets.clear();
-            unsubscribeResultPayloadAdmissions.close();
-            unsubscribeEvents.close();
+            unsubscribe.close();
             bridge.close();
             tracerProvider.shutdown();
             meterProvider.shutdown();

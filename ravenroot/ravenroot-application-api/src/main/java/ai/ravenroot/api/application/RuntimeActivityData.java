@@ -11,7 +11,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.PriorityQueue;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -112,7 +111,7 @@ public static final String TRUNCATION_MARKER = "[ravenroot:truncated]";
         if (depth > MAX_OUTPUT_DEPTH) return state.marker("depth");
         if (++state.values > MAX_VALUE_COUNT) return state.marker("value-count");
         if (value == null) return PayloadValue.NULL;
-        if (value instanceof PayloadValue payloadValue) return projectPayloadValue(payloadValue, depth, state);
+        if (value instanceof PayloadValue payloadValue) return project(payloadValue.toJava(), depth, state);
         if (value instanceof Boolean flag) return PayloadValue.of(flag.booleanValue());
         if (value instanceof Byte number) return PayloadValue.of(number.longValue());
         if (value instanceof Short number) return PayloadValue.of(number.longValue());
@@ -120,7 +119,16 @@ public static final String TRUNCATION_MARKER = "[ravenroot:truncated]";
         if (value instanceof Long number) return PayloadValue.of(number.longValue());
         if (value instanceof Float number && Float.isFinite(number)) return PayloadValue.of(number.doubleValue());
         if (value instanceof Double number && Double.isFinite(number)) return PayloadValue.of(number.doubleValue());
-        if (value instanceof CharSequence text) return projectText(text.toString(), state);
+        if (value instanceof CharSequence text) {
+            Redaction redaction = redact(normalize(text.toString()));
+            Bound bound = boundUtf8(redaction.value(), MAX_TEXT_UTF8_BYTES);
+            if (redaction.changed() && bound.truncated() && !bound.value().contains(REDACTION_MARKER)) {
+                bound = boundUtf8WithRequiredMarker(redaction.value(), MAX_TEXT_UTF8_BYTES, REDACTION_MARKER);
+            }
+            state.redacted |= redaction.changed();
+            state.truncated |= bound.truncated();
+            return PayloadValue.of(bound.value());
+        }
         if (state.seen.put(value, Boolean.TRUE) != null) return state.marker("cycle");
         try {
             if (value instanceof Map<?, ?> map) return projectMap(map, depth, state);
@@ -132,84 +140,12 @@ public static final String TRUNCATION_MARKER = "[ravenroot:truncated]";
         }
     }
 
-    /**
-     * Projects an already-closed value without first expanding it back into an equally large mutable
-     * Java graph. Apart from avoiding that second graph, this follows the same branches as
-     * {@link #project(Object, int, ProjectionState)}, so an ordinary representable value has the same
-     * canonical bytes whether it arrives as a {@link PayloadValue} or as its Java projection.
-     */
-    private static PayloadValue projectPayloadValue(PayloadValue value, int depth, ProjectionState state) {
-        // The former implementation re-entered project() after toJava(), consuming a second slot at
-        // this same depth. Preserve that established budget behavior while removing the expansion.
-        return projectClosedValue(value, depth, state);
-    }
-
-    private static PayloadValue projectClosedValue(PayloadValue value, int depth, ProjectionState state) {
-        if (depth > MAX_OUTPUT_DEPTH) return state.marker("depth");
-        if (++state.values > MAX_VALUE_COUNT) return state.marker("value-count");
-        return switch (value) {
-            case PayloadValue.NullValue ignored -> PayloadValue.NULL;
-            case PayloadValue.BooleanValue flag -> PayloadValue.of(flag.value());
-            case PayloadValue.IntegerValue number -> PayloadValue.of(number.value());
-            case PayloadValue.DecimalValue number -> PayloadValue.of(number.value());
-            case PayloadValue.TextValue text -> projectText(text.value(), state);
-            case PayloadValue.ListValue list -> projectClosedList(list.values(), depth, state);
-            case PayloadValue.MapValue map -> projectClosedMap(map.entries(), depth, state);
-        };
-    }
-
-    private static PayloadValue projectClosedList(List<PayloadValue> source, int depth, ProjectionState state) {
-        int retained = Math.min(source.size(), MAX_COLLECTION_SIZE);
-        var projected = new ArrayList<PayloadValue>(Math.min(source.size(), MAX_COLLECTION_SIZE));
-        for (int index = 0; index < retained; index++) {
-            projected.add(projectClosedValue(source.get(index), depth + 1, state));
-        }
-        if (source.size() > MAX_COLLECTION_SIZE) {
-            projected.set(MAX_COLLECTION_SIZE - 1, state.marker("collection"));
-        }
-        return PayloadValue.list(projected);
-    }
-
-    private static PayloadValue projectClosedMap(Map<String, PayloadValue> source, int depth,
-                                                  ProjectionState state) {
-        List<String> keys = smallestKeys(source);
-        var projected = new LinkedHashMap<String, PayloadValue>();
-        boolean overflow = source.size() > MAX_COLLECTION_SIZE;
-        int retained = overflow ? MAX_COLLECTION_SIZE - 1 : keys.size();
-        for (int index = 0; index < retained; index++) {
-            String key = keys.get(index);
-            if (key.getBytes(StandardCharsets.UTF_8).length > MAX_KEY_UTF8_BYTES) {
-                projected.put(TRUNCATION_MARKER, state.marker("key-length"));
-                break;
-            }
-            if (secretKey(key)) {
-                projected.put(key, PayloadValue.of(REDACTION_MARKER));
-                state.redacted = true;
-            } else {
-                projected.put(key, projectClosedValue(source.get(key), depth + 1, state));
-            }
-        }
-        if (overflow) addCollectionMarker(source, projected, state);
-        return PayloadValue.map(projected);
-    }
-
-    private static PayloadValue projectText(String text, ProjectionState state) {
-        Redaction redaction = redact(normalize(text));
-        Bound bound = boundUtf8(redaction.value(), MAX_TEXT_UTF8_BYTES);
-        if (redaction.changed() && bound.truncated() && !bound.value().contains(REDACTION_MARKER)) {
-            bound = boundUtf8WithRequiredMarker(redaction.value(), MAX_TEXT_UTF8_BYTES, REDACTION_MARKER);
-        }
-        state.redacted |= redaction.changed();
-        state.truncated |= bound.truncated();
-        return PayloadValue.of(bound.value());
-    }
-
     private static PayloadValue projectMap(Map<?, ?> source, int depth, ProjectionState state) {
-        List<String> keys = smallestKeys(source);
-        if (keys == null) return state.marker("non-string-key");
+        if (source.keySet().stream().anyMatch(key -> !(key instanceof String))) return state.marker("non-string-key");
+        List<String> keys = source.keySet().stream().map(String.class::cast).sorted().toList();
         var projected = new LinkedHashMap<String, PayloadValue>();
-        boolean overflow = source.size() > MAX_COLLECTION_SIZE;
-        int retained = overflow ? MAX_COLLECTION_SIZE - 1 : keys.size();
+        int retained = Math.min(keys.size(), MAX_COLLECTION_SIZE);
+        if (keys.size() > MAX_COLLECTION_SIZE) retained--;
         for (int index = 0; index < retained; index++) {
             String key = keys.get(index);
             if (key.getBytes(StandardCharsets.UTF_8).length > MAX_KEY_UTF8_BYTES) {
@@ -223,40 +159,12 @@ public static final String TRUNCATION_MARKER = "[ravenroot:truncated]";
                 projected.put(key, project(source.get(key), depth + 1, state));
             }
         }
-        if (overflow) {
-            addCollectionMarker(source, projected, state);
+        if (keys.size() > MAX_COLLECTION_SIZE) {
+            String markerKey = "$ravenrootTruncation";
+            while (projected.containsKey(markerKey) || source.containsKey(markerKey)) markerKey += "_";
+            projected.put(markerKey, state.marker("collection"));
         }
         return PayloadValue.map(projected);
-    }
-
-    private static void addCollectionMarker(Map<?, ?> source, Map<String, PayloadValue> projected,
-                                            ProjectionState state) {
-        String markerKey = "$ravenrootTruncation";
-        while (projected.containsKey(markerKey) || source.containsKey(markerKey)) markerKey += "_";
-        projected.put(markerKey, state.marker("collection"));
-    }
-
-    /**
-     * Selects the same lexicographically-first keys the former {@code sorted().toList()} projection
-     * selected, while retaining at most the collection budget. Traversal remains linear because the
-     * selected prefix cannot be known without seeing every key, but auxiliary retention is fixed at
-     * {@link #MAX_COLLECTION_SIZE}; a million-entry result cannot create a second million-entry list
-     * before its payload is admitted.
-     *
-     * @return sorted bounded key prefix, or {@code null} when any key is outside the closed model
-     */
-    private static List<String> smallestKeys(Map<?, ?> source) {
-        var selected = new PriorityQueue<String>(MAX_COLLECTION_SIZE, java.util.Comparator.reverseOrder());
-        for (Object candidate : source.keySet()) {
-            if (!(candidate instanceof String key)) return null;
-            if (selected.size() < MAX_COLLECTION_SIZE) {
-                selected.add(key);
-            } else if (key.compareTo(selected.peek()) < 0) {
-                selected.remove();
-                selected.add(key);
-            }
-        }
-        return selected.stream().sorted().toList();
     }
 
     private static PayloadValue projectIterable(Iterable<?> source, int depth, ProjectionState state) {

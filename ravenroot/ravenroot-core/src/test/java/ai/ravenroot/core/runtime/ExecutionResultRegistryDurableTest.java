@@ -41,12 +41,6 @@ class ExecutionResultRegistryDurableTest {
     private static final String TENANT = "tenant-a";
     private static final Instant START = Instant.parse("2026-01-01T00:00:00Z");
 
-    private static void complete(ExecutionResultRegistry registry, ExecutionResultRegistry.Key key,
-                                 GraphExecutionResult result) {
-        registry.completed(key, result, ai.ravenroot.api.persistence.DurableExecutionResult.project(
-                result.payload(), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes()));
-    }
-
     private static InMemoryExecutionStore store(MutableClock clock) {
         return new InMemoryExecutionStore(clock, Duration.ofMinutes(5), 1024 * 1024,
                 Duration.ofSeconds(5), Duration.ofHours(1), Duration.ofHours(2), Duration.ofHours(1));
@@ -216,7 +210,7 @@ class ExecutionResultRegistryDurableTest {
             // horizon exactly is the reason it is a count.
             var recorded = new ExecutionResultRegistry(1, 8192, DurableExecutionResults.of(store));
             recorded.started(registryKey, key.processInstanceId());
-            complete(recorded, registryKey, new GraphExecutionResult(key.processInstanceId(), traversalId,
+            recorded.completed(registryKey, new GraphExecutionResult(key.processInstanceId(), traversalId,
                     Map.of("answer", 42L), java.util.Set.of("start", "finish"), java.util.Set.of()));
             store.recordExecutionResult(completed(key, traversalId, Map.of("answer", 42L),
                     store.maxExecutionResultPayloadBytes())).toCompletableFuture().join();
@@ -224,7 +218,7 @@ class ExecutionResultRegistryDurableTest {
             UUID laterTraversalId = UUID.randomUUID();
             var laterKey = new ExecutionResultRegistry.Key(TENANT, laterTraversalId);
             recorded.started(laterKey, UUID.randomUUID());
-            complete(recorded, laterKey, new GraphExecutionResult(UUID.randomUUID(), laterTraversalId,
+            recorded.completed(laterKey, new GraphExecutionResult(UUID.randomUUID(), laterTraversalId,
                     "later", java.util.Set.of("start"), java.util.Set.of()));
             assertEquals(1, recorded.retainedResults());
             assertEquals(1, recorded.retainedTombstones(),
@@ -272,7 +266,7 @@ class ExecutionResultRegistryDurableTest {
 
             var recorded = new ExecutionResultRegistry(256, 8192, DurableExecutionResults.of(store));
             recorded.started(registryKey, key.processInstanceId());
-            complete(recorded, registryKey, new GraphExecutionResult(key.processInstanceId(), traversalId,
+            recorded.completed(registryKey, new GraphExecutionResult(key.processInstanceId(), traversalId,
                     Map.of("answer", 42L), java.util.Set.of("start", "finish"), java.util.Set.of()));
             DurableExecutionResult stored = store.recordExecutionResult(
                     completed(key, traversalId, Map.of("answer", 42L),
@@ -320,7 +314,7 @@ class ExecutionResultRegistryDurableTest {
             UUID laterTraversalId = UUID.randomUUID();
             var laterKey = new ExecutionResultRegistry.Key(TENANT, laterTraversalId);
             recorded.started(laterKey, UUID.randomUUID());
-            complete(recorded, laterKey, new GraphExecutionResult(UUID.randomUUID(), laterTraversalId,
+            recorded.completed(laterKey, new GraphExecutionResult(UUID.randomUUID(), laterTraversalId,
                     "later", java.util.Set.of("start"), java.util.Set.of()));
             assertEquals(1, recorded.retainedTombstones());
 

@@ -114,7 +114,9 @@ class EmbedBrowserHttpIntegrationTest {
                             "http://127.0.0.1:" + raw.getAddress().getPort()
                                     + EmbedBrowserHttpHandler.CREATE_PATH + "/alias"))
                     .POST(HttpRequest.BodyPublishers.noBody()).build());
-            assertEmbedDenied(invalidLegacyPath);
+            assertEquals(403, invalidLegacyPath.statusCode(), invalidLegacyPath.body());
+            assertEquals("{\"error\":\"EMBED_SESSION_UNAVAILABLE\"}", invalidLegacyPath.body());
+            assertPrivate(invalidLegacyPath);
         } finally {
             raw.stop(0);
         }

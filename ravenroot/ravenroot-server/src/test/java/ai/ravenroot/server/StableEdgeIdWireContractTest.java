@@ -37,14 +37,26 @@ class StableEdgeIdWireContractTest {
                 "the shared recent/live projection must preserve every escaped identity byte");
         assertEquals(streamPrefix + recentJson.substring(1), liveBody,
                 "the stream-only envelope must leave the polling projection byte-identical");
-        assertEquals(99, liveBody.getBytes(StandardCharsets.UTF_8).length
+        assertEquals(91, liveBody.getBytes(StandardCharsets.UTF_8).length
                         - recentJson.getBytes(StandardCharsets.UTF_8).length,
-                "the maximal signed cursor and event type consume the measured fixed envelope reserve");
+                "the maximal signed cursor and EDGE_TRAVERSED consume the measured fixed envelope reserve");
         assertTrue(liveFrame.length < StableEdgeId.SSE_FRAME_MAX_BYTES,
                 () -> "complete SSE frame is " + liveFrame.length + " bytes");
         assertTrue(StableEdgeId.SSE_FRAME_MAX_BYTES - liveFrame.length
                         < StableEdgeId.SSE_NON_ID_RESERVE_BYTES,
                 "the control-character identity exercises the six-byte worst-case expansion");
+    }
+
+    @Test
+    void longestEventTypeConsumesTheGlobalMaximumLiveEnvelopeReserve() {
+        ExecutionEvent event = longestTypeEvent();
+        String recentJson = RavenrootServer.executionEventJson(event);
+        String liveFrame = new String(RavenrootServer.executionEventFrame(event), StandardCharsets.UTF_8);
+        String liveBody = liveFrame.substring(liveFrame.indexOf("data: ") + 6).trim();
+
+        assertEquals(99, liveBody.getBytes(StandardCharsets.UTF_8).length
+                        - recentJson.getBytes(StandardCharsets.UTF_8).length,
+                "the maximal signed cursor and longest event name define the global envelope reserve");
     }
 
     @Test
@@ -136,6 +148,14 @@ class StableEdgeIdWireContractTest {
     private static ExecutionEvent edgeEvent(String edgeId) {
         return fullEdgeEvent(edgeId, "tenant", "request", "engine", "graph", "source",
                 "continue", "edge traversed", null, null, null);
+    }
+
+    private static ExecutionEvent longestTypeEvent() {
+        UUID execution = UUID.fromString("00000000-0000-0000-0000-000000000001");
+        return new ExecutionEvent(Long.MIN_VALUE, Instant.MAX,
+                "tenant", "request", "engine", "graph", execution, execution, null, null,
+                ExecutionEventType.JOIN_ARRIVAL_DISCARDED, null, 0, false, null, null, null,
+                null, null, null, 0, null, null, null, null);
     }
 
     private static ExecutionEvent fullEdgeEvent(String edgeId, String tenantId, String requestId,

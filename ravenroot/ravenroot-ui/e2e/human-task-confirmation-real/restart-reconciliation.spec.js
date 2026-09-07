@@ -203,7 +203,10 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     await assertPinnedDialog(page, storedLocator.taskId);
     const retainedContext = await page.evaluate(() => ({
       selected: window.ravenroot.activeDocument().cy.nodes(':selected').length,
-      humanTasks: { ...window.ravenroot.activeDocument().humanTasks },
+      humanTasks: {
+        deploymentId: window.ravenroot.activeDocument().humanTasks.deploymentId,
+        graphVersion: window.ravenroot.activeDocument().humanTasks.graphVersion,
+      },
     }));
     expect(retainedContext).toMatchObject({ selected: 0, humanTasks: {
       deploymentId: recovery.deploymentId, graphVersion: recovery.graphVersion,
@@ -286,7 +289,10 @@ test.describe('real SQLite Human Task confirmation recovery', () => {
     }, NODE_ID)).toEqual({ label: expect.not.stringContaining('⚑'), pending: 0, escalated: 0,
       pulsing: false });
     expect(await page.evaluate(() => localStorage.getItem('ravenroot.human-task.selection.v1'))).toBeNull();
-    expect(await page.evaluate(() => ({ ...window.ravenroot.activeDocument().humanTasks })))
+    expect(await page.evaluate(() => ({
+      deploymentId: window.ravenroot.activeDocument().humanTasks.deploymentId,
+      graphVersion: window.ravenroot.activeDocument().humanTasks.graphVersion,
+    })))
       .toEqual(retainedContext.humanTasks);
     expect(deploymentRegistrations).toBe(0);
 

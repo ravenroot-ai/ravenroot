@@ -449,22 +449,46 @@ final class JoinTimeoutPauseBudgetTest {
      */
     @Test
     void aDeadlineThatOutlivedItsCancellationIsRefusedWhenItFiresDuringAHold() throws Exception {
-        var fixture = new Fixture(2, 2);
-        fixture.start();
-        fixture.arrive(0);
-        fixture.awaitDeadlineArmed();
+        try (var fixture = new Fixture(2, 2)) {
+            var scheduler = fixture.engine.manualScheduler();
+            scheduler.blockInsideSchedule();
+            try {
+                fixture.start();
+                fixture.arrive(0);
+                fixture.awaitDeadlineArmed();
+                assertTrue(scheduler.awaitInsideSchedule(BOUND.toMillis()),
+                        "the join deadline must reach the scheduler callback");
+                assertEquals(1, fixture.runner.liveJoinTimeoutCount(),
+                        "callback entry already counts as an in-flight timeout handoff");
+                assertEquals(List.of(), fixture.delays(),
+                        "callback entry is earlier than registration in the manual scheduler");
+                assertEquals(0, scheduler.liveCount(),
+                        "a deadline held before registration is not live in the scheduler");
+                assertEquals(0, scheduler.fireAll(),
+                        "the coordinator count cannot make an unregistered deadline fire");
 
-        fixture.engine.manualScheduler().refuseCancellation();
-        assertTrue(fixture.runner.pauseTraversal(fixture.traversalId()));
+                scheduler.releaseSchedule();
+                assertTrue(scheduler.awaitFirstRegistration(BOUND.toMillis()),
+                        "the join deadline must become visible to the manual scheduler");
+                assertEquals(List.of(BUDGET), fixture.delays(),
+                        "the registered deadline keeps the configured active-execution budget");
+                assertEquals(1, scheduler.liveCount(),
+                        "the registered deadline is live before the hold attempts cancellation");
 
-        assertEquals(1, fixture.engine.manualScheduler().fireAll(),
-                "the refused cancellation left the task live, which is the state under test");
-        assertFalse(awaitDone(fixture.execution),
-                "the firing belonged to an arming the hold superseded, so it must settle nothing");
-        assertFalse(fixture.execution.isCompletedExceptionally(),
-                "a held traversal must not be failed by a deadline it no longer owns");
+                scheduler.refuseCancellation();
+                assertTrue(fixture.runner.pauseTraversal(fixture.traversalId()));
 
-        fixture.close();
+                assertEquals(1, scheduler.fireAll(),
+                        "the refused cancellation left the task live, which is the state under test");
+                assertFalse(awaitDone(fixture.execution),
+                        "the firing belonged to an arming the hold superseded, so it must settle nothing");
+                assertFalse(fixture.execution.isCompletedExceptionally(),
+                        "a held traversal must not be failed by a deadline it no longer owns");
+            } finally {
+                // A failed rendezvous must not leave the scheduler callback blocking fixture cleanup.
+                scheduler.releaseSchedule();
+            }
+        }
     }
 
     /**

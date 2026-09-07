@@ -1155,6 +1155,39 @@ def java_test_type_is_directly_runnable(source: str, type_symbol: str) -> bool:
     return re.fullmatch(r"\s*(?:final\s+)?", prefix) is not None
 
 
+RATE_TEST_IMPORTS = {
+    "Test": "org.junit.jupiter.api.Test",
+    "ParameterizedTest": "org.junit.jupiter.params.ParameterizedTest",
+    "MethodSource": "org.junit.jupiter.params.provider.MethodSource",
+    "Stream": "java.util.stream.Stream",
+}
+
+
+def java_has_exact_rate_test_imports(source: str, type_symbol: str) -> bool:
+    """Bind the supported short annotation/factory names to their exact library types."""
+    code = strip_c_comments_and_literals(source)
+    if re.search(
+            r"(?m)^\s*import\s+static\s+[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*"
+            r"\.(?:Stream|\*)\s*;", code,
+    ) is not None:
+        return False
+    imports = re.findall(
+        r"(?m)^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", code,
+    )
+    for simple, qualified in RATE_TEST_IMPORTS.items():
+        matching = [imported for imported in imports if imported.rsplit(".", 1)[-1] == simple]
+        if matching != [qualified]:
+            return False
+        if re.search(
+                rf"\b(?:class|record|enum|interface)\s+{re.escape(simple)}\b"
+                rf"|@interface\s+{re.escape(simple)}\b", code,
+        ) is not None:
+            return False
+    if java_type_declares_field(source, type_symbol, "Stream"):
+        return False
+    return True
+
+
 def java_direct_stream_string_return(source: str, type_symbol: str,
                                      method: str) -> tuple[str, ...] | None:
     """Parse one direct `return Stream.of("...")` body with quoted literals only."""
@@ -1602,6 +1635,9 @@ def environment_resolver_authority_errors(root: Path, identifier: str,
         if not java_test_type_is_directly_runnable(test_source, test_type):
             errors.append(
                 f"resolver authority {identifier} test type is not a supported runnable top-level class")
+        if not java_has_exact_rate_test_imports(test_source, test_type):
+            errors.append(
+                f"resolver authority {identifier} test type does not bind the exact JUnit and Stream types")
         if not isinstance(methods, dict) or set(methods) != ENVIRONMENT_RESOLVER_TEST_ROLES \
                 or any(not isinstance(method, str) or not method.strip()
                        for method in methods.values()) \
@@ -1618,12 +1654,18 @@ def environment_resolver_authority_errors(root: Path, identifier: str,
             }
             for role in parameterized:
                 method = str(methods[role])
+                if java_method_header(test_source, test_type, method) != f"void {method}(String name)":
+                    errors.append(
+                        f"resolver authority {identifier} test role {role} has unsupported signature")
                 if java_method_annotations(test_source, test_type, method) != (
                         "@ParameterizedTest", f'@MethodSource("{methods["bindingEnumeration"]}")'):
                     errors.append(
                         f"resolver authority {identifier} test role {role} is not linked to its enumeration")
             for role in ordinary:
                 method = str(methods[role])
+                if java_method_header(test_source, test_type, method) != f"void {method}()":
+                    errors.append(
+                        f"resolver authority {identifier} test role {role} has unsupported signature")
                 if java_method_annotations(test_source, test_type, method) != ("@Test",):
                     errors.append(
                         f"resolver authority {identifier} test role {role} is not a runnable @Test")
@@ -2079,6 +2121,10 @@ def environment_resolver_group_errors(root: Path,
         test_source = ((root / test_path).read_text(encoding="utf-8")
                        if current_source_owner(root, f"{test_path.as_posix()}#{test_type}") is not None
                        else "")
+        if enumeration and java_method_header(test_source, test_type, str(enumeration)) \
+                != f"private static Stream<String> {enumeration}()":
+            errors.append(
+                f"resolver authority {resolver_id} binding enumeration has unsupported factory signature")
         enumerated = (java_direct_stream_string_return(
             test_source, test_type, str(enumeration),
         ) if enumeration else None)

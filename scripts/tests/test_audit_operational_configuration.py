@@ -105,6 +105,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "import org.junit.jupiter.params.ParameterizedTest;\n"
             "import org.junit.jupiter.params.provider.MethodSource;\n"
             "import java.util.stream.Stream;\n"
+            "import static org.junit.jupiter.api.Assertions.assertEquals;\n"
             "final class RuntimeLimitsTest {\n"
             "  @Test\n"
             "  void blankDefaults() { settingNames().count(); }\n"
@@ -112,15 +113,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             "  void asciiTrim() {}\n"
             "  @ParameterizedTest\n"
             "  @MethodSource(\"settingNames\")\n"
-            "  void malformedOverflow(String setting) {}\n"
+            "  void malformedOverflow(String name) {}\n"
             "  @ParameterizedTest\n"
             "  @MethodSource(\"settingNames\")\n"
-            "  void nonPositive(String setting) {}\n"
+            "  void nonPositive(String name) {}\n"
             "  @Test\n"
             "  void boundaries() {}\n"
             "  @Test\n"
             "  void relations() {}\n"
-            "  Stream<String> settingNames() { return Stream.of(\n"
+            "  private static Stream<String> settingNames() { return Stream.of(\n"
             "      \"RAVENROOT_SYNTHETIC_MAX_RETRIES\", \"RAVENROOT_SYNTHETIC_MAX_BURST\",\n"
             "      \"RAVENROOT_SYNTHETIC_LEASE_SECONDS\"); }\n"
             "}\n",
@@ -443,6 +444,22 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
             test_path.write_text(original_test, encoding="utf-8")
 
+            enumeration_digest = audit.java_method_digest(
+                original_test, "RuntimeLimitsTest", "settingNames",
+            )
+            nonstatic_enumeration = original_test.replace(
+                "private static Stream<String> settingNames()",
+                "private Stream<String> settingNames()",
+            )
+            self.assertEqual(enumeration_digest, audit.java_method_digest(
+                nonstatic_enumeration, "RuntimeLimitsTest", "settingNames",
+            ))
+            test_path.write_text(nonstatic_enumeration, encoding="utf-8")
+            errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("unsupported factory signature" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
             def enumeration_mutation(mutant: str) -> list[str]:
                 test_path.write_text(mutant, encoding="utf-8")
                 mutated = copy.deepcopy(document)
@@ -501,6 +518,100 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             errors = audit.inventory_errors(root, document, discovered)
             self.assertTrue(any("asciiTrimContract is not a runnable @Test" in error
                                 for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            ordinary_digest = audit.java_method_digest(
+                original_test, "RuntimeLimitsTest", "asciiTrim",
+            )
+            for label, replacement in (
+                ("static", "static void asciiTrim"),
+                ("private", "private void asciiTrim"),
+            ):
+                with self.subTest(unsupported_test_signature=label):
+                    mutant = original_test.replace("void asciiTrim", replacement)
+                    self.assertEqual(ordinary_digest, audit.java_method_digest(
+                        mutant, "RuntimeLimitsTest", "asciiTrim",
+                    ))
+                    test_path.write_text(mutant, encoding="utf-8")
+                    errors = audit.inventory_errors(root, document, discovered)
+                    self.assertTrue(any("asciiTrimContract has unsupported signature" in error
+                                        for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            exact_imports = (
+                "org.junit.jupiter.api.Test",
+                "org.junit.jupiter.params.ParameterizedTest",
+                "org.junit.jupiter.params.provider.MethodSource",
+                "java.util.stream.Stream",
+            )
+            for qualified in exact_imports:
+                with self.subTest(retargeted_proof_import=qualified):
+                    simple = qualified.rsplit(".", 1)[-1]
+                    mutant = original_test.replace(
+                        f"import {qualified};", f"import example.fake.{simple};",
+                    )
+                    test_path.write_text(mutant, encoding="utf-8")
+                    errors = audit.inventory_errors(root, document, discovered)
+                    self.assertTrue(any("does not bind the exact JUnit and Stream types" in error
+                                        for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            local_annotations = original_test
+            for qualified in exact_imports[:3]:
+                local_annotations = local_annotations.replace(f"import {qualified};\n", "")
+            local_annotations = local_annotations.replace(
+                "final class RuntimeLimitsTest {",
+                "@interface Test {}\n"
+                "@interface ParameterizedTest {}\n"
+                "@interface MethodSource { String value(); }\n"
+                "final class RuntimeLimitsTest {",
+            )
+            test_path.write_text(local_annotations, encoding="utf-8")
+            errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("does not bind the exact JUnit and Stream types" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            local_stream = original_test.replace("import java.util.stream.Stream;\n", "").replace(
+                "final class RuntimeLimitsTest {",
+                "final class Stream<T> {}\nfinal class RuntimeLimitsTest {",
+            )
+            test_path.write_text(local_stream, encoding="utf-8")
+            errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("does not bind the exact JUnit and Stream types" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            stream_field_shadow = original_test.replace(
+                "  private static Stream<String> settingNames()",
+                "  private static final Object Stream = new Object();\n"
+                "  private static Stream<String> settingNames()",
+            )
+            self.assertEqual(enumeration_digest, audit.java_method_digest(
+                stream_field_shadow, "RuntimeLimitsTest", "settingNames",
+            ))
+            test_path.write_text(stream_field_shadow, encoding="utf-8")
+            errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("does not bind the exact JUnit and Stream types" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            for label, imported in (
+                ("stream-value", "import static example.Fake.Stream;\n"),
+                ("wildcard", "import static example.Fake.*;\n"),
+            ):
+                with self.subTest(static_import_shadow=label):
+                    mutant = original_test.replace(
+                        "final class RuntimeLimitsTest {",
+                        imported + "final class RuntimeLimitsTest {",
+                    )
+                    self.assertEqual(enumeration_digest, audit.java_method_digest(
+                        mutant, "RuntimeLimitsTest", "settingNames",
+                    ))
+                    test_path.write_text(mutant, encoding="utf-8")
+                    errors = audit.inventory_errors(root, document, discovered)
+                    self.assertTrue(any("does not bind the exact JUnit and Stream types" in error
+                                        for error in errors), errors)
             test_path.write_text(original_test, encoding="utf-8")
 
             method_digest = audit.java_method_digest(

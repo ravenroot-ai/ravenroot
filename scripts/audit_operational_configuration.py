@@ -3732,6 +3732,99 @@ def assistant_limit_compatibility_errors(root: Path, compatibility: object) -> l
     return errors
 
 
+def assistant_limit_family_index(authorities: object) -> dict[str, dict[str, object]]:
+    """Return only the checker-owned, exact two-setting family metadata."""
+    if not isinstance(authorities, dict) or set(authorities) != {ASSISTANT_LIMIT_FAMILY_ID}:
+        return {}
+    family = authorities[ASSISTANT_LIMIT_FAMILY_ID]
+    required = {
+        "kind", "settings", "resolverAuthority", "conversionAuthorities", "carrierEvidence",
+        "consumerAuthority", "compatibilityAuthority", "platformTestDigest",
+    }
+    if not isinstance(family, dict) or set(family) != required \
+            or family.get("kind") != "assistant-symbol-operational-limits-v1" \
+            or not isinstance(family.get("settings"), list) or len(family["settings"]) != 2 \
+            or not isinstance(family.get("conversionAuthorities"), dict) \
+            or not isinstance(family.get("carrierEvidence"), dict):
+        return {}
+    settings = {str(item.get("setting")): item
+                for item in family["settings"] if isinstance(item, dict)}
+    expected = {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}
+    if set(settings) != expected or set(family["conversionAuthorities"]) != expected \
+            or set(family["carrierEvidence"]) != expected:
+        return {}
+    return {
+        setting: {
+            "settingAuthority": settings[setting],
+            "conversion": family["conversionAuthorities"][setting],
+            "carrierEvidence": family["carrierEvidence"][setting],
+        }
+        for setting in expected
+    }
+
+
+def assistant_limit_expected_entry_ids(source: str, spec: dict[str, object],
+                                       discovered: dict[str, Candidate]) -> tuple[
+                                           list[str], list[str], set[str]]:
+    source_rows = java_source_candidates(ASSISTANT_CONFIGURATION_PATH, source)
+    declaration_ids = sorted(
+        candidate.id for offset, candidate in source_rows
+        if spec["environmentSpan"][0] <= offset < spec["environmentSpan"][1])
+    default_ids = candidate_ids_in_source_span(
+        ASSISTANT_CONFIGURATION_PATH, source, *spec["defaultSpan"],
+        "fixed-declaration", str(spec["defaultSymbol"]), discovered)
+    carrier_ids = {
+        candidate.id for candidate in discovered.values()
+        if any(candidate.path in paths for paths in ASSISTANT_CARRIER_PATHS.values())
+        and candidate.kind == "environment-binding"
+        and candidate.expression == spec["environment"]
+    }
+    return declaration_ids, default_ids, set(declaration_ids) | set(default_ids) | carrier_ids
+
+
+def assistant_limit_entry_adapter_errors(root: Path, setting: str,
+                                         setting_entries: list[dict[str, object]],
+                                         entries: dict[str, dict[str, object]],
+                                         discovered: dict[str, Candidate],
+                                         authorities: object) -> list[str]:
+    """Tie generic inventory rows to the fixed Assistant family without an opt-out flag."""
+    index = assistant_limit_family_index(authorities)
+    family = index.get(setting)
+    source = (root / ASSISTANT_CONFIGURATION_PATH).read_text(encoding="utf-8")
+    specs = assistant_limit_source_specs(source) or []
+    spec = next((item for item in specs if item["setting"] == setting), None)
+    if family is None or spec is None:
+        return [f"{setting}: assistant inventory row has no exact family authority"]
+    setting_authority = family["settingAuthority"]
+    if not isinstance(setting_authority, dict):
+        return [f"{setting}: assistant family setting authority is malformed"]
+    declaration_ids, default_ids, expected_ids = assistant_limit_expected_entry_ids(
+        source, spec, discovered)
+    actual_ids = {str(entry["id"]) for entry in setting_entries}
+    errors: list[str] = []
+    if actual_ids != expected_ids:
+        errors.append(f"{setting}: assistant inventory rows do not equal the source-derived partition")
+    expected_binding = setting_authority.get("bindingAuthority")
+    expected_default = setting_authority.get("defaultAuthority")
+    expected_carrier = family["carrierEvidence"]
+    expected_conversion = family["conversion"]
+    for entry in setting_entries:
+        identifier = str(entry["id"])
+        if entry.get("bindingAuthority") != expected_binding \
+                or entry.get("defaultAuthority") != expected_default \
+                or entry.get("carrierEvidence") != expected_carrier \
+                or entry.get("conversion") != expected_conversion:
+            errors.append(f"{identifier}: assistant row authority metadata differs from its family")
+        if entry.get("defaultEvidence") != default_ids:
+            errors.append(f"{identifier}: assistant defaultEvidence differs from its direct default atom")
+        if entry.get("owner") != f"{ASSISTANT_CONFIGURATION_PATH.as_posix()}#AssistantConfiguration" \
+                or entry.get("field") != spec["component"] \
+                or entry.get("bindings") != [spec["environment"]] \
+                or entry.get("default") != str(spec["defaultValue"]):
+            errors.append(f"{identifier}: assistant generic setting metadata has drifted")
+    return errors
+
+
 def assistant_limit_authority_errors(root: Path, authorities: object,
                                      entries: dict[str, dict[str, object]],
                                      discovered: dict[str, Candidate]) -> list[str]:
@@ -3754,6 +3847,7 @@ def assistant_limit_authority_errors(root: Path, authorities: object,
             or authority.get("kind") != "assistant-symbol-operational-limits-v1":
         return ["assistant operational-limit family authority has an unsupported shape"]
     errors: list[str] = []
+    family_index = assistant_limit_family_index(authorities)
     settings = authority["settings"]
     if not isinstance(settings, list) or len(settings) != 2:
         return ["assistant operational-limit authority must contain exactly two settings"]
@@ -3765,6 +3859,7 @@ def assistant_limit_authority_errors(root: Path, authorities: object,
     if not isinstance(conversions, dict) or set(conversions) != set(contracts) \
             or not isinstance(carriers, dict) or set(carriers) != set(contracts):
         errors.append("assistant conversion/carrier authorities must cover both settings")
+    expected_entry_ids: set[str] = set()
     for spec in derived:
         setting = str(spec["setting"])
         contract = contracts[setting]
@@ -3830,8 +3925,13 @@ def assistant_limit_authority_errors(root: Path, authorities: object,
             entries, discovered)
         errors.extend(carrier_errors)
         assigned = set(declaration_ids) | set(default_ids) | carrier_ids
+        expected_entry_ids.update(assigned)
         if any(entries.get(identifier, {}).get("setting") != setting for identifier in assigned):
             errors.append(f"{setting}: assistant proof candidates are absent or assigned elsewhere")
+        if any(entries.get(identifier, {}).get("status") != "converted"
+               or entries.get(identifier, {}).get("classification") != "operator-configurable"
+               for identifier in assigned):
+            errors.append(f"{setting}: assistant proof candidates must all be converted operator settings")
         errors.extend(assistant_limit_conversion_errors(
             root, spec, conversions.get(setting) if isinstance(conversions, dict) else None))
     errors.extend(assistant_limit_resolver_errors(root, authority["resolverAuthority"]))
@@ -3843,6 +3943,20 @@ def assistant_limit_authority_errors(root: Path, authorities: object,
                 f"{spec['environment']} {spec['component']} {spec['defaultSymbol']} "
                 f"assistant.{spec['helmField']}") != 1 for spec in ASSISTANT_LIMIT_SETTINGS):
         errors.append("assistant platform carrier test source evidence has drifted")
+    fixed_settings = set(family_index)
+    actual_entry_ids = {
+        identifier for identifier, entry in entries.items()
+        if entry.get("setting") in fixed_settings
+    }
+    if actual_entry_ids != expected_entry_ids:
+        errors.append("assistant inventory assignments do not equal the independently derived family rows")
+    specialized_rows = {
+        identifier for identifier, entry in entries.items()
+        if isinstance(entry.get("bindingAuthority"), dict)
+        and entry["bindingAuthority"].get("kind") == "java-symbol-environment-constructor-v1"
+    }
+    if any(entries[identifier].get("setting") not in fixed_settings for identifier in specialized_rows):
+        errors.append("assistant specialized authority cannot declare an unknown setting")
     return errors
 
 
@@ -3865,6 +3979,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         entries[identifier] = entry
 
     discovered = {candidate.id: candidate for candidate in candidates}
+    assistant_authorities = document.get("assistantLimitAuthorities")
+    assistant_settings = {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}
+    assistant_family = assistant_limit_family_index(assistant_authorities)
     for identifier, candidate in discovered.items():
         entry = entries.get(identifier)
         if entry is None:
@@ -3925,6 +4042,13 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                 errors.append(f"{identifier}: field is not declared by its typed owner: {entry.get('field')}")
             if status == "converted":
                 conversion = entry.get("conversion")
+                setting = str(entry.get("setting", ""))
+                if setting in assistant_settings:
+                    family = assistant_family.get(setting)
+                    if family is None or conversion != family["conversion"]:
+                        errors.append(
+                            f"{identifier}: converted assistant row must cite its exact family conversion")
+                    continue
                 required = ("issue", "beforeRevision", "afterRevision", "path", "symbol",
                             "binding", "bindingSymbol", "field", "beforeExpression", "afterExpression")
                 if not isinstance(conversion, dict) or any(
@@ -4060,7 +4184,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         root, document.get("routeTableAuthorities"), entries, discovered,
     ))
     errors.extend(assistant_limit_authority_errors(
-        root, document.get("assistantLimitAuthorities"), entries, discovered,
+        root, assistant_authorities, entries, discovered,
     ))
 
     tracked_paths = set(tracked_files(root))
@@ -4076,11 +4200,17 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                                   if entry.get("kind") == "environment-binding"}
             for binding in sorted(bindings - evidenced_bindings):
                 errors.append(f"{setting}: binding {binding} has no same-setting environment-binding candidate")
-        errors.extend(binding_authority_errors(
-            root, setting, representative, setting_entries, entries, discovered,
-            resolver_authorities,
-        ))
-        errors.extend(default_authority_errors(root, setting, representative, entries, discovered))
+        if setting in assistant_settings:
+            errors.extend(assistant_limit_entry_adapter_errors(
+                root, setting, setting_entries, entries, discovered, assistant_authorities,
+            ))
+        else:
+            errors.extend(binding_authority_errors(
+                root, setting, representative, setting_entries, entries, discovered,
+                resolver_authorities,
+            ))
+            errors.extend(default_authority_errors(
+                root, setting, representative, entries, discovered))
         errors.extend(schema_evidence_errors(setting, representative, entries, discovered, evidence_records))
         errors.extend(graph_platform_coverage_errors(
             root, setting, representative, entries, discovered, evidence_records, tracked_paths,

@@ -629,6 +629,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             Path("deploy/helm/ravenroot/templates/deployment.yaml"),
             Path("deploy/kubernetes/ravenroot.yaml"),
         )
+        pinned_revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
         before_source = subprocess.run(
             ["git", "show", "e60a099ebbd900e38f3bb004564d8f5125a887c4:"
              + audit.ASSISTANT_CONFIGURATION_PATH.as_posix()],
@@ -637,7 +641,10 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         for relative in paths:
             target = root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes((ROOT / relative).read_bytes())
+            target.write_bytes(subprocess.run(
+                ["git", "show", f"{pinned_revision}:{relative.as_posix()}"], cwd=ROOT,
+                check=True, capture_output=True,
+            ).stdout)
         (root / audit.ASSISTANT_CONFIGURATION_PATH).write_text(before_source, encoding="utf-8")
         subprocess.run(["git", "init", "-q"], cwd=root, check=True)
         subprocess.run(["git", "add", "."], cwd=root, check=True)
@@ -698,7 +705,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 entry = candidates[identifier].inventory_entry()
                 entry.update(setting=setting, status="converted", classification="operator-configurable")
                 entries[identifier] = entry
-            setting_authorities.append({
+            setting_authority = {
                 "setting": setting,
                 "bindingAuthority": {
                     "kind": "java-symbol-environment-constructor-v1",
@@ -723,7 +730,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     "sourceExpression": spec["defaultExpression"],
                     "candidateIds": default_ids, "evaluatedDefault": spec["defaultValue"],
                 },
-            })
+            }
+            setting_authorities.append(setting_authority)
             conversions[setting] = {
                 "kind": "java-constructor-binding-conversion-v1", "issue": "#225",
                 "beforeRevision": before_revision, "afterRevision": after_revision,
@@ -738,6 +746,26 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             carriers[setting] = {
                 "environment": spec["environment"], "expectedCandidateIds": carrier_ids,
             }
+            common = {
+                "setting": setting, "status": "converted",
+                "classification": "operator-configurable",
+                "rationale": "Operator-tightenable assistant provider resource bound.",
+                "owner": (audit.ASSISTANT_CONFIGURATION_PATH.as_posix()
+                          + "#AssistantConfiguration"),
+                "field": spec["component"], "bindings": [spec["environment"]],
+                "default": str(spec["defaultValue"]),
+                "defaultEvidence": default_ids,
+                "validation": f"whole integer from 1 to {spec['defaultValue']}",
+                "scope": "live AssistantService request processing",
+                "pinning": "live process-startup configuration; not durable",
+                "coverage": "closed Java and deployment carrier family",
+                "bindingAuthority": setting_authority["bindingAuthority"],
+                "defaultAuthority": setting_authority["defaultAuthority"],
+                "carrierEvidence": carriers[setting],
+                "conversion": conversions[setting],
+            }
+            for identifier in assigned:
+                entries[identifier].update(copy.deepcopy(common))
 
         config_test = (root / audit.ASSISTANT_CONFIGURATION_TEST_PATH).read_text(encoding="utf-8")
         service = (root / audit.ASSISTANT_SERVICE_PATH).read_text(encoding="utf-8")
@@ -801,6 +829,112 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def assistant_limit_errors(self, root: Path, authorities, entries, candidates):
         return audit.assistant_limit_authority_errors(root, authorities, entries, candidates)
+
+    def assistant_limit_inventory_document(self, authorities, entries, candidates):
+        selected = tuple(candidate for candidate in candidates.values() if candidate.id in entries)
+        return ({
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": [copy.deepcopy(entries[identifier]) for identifier in sorted(entries)],
+            "retiredEntries": [], "migrationHistory": [],
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in selected},
+            "assistantLimitAuthorities": copy.deepcopy(authorities),
+        }, selected)
+
+    def test_assistant_two_limit_inventory_adapter_preserves_generic_checks(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
+            document, selected = self.assistant_limit_inventory_document(
+                authorities, entries, candidates)
+            self.assertEqual([], audit.inventory_errors(root, document, selected))
+
+            def errors_after(change):
+                changed = copy.deepcopy(document)
+                change(changed)
+                return audit.inventory_errors(root, changed, selected)
+
+            first = 0
+            for field in ("defaultEvidence", "bindingAuthority", "defaultAuthority",
+                          "carrierEvidence", "conversion"):
+                self.assertTrue(errors_after(
+                    lambda changed, field=field: changed["entries"][first].pop(field)), field)
+
+            self.assertTrue(any("must all be converted operator settings" in error
+                                for error in errors_after(
+                                    lambda changed: changed["entries"][first].update(
+                                        status="pending-review", classification=None))))
+            self.assertTrue(any("must all be converted operator settings" in error
+                                for error in errors_after(
+                                    lambda changed: changed["entries"][first].update(
+                                        status="retained",
+                                        classification="protocol-or-format-invariant"))))
+            self.assertTrue(any("absent or assigned elsewhere" in error
+                                for error in errors_after(
+                                    lambda changed: changed["entries"][first].pop("setting"))))
+            self.assertTrue(errors_after(
+                lambda changed: changed.pop("assistantLimitAuthorities")))
+
+            mismatched = copy.deepcopy(document)
+            mismatched["entries"][first]["conversion"] = copy.deepcopy(
+                mismatched["entries"][first]["conversion"])
+            mismatched["entries"][first]["conversion"]["beforeArgument"] = \
+                "BROKEN_ASSISTANT_DEFAULT"
+            self.assertTrue(any("exact family conversion" in error
+                                or "differs from its family" in error
+                                for error in audit.inventory_errors(root, mismatched, selected)))
+
+            first_setting = document["entries"][first]["setting"]
+            wrong_default_id = next(
+                entry["id"] for entry in document["entries"]
+                if entry["setting"] == first_setting
+                and entry["id"] not in document["entries"][first]["defaultEvidence"])
+            wrong_defaults = copy.deepcopy(document)
+            for entry in wrong_defaults["entries"]:
+                if entry["setting"] == first_setting:
+                    entry["defaultEvidence"] = [wrong_default_id]
+            self.assertTrue(any("direct default atom" in error
+                                for error in audit.inventory_errors(
+                                    root, wrong_defaults, selected)))
+
+            missing_family_counterpart = copy.deepcopy(document)
+            family_settings = missing_family_counterpart["assistantLimitAuthorities"][
+                audit.ASSISTANT_LIMIT_FAMILY_ID]["settings"]
+            family_setting = next(item for item in family_settings
+                                  if item["setting"] == first_setting)
+            family_setting.pop("defaultAuthority")
+            self.assertTrue(audit.inventory_errors(
+                root, missing_family_counterpart, selected))
+
+            missing = copy.deepcopy(document)
+            missing["entries"].pop(first)
+            self.assertTrue(any("source-derived family rows" in error
+                                or "unclassified operational candidate" in error
+                                for error in audit.inventory_errors(root, missing, selected)))
+
+            unrelated = next(candidate for candidate in candidates.values()
+                             if candidate.id not in entries and not candidate.fixture)
+            extra = copy.deepcopy(document)
+            template = copy.deepcopy(extra["entries"][first])
+            template.update(unrelated.inventory_entry())
+            template.update(setting="assistant.unknown-third-setting", status="converted",
+                            classification="operator-configurable")
+            extra["entries"].append(template)
+            extra["evidenceRecords"][unrelated.evidence_digest] = unrelated.evidence
+            self.assertTrue(any("unknown setting" in error
+                                for error in audit.inventory_errors(
+                                    root, extra, selected + (unrelated,))))
+
+            extra_fixed = copy.deepcopy(document)
+            template = copy.deepcopy(extra_fixed["entries"][first])
+            template.update(unrelated.inventory_entry())
+            template.update(status="converted", classification="operator-configurable")
+            extra_fixed["entries"].append(template)
+            extra_fixed["evidenceRecords"][unrelated.evidence_digest] = unrelated.evidence
+            self.assertTrue(any("independently derived family rows" in error
+                                or "source-derived partition" in error
+                                for error in audit.inventory_errors(
+                                    root, extra_fixed, selected + (unrelated,))))
 
     def test_assistant_two_limit_authority_proves_bindings_defaults_history_and_consumers(self) -> None:
         with tempfile.TemporaryDirectory() as location:

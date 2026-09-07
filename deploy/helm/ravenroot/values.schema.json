@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft-07/schema#",
   "type": "object",
-  "required": ["image", "auth", "graph", "assistant"],
+  "required": ["image", "auth", "graph", "assistant", "rateLimit"],
   "properties": {
     "replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },
     "image": {
@@ -175,6 +175,112 @@
         "maxToolIterations": {
           "x-ravenroot-environment": "RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS",
           "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 8 }, { "$ref": "#/definitions/graphBlank" }]
+        }
+      }
+    },
+    "rateLimit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "addressRequestsPerSecond", "addressBurst", "tenantRequestsPerSecond", "tenantBurst",
+        "principalRequestsPerSecond", "principalBurst", "submissionsPerSecond", "submissionBurst",
+        "tenantConcurrentSubmissions", "globalActiveExecutions", "tenantConcurrentStreams",
+        "principalConcurrentStreams", "streamQueueCapacity", "maxQueryBytes", "maxQueryParameters",
+        "maxHeaderCount", "maxHeaderBytes", "maxHeaderValueBytes", "maxTrackedClients",
+        "maxTrackedTenants", "maxTrackedPrincipals", "idleEntryTtlSeconds", "executionMaxAgeSeconds"
+      ],
+      "properties": {
+        "addressRequestsPerSecond": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_ADDRESS_RPS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "addressBurst": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_ADDRESS_BURST",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "tenantRequestsPerSecond": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_TENANT_RPS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "tenantBurst": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_TENANT_BURST",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "principalRequestsPerSecond": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_PRINCIPAL_RPS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "principalBurst": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_PRINCIPAL_BURST",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "submissionsPerSecond": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_SUBMISSION_RPS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "submissionBurst": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_SUBMISSION_BURST",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "tenantConcurrentSubmissions": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "globalActiveExecutions": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "tenantConcurrentStreams": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_TENANT_STREAMS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "principalConcurrentStreams": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "streamQueueCapacity": {
+          "x-ravenroot-environment": "RAVENROOT_SSE_QUEUE_CAPACITY",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxQueryBytes": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_QUERY_BYTES",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxQueryParameters": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxHeaderCount": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_HEADER_COUNT",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxHeaderBytes": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_HEADER_BYTES",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxHeaderValueBytes": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxTrackedClients": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxTrackedTenants": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "maxTrackedPrincipals": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 2147483647 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "idleEntryTtlSeconds": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 3600 }, { "$ref": "#/definitions/graphBlank" }]
+        },
+        "executionMaxAgeSeconds": {
+          "x-ravenroot-environment": "RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS",
+          "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 86400 }, { "$ref": "#/definitions/graphBlank" }]
         }
       }
     },

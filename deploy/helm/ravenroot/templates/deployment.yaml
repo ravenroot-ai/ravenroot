@@ -159,6 +159,53 @@ spec:
               value: {{ include "ravenroot.graphLimitValue" .Values.assistant.maxOutputTokens }}
             - name: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS
               value: {{ include "ravenroot.graphLimitValue" .Values.assistant.maxToolIterations }}
+            # Empty rate-limit values select RateLimitConfiguration.DEFAULTS at startup.
+            - name: RAVENROOT_RATELIMIT_ADDRESS_RPS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.addressRequestsPerSecond }}
+            - name: RAVENROOT_RATELIMIT_ADDRESS_BURST
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.addressBurst }}
+            - name: RAVENROOT_RATELIMIT_TENANT_RPS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.tenantRequestsPerSecond }}
+            - name: RAVENROOT_RATELIMIT_TENANT_BURST
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.tenantBurst }}
+            - name: RAVENROOT_RATELIMIT_PRINCIPAL_RPS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.principalRequestsPerSecond }}
+            - name: RAVENROOT_RATELIMIT_PRINCIPAL_BURST
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.principalBurst }}
+            - name: RAVENROOT_RATELIMIT_SUBMISSION_RPS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.submissionsPerSecond }}
+            - name: RAVENROOT_RATELIMIT_SUBMISSION_BURST
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.submissionBurst }}
+            - name: RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.tenantConcurrentSubmissions }}
+            - name: RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.globalActiveExecutions }}
+            - name: RAVENROOT_RATELIMIT_TENANT_STREAMS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.tenantConcurrentStreams }}
+            - name: RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.principalConcurrentStreams }}
+            - name: RAVENROOT_SSE_QUEUE_CAPACITY
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.streamQueueCapacity }}
+            - name: RAVENROOT_RATELIMIT_MAX_QUERY_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxQueryBytes }}
+            - name: RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxQueryParameters }}
+            - name: RAVENROOT_RATELIMIT_MAX_HEADER_COUNT
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxHeaderCount }}
+            - name: RAVENROOT_RATELIMIT_MAX_HEADER_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxHeaderBytes }}
+            - name: RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxHeaderValueBytes }}
+            - name: RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxTrackedClients }}
+            - name: RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxTrackedTenants }}
+            - name: RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.maxTrackedPrincipals }}
+            - name: RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.idleEntryTtlSeconds }}
+            - name: RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS
+              value: {{ include "ravenroot.graphLimitValue" .Values.rateLimit.executionMaxAgeSeconds }}
             # The default execution store is SQLite/WAL. It shares this one-pod RWO volume with the
             # durable audit trail and must never be placed on the read-only root filesystem or /tmp.
             - name: RAVENROOT_AUDIT_DIR

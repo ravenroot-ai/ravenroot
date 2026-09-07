@@ -230,24 +230,43 @@ metric labels.
 
 ## HTTP rate and representation limits
 
-All values below are positive integers unless a row states otherwise. Blank uses the default; malformed
-or invalid relationships refuse startup. Burst values must be at least their sustained rate and at
-most 1,000,000.
+The server resolves this immutable policy once at startup. An absent or Java-whitespace-only value
+uses the Java-owned default. A nonblank value must be a positive integer; malformed values and invalid
+sibling relationships refuse startup. Compose and raw Kubernetes carry quoted strings. Helm accepts
+canonical YAML integers or Java-blank strings and carries no numerical defaults.
+
+| Variable | Default | Scalar range and unit | Boundary or relationship |
+|---|---:|---|---|
+| `RAVENROOT_RATELIMIT_ADDRESS_RPS` | `20` | 1–1,000,000 requests/s | one pre-authentication address key: one IPv4 address or IPv6 /64; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_ADDRESS_BURST` | `120` | 1–1,000,000 requests | must be at least address RPS |
+| `RAVENROOT_RATELIMIT_TENANT_RPS` | `50` | 1–1,000,000 requests/s | one authenticated tenant; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_TENANT_BURST` | `200` | 1–1,000,000 requests | must be at least tenant RPS |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_RPS` | `20` | 1–1,000,000 requests/s | one principal within a tenant; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_BURST` | `80` | 1–1,000,000 requests | must be at least principal RPS |
+| `RAVENROOT_RATELIMIT_SUBMISSION_RPS` | `2` | 1–1,000,000 submissions/s | execution submissions per tenant; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_SUBMISSION_BURST` | `10` | 1–1,000,000 submissions | must be at least submission RPS |
+| `RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS` | `4` | 1–2,147,483,647 submissions | in-flight submissions for one tenant |
+| `RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS` | `64` | 1–2,147,483,647 executions | process-wide active-execution ceiling |
+| `RAVENROOT_RATELIMIT_TENANT_STREAMS` | `16` | 1–2,147,483,647 streams | concurrent SSE streams for one tenant |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS` | `4` | 1–2,147,483,647 streams | cannot exceed tenant streams |
+| `RAVENROOT_SSE_QUEUE_CAPACITY` | `256` | 1–2,147,483,647 events | buffered events per stream before a slow consumer is dropped |
+| `RAVENROOT_RATELIMIT_MAX_QUERY_BYTES` | `4096` | 1–2,147,483,647 Java string code units | raw query string length; the current limiter uses `String.length()`, despite the variable's historical `BYTES` name |
+| `RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS` | `64` | 1–2,147,483,647 segments | one for a nonempty raw query plus each `&` separator |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_COUNT` | `64` | 1–2,147,483,647 headers | request header count |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_BYTES` | `16384` | 1–2,147,483,647 Java string code units | sum of each header name and value's `String.length()`; the variable's historical `BYTES` name does not imply UTF-8 measurement |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES` | `8192` | 1–2,147,483,647 Java string code units | one value's `String.length()`; cannot exceed the total header representation budget |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS` | `10000` | 1–2,147,483,647 entries | retained per-address limiter identities |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS` | `1000` | 1–2,147,483,647 entries | retained per-tenant limiter identities |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | `10000` | 1–2,147,483,647 entries | retained per-principal limiter identities |
+| `RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS` | `60` | 1–3,600 seconds | idle limiter-state retention |
+| `RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS` | `3600` | 1–86,400 seconds | active-execution accounting retention |
+
+The Helm Draft-07 schema enforces each scalar range. It cannot compare sibling fields, so the four
+burst/rate relationships, principal-stream/tenant-stream relationship, and single-value/total-header
+relationship are checked by `RateLimitConfiguration` when the server starts.
 
 | Variables | Defaults | Boundary |
 |---|---|---|
-| `RAVENROOT_RATELIMIT_ADDRESS_RPS`, `RAVENROOT_RATELIMIT_ADDRESS_BURST` | `20`, `120` | one client address before authentication |
-| `RAVENROOT_RATELIMIT_TENANT_RPS`, `RAVENROOT_RATELIMIT_TENANT_BURST` | `50`, `200` | one authenticated tenant |
-| `RAVENROOT_RATELIMIT_PRINCIPAL_RPS`, `RAVENROOT_RATELIMIT_PRINCIPAL_BURST` | `20`, `80` | one principal within a tenant |
-| `RAVENROOT_RATELIMIT_SUBMISSION_RPS`, `RAVENROOT_RATELIMIT_SUBMISSION_BURST` | `2`, `10` | execution submissions per tenant |
-| `RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS`, `RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS` | `4`, `64` | in-flight submissions and process-wide executions |
-| `RAVENROOT_RATELIMIT_TENANT_STREAMS`, `RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS` | `16`, `4` | concurrent SSE streams; principal cannot exceed tenant |
-| `RAVENROOT_SSE_QUEUE_CAPACITY` | `256` | buffered events per stream |
-| `RAVENROOT_RATELIMIT_MAX_QUERY_BYTES`, `RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS` | `4096`, `64` | raw query representation |
-| `RAVENROOT_RATELIMIT_MAX_HEADER_COUNT`, `RAVENROOT_RATELIMIT_MAX_HEADER_BYTES`, `RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES` | `64`, `16384`, `8192` | header representation; one value cannot exceed the total |
-| `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS`, `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS`, `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | `10000`, `1000`, `10000` | retained limiter identities |
-| `RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS` | `60` (1–3600) | idle limiter-state retention |
-| `RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS` | `3600` (1–86400) | active-execution accounting retention |
 | `RAVENROOT_TRUSTED_PROXY_HOPS`, `RAVENROOT_TRUSTED_PROXY_ADDRESSES` | `0`, empty | exact trusted suffix length (0–32) and IP-literal peers; both must be configured together |
 
 ## Server process and readiness

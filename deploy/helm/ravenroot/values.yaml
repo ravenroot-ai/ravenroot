@@ -94,6 +94,33 @@ assistant:
   maxOutputTokens: ""
   maxToolIterations: ""
 
+# HTTP rate, representation, and retained-limiter policy. Empty values leave every numerical
+# default in RateLimitConfiguration.DEFAULTS; use YAML integers for explicit startup values.
+rateLimit:
+  addressRequestsPerSecond: ""
+  addressBurst: ""
+  tenantRequestsPerSecond: ""
+  tenantBurst: ""
+  principalRequestsPerSecond: ""
+  principalBurst: ""
+  submissionsPerSecond: ""
+  submissionBurst: ""
+  tenantConcurrentSubmissions: ""
+  globalActiveExecutions: ""
+  tenantConcurrentStreams: ""
+  principalConcurrentStreams: ""
+  streamQueueCapacity: ""
+  maxQueryBytes: ""
+  maxQueryParameters: ""
+  maxHeaderCount: ""
+  maxHeaderBytes: ""
+  maxHeaderValueBytes: ""
+  maxTrackedClients: ""
+  maxTrackedTenants: ""
+  maxTrackedPrincipals: ""
+  idleEntryTtlSeconds: ""
+  executionMaxAgeSeconds: ""
+
 # Program execution timeout. RAVENROOT_PROGRAM_TIMEOUT_MS
 # has no chart-level default at all before this: an operator who wires in their own SEC-11 sandbox
 # supervisor (RAVENROOT_GRAAL_SANDBOX_SUPERVISOR is deliberately absent from this chart -- see

@@ -119,27 +119,32 @@ class InteractionWebSocketWireTest {
                         + "\"command\":\"human-task.cancel\",\"taskId\":\""
                         + cancelTask.taskId() + "\",\"generation\":1}", true).get(5, TimeUnit.SECONDS);
                 String result = listener.messages.poll(5, TimeUnit.SECONDS);
-                assertTrue(result.contains("\"outcome\":\"cancelled\""));
-                assertTrue(result.contains("\"generation\":2"));
+                assertContains(result, "\"outcome\":\"cancelled\"");
+                assertContains(result, "\"generation\":2");
 
+                String resolvedPayload = java.util.Base64.getEncoder().encodeToString(
+                        ai.ravenroot.api.payload.PayloadEnvelope.of("wire-test", "1",
+                                ai.ravenroot.api.payload.PayloadValue.of("approved"))
+                                .toJson().getBytes(StandardCharsets.UTF_8));
                 socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-resolve\","
                         + "\"command\":\"human-task.resolve\",\"taskId\":\""
-                        + resolveTask.taskId() + "\",\"generation\":1,\"payloadBase64\":\"\","
+                        + resolveTask.taskId() + "\",\"generation\":1,\"payloadBase64\":\""
+                        + resolvedPayload + "\","
                         + "\"contentType\":\"application/octet-stream\",\"comment\":\"\"}", true)
                         .get(5, TimeUnit.SECONDS);
                 result = listener.messages.poll(5, TimeUnit.SECONDS);
-                assertTrue(result.contains("\"inReplyTo\":\"client-resolve\""));
-                assertTrue(result.contains("\"outcome\":\"resolved\""));
-                assertTrue(result.contains("\"generation\":2"));
+                assertContains(result, "\"inReplyTo\":\"client-resolve\"");
+                assertContains(result, "\"outcome\":\"resolved\"");
+                assertContains(result, "\"generation\":2");
 
                 socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-deny\","
                         + "\"command\":\"human-task.deny\",\"taskId\":\""
                         + denyTask.taskId() + "\",\"generation\":1,\"comment\":\"declined\"}", true)
                         .get(5, TimeUnit.SECONDS);
                 result = listener.messages.poll(5, TimeUnit.SECONDS);
-                assertTrue(result.contains("\"inReplyTo\":\"client-deny\""));
-                assertTrue(result.contains("\"outcome\":\"denied\""));
-                assertTrue(result.contains("\"generation\":2"));
+                assertContains(result, "\"inReplyTo\":\"client-deny\"");
+                assertContains(result, "\"outcome\":\"denied\"");
+                assertContains(result, "\"generation\":2");
                 var existing = awaitEvents(authorized, context);
                 long lastOffset = existing.getLast().journalOffset();
                 java.util.UUID lastEventId = existing.getLast().eventId();
@@ -737,6 +742,11 @@ class InteractionWebSocketWireTest {
         var matcher = java.util.regex.Pattern.compile("\\\"" + field + "\\\":(\\d+)").matcher(json);
         assertTrue(matcher.find(), json);
         return Long.parseLong(matcher.group(1));
+    }
+
+    private static void assertContains(String message, String expected) {
+        assertTrue(message != null && message.contains(expected),
+                () -> "Expected " + expected + " in WebSocket response: " + message);
     }
 
     private static void awaitBackendCapacity(InteractionWebSocketServer server, int expected) {

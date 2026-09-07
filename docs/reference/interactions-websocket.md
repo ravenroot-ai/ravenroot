@@ -59,7 +59,7 @@ durable pair remains the authority across reconnects.
 The v1 mutation surface contains only these commands:
 
 ```json
-{"version":1,"type":"command","messageId":"client-17","command":"human-task.resolve","taskId":"ae0dd61d-0f99-4ef3-aaea-fd86eea9a7ad","generation":3,"payloadBase64":"","contentType":"application/octet-stream","comment":""}
+{"version":1,"type":"command","messageId":"client-17","command":"human-task.resolve","taskId":"ae0dd61d-0f99-4ef3-aaea-fd86eea9a7ad","generation":3,"payloadBase64":"eyJjb250cmFjdCI6InJhdmVucm9vdC5wYXlsb2FkLzEiLCJraW5kIjoiU0NBTEFSIiwic2NoZW1hIjoiYXBwcm92YWwucmVzcG9uc2UiLCJzY2hlbWFWZXJzaW9uIjoiMSIsInZhbHVlIjoiYXBwcm92ZWQifQ==","contentType":"application/octet-stream","comment":""}
 ```
 
 ```json
@@ -72,10 +72,14 @@ The v1 mutation surface contains only these commands:
 
 Every command requires an exact UUID `taskId`, positive integer `generation`, and nonblank UTF-8
 `messageId` of at most 128 bytes. Resolve additionally requires standard base64 `payloadBase64`; the
-empty string is a valid zero-byte response. Its optional `contentType` is at most 255 UTF-8 bytes and
-blank or absent means `application/octet-stream`. `comment` is optional for every command, may be
-empty, and is at most 4,096 UTF-8 bytes. Unknown fields and unknown commands are rejected. The whole
-message and decoded response must also fit the configured message ceiling.
+decoded bytes must be a complete `ravenroot.payload/1` envelope matching the task's pinned schema,
+version, and kind as described by the [Human Task authoring contract](human-tasks.md#authoring-contract).
+The message grammar admits an empty base64 string, but zero bytes do not form that required envelope,
+so the durable Human Task authority returns `PAYLOAD_REFUSED`. The optional `contentType` is at most
+255 UTF-8 bytes and blank or absent means `application/octet-stream`; its resolved value must also
+match the pinned media type. `comment` is optional for every command, may be empty, and is at most
+4,096 UTF-8 bytes. Unknown fields and unknown commands are rejected. The whole message and decoded
+response must also fit the configured message ceiling.
 
 A successful or already-settled durable operation returns:
 

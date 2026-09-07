@@ -115,11 +115,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     generator, "OpenApiSpecGenerator", "operationEntry"),
                 "openApiSuccessResponse": audit.java_method_digest(
                     generator, "OpenApiSpecGenerator", "successResponse"),
+                "openApiHumanTaskSchemas": audit.java_method_digest(
+                    generator, "OpenApiSpecGenerator", "humanTaskSchemas"),
+                "openApiExecutionEventSchemas": audit.java_method_digest(
+                    generator, "OpenApiSpecGenerator", "executionEventSchemas"),
             },
             "publicationTestAuthority": {
                 "testBodyDigest": audit.java_method_digest(
                     publication_test, "RouteTableSpecServerAgreementTest",
                     "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow"),
+                "eventStreamSpecBodyDigest": audit.java_method_digest(
+                    publication_test, "RouteTableSpecServerAgreementTest",
+                    "eventStreamSpecSeparatesSseTextFromVersionedDataAndControlFrames"),
                 "checkedInSpecBodyDigest": audit.java_method_digest(
                     publication_test, "RouteTableSpecServerAgreementTest", "checkedInSpec"),
             },
@@ -154,16 +161,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
         )
 
-    def test_route_table_authority_proves_all_508_positions_consumers_and_bounds(self) -> None:
+    def test_route_table_authority_proves_all_515_positions_consumers_and_bounds(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
             authority, entries, candidates, details = self.route_table_authority_fixture(root)
             self.assertEqual(53, len(details))
             self.assertEqual(
-                {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54},
+                {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54},
                 {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
             )
-            self.assertEqual(508, len(entries))
+            self.assertEqual(515, len(entries))
             self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
             self.assertEqual({
                 "StableEdgeId.MAX_UTF8_BYTES": 8192,
@@ -193,7 +200,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     self.assertTrue(any("exact candidate-specific authorities" in error
                                         for error in errors), errors)
             wrong_subset = copy.deepcopy(authority)
-            wrong_subset["publishedBoundClauses"]["oc-68d83961ae8fd9333d39"] = [
+            wrong_subset["publishedBoundClauses"]["oc-0b67657cac8e5b904054"] = [
                 "StableEdgeId.MAX_UTF8_BYTES", "StableEdgeId.SSE_FRAME_MAX_BYTES",
             ]
             errors = self.route_table_errors(root, wrong_subset, entries, candidates)
@@ -201,10 +208,40 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
 
             wrong_classification = copy.deepcopy(entries)
-            summary_id = authority["candidateIdsByRole"]["summary"][0]
+            summary_id = next(
+                identifier for identifier in authority["candidateIdsByRole"]["summary"]
+                if "Execution data uses schemaVersion 1" in candidates[identifier].expression
+            )
             wrong_classification[summary_id]["classification"] = "protocol-or-format-invariant"
             errors = self.route_table_errors(root, authority, wrong_classification, candidates)
             self.assertTrue(any(summary_id in error and "exact retained positional authority" in error
+                                for error in errors), errors)
+
+            missing_new_summary = copy.deepcopy(entries)
+            missing_new_summary.pop(summary_id)
+            errors = self.route_table_errors(root, authority, missing_new_summary, candidates)
+            self.assertTrue(any(summary_id in error and "exact retained positional authority" in error
+                                for error in errors), errors)
+
+            extra_new_summary = copy.deepcopy(entries)
+            extra = copy.deepcopy(entries[summary_id])
+            extra["id"] = "oc-extra-route-description"
+            extra_new_summary[extra["id"]] = extra
+            errors = self.route_table_errors(root, authority, extra_new_summary, candidates)
+            self.assertTrue(any("reviewed rows do not equal" in error for error in errors), errors)
+
+            stale_508 = copy.deepcopy(authority)
+            stale_508["candidateIdsByRole"]["summary"] = \
+                stale_508["candidateIdsByRole"]["summary"][:341]
+            errors = self.route_table_errors(root, stale_508, entries, candidates)
+            self.assertTrue(any("positional partitions have drifted" in error
+                                for error in errors), errors)
+
+            stale_bounds = copy.deepcopy(authority)
+            stale_bounds["publishedBoundClauses"]["oc-68d83961ae8fd9333d39"] = \
+                stale_bounds["publishedBoundClauses"].pop("oc-0b67657cac8e5b904054")
+            errors = self.route_table_errors(root, stale_bounds, entries, candidates)
+            self.assertTrue(any("exact candidate-specific authorities" in error
                                 for error in errors), errors)
 
             missing_consumer = copy.deepcopy(authority)
@@ -430,6 +467,89 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
+            success_span = audit.java_method_span(
+                original_generator, "OpenApiSpecGenerator", "successResponse")
+            self.assertIsNotNone(success_span)
+            success_start, success_end = success_span
+            original_success = original_generator[success_start:success_end]
+
+            def refreshed_success_errors(mutated_success: str) -> list[str]:
+                self.assertNotEqual(original_success, mutated_success)
+                mutated_generator = (original_generator[:success_start] + mutated_success
+                                     + original_generator[success_end:])
+                generator_path.write_text(mutated_generator, encoding="utf-8")
+                refreshed = copy.deepcopy(authority)
+                refreshed["consumerBodyDigests"]["openApiSuccessResponse"] = \
+                    audit.java_method_digest(
+                        mutated_generator, "OpenApiSpecGenerator", "successResponse")
+                return self.route_table_errors(root, refreshed, entries, candidates)
+
+            for original, replacement in (
+                ('"/v1/events".equals(route.path())', '"/v1/eventz".equals(route.path())'),
+                ('"GET".equals(method)', '"POST".equals(method)'),
+                ("status == 200", "status == 201"),
+            ):
+                with self.subTest(sse_guard=original):
+                    errors = refreshed_success_errors(original_success.replace(
+                        original, replacement, 1))
+                    self.assertTrue(any("successResponse lost status serialization" in error
+                                        for error in errors), errors)
+            third_return = original_success.replace(
+                '        if ("/v1/events".equals(route.path()) && "GET".equals(method) && status == 200) {',
+                '        if ("/v1/events".equals(route.path()) && "GET".equals(method) && status == 200) {'
+                '\n            if (route.authenticated()) return "shadow";',
+                1,
+            )
+            errors = refreshed_success_errors(third_return)
+            self.assertTrue(any("successResponse lost status serialization" in error
+                                for error in errors), errors)
+            lost_header = original_success.replace(
+                "X-Ravenroot-Event-Continuity", "X-Ravenroot-Event-ContinuityX", 1)
+            errors = refreshed_success_errors(lost_header)
+            self.assertTrue(any("SSE response lost header X-Ravenroot-Event-Continuity" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            removed_schema_append = original_generator.replace(
+                '        json.append(",\\n").append(executionEventSchemas()).append("    }\\n");',
+                '        json.append("    }\\n");',
+                1,
+            )
+            self.assertNotEqual(original_generator, removed_schema_append)
+            generator_path.write_text(removed_schema_append, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["consumerBodyDigests"]["openApiGenerate"] = audit.java_method_digest(
+                removed_schema_append, "OpenApiSpecGenerator", "generate")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("schema publication flow" in error for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            removed_schema_helper = original_generator.replace(
+                "private static String executionEventSchemas()",
+                "private static String unusedExecutionEventSchemas()",
+                1,
+            )
+            self.assertNotEqual(original_generator, removed_schema_helper)
+            generator_path.write_text(removed_schema_helper, encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("executionEventSchemas schema helper has drifted" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            changed_schema_body = original_generator.replace(
+                '"additionalProperties\\\":tru"', '"additionalProperties\\\":fals"', 1,
+            )
+            self.assertNotEqual(original_generator, changed_schema_body)
+            generator_path.write_text(changed_schema_body, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["consumerBodyDigests"]["openApiExecutionEventSchemas"] = \
+                audit.java_method_digest(
+                    changed_schema_body, "OpenApiSpecGenerator", "executionEventSchemas")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("executionEventSchemas schema helper has drifted" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
             generator_path.write_text(
                 original_generator.replace(
                     "package ai.ravenroot.server.spec;",
@@ -476,6 +596,73 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow")
             errors = self.route_table_errors(root, changed, entries, candidates)
             self.assertTrue(any("not an exact runnable @Test" in error for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            event_method = "eventStreamSpecSeparatesSseTextFromVersionedDataAndControlFrames"
+            missing_event_test = original_test.replace(
+                f"    @Test\n    void {event_method}", f"    void {event_method}", 1,
+            )
+            self.assertNotEqual(original_test, missing_event_test)
+            test_path.write_text(missing_event_test, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["publicationTestAuthority"]["eventStreamSpecBodyDigest"] = \
+                audit.java_method_digest(
+                    missing_event_test, "RouteTableSpecServerAgreementTest", event_method)
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("event-stream publication test is not an exact runnable @Test"
+                                in error for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            event_span = audit.java_method_span(
+                original_test, "RouteTableSpecServerAgreementTest", event_method)
+            self.assertIsNotNone(event_span)
+            event_start, event_end = event_span
+            original_event = original_test[event_start:event_end]
+            lost_recent_no_content = original_event.replace(
+                'assertFalse(members.apply(members.apply(recent.get("responses")).get("200"))'
+                '.containsKey("content")',
+                'assertTrue(members.apply(members.apply(recent.get("responses")).get("200"))'
+                '.containsKey("content")',
+                1,
+            )
+            self.assertNotEqual(original_event, lost_recent_no_content)
+            changed_event_test = (original_test[:event_start] + lost_recent_no_content
+                                  + original_test[event_end:])
+            test_path.write_text(changed_event_test, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["publicationTestAuthority"]["eventStreamSpecBodyDigest"] = \
+                audit.java_method_digest(
+                    changed_event_test, "RouteTableSpecServerAgreementTest", event_method)
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("event-stream publication test lost" in error
+                                and "containsKey" in error for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            decoy = (
+                '            String ignoredAssertionText = """\n'
+                '                    assertFalse(members.apply(members.apply(recent.get("responses"))'
+                '.get("200")).containsKey("content")\n'
+                '                    """;\n'
+            )
+            disabled_with_decoy = original_event.replace(
+                '        assertFalse(members.apply(members.apply(recent.get("responses")).get("200"))'
+                '.containsKey("content")',
+                decoy
+                + '        assertTrue(members.apply(members.apply(recent.get("responses")).get("200"))'
+                '.containsKey("content")',
+                1,
+            )
+            self.assertNotEqual(original_event, disabled_with_decoy)
+            decoy_test = (original_test[:event_start] + disabled_with_decoy
+                          + original_test[event_end:])
+            test_path.write_text(decoy_test, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["publicationTestAuthority"]["eventStreamSpecBodyDigest"] = \
+                audit.java_method_digest(
+                    decoy_test, "RouteTableSpecServerAgreementTest", event_method)
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("event-stream publication test is not an exact runnable @Test"
+                                in error for error in errors), errors)
             test_path.write_text(original_test, encoding="utf-8")
 
             test_path.write_text(

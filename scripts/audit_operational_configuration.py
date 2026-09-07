@@ -329,7 +329,7 @@ class Candidate:
                 **self.source_fields(),
                 "status": "retained",
                 "classification": "test-fixture",
-                "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration.",
+                "rationale": "The candidate is under an explicitly recognized test-fixture surface; it is not production runtime configuration.",
             }
         return {
             **self.source_fields(),
@@ -3124,6 +3124,12 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
 
 
 ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
+ROUTE_HUMAN_TASK_SCHEMAS_BODY_DIGEST = \
+    "2efd14c6ecb0e3f947800cbfe9a8af3ce591a5ac95e0ba05f6480d0564cc8d69"
+ROUTE_EXECUTION_EVENT_SCHEMAS_BODY_DIGEST = \
+    "f4b91c57c74f5f1ee76b9aca4a3edd52a2cce10a0f67efe3d4cacd270dd56f6b"
+ROUTE_EVENT_STREAM_PUBLICATION_TEST_BODY_DIGEST = \
+    "fd78aef6ecb775a1552fcfad1556dc02f4465345ac9d5837cb5521734a41a385"
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -3141,22 +3147,22 @@ STABLE_EDGE_TEST_PATH = Path(
 STABLE_EDGE_WIRE_TEST_PATH = Path(
     "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
 ROUTE_BOUND_CANDIDATES = {
-    "oc-68d83961ae8fd9333d39": ("StableEdgeId.MAX_UTF8_BYTES",),
-    "oc-87cc337254d84e793594":
+    "oc-0b67657cac8e5b904054": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-7ab123337eeb18906fc2":
         ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
-    "oc-72d27bee3c7d60226c09": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
-    "oc-af3a93f860fc52c46a00": (
+    "oc-7bab59779a16e10b10d7": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-418656067bc7b4ad0c5c": (
         "StableEdgeId.MAX_UTF8_BYTES",
         "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
     ),
-    "oc-e29595d4bc323f7da368": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-8eed875577d7d07c6447": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
 }
 ROUTE_BOUND_PATHS = {
-    "oc-68d83961ae8fd9333d39": "/v1/events",
-    "oc-87cc337254d84e793594": "/v1/events",
-    "oc-72d27bee3c7d60226c09": "/v1/events",
-    "oc-af3a93f860fc52c46a00": "/v1/events/recent",
-    "oc-e29595d4bc323f7da368": "/v1/events/recent",
+    "oc-0b67657cac8e5b904054": "/v1/events",
+    "oc-7ab123337eeb18906fc2": "/v1/events",
+    "oc-7bab59779a16e10b10d7": "/v1/events",
+    "oc-418656067bc7b4ad0c5c": "/v1/events/recent",
+    "oc-8eed875577d7d07c6447": "/v1/events/recent",
 }
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
@@ -3465,6 +3471,72 @@ def java_direct_return_expression(source: str, type_symbol: str, method: str) ->
     return normalized(actual[start:semicolon])
 
 
+def route_success_response_expressions(source: str) -> tuple[str, str] | None:
+    """Parse the closed SSE special case and final generic response return."""
+    span = java_method_span(source, "OpenApiSpecGenerator", "successResponse")
+    if span is None:
+        return None
+    actual = strip_c_comments(source[slice(*span)])
+    code = strip_c_comments_and_literals(source[slice(*span)])
+    depths = java_brace_depths(code)
+    body_open = code.find("{")
+    if body_open < 0:
+        return None
+    leading_if = next((match for match in re.finditer(r"\bif\s*\(", code)
+                       if depths[match.start()] == 1), None)
+    if leading_if is None or code[body_open + 1:leading_if.start()].strip():
+        return None
+    condition_open = code.find("(", leading_if.start())
+    condition_close = matching_delimiter(code, condition_open, "(", ")")
+    if condition_close is None or normalized(actual[leading_if.start():condition_close + 1]) != normalized(
+            'if ("/v1/events".equals(route.path()) && "GET".equals(method) && status == 200)'):
+        return None
+    branch_open_match = re.match(r"\s*\{", code[condition_close + 1:])
+    if branch_open_match is None:
+        return None
+    branch_open = condition_close + 1 + branch_open_match.end() - 1
+    branch_close = matching_delimiter(code, branch_open, "{", "}")
+    if branch_close is None:
+        return None
+    nested_returns = [match for match in re.finditer(r"\breturn\b", code)
+                      if depths[match.start()] == 2]
+    direct_returns = [match for match in re.finditer(r"\breturn\b", code)
+                      if depths[match.start()] == 1]
+    if len(nested_returns) != 1 or len(direct_returns) != 1 \
+            or len(re.findall(r"\breturn\b", code)) != 2 \
+            or not branch_open < nested_returns[0].start() < branch_close:
+        return None
+    nested_start = nested_returns[0].end()
+    nested_semicolon = next((offset for offset in range(nested_start, branch_close)
+                             if code[offset] == ";" and depths[offset] == 2), None)
+    if nested_semicolon is None \
+            or code[branch_open + 1:nested_returns[0].start()].strip() \
+            or code[nested_semicolon + 1:branch_close].strip():
+        return None
+    if not re.match(r"\s*String\s+schema\s*=\s*null\s*;", code[branch_close + 1:]):
+        return None
+    direct_start = direct_returns[0].end()
+    direct_semicolon = next((offset for offset in range(direct_start, len(code))
+                             if code[offset] == ";" and depths[offset] == 1), None)
+    if direct_semicolon is None:
+        return None
+    if code[direct_semicolon + 1:].strip() != "}":
+        return None
+    top_level_ifs = [match for match in re.finditer(r"\bif\s*\(", code)
+                     if depths[match.start()] == 1]
+    top_level_elses = [match for match in re.finditer(r"\belse\b", code)
+                       if depths[match.start()] == 1]
+    other_controls = [match for match in re.finditer(
+        r"\b(?:switch|for|while|do|try|catch)\b", code,
+    ) if depths[match.start()] >= 1]
+    if len(top_level_ifs) != 5 or len(top_level_elses) != 3 or other_controls:
+        return None
+    return (
+        normalized(actual[nested_start:nested_semicolon]),
+        normalized(actual[direct_start:direct_semicolon]),
+    )
+
+
 def java_direct_field_has_annotation(source: str, type_symbol: str, field: str,
                                      annotation: str) -> bool:
     span = java_type_span(source, type_symbol)
@@ -3604,7 +3676,8 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
     consumer_digests = authority.get("consumerBodyDigests")
     required_digests = {
         "routeDescriptorValidation", "openApiGenerate", "openApiPathEntry",
-        "openApiOperationEntry", "openApiSuccessResponse",
+        "openApiOperationEntry", "openApiSuccessResponse", "openApiHumanTaskSchemas",
+        "openApiExecutionEventSchemas",
     }
     if not isinstance(consumer_digests, dict) or set(consumer_digests) != required_digests:
         return ["RouteTable authority requires exact typed consumer body digests"]
@@ -3672,6 +3745,13 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
         errors.append("RouteTable OpenAPI generate lost the routes-to-pathEntry append chain")
     if normalized("return json.toString()") not in generate_code:
         errors.append("RouteTable OpenAPI generate lost return json.toString()")
+    for expression in (
+        "String existingSchemas = humanTaskSchemas()",
+        'json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\\n    }"))',
+        'json.append(",\\n").append(executionEventSchemas()).append("    }\\n")',
+    ):
+        if normalized(expression) not in normalized(strip_c_comments(generate_source)):
+            errors.append(f"RouteTable OpenAPI generate lost schema publication flow: {expression}")
     for role, method, header, required in (
         ("openApiPathEntry", "pathEntry", "private static String pathEntry(RouteDescriptor route)",
          ("route.methods().stream().sorted().map(method -> operationEntry(route, method))",
@@ -3689,25 +3769,68 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
         for expression in required:
             if normalized(expression) not in code:
                 errors.append(f"RouteTable typed consumer {method} lost {expression}")
-    success_span = java_method_span(generator, "OpenApiSpecGenerator", "successResponse")
-    success_return = java_direct_return_expression(
-        generator, "OpenApiSpecGenerator", "successResponse")
+    success_expressions = route_success_response_expressions(generator)
+    sse_return, generic_return = success_expressions if success_expressions is not None else ("", "")
+    sse_literal = java_literal_concatenation(sse_return) if sse_return else None
+    sse_value = sse_literal[0] if sse_literal is not None else ""
     status_prefix = normalized(
         '"          \\"" + status + "\\": {\\"description\\": \\"success\\"" +')
     if java_method_header(generator, "OpenApiSpecGenerator", "successResponse") != \
             "private static String successResponse(RouteDescriptor route, String method, int status)" \
             or java_method_digest(generator, "OpenApiSpecGenerator", "successResponse") != \
             consumer_digests["openApiSuccessResponse"] \
-            or success_return is None or not success_return.startswith(status_prefix) \
-            or normalized("schema == null ?") not in success_return \
-            or normalized("+ schema +") not in success_return:
+            or success_expressions is None \
+            or not sse_value.lstrip().startswith('"200":') \
+            or '"text/event-stream"' not in sse_value \
+            or '"#/components/schemas/ExecutionStreamEvent"' not in sse_value \
+            or not generic_return.startswith(status_prefix) \
+            or normalized("schema == null ?") not in generic_return \
+            or normalized("+ schema +") not in generic_return:
         errors.append("RouteTable OpenAPI successResponse lost status serialization")
+    for name in (
+        "X-Ravenroot-Event-Source", "X-Ravenroot-Event-Continuity",
+        "X-Ravenroot-Event-Schema-Version",
+    ):
+        if sse_value.count(f'"{name}":') != 1:
+            errors.append(f"RouteTable OpenAPI SSE response lost header {name}")
+    for event, schema in (
+        ("execution", "ExecutionStreamEvent"),
+        ("stream-truncated", "EventStreamTruncated"),
+        ("stream-overrun", "EventStreamOverrun"),
+    ):
+        clause = f'"{event}":{{"dataSchema":{{"$ref":"#/components/schemas/{schema}"}}}}'
+        if clause not in sse_value:
+            errors.append(f"RouteTable OpenAPI SSE response lost {event} data schema")
+    for method, digest_key in (
+        ("humanTaskSchemas", "openApiHumanTaskSchemas"),
+        ("executionEventSchemas", "openApiExecutionEventSchemas"),
+    ):
+        method_digest = java_method_digest(generator, "OpenApiSpecGenerator", method)
+        if java_method_header(generator, "OpenApiSpecGenerator", method) != \
+                f"private static String {method}()" \
+                or method_digest != consumer_digests[digest_key] \
+                or (method == "humanTaskSchemas"
+                    and method_digest != ROUTE_HUMAN_TASK_SCHEMAS_BODY_DIGEST) \
+                or (method == "executionEventSchemas"
+                    and method_digest != ROUTE_EXECUTION_EVENT_SCHEMAS_BODY_DIGEST) \
+                or java_direct_return_expression(generator, "OpenApiSpecGenerator", method) is None:
+            errors.append(f"RouteTable OpenAPI {method} schema helper has drifted")
+    execution_return = java_direct_return_expression(
+        generator, "OpenApiSpecGenerator", "executionEventSchemas")
+    execution_literal = java_literal_concatenation(execution_return) if execution_return else None
+    execution_value = execution_literal[0] if execution_literal is not None else ""
+    for schema in (
+        "ExecutionStreamEventBase", "ExecutionStreamEvent", "RingExecutionStreamEvent",
+        "DurableExecutionStreamEvent", "EventStreamTruncated", "EventStreamOverrun",
+    ):
+        if execution_value.count(f'"{schema}":') != 1:
+            errors.append(f"RouteTable OpenAPI executionEventSchemas lost {schema}")
     return errors
 
 
 def route_publication_test_errors(root: Path, authority: dict[str, object]) -> list[str]:
     evidence = authority.get("publicationTestAuthority")
-    required = {"testBodyDigest", "checkedInSpecBodyDigest"}
+    required = {"testBodyDigest", "eventStreamSpecBodyDigest", "checkedInSpecBodyDigest"}
     if not isinstance(evidence, dict) or set(evidence) != required:
         return ["RouteTable authority requires exact publication test evidence"]
     source = (root / ROUTE_TABLE_TEST_PATH).read_text(encoding="utf-8")
@@ -3726,7 +3849,7 @@ def route_publication_test_errors(root: Path, authority: dict[str, object]) -> l
             or not same_package_type_identity(
                 source, test_type, "ai.ravenroot.server.spec.OpenApiSpecGenerator") \
             or not java_has_exact_junit_assertions(
-                source, test_type, {"assertEquals", "assertTrue"}):
+                source, test_type, {"assertEquals", "assertFalse", "assertTrue"}):
         errors.append("RouteTable publication test type/import/TempDir identity has drifted")
     if java_method_header(source, test_type, method) != f"void {method}() throws Exception" \
             or java_method_annotations(source, test_type, method) != ("@Test",) \
@@ -3740,6 +3863,32 @@ def route_publication_test_errors(root: Path, authority: dict[str, object]) -> l
     ):
         if normalized(expression) not in code:
             errors.append(f"RouteTable publication parity test lost {expression}")
+    event_method = "eventStreamSpecSeparatesSseTextFromVersionedDataAndControlFrames"
+    event_digest = java_method_digest(source, test_type, event_method)
+    if java_method_header(source, test_type, event_method) != f"void {event_method}()" \
+            or java_method_annotations(source, test_type, event_method) != ("@Test",) \
+            or event_digest != evidence["eventStreamSpecBodyDigest"] \
+            or event_digest != ROUTE_EVENT_STREAM_PUBLICATION_TEST_BODY_DIGEST:
+        errors.append("RouteTable event-stream publication test is not an exact runnable @Test")
+    event_span = java_method_span(source, test_type, event_method)
+    event_source = normalized(strip_c_comments(
+        source[slice(*event_span)] if event_span is not None else ""))
+    for expression in (
+        "OpenApiSpecGenerator.generate(RouteTable.ALL)",
+        'paths.get("/v1/events")',
+        'members.apply(operation.get("responses")).get("200")',
+        'assertEquals(Set.of("text/event-stream"), content.keySet())',
+        'Set.of("X-Ravenroot-Event-Source", "X-Ravenroot-Event-Continuity", '
+        '"X-Ravenroot-Event-Schema-Version")',
+        'Set.of("execution", "stream-truncated", "stream-overrun")',
+        'schemas.get("ExecutionStreamEvent")',
+        'assertFalse(members.apply(baseProperties.get("occurredAt")).containsKey("format")',
+        'paths.get("/v1/events/recent")',
+        'assertFalse(members.apply(members.apply(recent.get("responses")).get("200"))'
+        '.containsKey("content")',
+    ):
+        if normalized(expression) not in event_source:
+            errors.append(f"RouteTable event-stream publication test lost {expression}")
     helper_span = java_method_span(source, test_type, helper)
     helper_code = normalized(strip_c_comments_and_literals(
         source[slice(*helper_span)] if helper_span else ""))
@@ -3865,9 +4014,9 @@ def route_table_authority_errors(root: Path, authorities: object,
         return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
     partitions, details, source_candidates = parsed
     errors: list[str] = []
-    expected_counts = {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54}
+    expected_counts = {"methods": 60, "path": 53, "summary": 348, "successStatuses": 54}
     if len(details) != 53 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
-        errors.append("RouteTable authority no longer has the reviewed 53/508 positional shape")
+        errors.append("RouteTable authority no longer has the reviewed 53/515 positional shape")
     recorded = authority["candidateIdsByRole"]
     if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
             or any(recorded.get(role) != partitions[role] for role in expected_counts):

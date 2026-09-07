@@ -9,13 +9,14 @@ public record ArtifactLifecycleConfiguration(boolean dualControl) {
 
     public static ArtifactLifecycleConfiguration fromEnvironment(Map<String, String> environment) {
         Objects.requireNonNull(environment, "environment");
-        if (!environment.containsKey(DUAL_CONTROL_ENV)) {
+        String configured = environment.get(DUAL_CONTROL_ENV);
+        if (configured == null || configured.isBlank()) {
             // Automatic graph readiness is the default delivery path. Deployments that require a
             // second human approver opt in explicitly; absence must not make every imported graph
-            // wait forever for an operator action that the UI did not ask for.
+            // wait forever for an operator action that the UI did not ask for. Blank has the same
+            // meaning as absence across startup configuration.
             return new ArtifactLifecycleConfiguration(false);
         }
-        String configured = environment.get(DUAL_CONTROL_ENV);
         if ("true".equals(configured)) {
             return new ArtifactLifecycleConfiguration(true);
         }

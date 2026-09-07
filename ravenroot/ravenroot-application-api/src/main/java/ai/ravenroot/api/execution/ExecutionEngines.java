@@ -25,6 +25,23 @@ public final class ExecutionEngines {
                 .create(systemName);
     }
 
+    /**
+     * Locates a runtime adapter by its service-provider ID and creates an engine with explicit policy.
+     *
+     * @param id case-insensitive ID advertised by an {@link ExecutionEngineProvider}
+     * @param systemName adapter-specific runtime or actor-system name
+     * @param policy immutable policy forwarded unchanged to the selected provider
+     * @return a newly created engine from the selected provider
+     */
+    public static ExecutionEngine create(String id, String systemName, ExecutionEnginePolicy policy) {
+        return providers().stream()
+                .filter(provider -> provider.id().equalsIgnoreCase(id))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Unknown execution engine '" + id + "'. Available engines: " + available()))
+                .create(systemName, policy);
+    }
+
 /**
  * Lists the runtime adapter IDs visible through Java's service loader.
  * @return immutable, sorted provider IDs available on the application class path

@@ -23,9 +23,14 @@ const LOOPBACK_CATALOG = JSON.stringify([
   { behavior: 'delay', displayName: 'Delay', category: 'Control flow', description: 'Pauses without blocking a worker', visualType: 'flow', agentic: false, capabilities: [], properties: [] },
   { behavior: 'json-path', displayName: 'JSONPath', category: 'Transformations', description: 'Selects data from JSON', visualType: 'flow', agentic: false, capabilities: [], properties: [] },
 ]);
+const SERVICE_CONFIGURATION = JSON.stringify({
+  schemaVersion: 1,
+  graphDocumentMaxBytes: 10 * 1024 * 1024,
+});
 
 let service;
 let catalogStatus = 200;
+let catalogUnavailable = false;
 
 function startService() {
   service = createServer((request, response) => {
@@ -34,7 +39,16 @@ function startService() {
       Vary: 'Origin',
       'Content-Type': 'application/json; charset=utf-8',
     };
+    if (request.url === '/v1/configuration') {
+      response.writeHead(200, headers);
+      response.end(SERVICE_CONFIGURATION);
+      return;
+    }
     if (request.url === '/v1/node-types') {
+      if (catalogUnavailable) {
+        request.socket.destroy();
+        return;
+      }
       // A loopback service with authentication disabled: it authorises everyone and never asks
       // for a token. `catalogStatus` lets a single test flip it into a service that does.
       response.writeHead(catalogStatus, headers);
@@ -62,8 +76,8 @@ async function connectWithoutToken(page) {
 }
 
 // The service the page reaches at boot is its own origin: `#service-url` is empty and the client
-// resolves that to same-origin relative paths. The fixture server that hosts the bundle only serves
-// static files, so the loopback service is placed on that origin here.
+// resolves that to same-origin relative paths. The fixture server that hosts the bundle also serves
+// configuration, while this route supplies the node catalog on that same origin.
 async function serveLoopbackCatalogAtBootOrigin(page, { status = 200 } = {}) {
   const requests = [];
   await page.route('**/v1/node-types', async route => {
@@ -80,6 +94,7 @@ async function serveLoopbackCatalogAtBootOrigin(page, { status = 200 } = {}) {
 
 test.beforeEach(async () => {
   catalogStatus = 200;
+  catalogUnavailable = false;
   await startService();
 });
 
@@ -110,20 +125,15 @@ test('a service that answers 401 says so, and does not claim the catalog is unre
   await expect(empty).not.toContainText('unreachable');
 });
 
-test('a service that does not answer at all is reported as unreachable, not as unauthorised', async ({ page }) => {
-  await new Promise(resolve => service.close(resolve));
+test('a catalog endpoint that does not answer is reported as unreachable, not as unauthorised', async ({ page }) => {
+  catalogUnavailable = true;
 
-  await page.goto('/');
-  await page.locator('#service-url').fill(SERVICE_ORIGIN);
-  page.once('dialog', dialog => dialog.accept());
-  await page.locator('#service-url').press('Tab');
+  await connectWithoutToken(page);
 
   const empty = page.locator('#node-catalog .catalog-empty');
   await expect(empty).toHaveAttribute('data-catalog-state', 'unreachable');
   await expect(empty).toContainText('unreachable');
   await expect(empty).not.toContainText('401');
-
-  await startService();
 });
 
 // ── THE BOOT PATH ITSELF, WITH NO USER INTERACTION WHATSOEVER ────────────────────────────────

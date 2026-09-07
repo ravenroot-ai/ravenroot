@@ -100,6 +100,7 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
     private final UnaryOperator<Properties> sessionProperties;
     private final Executor executor;
     private final LongSupplier nanoTime;
+    private final LongSupplier watchdogNanoTime;
     private final ReservedNetworkPolicy destinationPolicy;
 
     public MailImapQueryNodeBehavior() { this(new EnvironmentImapProfileResolver(), new ai.ravenroot.extensions.mail.EnvironmentMailCredentialResolver()); }
@@ -114,7 +115,13 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
     MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials,
                               UnaryOperator<Properties> sessionProperties, Executor executor,
                               LongSupplier nanoTime, ReservedNetworkPolicy destinationPolicy) {
-        this.profiles = Objects.requireNonNull(profiles); this.credentials = Objects.requireNonNull(credentials); this.sessionProperties = Objects.requireNonNull(sessionProperties); this.executor = Objects.requireNonNull(executor); this.nanoTime = Objects.requireNonNull(nanoTime);
+        this(profiles, credentials, sessionProperties, executor, nanoTime, System::nanoTime, destinationPolicy);
+    }
+    MailImapQueryNodeBehavior(ImapProfileResolver profiles, CredentialResolver credentials,
+                              UnaryOperator<Properties> sessionProperties, Executor executor,
+                              LongSupplier nanoTime, LongSupplier watchdogNanoTime,
+                              ReservedNetworkPolicy destinationPolicy) {
+        this.profiles = Objects.requireNonNull(profiles); this.credentials = Objects.requireNonNull(credentials); this.sessionProperties = Objects.requireNonNull(sessionProperties); this.executor = Objects.requireNonNull(executor); this.nanoTime = Objects.requireNonNull(nanoTime); this.watchdogNanoTime = Objects.requireNonNull(watchdogNanoTime);
         this.destinationPolicy = Objects.requireNonNull(destinationPolicy);
     }
 
@@ -201,7 +208,7 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
     private NodeResult query(String tenantId, ImapProfile profile, Request request, int actionLimit, ConcurrentHashMap<String, Gate> resolverActions) {
         int timeoutMs = Math.min(MAX_QUERY_MS, profile.readTimeoutMs());
         long deadline = nanoTime.getAsLong() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs);
-        DeadlineWatchdog watchdog = new DeadlineWatchdog(timeoutMs);
+        DeadlineWatchdog watchdog = new DeadlineWatchdog(timeoutMs, watchdogNanoTime);
         SecretValue secret = null;
         char[] password = null;
         Store store = null; Folder folder = null;
@@ -641,11 +648,13 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         private final AtomicReference<Store> store = new AtomicReference<>();
         private final Set<Socket> sockets = ConcurrentHashMap.newKeySet();
         private final Thread owner = Thread.currentThread();
+        private final LongSupplier nanoTime;
         private final long deadline;
         private final Thread thread;
 
-        DeadlineWatchdog(int timeoutMs) {
-            deadline = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs);
+        DeadlineWatchdog(int timeoutMs, LongSupplier nanoTime) {
+            this.nanoTime = Objects.requireNonNull(nanoTime);
+            deadline = nanoTime.getAsLong() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(timeoutMs);
             thread = Thread.ofVirtual().name("ravenroot-imap-watchdog-", 0).unstarted(this::watch);
         }
         void start() {
@@ -657,7 +666,7 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         void track(Folder value) { folder.set(value); if (timedOut()) close(value); }
         Socket track(Socket value) { sockets.add(value); if (timedOut()) close(value); return value; }
         boolean timedOut() { return state.get() == TIMED_OUT; }
-        long remainingNanos() { return deadline - System.nanoTime(); }
+        long remainingNanos() { return deadline - nanoTime.getAsLong(); }
         boolean finishAndJoin() {
             finishState();
             thread.interrupt();
@@ -669,7 +678,7 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
         private void watch() {
             try {
                 while (state.get() == ACTIVE) {
-                    long remaining = deadline - System.nanoTime();
+                    long remaining = deadline - nanoTime.getAsLong();
                     if (remaining > 0) LockSupport.parkNanos(this, remaining);
                     Thread.interrupted();
                     if (expireIfDue()) break;
@@ -683,11 +692,11 @@ public final class MailImapQueryNodeBehavior implements NodeBehavior {
             } finally { ACTIVE_WATCHDOGS.decrementAndGet(); }
         }
         private synchronized boolean expireIfDue() {
-            if (state.get() == ACTIVE && System.nanoTime() - deadline >= 0) state.set(TIMED_OUT);
+            if (state.get() == ACTIVE && nanoTime.getAsLong() - deadline >= 0) state.set(TIMED_OUT);
             return state.get() != ACTIVE;
         }
         private synchronized void finishState() {
-            if (state.get() == ACTIVE) state.set(System.nanoTime() - deadline >= 0 ? TIMED_OUT : FINISHED);
+            if (state.get() == ACTIVE) state.set(nanoTime.getAsLong() - deadline >= 0 ? TIMED_OUT : FINISHED);
         }
         private static void close(Socket socket) {
             if (socket == null) return;

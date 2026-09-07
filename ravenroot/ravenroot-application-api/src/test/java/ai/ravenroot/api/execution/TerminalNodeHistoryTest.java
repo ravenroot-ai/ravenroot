@@ -65,9 +65,14 @@ class TerminalNodeHistoryTest {
     @Test
     void defaultsToACapacityLargeEnoughToOutliveAnExecutionButStillBounded() {
         var history = new TerminalNodeHistory();
+        int compileTimeConstant = switch (TerminalNodeHistory.DEFAULT_CAPACITY) {
+            case TerminalNodeHistory.DEFAULT_CAPACITY -> TerminalNodeHistory.DEFAULT_CAPACITY;
+            default -> throw new AssertionError("unexpected terminal-history default");
+        };
 
         assertEquals(TerminalNodeHistory.DEFAULT_CAPACITY, history.capacity());
         assertEquals(1024, TerminalNodeHistory.DEFAULT_CAPACITY);
+        assertEquals(1024, compileTimeConstant);
     }
 
     @Test

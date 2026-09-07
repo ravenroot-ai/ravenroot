@@ -32,6 +32,15 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 {{- end }}
 
+{{/* Graph limits use blank strings for Java-owned defaults and integers for explicit values. */}}
+{{- define "ravenroot.graphLimitValue" -}}
+{{- if kindIs "string" . -}}
+{{ . | quote }}
+{{- else -}}
+{{ int64 . | quote }}
+{{- end -}}
+{{- end }}
+
 {{- define "ravenroot.image" -}}
 {{- if .Values.image.digest -}}
 {{ printf "%s@%s" .Values.image.repository .Values.image.digest }}

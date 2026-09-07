@@ -66,6 +66,8 @@
   items:
     - title: Architecture overview
       url: /architecture/
+    - title: Operational configuration audit
+      url: /architecture/operational-configuration-audit.html
     - title: Product boundaries and authority
       url: /architecture/product-boundaries.html
     - title: Graph and GraphML semantics
@@ -125,6 +127,8 @@
       url: /reference/embed-extension-contracts.html
     - title: Backup and recovery bundle
       url: /reference/backup-recovery.html
+    - title: Shared PostgreSQL persistence
+      url: /reference/postgresql-persistence.html
 
 - title: First-party bundle reference
   items:

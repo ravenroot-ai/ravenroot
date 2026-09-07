@@ -76,6 +76,12 @@ identifier, and generation. After a reload or server restart, re-authenticate an
 that locator to fetch the task's durable presentation and current state. It never reconstructs the
 row from browser-cached task data.
 
+A server restart does not reload an already open browser page, so that page keeps the deployment or
+process context the user selected earlier. Close the recovered decision and select its Human Task
+node again to refresh the authoritative task list for that context. A browser reload restores the
+exact selected task from the opaque locator, but a broader task list still requires a deployment or
+run context selected from the service; Ravenroot does not infer one from the recovered row.
+
 This release provides the confirmation inside the main workbench connected to the embedded or
 single-server runtime, including SQLite-backed restart recovery. External approval pages, redirects,
 callbacks, CAPTCHAs, arbitrary URLs, and third-party signing flows are outside this interaction.

@@ -244,7 +244,30 @@ class MailImapConsumeContractTest {
         assertEquals("poison", ingress.payloads.getFirst().get("kind"));
         assertEquals(Map.of("type", "projection", "reason", "message-size-invalid"),
                 ingress.payloads.getFirst().get("failure"));
+        assertEquals(11L, ImapConsumerTestSupport.await(ingress.checkpointCompleted));
         assertEquals(java.util.List.of(11L), ingress.advances);
+    }
+
+    @Test void durableReceiptAvailabilityIsDistinctFromCheckpointCompletion() {
+        var owner = new ImapConsumerTestSupport.FakeOwner();
+        var ingress = new ImapConsumerTestSupport.Ingress().gateCheckpoint();
+        source = source(new ImapConsumerTestSupport.FakeProtocol(owner), configuration(Map.of()), ignored -> secret());
+        source.start(new ImapConsumerTestSupport.Context(ingress)).toCompletableFuture().join();
+        owner.deliver(12, ImapConsumerTestSupport.message("<checkpoint-gate>", "hello", "body"));
+
+        try {
+            assertInstanceOf(IngressReceipt.DurablyCommitted.class,
+                    ImapConsumerTestSupport.await(ingress.receiptAvailable));
+            assertEquals(12L, ImapConsumerTestSupport.await(ingress.checkpointAdvanceRequested));
+            assertFalse(ingress.checkpointCompleted.isDone(),
+                    "a durable receipt must not imply checkpoint completion");
+            assertTrue(ingress.advances.isEmpty(),
+                    "the fixture must expose premature checkpoint advancement");
+        } finally {
+            ingress.releaseCheckpoint();
+        }
+        assertEquals(12L, ImapConsumerTestSupport.await(ingress.checkpointCompleted));
+        assertEquals(java.util.List.of(12L), ingress.advances);
     }
 
     @Test void transientLazyProjectionFailureReconnectsAndNeverPoisonsOrAdvances() throws Exception {

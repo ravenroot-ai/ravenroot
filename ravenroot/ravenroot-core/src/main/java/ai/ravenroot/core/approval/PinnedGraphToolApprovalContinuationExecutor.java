@@ -55,6 +55,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
     private final String workerId;
     private final Duration leaseTtl;
     private final GraphExecutionLimits executionLimits;
+    private final Duration runnerShutdownStepBound;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     /**
      * Verifies that this runtime resolves what the execution was accepted against, or {@code null}
@@ -199,6 +200,25 @@ public final class PinnedGraphToolApprovalContinuationExecutor
                                                        GraphExecutionLimits executionLimits,
                                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
                                                        ai.ravenroot.core.manifest.ExecutionManifestService manifests) {
+        this(definitions, executions, approvals, humanTasks, engine, behaviors, monitor, identities,
+                workerId, leaseTtl, executionLimits, agentBudgets, manifests,
+                GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    /** Full recovery composition with an immutable runner shutdown step bound. */
+    public PinnedGraphToolApprovalContinuationExecutor(GraphDefinitionStore definitions,
+                                                       ExecutionStore executions,
+                                                       ToolApprovalService approvals,
+                                                       HumanTaskService humanTasks,
+                                                       ExecutionEngine engine,
+                                                       BehaviorRegistry behaviors,
+                                                       ExecutionMonitor monitor,
+                                                       ExecutionIdentitySource identities,
+                                                       String workerId, Duration leaseTtl,
+                                                       GraphExecutionLimits executionLimits,
+                                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                                       ai.ravenroot.core.manifest.ExecutionManifestService manifests,
+                                                       Duration runnerShutdownStepBound) {
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
         this.approvals = Objects.requireNonNull(approvals, "approvals");
@@ -210,6 +230,11 @@ public final class PinnedGraphToolApprovalContinuationExecutor
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
         this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
+        this.runnerShutdownStepBound = Objects.requireNonNull(
+                runnerShutdownStepBound, "runnerShutdownStepBound");
+        if (runnerShutdownStepBound.isZero() || runnerShutdownStepBound.isNegative()) {
+            throw new IllegalArgumentException("runnerShutdownStepBound must be positive");
+        }
         this.agentBudgets = agentBudgets;
         this.manifests = manifests;
     }
@@ -335,7 +360,7 @@ public final class PinnedGraphToolApprovalContinuationExecutor
             GraphRunner runner;
             try {
                 runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                        GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
+                        runnerShutdownStepBound, executionLimits);
             } catch (RuntimeException setupFailure) {
                 setupFailure = cleanup(setupFailure, recorder::detachForAcknowledgement);
                 setupFailure = cleanup(setupFailure, manager::close);

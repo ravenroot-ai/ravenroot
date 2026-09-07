@@ -10,6 +10,14 @@ Protect the last safe cursor and durable store before reconciling gaps, expired 
 
 **Verify:** Confirm that subsequent events are ascending and that no state was inferred across the declared gap.
 
+## A stream reader reports an unsupported or contradictory envelope
+
+**Diagnosis:** An execution frame has an unsupported `schemaVersion` or source, conflicting compatibility aliases, or an ID that disagrees with its native cursor. The JSON schema describes execution `data`, not the whole SSE response body.
+
+**Action:** Parse SSE framing before JSON. Use `eventType` with legacy `type` fallback, preserve the exact string `id`, and keep cursor state scoped to the authenticated tenant and source. Accept unknown extra fields in a supported version, but do not guess how an unsupported version works. RING IDs cannot be carried across a known process restart.
+
+**Verify:** Decode a captured response body with `ravenroot events decode < capture.sse`. Confirm the source and schema headers agree with execution data when the HTTP client exposes them. A missing final frame delimiter reports an incomplete capture; neither a complete capture nor a keepalive proves that an execution terminated.
+
 ## An execution result is no longer available
 
 **Diagnosis:** Terminal-result retention expired even though the execution once completed.

@@ -9,6 +9,8 @@ import java.time.ZoneOffset;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -85,6 +87,63 @@ class InMemoryAssistantTokenStoreTest {
         store.signIn("author-one", AssistantCredential.oauthToken("token-one"), Duration.ZERO);
 
         assertTrue(store.tokenFor("author-one").isEmpty());
+        assertEquals(0, store.signedInCount());
+    }
+
+    @Test
+    void anExpiryAtTheLastRepresentableInstantIsAccepted() {
+        now.set(Instant.MAX.minusSeconds(60));
+        var store = store();
+
+        store.signIn("author-one", AssistantCredential.oauthToken("token-one"),
+                Duration.ofSeconds(60));
+
+        assertEquals(1, store.signedInCount());
+        now.set(Instant.MAX.minusNanos(1));
+        assertTrue(store.tokenFor("author-one").isPresent(), "valid until the final nanosecond");
+        now.set(Instant.MAX);
+        assertTrue(store.tokenFor("author-one").isEmpty(), "expired at the exact boundary");
+        assertEquals(0, store.signedInCount());
+    }
+
+    @Test
+    void anUnrepresentableExpiryIsCauseFreeAndCannotCreateOrReplaceASession() {
+        Instant nearEndOfTime = Instant.MAX.minusSeconds(60);
+        var store = new InMemoryAssistantTokenStore(Clock.fixed(nearEndOfTime, ZoneOffset.UTC));
+        var original = AssistantCredential.oauthToken("original-token");
+        store.signIn("existing-author", original, Duration.ofSeconds(30));
+
+        var newAuthorFailure = assertThrows(IllegalArgumentException.class, () ->
+                store.signIn("new-author", AssistantCredential.oauthToken("new-token"),
+                        Duration.ofSeconds(61)));
+        assertEquals("assistant session lifetime cannot be represented at the current time",
+                newAuthorFailure.getMessage());
+        assertNull(newAuthorFailure.getCause());
+        assertEquals(1, store.signedInCount());
+        assertTrue(store.tokenFor("new-author").isEmpty());
+
+        var replacementFailure = assertThrows(IllegalArgumentException.class, () ->
+                store.signIn("existing-author", AssistantCredential.oauthToken("replacement-token"),
+                        Duration.ofSeconds(61)));
+        assertEquals("assistant session lifetime cannot be represented at the current time",
+                replacementFailure.getMessage());
+        assertNull(replacementFailure.getCause());
+        assertEquals(1, store.signedInCount());
+        assertSame(original, store.tokenFor("existing-author").orElseThrow(),
+                "expiry calculation must complete before an existing token can be replaced");
+    }
+
+    @Test
+    void evenOneNanosecondPastInstantMaxIsRefused() {
+        var store = new InMemoryAssistantTokenStore(Clock.fixed(Instant.MAX, ZoneOffset.UTC));
+
+        var failure = assertThrows(IllegalArgumentException.class, () ->
+                store.signIn("author-one", AssistantCredential.oauthToken("token-one"),
+                        Duration.ofNanos(1)));
+
+        assertEquals("assistant session lifetime cannot be represented at the current time",
+                failure.getMessage());
+        assertNull(failure.getCause());
         assertEquals(0, store.signedInCount());
     }
 

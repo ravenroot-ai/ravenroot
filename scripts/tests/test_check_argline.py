@@ -214,6 +214,31 @@ class ArgLineGuardTests(unittest.TestCase):
             errors,
         )
 
+    def test_a_child_module_may_populate_the_composable_extra_argline(self) -> None:
+        """A module-specific JVM option belongs in extraArgLine, while the inherited argLine keeps
+        appending the separately protected locale property. The integrity guard must accept this
+        supported composition without relaxing its child-locale or literal-argLine checks.
+        """
+        with real_repo_copy() as root:
+            root_path = Path(root)
+            child_pom = root_path / "ravenroot/ravenroot-application-api/pom.xml"
+            text = child_pom.read_text(encoding="utf-8")
+            self.assertNotIn("ravenroot.surefire.extraArgLine", text, "fixture assumption drifted")
+            populated = text.replace(
+                "</project>",
+                (
+                    "    <properties>\n"
+                    "        <ravenroot.surefire.extraArgLine>-Dprobe=module</ravenroot.surefire.extraArgLine>\n"
+                    "    </properties>\n"
+                    "</project>"
+                ),
+            )
+            self.assertNotEqual(text, populated, "replacement anchor not found; fixture drifted")
+            self.assertNotIn("<argLine", populated, "fixture accidentally added an argLine")
+            child_pom.write_text(populated, encoding="utf-8")
+            errors = check_argline.check(root_path, check_argline.discover_poms(root_path))
+        self.assertEqual([], errors, errors)
+
     def test_red_an_argline_with_a_combine_self_attribute_is_caught(self) -> None:
         """RED case: a bare <argLine>(.*?)</argLine> pattern misses an opening tag that carries
         an attribute (e.g. combine.self="override", a real Maven Dom-merge control attribute a

@@ -69,6 +69,41 @@ class DefaultRavenrootApplicationExecutionStoreTest {
             """;
 
     @Test
+    void startGraphMlUsesTheApplicationRunnerShutdownBoundWithoutSkippingDurableCompletion() throws Exception {
+        var store = new InMemoryExecutionStore();
+        var engine = new ShutdownBoundProbeEngine();
+        var application = new DefaultRavenrootApplication(engine, new ExecutionMonitor(),
+                BehaviorRegistry.standard(BehaviorEnvironment.safeDefaults()),
+                new ai.ravenroot.core.programming.InMemoryArtifactRegistry(),
+                new ai.ravenroot.core.programming.DisabledProgramRuntime(),
+                ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), store, 0,
+                UnknownBehaviorPolicy.passThrough(), null, null, null,
+                GraphExecutionLimits.DEFAULTS, null, null, Duration.ofMillis(50));
+        CompletableFuture<ExecutionSubmission> submitting = null;
+        try {
+            submitting = CompletableFuture.supplyAsync(() -> application.startGraphMl(
+                    TestIdentities.TENANT_A, java.util.UUID.randomUUID(),
+                    new ByteArrayInputStream(graphBytes()), "payload"));
+
+            engine.firstCancellation().toCompletableFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
+            ExecutionSubmission submission = submitting.get(5, java.util.concurrent.TimeUnit.SECONDS);
+
+            assertEquals(ProcessInstanceStatus.COMPLETED, store
+                    .load(new ExecutionKey(TestIdentities.TENANT_A.tenantId(), submission.processInstanceId()))
+                    .toCompletableFuture().join().state().status());
+            assertTrue(engine.cancellationCount() > 0);
+        } finally {
+            engine.close();
+            if (submitting != null) {
+                submitting.handle((ignored, failure) -> null)
+                        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+            }
+            application.close();
+            store.close();
+        }
+    }
+
+    @Test
     void recordsInstanceCreationAndOneStateTransitionThroughThePort() {
         var store = new InMemoryExecutionStore();
         var engine = new StubExecutionEngine();

@@ -70,6 +70,7 @@ public final class DurableExecutionPauseService {
     private final String workerId;
     private final Duration leaseTtl;
     private final GraphExecutionLimits executionLimits;
+    private final Duration runnerShutdownStepBound;
     private final ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets;
     /**
      * Verifies that this runtime resolves what the held execution was accepted against, or
@@ -156,6 +157,20 @@ public final class DurableExecutionPauseService {
                                         ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
                                                 agentBudgets,
                                         ai.ravenroot.core.manifest.ExecutionManifestService manifests) {
+        this(definitions, executions, engine, behaviors, monitor, identities, workerId, leaseTtl,
+                executionLimits, agentBudgets, manifests, GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    /** Full recovery composition with an immutable runner shutdown step bound. */
+    public DurableExecutionPauseService(GraphDefinitionStore definitions, ExecutionStore executions,
+                                        ExecutionEngine engine, BehaviorRegistry behaviors,
+                                        ExecutionMonitor monitor, ExecutionIdentitySource identities,
+                                        String workerId, Duration leaseTtl,
+                                        GraphExecutionLimits executionLimits,
+                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService
+                                                agentBudgets,
+                                        ai.ravenroot.core.manifest.ExecutionManifestService manifests,
+                                        Duration runnerShutdownStepBound) {
         this.manifests = manifests;
         this.definitions = Objects.requireNonNull(definitions, "definitions");
         this.executions = Objects.requireNonNull(executions, "executions");
@@ -166,6 +181,11 @@ public final class DurableExecutionPauseService {
         this.workerId = Objects.requireNonNull(workerId, "workerId");
         this.leaseTtl = Objects.requireNonNull(leaseTtl, "leaseTtl");
         this.executionLimits = Objects.requireNonNull(executionLimits, "executionLimits");
+        this.runnerShutdownStepBound = Objects.requireNonNull(
+                runnerShutdownStepBound, "runnerShutdownStepBound");
+        if (runnerShutdownStepBound.isZero() || runnerShutdownStepBound.isNegative()) {
+            throw new IllegalArgumentException("runnerShutdownStepBound must be positive");
+        }
         this.agentBudgets = agentBudgets;
     }
 
@@ -278,7 +298,7 @@ public final class DurableExecutionPauseService {
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, prepared.snapshot(), engine, behaviors, monitor, identities,
-                    GraphRunner.DEFAULT_SHUTDOWN_BOUND, executionLimits);
+                    runnerShutdownStepBound, executionLimits);
         } catch (RuntimeException setupFailure) {
             setupFailure = cleanup(setupFailure, recorder::close);
             setupFailure = cleanup(setupFailure, manager::close);

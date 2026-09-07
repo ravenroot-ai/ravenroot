@@ -272,6 +272,43 @@ public final class ExecutionResultRegistry {
         terminated(key, processInstanceId, ExecutionTerminationReason.CANCELLED, payload);
     }
 
+    /**
+     * Records a terminal reconciliation: the execution could never reach an outcome and was ended.
+     *
+     * <p>The status written is {@code FAILED}, and here that is not only a compatibility decision —
+     * it is also the truth. Unlike a cancellation this is an incident, and it belongs in the failure
+     * series an operator pages on. What the reason beside it adds is <em>which</em> incident: not a
+     * node that raised, but a traversal left parked with nothing able to settle it, which is a
+     * different investigation entirely.</p>
+     *
+     * <p>Warm and durable must agree, exactly as they must for a cancellation, so this is written
+     * from the same seam and classified by the same helper that decides the durable record's reason.
+     * A run recorded as unreachable durably and as an ordinary failure here would read as correct
+     * from either side alone.</p>
+     *
+     * @param key the tenant-scoped execution being recorded.
+     * @param processInstanceId the durable process that contained the reconciled traversal.
+     */
+    public synchronized void unreachable(Key key, UUID processInstanceId) {
+        unreachable(key, processInstanceId, ExecutionResultPayload.none());
+    }
+
+    /**
+     * The same reconciliation, carrying the payload the run had produced before it was reconciled.
+     *
+     * <p>Shaped like the cancellation and failure pairs beside it rather than left as the one terminal
+     * method that cannot carry a payload. An unreachable run has usually produced nothing, which is
+     * what the two-argument form states explicitly; but "nothing" is a value here, not the absence of
+     * one, and a caller that does hold a payload must have somewhere to put it.</p>
+     *
+     * @param key the tenant-scoped execution being recorded.
+     * @param processInstanceId the durable process that contained the reconciled traversal.
+     * @param payload what the run had produced, or {@link ExecutionResultPayload#none()}.
+     */
+    public synchronized void unreachable(Key key, UUID processInstanceId, ExecutionResultPayload payload) {
+        terminated(key, processInstanceId, ExecutionTerminationReason.UNREACHABLE, payload);
+    }
+
     private synchronized void terminated(Key key, UUID processInstanceId,
                                          ExecutionTerminationReason reason, ExecutionResultPayload payload) {
         Objects.requireNonNull(key, "key");

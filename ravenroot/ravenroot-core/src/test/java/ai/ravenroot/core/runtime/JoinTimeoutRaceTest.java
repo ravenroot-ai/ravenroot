@@ -89,8 +89,8 @@ class JoinTimeoutRaceTest {
                      ExecutionIdentitySource.randomUuids(), store, Clock.systemUTC())) {
             var execution = runner.execute(TestIdentities.TENANT_A, "in").toCompletableFuture();
 
-            // b0's write must have landed first: a timeout that loads an absent record has nothing to
-            // settle and would leave the trial measuring the wrong thing.
+            // b0's write must have landed first so the timeout and the arriving branch both contend
+            // on the same revision; an absent first-lap record can now be settled by the timeout.
             awaitRecordCount(backing, 1);
 
             var releaser = new Thread(() -> releasedB1.complete(NodeResult.continueWith("from-b1")));

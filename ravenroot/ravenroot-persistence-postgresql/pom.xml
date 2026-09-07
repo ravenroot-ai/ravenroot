@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <parent>
+        <groupId>ai.ravenroot</groupId>
+        <artifactId>ravenroot-parent</artifactId>
+        <version>0.1.0-alpha.1</version>
+    </parent>
+
+    <artifactId>ravenroot-persistence-postgresql</artifactId>
+    <name>Ravenroot PostgreSQL Shared Execution Store</name>
+    <description>Durable multi-host PostgreSQL adapter for the execution-store, graph-definition and execution-manifest ports (ADR 0040). Not included in the standalone server or the default distribution; an adopter must add this module and supply it a DataSource explicitly to use it.</description>
+
+    <dependencies>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-application-api</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql-jdbc.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.junit.jupiter</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>ai.ravenroot</groupId>
+            <artifactId>ravenroot-persistence-testkit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <!--
+            The conformance suite needs a real server, because everything this adapter exists to
+            prove - row-level compare-and-set, serialization failure, a fenced owner surviving a
+            competing host - is invisible against a substitute. The container is started by the test
+            code rather than by the workflow, so a developer and CI provision it the same way and a
+            missing daemon fails the run instead of silently skipping the assertions.
+        -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>junit-jupiter</artifactId>
+            <scope>test</scope>
+        </dependency>
+    </dependencies>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <!--
+                        The cross-process lease and kill tests launch a real second JVM and hand it
+                        this JVM's classpath, for the reason the SQLite adapter states: a forked
+                        child resolving a manifest-only booter JAR adds a classloading failure mode
+                        to a test whose entire point is that a SIGKILL, and nothing else, ended it.
+                    -->
+                    <useManifestOnlyJar>false</useManifestOnlyJar>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+</project>

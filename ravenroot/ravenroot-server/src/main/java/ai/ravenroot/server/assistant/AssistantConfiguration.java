@@ -56,8 +56,17 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
     public static final String ENDPOINT_VARIABLE = "RAVENROOT_ASSISTANT_ENDPOINT";
     /** Explicit opt-in for credential-free HTTP to a narrowly local endpoint. */
     public static final String ALLOW_LOCAL_HTTP_VARIABLE = "RAVENROOT_ASSISTANT_ALLOW_LOCAL_HTTP";
-    /** Per-request wall clock bound on the provider call. */
+    /**
+     * Per-request wall clock bound on the provider call. Absence or blank selects 120 seconds;
+     * another declaration must be a positive whole number of seconds.
+     */
     public static final String TIMEOUT_VARIABLE = "RAVENROOT_ASSISTANT_TIMEOUT_SECONDS";
+    /** Tightenable output ceiling for each provider turn; absence keeps the current default. */
+    public static final String MAX_OUTPUT_TOKENS_VARIABLE =
+            "RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS";
+    /** Tightenable provider-turn ceiling for one author message; absence keeps the current default. */
+    public static final String MAX_TOOL_ITERATIONS_VARIABLE =
+            "RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS";
     /**
      * Which credential model this deployment uses: {@code api-key} (default) or {@code oauth}.
      *
@@ -150,12 +159,26 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
         AssistantCredential credential = source == AssistantCredentialSource.API_KEY
                 ? AssistantCredential.ofNullable(env.get(API_KEY_VARIABLE))
                 : null;
-        var egress = OutboundHttpPolicy.fromCommaSeparated(
-                trimmed(env.get(ALLOWED_HOSTS_VARIABLE)),
-                trimmed(env.get(ALLOWED_PORTS_VARIABLE)), 0);
+        String configuredPorts = trimmed(env.get(ALLOWED_PORTS_VARIABLE));
+        if (configuredPorts != null && java.util.Arrays.stream(configuredPorts.split(",", -1))
+                .map(String::trim).allMatch(String::isEmpty)) {
+            throw invalidPorts();
+        }
+        OutboundHttpPolicy egress;
+        try {
+            egress = OutboundHttpPolicy.fromCommaSeparated(
+                    trimmed(env.get(ALLOWED_HOSTS_VARIABLE)),
+                    configuredPorts, 0);
+        } catch (IllegalArgumentException invalidPortList) {
+            // The shared parser includes the offending token in its diagnostic. This boundary knows
+            // which trusted setting supplied it and can give the operator a useful answer without
+            // copying that value (which may itself contain sensitive deployment text) into a log.
+            throw invalidPorts();
+        }
         String model = trimmed(env.get(MODEL_VARIABLE));
         URI endpoint = endpointFor(providerId, trimmed(env.get(ENDPOINT_VARIABLE)));
-        boolean allowLocalHttp = "true".equalsIgnoreCase(trimmed(env.get(ALLOW_LOCAL_HTTP_VARIABLE)));
+        boolean allowLocalHttp = strictBoolean(env.get(ALLOW_LOCAL_HTTP_VARIABLE),
+                ALLOW_LOCAL_HTTP_VARIABLE, false);
         if (ANTHROPIC_PROVIDER.equals(providerId) && model == null) {
             model = ANTHROPIC_DEFAULT_MODEL;
         }
@@ -165,8 +188,12 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
                     : model;
         }
         return new AssistantConfiguration(enabled, providerId, endpoint, model, credential, egress,
-                seconds(trimmed(env.get(TIMEOUT_VARIABLE))), DEFAULT_MAX_OUTPUT_TOKENS,
-                DEFAULT_MAX_TOOL_ITERATIONS, source, allowLocalHttp);
+                seconds(trimmed(env.get(TIMEOUT_VARIABLE))),
+                boundedPositiveInteger(env.get(MAX_OUTPUT_TOKENS_VARIABLE),
+                        MAX_OUTPUT_TOKENS_VARIABLE, DEFAULT_MAX_OUTPUT_TOKENS),
+                boundedPositiveInteger(env.get(MAX_TOOL_ITERATIONS_VARIABLE),
+                        MAX_TOOL_ITERATIONS_VARIABLE, DEFAULT_MAX_TOOL_ITERATIONS),
+                source, allowLocalHttp);
     }
 
     /**
@@ -269,7 +296,7 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
             try {
                 parsed = new URI(override);
             } catch (java.net.URISyntaxException malformed) {
-                throw new IllegalArgumentException(ENDPOINT_VARIABLE + " is not a valid URI", malformed);
+                throw new IllegalArgumentException(ENDPOINT_VARIABLE + " is not a valid URI");
             }
             String scheme = String.valueOf(parsed.getScheme()).toLowerCase(java.util.Locale.ROOT);
             if (!("https".equals(scheme) || "http".equals(scheme))) {
@@ -328,11 +355,56 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
         if (value == null) {
             return DEFAULT_TIMEOUT;
         }
+        long seconds;
         try {
-            return Duration.ofSeconds(Long.parseLong(value));
+            seconds = Long.parseLong(value);
         } catch (NumberFormatException notANumber) {
-            return DEFAULT_TIMEOUT;
+            throw new IllegalArgumentException(TIMEOUT_VARIABLE + " must be a positive whole number of seconds");
         }
+        if (seconds <= 0) {
+            throw new IllegalArgumentException(TIMEOUT_VARIABLE + " must be a positive whole number of seconds");
+        }
+        return Duration.ofSeconds(seconds);
+    }
+
+    private static boolean strictBoolean(String value, String variable, boolean defaultValue) {
+        String normalized = trimmed(value);
+        if (normalized == null) {
+            return defaultValue;
+        }
+        if ("true".equalsIgnoreCase(normalized)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(normalized)) {
+            return false;
+        }
+        throw new IllegalArgumentException(variable + " must be true or false");
+    }
+
+    private static IllegalArgumentException invalidPorts() {
+        return new IllegalArgumentException(ALLOWED_PORTS_VARIABLE
+                + " must contain comma-separated ports from 1 to 65535");
+    }
+
+    private static int boundedPositiveInteger(String value, String variable, int defaultAndMaximum) {
+        String normalized = trimmed(value);
+        if (normalized == null) {
+            return defaultAndMaximum;
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(normalized);
+        } catch (NumberFormatException invalid) {
+            throw boundedIntegerRefusal(variable, defaultAndMaximum);
+        }
+        if (parsed < 1 || parsed > defaultAndMaximum) {
+            throw boundedIntegerRefusal(variable, defaultAndMaximum);
+        }
+        return parsed;
+    }
+
+    private static IllegalArgumentException boundedIntegerRefusal(String variable, int maximum) {
+        return new IllegalArgumentException(variable + " must be a whole number from 1 to " + maximum);
     }
 
     private static String trimmed(String value) {

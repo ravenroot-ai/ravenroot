@@ -236,6 +236,33 @@ class ExecutionResultRegistryTest {
         assertTrue(!found.outcome().handledFailure());
     }
 
+    /**
+     * The public read of a reconciled execution. The status is {@code FAILED} and stays there —
+     * unlike a cancellation this is a genuine incident and belongs in the failure count — and the
+     * reason beside it is what tells a reader that no node broke, so the investigation is "what
+     * stopped delivering" rather than "which behaviour raised".
+     *
+     * <p>{@code cancelled()} is asserted false in the same breath as {@code unreachable()} is
+     * asserted true. The two derive from one nullable component and are the whole reason it exists:
+     * a reconciliation reported as a cancellation would vanish from exactly the dashboards that
+     * filter operator stops out, which is the surface this record must not get wrong.</p>
+     */
+    @Test
+    @DisplayName("a reconciled execution is readable as FAILED and UNREACHABLE, and not as cancelled")
+    void aReconciledExecutionIsReadableAsUnreachable() {
+        var registry = new ExecutionResultRegistry();
+        UUID traversal = UUID.randomUUID();
+        registry.unreachable(key(traversal), UUID.randomUUID());
+
+        var found = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
+        assertEquals(ProcessInstanceStatus.FAILED, found.outcome().status());
+        assertEquals(ai.ravenroot.api.application.ExecutionTerminationReason.UNREACHABLE,
+                found.outcome().terminationReason());
+        assertTrue(found.outcome().unreachable());
+        assertTrue(!found.outcome().cancelled(),
+                "a reconciliation is not an operator stop, and must not be filtered out as one");
+    }
+
     @Test
     @DisplayName("an in-flight execution is readable as RUNNING, not as unknown")
     void anInFlightExecutionIsReadableAsRunning() {

@@ -58,6 +58,7 @@ import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -267,6 +268,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private final int maxActiveDeployments;
     private final GraphExecutionLimits graphExecutionLimits;
+    private final Duration runnerShutdownStepBound;
 
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor) {
         this(engine, monitor, BehaviorEnvironment.safeDefaults());
@@ -525,11 +527,34 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        GraphExecutionLimits graphExecutionLimits,
                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
                                        ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionManifestStore,
+                GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    /** Full production composition with an immutable runner shutdown step bound. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
+                                       Duration runnerShutdownStepBound) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.graphDefinitionStore = graphDefinitionStore;
         this.executionManifestStore = executionManifestStore;
         this.toolApprovals = toolApprovals;
         this.graphExecutionLimits = java.util.Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
+        this.runnerShutdownStepBound = java.util.Objects.requireNonNull(
+                runnerShutdownStepBound, "runnerShutdownStepBound");
+        if (runnerShutdownStepBound.isZero() || runnerShutdownStepBound.isNegative()) {
+            throw new IllegalArgumentException("runnerShutdownStepBound must be positive");
+        }
         this.humanTasks = humanTasks;
         this.agentBudgets = agentBudgets;
         this.engine = engine;
@@ -1258,7 +1283,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
-                    unknownBehaviors, policy, graphExecutionLimits);
+                    runnerShutdownStepBound, unknownBehaviors, policy, graphExecutionLimits);
         } catch (RuntimeException error) {
             manager.close();
             throw error;
@@ -1370,6 +1395,29 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                 active.startedAt, ProcessInstanceStatus.FAILED,
                                 ai.ravenroot.api.application.ExecutionTerminationReason.CANCELLED,
                                 noPayload, null, null);
+                    } else if (ExecutionTermination.isUnreachable(terminalFailure)) {
+                        // The second termination the durable aggregate distinguishes, carried here
+                        // through the same classifier and the same throwable for the same reason the
+                        // cancellation above is: a run recorded as unreachable durably and as an
+                        // ordinary failure here reads as correct from either side alone. The status
+                        // stays FAILED and, unlike a cancellation, it belongs in the failure series —
+                        // nobody asked for this and the run did not do what it was submitted to do.
+                        executionResults.unreachable(resultKey, processInstanceId);
+                        // The failure classifier is kept, unlike on the cancellation path. This IS a
+                        // fault, so the class that carried the verdict is diagnostic rather than a
+                        // control-flow detail, and it is what tells an observer still reading the
+                        // classifier that no node broke.
+                        recordDurableResult(security, processInstanceId, traversalId, graphVersion,
+                                active.startedAt, ProcessInstanceStatus.FAILED,
+                                ai.ravenroot.api.application.ExecutionTerminationReason.UNREACHABLE,
+                                // none() rather than null, for the reason the two paths above changed
+                                // to it: an unreachable run produced nothing, and that is a statement
+                                // the record should carry rather than an absence a reader has to
+                                // interpret. This branch arrived after those two were changed, so it
+                                // is brought under the same rule rather than left as the one place
+                                // where "no payload" is still spelled null.
+                                ai.ravenroot.api.persistence.ExecutionResultPayload.none(),
+                                null, terminalFailure);
                     } else if (error != null || result == null) {
                         var noPayload = ai.ravenroot.api.persistence.ExecutionResultPayload.none();
                         executionResults.failed(resultKey, processInstanceId, noPayload);
@@ -1619,7 +1667,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * <p>{@code active.close()} runs on a fresh virtual thread rather than the calling thread, exactly
      * like the natural-completion path a few lines below in {@link #startGraphMl} -- this may be an HTTP
      * or CLI request thread, not the actor dispatcher, and {@code GraphRunner.close()}'s stop-then-cancel
-     * escalation is bounded by up to {@code GraphRunner.DEFAULT_SHUTDOWN_BOUND} (10s), which a control
+     * escalation is bounded by the immutable {@code runnerShutdownStepBound} per phase, which a control
      * endpoint must not block on to report its result: the atomic map removal above is already the
      * moment cancellation was accepted, and that is what the caller's result reports.</p>
      *
@@ -1894,7 +1942,62 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return durablePauses.updateAndGet(existing -> existing != null ? existing
                 : new ai.ravenroot.core.pause.DurableExecutionPauseService(graphDefinitionStore,
                         executionStore, engine, behaviors, monitor, identitySource, workerId,
-                        executionLeaseTtl, graphExecutionLimits, agentBudgets, executionManifests()));
+                        executionLeaseTtl, graphExecutionLimits, agentBudgets, executionManifests(),
+                        runnerShutdownStepBound));
+    }
+
+    /**
+     * Ends this tenant's unreachable executions, over the same map {@link #liveExecutions} reads.
+     *
+     * <h2>Why it goes through the runners rather than deciding here</h2>
+     * <p>Reachability is a property of a traversal's own runner — which nodes are running, which
+     * deadlines are armed, which branches are parked — and none of it is visible from this map. So
+     * this method selects by tenant and delegates the verdict and the action to
+     * {@link GraphRunner#reconcileUnreachableTraversals()}, which is where the criterion and the
+     * release already live. Duplicating either here would give the runtime two answers to one
+     * question.</p>
+     *
+     * <p>Filtering happens against each entry's own recorded {@code tenantId}, exactly as
+     * {@link #liveExecutions} filters and for the same reason: another tenant's traversal is never
+     * reached in the first place, so there is no exclusion step that could be forgotten. A runner is
+     * asked at most once even when it hosts several of this tenant's traversals, because the runner
+     * reconciles every unreachable traversal it holds — and a runner shared with another tenant
+     * cannot exist, since {@code startGraphMl} builds one per submission.</p>
+     *
+     * <h2>What ends the execution, and what returns its capacity</h2>
+     * <p>Nothing here removes an entry from {@link #activeExecutions}. The reconciliation strands the
+     * traversal's parked branches with a verdict; the failure propagates into the traversal's own
+     * stage, and the {@code whenComplete} seam that every execution already ends through does the
+     * rest — it records {@code FAILED} with
+     * {@link ai.ravenroot.api.application.ExecutionTerminationReason#UNREACHABLE}, removes this
+     * entry, and closes the runner. One ending path means the capacity is returned exactly once, and
+     * it is the same path a completion and a cancellation take.</p>
+     */
+    @Override
+    public java.util.Set<UUID> reconcileUnreachableExecutions(String tenantId) {
+        java.util.Objects.requireNonNull(tenantId, "tenantId");
+        var runners = new java.util.LinkedHashSet<GraphRunner>();
+        var ownedByTenant = new java.util.HashSet<UUID>();
+        activeExecutions.forEach((traversalId, active) -> {
+            if (tenantId.equals(active.tenantId)) {
+                runners.add(active.runner);
+                ownedByTenant.add(traversalId);
+            }
+        });
+        var reconciled = new java.util.LinkedHashSet<UUID>();
+        for (GraphRunner runner : runners) {
+            reconciled.addAll(runner.reconcileUnreachableTraversals());
+        }
+        // Narrowed against the membership snapshot taken above, not against a re-read of the map.
+        // Re-reading cannot decide this: reconciliation ends the traversal, and the terminal seam
+        // that removes its entry frequently runs synchronously inside the call above -- so by this
+        // line the entry for a reconciled id is usually already gone, and a filter that keeps an id
+        // whose entry it cannot find keeps every id unconditionally. That is a check that reads as
+        // defence and performs as nothing. The snapshot names exactly this tenant's traversals as
+        // they were when the runners were chosen, which is the same instant the selection was made
+        // from, so the two agree by construction.
+        reconciled.retainAll(ownedByTenant);
+        return java.util.Set.copyOf(reconciled);
     }
 
     /**
@@ -2231,7 +2334,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
                             DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
                     graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
-                    executionManifests(), executionContextDeploymentId);
+                    executionManifests(), executionContextDeploymentId, runnerShutdownStepBound);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });

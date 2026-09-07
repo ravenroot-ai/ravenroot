@@ -39,18 +39,33 @@ class ExecutionStoreConfigurationTest {
     }
 
     @Test
-    void onlyAnExplicitRecognisedNegativeDisablesIt() {
+    void acceptsOnlyTheCanonicalPositiveAndDocumentedNegativeAliases() {
         for (String off : new String[] {"false", "off", "0", "no", "FALSE", " Off "}) {
             assertFalse(ExecutionStoreConfiguration.fromEnvironment(
                             Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, off)).enabled(),
                     off + " must disable the store");
         }
-        // A typo must not silently turn durability off. Failing towards "on" is the safe direction:
-        // an unwanted store is visible on disk, an absent one is invisible until a crash loses work.
-        for (String noise : new String[] {"", "  ", "flase", "disabled", "nope", "true", "1"}) {
+        for (String enabled : new String[] {"true", "TRUE", " True "}) {
             assertTrue(ExecutionStoreConfiguration.fromEnvironment(
-                            Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, noise)).enabled(),
-                    "'" + noise + "' is not a recognised negative and must not disable durability");
+                            Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, enabled)).enabled(), enabled);
+        }
+        for (String blank : new String[] {"", "  ", "\t"}) {
+            assertTrue(ExecutionStoreConfiguration.fromEnvironment(
+                    Map.of(ExecutionStoreConfiguration.ENABLED_VARIABLE, blank)).enabled(), blank);
+        }
+    }
+
+    @Test
+    void malformedEnabledValueIsRejectedWithoutEchoOrCause() {
+        for (String invalid : new String[] {"flase", "disabled", "nope", "1", "on", "yes",
+                "secret-enabled-value"}) {
+            var failure = assertThrows(IllegalArgumentException.class, () ->
+                    ExecutionStoreConfiguration.fromEnvironment(Map.of(
+                            ExecutionStoreConfiguration.ENABLED_VARIABLE, invalid)));
+            assertEquals(ExecutionStoreConfiguration.ENABLED_VARIABLE
+                    + " must be 'true', 'false', 'off', '0', or 'no'", failure.getMessage());
+            org.junit.jupiter.api.Assertions.assertNull(failure.getCause());
+            org.junit.jupiter.api.Assertions.assertFalse(failure.getMessage().contains(invalid));
         }
     }
 

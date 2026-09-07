@@ -91,9 +91,13 @@ public final class DiscordSendNodeBehavior implements NodeBehavior {
             AtomicReference<OutboundCall<OutboundHttpResponse>> active = new AtomicReference<>();
             cancellation.onCancel(() -> { cancelled.set(true); OutboundCall<?> call = active.get(); if (call != null) call.cancel(); });
             Thread.startVirtualThread(() -> {
-                try { result.complete(send(message, settings, payload, rateKey, cancelled, active)); }
-                catch (RuntimeException failure) { result.completeExceptionally(sanitize(failure, true)); }
+                NodeResult terminalResult = null;
+                RuntimeException terminalFailure = null;
+                try { terminalResult = send(message, settings, payload, rateKey, cancelled, active); }
+                catch (RuntimeException failure) { terminalFailure = sanitize(failure, true); }
                 finally { active.set(null); profile.release(); local.release(); }
+                if (terminalFailure == null) result.complete(terminalResult);
+                else result.completeExceptionally(terminalFailure);
             });
             return result;
         }

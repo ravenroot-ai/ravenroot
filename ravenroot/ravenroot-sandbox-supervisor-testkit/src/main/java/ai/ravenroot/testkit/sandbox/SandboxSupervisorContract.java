@@ -7,6 +7,7 @@ import ai.ravenroot.programming.graalvm.SandboxSupervisorLauncher.SandboxSupervi
 import ai.ravenroot.programming.graalvm.SandboxSupervisorLauncher.SandboxTermination;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.opentest4j.AssertionFailedError;
 
 import java.io.File;
 import java.io.IOException;
@@ -115,6 +116,9 @@ public abstract class SandboxSupervisorContract {
 
     private static final Duration GENEROUS = Duration.ofSeconds(8);
     private static final Path PROBE_JRE = Path.of(System.getProperty("java.home"), "bin", "java");
+    static final String CPU_FAILURE_MESSAGE = "a workload that spends roughly 4s of real CPU time "
+            + "against a 250ms CPU budget, well inside an 8s deadline, must not be reported as COMPLETED";
+    static final String CPU_EXPECTED_OUTCOME = "any non-COMPLETED SandboxOutcome";
 
     /**
      * A single, genuine filesystem {@link Path} suitable for {@code SandboxPolicy.trustedWorker()}
@@ -196,9 +200,12 @@ public abstract class SandboxSupervisorContract {
         // a supervisor that only checks wall clock would let this workload run to completion.
         SandboxPolicy tightCpu = policy(GENEROUS, 250, 128, 8, 64, 8);
         SandboxOutcome outcome = run(tightCpu, "BUSY 4000");
-        assertNotEquals(SandboxOutcome.COMPLETED, outcome,
-                "a workload that spends roughly 4s of real CPU time against a 250ms CPU budget, "
-                        + "well inside an 8s deadline, must not be reported as COMPLETED");
+        if (outcome == SandboxOutcome.COMPLETED) {
+            // JUnit's assertNotEquals failure does not expose structured expected/actual values.
+            // The meta-control needs the actual outcome as data so a timeout or unrelated error in
+            // this same descriptor cannot masquerade as proof that the CPU assertion is sensitive.
+            throw new AssertionFailedError(CPU_FAILURE_MESSAGE, CPU_EXPECTED_OUTCOME, outcome);
+        }
     }
 
     // -- Memory --------------------------------------------------------------------------------

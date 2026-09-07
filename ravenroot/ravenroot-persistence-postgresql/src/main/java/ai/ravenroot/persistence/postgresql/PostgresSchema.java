@@ -58,14 +58,15 @@ import java.util.List;
  *   written — turning a missing value into a silent historical constant rather than an error.</li>
  * </ul>
  *
- * <h2>Tables for capabilities this build does not declare</h2>
+ * <h2>The continuation tables shipped ahead of the code that writes them</h2>
  * <p>{@code execution_handler}, {@code tool_approval}, {@code human_task}, {@code execution_pause},
- * {@code agent_authority_budget} and {@code agent_authority_control} are created even though
- * {@link ai.ravenroot.api.persistence.StoreCapability#DURABLE_HANDLERS} and its neighbours are not
- * declared and nothing writes to them yet. Creating them now is what makes the work that implements
- * them <em>additive</em> — new code against an unchanged schema — rather than a migration applied to
- * databases that are by then holding executions. An empty table costs nothing; a schema change to a
- * live multi-host deployment is a rolling-upgrade problem.</p>
+ * {@code agent_authority_budget} and {@code agent_authority_control} were created in this migration
+ * before {@link ai.ravenroot.api.persistence.StoreCapability#DURABLE_HANDLERS} and its neighbours
+ * were declared and before anything wrote to them. That is what made implementing them
+ * <em>additive</em> — new code against an unchanged schema — instead of a migration applied to
+ * databases that were by then holding executions. An empty table costs nothing; a schema change to a
+ * live multi-host deployment is a rolling-upgrade problem. All six are now written and read, and no
+ * migration was needed to start doing so, which is the outcome the decision was made for.</p>
  *
  * <p>The deployment-registry tables are deliberately absent. They are a separate body of work with its
  * own aggregate, and creating them speculatively would fix their shape from the outside before

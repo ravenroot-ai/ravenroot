@@ -28,18 +28,11 @@ final class TestOidcProvider implements AutoCloseable {
     static final String AUDIENCE = "ravenroot-test";
 
     /**
-     * Touches {@link RavenrootServer}'s class before this class's own
-     * {@link HttpServer#create} below runs, forcing {@code RavenrootServer}'s static initializer --
-     * which sets {@code sun.net.httpserver.maxReqHeaderSize} -- to go first. See that class's Javadoc
-     * ("Set here, verified at start()") for why letting a foreign {@code HttpServer.create()} run first
-     * instead would permanently lock {@code sun.net.httpserver.ServerConfig} onto the JDK's own defaults
-     * for the rest of this JVM: Surefire runs every test class in this module in one forked JVM by
-     * default, so which test class happens to run before another using this fake OIDC provider would
-     * otherwise silently decide whether every {@code RavenrootServer} the rest of the suite constructs
-     * actually gets the cap this module intends, or reproduces the raw connection failure unnoticed.
-     * {@code JdkHeaderCapOrderingHazardTest} demonstrates the underlying hazard directly, in a fresh JVM
-     * where the ordering hazard is isolated; this line keeps this module's own test suite from being an
-     * instance of it.
+     * Retains a local initialization guard for direct launches outside the server module's Maven test
+     * fork. The normal reused Surefire JVM already starts with the header-cap property through the
+     * module's composable extra argument; {@code JdkHeaderCapOrderingHazardTest} proves that invariant
+     * with a bare-server-first process. This guard is therefore defense in depth, not the module-wide
+     * ordering mechanism.
      */
     static {
         // Class.forName(Class#getName()), unlike a plain ".class" literal, is specified (JLS 12.4.1) to

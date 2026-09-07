@@ -505,6 +505,18 @@ jobs:
           -Dtest=HumanTaskConfirmationBrowserProcessIntegrationTest
           -Dravenroot.humanTaskConfirmation.browserTest=true
           -Dsurefire.failIfNoSpecifiedTests=false test
+      # Archive before the ordinary Playwright invocation so its output cleanup cannot erase the
+      # real restart evidence. The UUID keeps repeated harness invocations separate.
+      - name: Archive Human Task confirmation browser evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: human-task-confirmation-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ravenroot/ravenroot-server/target/human-task-confirmation-browser/*/playwright-results/**
+            ravenroot/ravenroot-server/target/human-task-confirmation-browser/*/playwright-driver.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Run the complete Playwright suite
         working-directory: ravenroot/ravenroot-ui
         run: npx playwright test --reporter=list,html

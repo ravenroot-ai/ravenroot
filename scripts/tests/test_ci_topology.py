@@ -11,6 +11,12 @@ ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
 AUDIT_SUITE_COMMAND = "python3 -m unittest scripts.tests.test_audit_operational_configuration"
 AUDIT_STRICT_COMMAND = "python3 scripts/audit_operational_configuration.py --check"
+UNITTEST_COMMAND = re.compile(
+    r"python3 -m unittest [A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+"
+)
+PYTHON_SCRIPT_COMMAND = re.compile(
+    r"python3 [A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*\.py(?: --check)?"
+)
 
 
 def job_blocks(contents: str) -> dict[str, str]:
@@ -60,7 +66,11 @@ def operational_audit_gate_errors(block: str) -> list[str]:
             or any(not line.startswith("          ") for line in step_lines[2:]):
         return errors + ["Python tooling step has unsupported keys or shape"]
     commands = [line[10:] for line in step_lines[2:] if line[10:]]
-    if any(not command.startswith("python3 ") for command in commands):
+    if any(
+        not UNITTEST_COMMAND.fullmatch(command)
+        and not PYTHON_SCRIPT_COMMAND.fullmatch(command)
+        for command in commands
+    ):
         errors.append("Python tooling step contains a non-executable or conditional shell line")
     if commands.count(AUDIT_SUITE_COMMAND) != 1:
         errors.append("operational audit unit suite is absent or duplicated")
@@ -191,6 +201,18 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
                     "after-run-shell": block.replace(
                         "          python3 scripts/check_release_configuration.py",
                         "          python3 scripts/check_release_configuration.py\n        shell: echo {0}", 1),
+                    "command-chain": block.replace(
+                        "python3 -m unittest scripts.tests.test_check_argline",
+                        "python3 -m unittest scripts.tests.test_check_argline; exit 0", 1),
+                    "line-continuation": block.replace(
+                        "python3 -m unittest scripts.tests.test_check_argline",
+                        "python3 -m unittest scripts.tests.test_check_argline \\", 1),
+                    "redirection": block.replace(
+                        "python3 -m unittest scripts.tests.test_check_argline",
+                        "python3 -m unittest scripts.tests.test_check_argline >/dev/null", 1),
+                    "command-substitution": block.replace(
+                        "python3 -m unittest scripts.tests.test_check_argline",
+                        "python3 -m unittest scripts.tests.test_check_argline $(exit 0)", 1),
                 }
                 for seam, changed in mutations.items():
                     with self.subTest(job=job, seam=seam):

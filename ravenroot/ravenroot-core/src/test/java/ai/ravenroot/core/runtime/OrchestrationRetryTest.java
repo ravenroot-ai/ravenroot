@@ -440,22 +440,45 @@ class OrchestrationRetryTest {
         UUID traversalId = UUID.randomUUID();
         var key = new ExecutionKey(TENANT, processInstanceId);
         var joins = new InMemoryJoinStore();
+        var scheduler = engine.manualScheduler();
         // The join's deadline is fired by hand rather than waited for, exactly as the join suite
         // drives every other timeout: the point of the test is the ORDER of two events, and a
         // wall-clock race between them would prove whichever the machine happened to run first.
         // The backoff is half an hour, so nothing here can pass by outlasting it.
+        scheduler.blockInsideSchedule();
         try (var manager = GraphManager.from(timedJoinGraph("PT30S", Duration.ofMinutes(30)));
              var runner = new GraphRunner(manager, engine, behaviors, monitor,
                      ExecutionIdentitySource.randomUuids(), joins, Clock.systemUTC())) {
             long revision = createRunningInstance(store, key, traversalId, manager.start().id());
             try (var recorder = ExecutionRecorder.open(store, key, "test-worker", TTL, revision)) {
-                var execution = runner.execute(security, processInstanceId, traversalId, "payload",
-                        GRAPH_VERSION, null, null, recorder).toCompletableFuture();
-                awaitAttemptCount(store, key, "b0", 2);
-                assertEquals(1, retryingEntries.get(), "b0 is in backoff, not running");
+                CompletableFuture<?> execution;
+                try {
+                    execution = runner.execute(security, processInstanceId, traversalId, "payload",
+                            GRAPH_VERSION, null, null, recorder).toCompletableFuture();
+                    awaitAttemptCount(store, key, "b0", 2);
+                    assertEquals(1, retryingEntries.get(), "b0 is in backoff, not running");
 
-                assertEquals(1, engine.manualScheduler().fireAll(),
-                        "exactly one join timeout was scheduled, and this is it");
+                    assertTrue(scheduler.awaitInsideSchedule(BOUND_MILLIS),
+                            "b1 must reach the scheduler while b0 remains in backoff");
+                    assertEquals(List.of(), scheduler.requestedDelays(),
+                            "entering schedule is earlier than registering a task that can fire");
+                    assertEquals(0, scheduler.liveCount(),
+                            "a task held before registration is not live yet");
+                    assertEquals(0, scheduler.fireAll(),
+                            "firing at callback entry is premature because registration is still gated");
+
+                    scheduler.releaseSchedule();
+                    assertTrue(scheduler.awaitFirstRegistration(BOUND_MILLIS),
+                            "the join timeout must become visible to the manual scheduler");
+                    assertEquals(1, scheduler.liveCount(),
+                            "the registered join timeout must still be live before it is fired");
+                    awaitParkedBranchCount(runner, 1);
+                    assertEquals(1, scheduler.fireAll(),
+                            "exactly one join timeout was scheduled, and this is it");
+                } finally {
+                    // A failed rendezvous must not leave b1 holding the engine during fixture cleanup.
+                    scheduler.releaseSchedule();
+                }
 
                 var thrown = assertThrows(ExecutionException.class,
                         () -> execution.get(BOUND_MILLIS, TimeUnit.MILLISECONDS),
@@ -929,6 +952,22 @@ class OrchestrationRetryTest {
         }
         throw new AssertionError("node '" + nodeId + "' never reached " + expected
                 + " attempts within " + BOUND_MILLIS + "ms");
+    }
+
+    /** Waits until the join has installed the branch that the registered timeout must release. */
+    private static void awaitParkedBranchCount(GraphRunner runner, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofMillis(BOUND_MILLIS).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (runner.liveParkedBranchCount() == expected) {
+                return;
+            }
+            if (Thread.interrupted()) {
+                throw new InterruptedException("interrupted while awaiting a parked join branch");
+            }
+            Thread.yield();
+        }
+        assertEquals(expected, runner.liveParkedBranchCount(),
+                "b1 never reached the parked join state after its timeout was registered");
     }
 
     private static long createRunningInstance(ExecutionStore store, ExecutionKey key, UUID traversalId,

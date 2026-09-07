@@ -62,13 +62,13 @@ public final class RavenrootCliMain {
             System.exit(runRemote(parsed, args));
             return;
         }
-        String engineId = System.getenv().getOrDefault("RAVENROOT_ENGINE", "pekko");
-        try (var engine = ExecutionEngines.create(engineId, "ravenroot-cli")) {
+        var embeddedRuntime = embeddedRuntime(System.getenv(), ExecutionEngines::create);
+        try (var engine = embeddedRuntime.engine()) {
             // Same operator-named node packages as the server, same prohibition — the
             // allowlist is deployment configuration, never graph content. Unset means the standard
             // catalog, unchanged.
-            var monitor = new ExecutionMonitor();
-            var application = embeddedApplication(engine, monitor, System.getenv());
+            var monitor = embeddedRuntime.monitor();
+            var application = embeddedRuntime.application();
             // Stated the way the server states it, but on stderr: the CLI's stdout is the command's
             // machine-readable output, and a diagnostic injected there would corrupt it for anyone
             // piping `ravenroot result <id>`. Same line, same spelling, appropriate stream.
@@ -138,6 +138,14 @@ public final class RavenrootCliMain {
     static DefaultRavenrootApplication embeddedApplication(
             ai.ravenroot.api.execution.ExecutionEngine engine, ExecutionMonitor monitor,
             java.util.Map<String, String> environmentVariables) {
+        return embeddedApplication(engine, monitor, environmentVariables,
+                ai.ravenroot.core.runtime.GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    static DefaultRavenrootApplication embeddedApplication(
+            ai.ravenroot.api.execution.ExecutionEngine engine, ExecutionMonitor monitor,
+            java.util.Map<String, String> environmentVariables,
+            java.time.Duration runnerShutdownStepBound) {
         // Same operator-named node packages as the server, same prohibition -- the allowlist
         // is deployment configuration, never graph content. Unset means the standard catalog.
         var environment = ai.ravenroot.core.runtime.BehaviorEnvironment.safeDefaults();
@@ -153,7 +161,50 @@ public final class RavenrootCliMain {
                 environment.programRuntime(),
                 ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(), null, 0,
                 ai.ravenroot.core.runtime.UnknownBehaviorPolicy.fromEnvironment(environmentVariables),
-                ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(environmentVariables));
+                null, null, null,
+                ai.ravenroot.core.runtime.GraphExecutionLimits.fromEnvironment(environmentVariables),
+                null, null, runnerShutdownStepBound);
+    }
+
+    /** Composes the complete local runtime from one immutable engine/runner configuration. */
+    static EmbeddedRuntime embeddedRuntime(
+            java.util.Map<String, String> environmentVariables, EngineFactory engineFactory) {
+        java.util.Objects.requireNonNull(environmentVariables, "environmentVariables");
+        java.util.Objects.requireNonNull(engineFactory, "engineFactory");
+        var configuration = ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration
+                .fromEnvironment(environmentVariables);
+        String engineId = environmentVariables.getOrDefault("RAVENROOT_ENGINE", "pekko");
+        var engine = engineFactory.create(engineId, "ravenroot-cli", configuration.enginePolicy());
+        try {
+            var monitor = new ExecutionMonitor();
+            var application = embeddedApplication(engine, monitor, environmentVariables,
+                    configuration.runnerShutdownStepBound());
+            return new EmbeddedRuntime(engine, monitor, application);
+        } catch (RuntimeException | Error compositionFailure) {
+            try {
+                engine.close();
+            } catch (RuntimeException | Error cleanupFailure) {
+                compositionFailure.addSuppressed(cleanupFailure);
+            }
+            throw compositionFailure;
+        }
+    }
+
+    record EmbeddedRuntime(ai.ravenroot.api.execution.ExecutionEngine engine,
+                           ExecutionMonitor monitor,
+                           DefaultRavenrootApplication application) {
+        EmbeddedRuntime {
+            java.util.Objects.requireNonNull(engine, "engine");
+            java.util.Objects.requireNonNull(monitor, "monitor");
+            java.util.Objects.requireNonNull(application, "application");
+        }
+    }
+
+    @FunctionalInterface
+    interface EngineFactory {
+        ai.ravenroot.api.execution.ExecutionEngine create(
+                String engineId, String systemName,
+                ai.ravenroot.api.execution.ExecutionEnginePolicy policy);
     }
 
     private static int runRemote(GlobalOptions options, String[] commandArgs) {

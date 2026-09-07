@@ -11,17 +11,73 @@ import java.nio.file.Path;
 import java.io.ByteArrayOutputStream;
 import java.io.PrintStream;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class RavenrootServerMainLifecycleTest {
     @TempDir
     Path temporaryDirectory;
+
+    @Test
+    void oneResolvedExecutionRuntimeReachesEveryServerExecutionConsumer() throws Exception {
+        var environment = Map.of(
+                ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration
+                        .MAX_STASHED_COMMANDS_PER_NODE_VARIABLE, "7",
+                ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration
+                        .LIFECYCLE_STEP_SECONDS_VARIABLE, "2",
+                ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration
+                        .TERMINAL_HISTORY_CAPACITY_VARIABLE, "9",
+                ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration
+                        .RUNNER_SHUTDOWN_STEP_SECONDS_VARIABLE, "1");
+        var runtime = RavenrootServerMain.ResolvedExecutionRuntime.fromEnvironment(environment);
+        var capturedPolicy = new AtomicReference<ai.ravenroot.api.execution.ExecutionEnginePolicy>();
+
+        String created = runtime.createEngine("PeKkO", "server-policy-probe", (id, name, policy) -> {
+            assertEquals("PeKkO", id);
+            assertEquals("server-policy-probe", name);
+            capturedPolicy.set(policy);
+            return "created";
+        });
+
+        assertEquals("created", created);
+        assertEquals(7, capturedPolicy.get().maxStashedCommandsPerNode());
+        assertEquals(Duration.ofSeconds(2), capturedPolicy.get().lifecycleStepBound());
+        assertEquals(9, capturedPolicy.get().terminalNodeHistoryCapacity());
+        Duration applicationBound = runtime.applicationRunnerShutdownStepBound();
+        assertEquals(Duration.ofSeconds(1), applicationBound);
+        assertSame(applicationBound, runtime.toolApprovalRunnerShutdownStepBound());
+        assertSame(applicationBound, runtime.humanTaskRunnerShutdownStepBound());
+
+        String source = Files.readString(Path.of(
+                "src/main/java/ai/ravenroot/server/RavenrootServerMain.java"));
+        assertEquals(1, source.split(
+                "ResolvedExecutionRuntime\\.fromEnvironment\\(System\\.getenv\\(\\)\\)", -1).length - 1,
+                "the server must resolve the engine/runner tuple exactly once");
+        assertTrue(source.indexOf("ResolvedExecutionRuntime.fromEnvironment(System.getenv())")
+                        < source.indexOf("ExecutionStoreBootstrap.openOwned("),
+                "runtime bounds must refuse invalid startup before a durable store opens");
+        String compact = source.replaceAll("\\s+", " ");
+        assertTrue(compact.contains("executionRuntime.createEngine(engineId, \"ravenroot-server\", "
+                        + "ExecutionEngines::create)"),
+                "the actual server engine site must use the resolved policy");
+        assertTrue(compact.contains("executionStoreOwner.executionManifestStore(), "
+                        + "executionRuntime.applicationRunnerShutdownStepBound())"),
+                "the application site must use its named projection");
+        assertTrue(compact.contains("executionManifests, "
+                        + "executionRuntime.toolApprovalRunnerShutdownStepBound())"),
+                "tool recovery must use its named projection");
+        assertTrue(compact.contains("executionManifests, "
+                        + "executionRuntime.humanTaskRunnerShutdownStepBound())"),
+                "human-task recovery must use its named projection");
+    }
 
     @Test
     void pluginRefusalClosesAuditAndCheckpointsStoreBeforeExitStrategyRuns() throws Exception {

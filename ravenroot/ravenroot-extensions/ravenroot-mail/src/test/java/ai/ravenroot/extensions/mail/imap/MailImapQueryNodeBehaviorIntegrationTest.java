@@ -522,7 +522,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             var credentialEntered = new CompletableFuture<Void>();
             var releaseCredential = new CompletableFuture<Void>();
             var clock = new CleanupClock();
-            var acceptedOperations = new ArrayList<CompletableFuture<?>>();
+            var submittedOperations = new ArrayList<CompletableFuture<?>>();
             NodeAction action = limitedAction(server.port(), profile, ref -> {
                 if (secrets.incrementAndGet() == 1) {
                     credentialEntered.complete(null);
@@ -532,7 +532,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             }, clock);
             var first = action.handle(node(tenant, Map.of("version", "mail.imap.query.v1")))
                     .toCompletableFuture();
-            acceptedOperations.add(first);
+            submittedOperations.add(first);
             try {
                 try {
                     awaitEventOrStage("credential resolver entry", credentialEntered, first);
@@ -540,8 +540,10 @@ class MailImapQueryNodeBehaviorIntegrationTest {
                     assertEquals(0, server.acceptedSockets(),
                             "the credential gate must hold the admitted call before its first socket");
 
-                    ImapQueryException saturated = failure(action.handle(
-                            node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture());
+                    var expectedRejection = action.handle(
+                            node(tenant, Map.of("version", "mail.imap.query.v1"))).toCompletableFuture();
+                    submittedOperations.add(expectedRejection);
+                    ImapQueryException saturated = failure(expectedRejection);
                     assertEquals(ImapQueryException.Code.SATURATED, saturated.code());
                     assertEquals(1, secrets.get(), "rejected work must not resolve a second secret");
                     assertEquals(0, server.acceptedSockets(), "rejected work must not open a second connection");
@@ -560,7 +562,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
 
                 var recovery = action.handle(node(tenant, Map.of("version", "mail.imap.query.v1")))
                         .toCompletableFuture();
-                acceptedOperations.add(recovery);
+                submittedOperations.add(recovery);
                 ImapQueryException recovered = failure(recovery);
                 assertEquals(ImapQueryException.Code.TRANSPORT_FAILURE, recovered.code());
                 assertEquals(2, secrets.get(), "released permit must admit and resolve the recovery request");
@@ -572,7 +574,7 @@ class MailImapQueryNodeBehaviorIntegrationTest {
                     server.stopTransport();
                 } finally {
                     clock.expireForCleanup();
-                    awaitTerminalOperations(acceptedOperations);
+                    awaitTerminalOperations(submittedOperations);
                 }
             }
         }
@@ -749,11 +751,11 @@ class MailImapQueryNodeBehaviorIntegrationTest {
             CompletableFuture.allOf(drained).get(20, TimeUnit.SECONDS);
         } catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt();
-            throw new AssertionError("Interrupted while draining admitted IMAP operations", interrupted);
+            throw new AssertionError("Interrupted while draining submitted IMAP operations", interrupted);
         } catch (ExecutionException failure) {
-            throw new AssertionError("Failed while draining admitted IMAP operations", failure.getCause());
+            throw new AssertionError("Failed while draining submitted IMAP operations", failure.getCause());
         } catch (TimeoutException timeout) {
-            throw new AssertionError("Timed out draining admitted IMAP operations: "
+            throw new AssertionError("Timed out draining submitted IMAP operations: "
                     + operations.stream().map(MailImapQueryNodeBehaviorIntegrationTest::stageOutcome).toList(),
                     timeout);
         }

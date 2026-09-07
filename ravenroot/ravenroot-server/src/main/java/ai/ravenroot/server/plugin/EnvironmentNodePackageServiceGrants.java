@@ -124,7 +124,7 @@ public final class EnvironmentNodePackageServiceGrants {
 
     /**
      * The policy's own defaults, obtained by building an empty policy rather than by transcribing
-     * numbers. Three of the ten ceilings are public constants and seven are private, so any
+     * numbers. The scalar ceilings are owned by the policy, so any
      * transcription would have been half copy and half guess, and would age silently.
      */
     private static final NodePackageEgressPolicy DEFAULTS = NodePackageEgressPolicy.builder().build();
@@ -137,7 +137,7 @@ public final class EnvironmentNodePackageServiceGrants {
     private static final Set<String> LIMIT_KEYS = Set.of("maxRequestBytes", "maxResponseBytes",
             "maxWebSocketMessageBytes", "maxWebSocketFragments", "maxQueuedWebSocketSends",
             "maxConcurrentOperations", "maxConcurrentPerTenant", "maxDeadlineMs",
-            "maxWebSocketLifetimeMs", "maxWebSocketIdleMs");
+            "maxWebSocketLifetimeMs", "maxWebSocketIdleMs", "maxHttpDecompressionRatio");
     private static final Set<String> ORIGIN_KEYS = Set.of("scheme", "host", "port");
     private static final Set<String> CREDENTIAL_BINDING_KEYS =
             Set.of("bindingId", "origin", "headerName", "prefix");
@@ -544,6 +544,8 @@ public final class EnvironmentNodePackageServiceGrants {
                 millis(variable, limits, "maxWebSocketLifetimeMs", DEFAULTS.maximumWebSocketLifetime()),
                 millis(variable, limits, "maxWebSocketIdleMs", DEFAULTS.maximumWebSocketIdle()));
         policy.maximumDeadline(millis(variable, limits, "maxDeadlineMs", DEFAULTS.maximumDeadline()));
+        policy.maxHttpDecompressionRatio(count(variable, limits, "maxHttpDecompressionRatio",
+                DEFAULTS.maximumHttpDecompressionRatio()));
     }
 
     private static NodePackageEgressPolicy.Origin origin(String variable, Object declared, String field) {

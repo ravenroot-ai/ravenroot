@@ -39,6 +39,57 @@ class EnvironmentNodePackageServiceGrantsTest {
             (packageId, tenantId, reference) -> Optional.empty();
 
     @Test
+    void httpDecompressionRatioDefaultsAndExplicitEndpointsReachTheActualRegisteredService() {
+        assertEquals(100, registeredRatio("{\"capabilities\":[\"outbound-http\"]}"));
+        assertEquals(100, registeredRatio("{\"capabilities\":[\"outbound-http\"],\"limits\":{}}"));
+        assertEquals(100, registeredRatio("{\"capabilities\":[\"outbound-http\"],\"limits\":{\"maxHttpDecompressionRatio\":null}}"),
+                "null retains the existing optional-limit omission semantics");
+        for (int ratio : new int[]{1, 100, 1000}) {
+            assertEquals(ratio, registeredRatio("{\"capabilities\":[\"outbound-http\"],\"limits\":{"
+                    + "\"maxHttpDecompressionRatio\":" + ratio + "}}"));
+        }
+    }
+
+    @Test
+    void httpDecompressionRatioRejectsInvalidAndUnknownFieldsWithSanitizedDiagnostics() {
+        for (String invalid : List.of("0", "1001", "-1", "1.5", "\"private-value\"")) {
+            var failure = assertThrows(NodePackageServiceGrantException.class, () -> registeredRatio(
+                    "{\"capabilities\":[\"outbound-http\"],\"limits\":{\"maxHttpDecompressionRatio\":" + invalid + "}}"));
+            assertEquals(STORAGE_VARIABLE, failure.variableName());
+            assertTrue(failure.getMessage().contains("maxHttpDecompressionRatio"), failure.getMessage());
+            org.junit.jupiter.api.Assertions.assertFalse(failure.getMessage().contains("private-value"));
+        }
+        var unknown = assertThrows(NodePackageServiceGrantException.class, () -> registeredRatio(
+                "{\"capabilities\":[\"outbound-http\"],\"limits\":{\"maxHttpDecompressionRato\":\"private-value\"}}"));
+        assertEquals(STORAGE_VARIABLE, unknown.variableName());
+        assertTrue(unknown.getMessage().contains("maxHttpDecompressionRato"));
+        org.junit.jupiter.api.Assertions.assertFalse(unknown.getMessage().contains("private-value"));
+    }
+
+    private static int registeredRatio(String json) {
+        var grants = EnvironmentNodePackageServiceGrants.fromEnvironment(Map.of(STORAGE_VARIABLE, encode(json)), NO_CREDENTIALS);
+        var nodePackage = new ai.ravenroot.api.node.NodePackage() {
+            @Override public String id() { return STORAGE_PACKAGE_ID; }
+            @Override public String version() { return "1"; }
+            @Override public String sdkContract() { return ai.ravenroot.api.node.NodeSdk.CONTRACT; }
+            @Override public List<ai.ravenroot.api.node.NodeBehavior> behaviors() {
+                return List.of(new ai.ravenroot.api.node.NodeBehavior() {
+                    @Override public ai.ravenroot.api.catalog.NodeTypeDescriptor descriptor() {
+                        return new ai.ravenroot.api.catalog.NodeTypeDescriptor("ratio-probe", "Ratio", "Test", "",
+                                "actor", false, List.of(), Set.of());
+                    }
+                    @Override public ai.ravenroot.api.node.NodeAction create(ai.ravenroot.api.node.NodeConfiguration config) {
+                        throw new AssertionError("registration must not execute a behavior");
+                    }
+                });
+            }
+        };
+        return ai.ravenroot.core.runtime.NodePackages.register(new ai.ravenroot.core.runtime.BehaviorRegistry(),
+                nodePackage, grants).nodePackageBindings().getFirst().capacityProfile().orElseThrow()
+                .limits().orElseThrow().maximumHttpDecompressionRatio();
+    }
+
+    @Test
     void anEmptyEnvironmentConcedesNothingAndIsTheSameObjectAsNoRegistryAtAll() {
         // No grant is ever implicit. Identity against empty() is the
         // strongest available statement of "this composes what registerWithInventory already passed

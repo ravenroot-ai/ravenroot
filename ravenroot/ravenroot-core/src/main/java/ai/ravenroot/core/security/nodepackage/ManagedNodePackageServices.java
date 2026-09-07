@@ -8,6 +8,7 @@ import ai.ravenroot.api.node.service.NodeCredentialService;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundCredentialBinding;
 import ai.ravenroot.api.node.service.OutboundHttpRequest;
@@ -88,6 +89,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * {@link NodeMessage}; every source operation derives it from the delivered
  * {@link InboundSourceContext}. Both acquire admission before starting transport work and map
  * failures to stable sanitized reasons.</p>
+ *
+ * <p>For HTTP and credential calls, cancellation makes the call terminal and requests interruption,
+ * but cannot guarantee timed transport teardown. The cancellation hint is advisory; these calls keep
+ * admission occupied until their worker finally unwinds. Synchronous completion callbacks can also
+ * delay cancel() returning. An established WebSocket session has its own terminal release path.</p>
  */
 public final class ManagedNodePackageServices implements NodePackageServices {
     private static final PayloadLimits TOOL_ARGUMENT_LIMITS =
@@ -113,6 +119,7 @@ public final class ManagedNodePackageServices implements NodePackageServices {
 
     private final String packageId;
     private final NodePackageEgressPolicy policy;
+    private final NodePackageEgressCapacityProfile capacityProfile;
     private final TenantCredentialResolver credentials;
     private final Set<NodePackageCapability> capabilities;
     private final java.util.function.Supplier<HttpClient> clientFactory;
@@ -130,6 +137,11 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     private ManagedNodePackageServices(Builder builder) {
         packageId = safePackageId(builder.packageId);
         policy = Objects.requireNonNull(builder.policy, "policy");
+        capacityProfile = NodePackageEgressCapacityProfile.bounded(policy.maximumRequestBytes(),
+                policy.maximumResponseBytes(), policy.maximumWebSocketMessageBytes(), policy.maximumWebSocketFragments(),
+                policy.maximumConcurrentOperations(), policy.maximumConcurrentPerTenant(), policy.maximumQueuedWebSocketSends(),
+                policy.maximumDeadline(), policy.maximumWebSocketLifetime(), policy.maximumWebSocketIdle(),
+                policy.maximumHttpDecompressionRatio());
         credentials = Objects.requireNonNull(builder.credentials, "credentials");
         capabilities = Set.copyOf(builder.capabilities);
         clientFactory = Objects.requireNonNull(builder.clientFactory, "clientFactory");
@@ -147,6 +159,11 @@ public final class ManagedNodePackageServices implements NodePackageServices {
     public static Builder builder(String packageId, NodePackageEgressPolicy policy,
                                   TenantCredentialResolver credentials) {
         return new Builder(packageId, policy, credentials);
+    }
+
+    @Override
+    public java.util.Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+        return java.util.Optional.of(capacityProfile);
     }
 
     @Override
@@ -532,8 +549,8 @@ public final class ManagedNodePackageServices implements NodePackageServices {
             });
             ExternalIoLimits authority = new ExternalIoLimits(policy.maximumRequestBytes(),
                     policy.maximumResponseBytes(), policy.maximumResponseBytes(),
-                    policy.maximumResponseBytes(), 100, policy.maximumDeadline(),
-                    Duration.ofSeconds(2), Set.of(), Set.of("identity", "gzip"));
+                    policy.maximumResponseBytes(), policy.maximumHttpDecompressionRatio(), policy.maximumDeadline(),
+                    ExternalIoLimits.DEFAULT_CANCELLATION_HINT, Set.of(), Set.of("identity", "gzip"));
             limits = request.limits().intersect(authority);
             if (body.length > limits.maximumRequestBytes()) {
                 return failed(NodePackageServiceException.Reason.REQUEST_TOO_LARGE);

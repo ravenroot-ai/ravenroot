@@ -534,6 +534,127 @@ class ManagedNodePackageServicesTest {
         assertEquals(0, clientCreations.get(), "composition must not start transport/provider state");
     }
 
+    @Test
+    void actualCapacitySnapshotContainsEveryPolicyDimensionEvenWithoutCapabilities() {
+        var policy = NodePackageEgressPolicy.builder().byteLimits(11, 12, 13)
+                .concurrencyLimits(17, 7).webSocketLimits(19, 23, Duration.ofSeconds(29), Duration.ofSeconds(3))
+                .maximumDeadline(Duration.ofSeconds(31)).maxHttpDecompressionRatio(37).build();
+        var managed = services(policy, Set.of(), OptionalSecret.none());
+        var profile = managed.egressCapacityProfile().orElseThrow();
+        assertTrue(managed.capabilities().isEmpty());
+        assertEquals(ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.bounded(
+                11, 12, 13, 19, 17, 7, 23, Duration.ofSeconds(31), Duration.ofSeconds(29), Duration.ofSeconds(3), 37),
+                profile);
+        org.junit.jupiter.api.Assertions.assertSame(profile, managed.egressCapacityProfile().orElseThrow());
+        assertEquals(100, NodePackageEgressPolicy.builder().build().maximumHttpDecompressionRatio());
+        for (int invalid : new int[]{0, 1001}) {
+            assertThrows(IllegalArgumentException.class,
+                    () -> NodePackageEgressPolicy.builder().maxHttpDecompressionRatio(invalid).build());
+        }
+    }
+
+    @Test
+    void gzipExpansionUsesTheIntersectionOfOperatorAndRequestRatiosWhenByteCapsFit() throws Exception {
+        byte[] decoded = "a".repeat(1024).getBytes(StandardCharsets.UTF_8);
+        var buffer = new java.io.ByteArrayOutputStream();
+        try (var gzip = new java.util.zip.GZIPOutputStream(buffer)) { gzip.write(decoded); }
+        byte[] encoded = buffer.toByteArray();
+        assertTrue(encoded.length < decoded.length);
+        assertTrue(decoded.length < encoded.length * 100);
+        server = server(exchange -> {
+            exchange.getResponseHeaders().add("Content-Encoding", "gzip");
+            exchange.getResponseHeaders().add("Content-Type", "text/plain");
+            exchange.sendResponseHeaders(200, encoded.length);
+            exchange.getResponseBody().write(encoded);
+            exchange.close();
+        });
+        int port = server.getAddress().getPort();
+        for (int[] ratios : new int[][]{{1, 1000}, {1000, 1}, {1000, 1000}, {100, 1000}}) {
+            var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                    .allowHttpMethod("GET").byteLimits(4096, 4096, 4096)
+                    .maxHttpDecompressionRatio(ratios[0]).build();
+            var managed = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), OptionalSecret.none());
+            var limits = ExternalIoLimits.compressedHttp(4096, 4096, 4096, 4096, ratios[1],
+                    Duration.ofSeconds(2), Set.of("text/plain"));
+            var call = managed.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(
+                    uri(port, "/"), "GET", Map.of(), null, Duration.ofSeconds(2), null, null, limits));
+            if (Math.min(ratios[0], ratios[1]) == 1) {
+                assertReason(NodePackageServiceException.Reason.RESPONSE_TOO_LARGE, call);
+            } else {
+                assertArrayEquals(decoded, await(call).body());
+            }
+        }
+    }
+
+    @Test
+    void wideningOperatorByteCeilingsDoesNotWidenLegacyRequestCaps() throws Exception {
+        var hits = new AtomicInteger();
+        server = server(exchange -> { hits.incrementAndGet(); respond(exchange, 200, "ok"); });
+        int port = server.getAddress().getPort();
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("POST").byteLimits(2_097_152, 16_777_216, 1024)
+                .maxHttpDecompressionRatio(1000).build();
+        var managed = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), OptionalSecret.none());
+        assertReason(NodePackageServiceException.Reason.REQUEST_TOO_LARGE,
+                managed.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(uri(port, "/"),
+                        "POST", Map.of(), new byte[1_048_577], Duration.ofSeconds(2), null)));
+        assertEquals(0, hits.get());
+    }
+
+    @Test
+    void cancelledHttpWorkerThatIgnoresInterruptionKeepsItsTenantPermitUntilFinally() throws Exception {
+        var entered = new CountDownLatch(1);
+        var interrupted = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        server = server(exchange -> respond(exchange, 200, "ok"));
+        int port = server.getAddress().getPort();
+        var origin = new NodePackageEgressPolicy.Origin("http", "localhost", port);
+        var policy = NodePackageEgressPolicy.builder().allowOrigin("http", "localhost", port)
+                .allowHttpMethod("GET").bindCredential("bearer", origin, "Authorization", "Bearer ")
+                .concurrencyLimits(2, 1).maximumDeadline(Duration.ofSeconds(10)).build();
+        var managed = services(policy, Set.of(NodePackageCapability.OUTBOUND_HTTP), (pkg, tenant, reference) -> {
+            if (reference.equals("blocked")) {
+                entered.countDown();
+                boolean waiting = true;
+                while (waiting) {
+                    try { release.await(); waiting = false; }
+                    catch (InterruptedException ignored) { interrupted.countDown(); }
+                }
+            }
+            return OptionalSecret.of("secret").resolve(pkg, tenant, reference);
+        });
+        var fast = new OutboundHttpRequest(uri(port, "/"), "GET", Map.of(), null, Duration.ofSeconds(2), null);
+        var blocked = managed.outboundHttp().execute(message("tenant-a", null), new OutboundHttpRequest(
+                uri(port, "/"), "GET", Map.of(), null, Duration.ofSeconds(10),
+                new OutboundCredentialBinding("bearer", "blocked")));
+        try {
+            assertTrue(entered.await(2, TimeUnit.SECONDS));
+            assertTrue(blocked.cancel());
+            assertFalse(blocked.cancel());
+            assertReason(NodePackageServiceException.Reason.CANCELLED, blocked);
+            assertTrue(interrupted.await(2, TimeUnit.SECONDS), "actual HTTP worker observed and ignored interruption");
+            assertReason(NodePackageServiceException.Reason.ADMISSION_REFUSED,
+                    managed.outboundHttp().execute(message("tenant-a", null), fast));
+            assertEquals(200, await(managed.outboundHttp().execute(message("tenant-b", null), fast)).statusCode(),
+                    "the occupied permit belongs to tenant-a, not a globally closed executor");
+        } finally {
+            release.countDown();
+        }
+        OutboundHttpResponse recovered = null;
+        long deadline = System.nanoTime() + Duration.ofSeconds(3).toNanos();
+        while (recovered == null && System.nanoTime() < deadline) {
+            try { recovered = await(managed.outboundHttp().execute(message("tenant-a", null), fast)); }
+            catch (CompletionException refusal) {
+                if (!(refusal.getCause() instanceof NodePackageServiceException typed)
+                        || typed.reason() != NodePackageServiceException.Reason.ADMISSION_REFUSED) throw refusal;
+                Thread.sleep(5);
+            }
+        }
+        assertEquals(200, java.util.Objects.requireNonNull(recovered, "permit released by worker finally").statusCode());
+        assertFalse(blocked.cancel());
+        assertReason(NodePackageServiceException.Reason.CANCELLED, blocked);
+    }
+
     private ManagedNodePackageServices services(NodePackageEgressPolicy policy,
                                                 Set<NodePackageCapability> capabilities,
                                                 TenantCredentialResolver resolver) {

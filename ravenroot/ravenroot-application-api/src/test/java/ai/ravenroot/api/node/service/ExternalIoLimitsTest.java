@@ -13,6 +13,24 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 
 class ExternalIoLimitsTest {
     @Test
+    void widerOperatorPolicyPreservesTheExactLegacyCallerEnvelopeAndRepresentationPolicy() {
+        var legacy = new OutboundHttpRequest(java.net.URI.create("https://example.invalid"), "GET", Map.of(),
+                null, Duration.ofSeconds(30), null);
+        var expected = new ExternalIoLimits(1_048_576, 8_388_608, 8_388_608, 8_388_608, 1,
+                Duration.ofSeconds(30), Duration.ofSeconds(2), Set.of(), Set.of("identity"));
+        var wider = new ExternalIoLimits(Integer.MAX_VALUE, Integer.MAX_VALUE, Integer.MAX_VALUE,
+                Integer.MAX_VALUE, 1000, Duration.ofHours(1), Duration.ofSeconds(3),
+                Set.of(), Set.of("identity", "gzip"));
+        assertEquals(expected, legacy.limits());
+        assertEquals(expected, legacy.limits().intersect(wider));
+        assertEquals(OutboundHttpRepresentationPolicy.SUCCESS_ONLY, legacy.representationPolicy());
+        var explicit = new OutboundHttpRequest(legacy.destination(), "GET", Map.of(), null,
+                Duration.ofSeconds(30), null, null, expected);
+        assertEquals(OutboundHttpRepresentationPolicy.ALL_STATUSES, explicit.representationPolicy());
+        assertEquals(Duration.ofSeconds(2), ExternalIoLimits.DEFAULT_CANCELLATION_HINT);
+    }
+
+    @Test
     void intersectionCanOnlyNarrowEveryResourceDimension() {
         ExternalIoLimits caller = new ExternalIoLimits(100, 200, 300, 150, 20,
                 Duration.ofSeconds(10), Duration.ofSeconds(2), Set.of("application/json"),

@@ -508,7 +508,10 @@ members are `origins`, `httpMethods`, `requestHeaders`, `responseHeaders`,
 `limits`; unknown members and malformed, noncanonical, or empty grants refuse startup. Exact schema,
 encoding commands, package recipes, and Compose propagation are in the
 [bundle lifecycle](../operator-guide/plugin-bundles.md#grant-required-runtime-services). Both settings
-are startup-only.
+are startup-only. The grant's `limits.maxHttpDecompressionRatio` defaults to 100 and accepts integers
+from 1 through 1000; actual HTTP expansion uses the lower of this operator ceiling and the request
+ceiling, alongside independent byte caps. The managed HTTP/credential cancellation hint remains
+advisory, not a timed teardown guarantee; see the bundle lifecycle for permit cleanup behavior.
 
 The `RAVENROOT_ASSISTANT_*` family configures the workspace authoring assistant. It is independent of
 the optional `llm-prompt` and `agent` graph nodes and their `RAVENROOT_LLM_PROFILE_*` family. Exact

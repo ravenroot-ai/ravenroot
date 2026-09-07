@@ -35,6 +35,7 @@ public final class NodePackageEgressPolicy {
     private final int maximumConcurrentOperations;
     private final int maximumConcurrentPerTenant;
     private final int maximumQueuedWebSocketSends;
+    private final int maximumHttpDecompressionRatio;
     private final Duration maximumDeadline;
     private final Duration maximumWebSocketLifetime;
     private final Duration maximumWebSocketIdle;
@@ -61,6 +62,10 @@ public final class NodePackageEgressPolicy {
         }
         maximumQueuedWebSocketSends = positive(builder.maximumQueuedWebSocketSends,
                 "maximumQueuedWebSocketSends");
+        maximumHttpDecompressionRatio = builder.maximumHttpDecompressionRatio;
+        if (maximumHttpDecompressionRatio < 1 || maximumHttpDecompressionRatio > 1000) {
+            throw new IllegalArgumentException("maxHttpDecompressionRatio must be from 1 through 1000");
+        }
         maximumDeadline = positive(builder.maximumDeadline, "maximumDeadline");
         maximumWebSocketLifetime = positive(builder.maximumWebSocketLifetime, "maximumWebSocketLifetime");
         maximumWebSocketIdle = positive(builder.maximumWebSocketIdle, "maximumWebSocketIdle");
@@ -119,6 +124,7 @@ public final class NodePackageEgressPolicy {
     public int maximumConcurrentOperations() { return maximumConcurrentOperations; }
     public int maximumConcurrentPerTenant() { return maximumConcurrentPerTenant; }
     public int maximumQueuedWebSocketSends() { return maximumQueuedWebSocketSends; }
+    public int maximumHttpDecompressionRatio() { return maximumHttpDecompressionRatio; }
     public Duration maximumDeadline() { return maximumDeadline; }
     public Duration maximumWebSocketLifetime() { return maximumWebSocketLifetime; }
     public Duration maximumWebSocketIdle() { return maximumWebSocketIdle; }
@@ -202,6 +208,7 @@ public final class NodePackageEgressPolicy {
         private int maximumConcurrentOperations = 32;
         private int maximumConcurrentPerTenant = 8;
         private int maximumQueuedWebSocketSends = 16;
+        private int maximumHttpDecompressionRatio = 100;
         private Duration maximumDeadline = Duration.ofSeconds(30);
         private Duration maximumWebSocketLifetime = Duration.ofHours(1);
         private Duration maximumWebSocketIdle = Duration.ofMinutes(5);
@@ -276,6 +283,11 @@ public final class NodePackageEgressPolicy {
             maximumQueuedWebSocketSends = maximumQueuedSends;
             maximumWebSocketLifetime = maximumLifetime;
             maximumWebSocketIdle = maximumIdle;
+            return this;
+        }
+
+        public Builder maxHttpDecompressionRatio(int maximum) {
+            maximumHttpDecompressionRatio = maximum;
             return this;
         }
 

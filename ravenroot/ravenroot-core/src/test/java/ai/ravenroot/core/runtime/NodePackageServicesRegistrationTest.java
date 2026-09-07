@@ -178,6 +178,112 @@ class NodePackageServicesRegistrationTest {
                 ((NodePackageServiceException) refusal.getCause()).reason());
     }
 
+    @Test
+    void capturesTheActualSdkTwoProfileOnceAndKeepsItsSnapshotImmutable() {
+        var reads = new java.util.concurrent.atomic.AtomicInteger();
+        var current = new java.util.concurrent.atomic.AtomicReference<>(
+                java.util.Optional.of(ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.noManagedEgress()));
+        NodePackageServices granted = profiled(() -> { reads.incrementAndGet(); return current.get(); });
+        NodePackage nodePackage = packageWith("test.snapshot", NodeSdk.CONTRACT,
+                behavior("snapshot", Set.of(), new AtomicBoolean(), new AtomicBoolean(), granted));
+        var registry = NodePackages.register(new BehaviorRegistry(), nodePackage,
+                NodePackageServiceRegistry.builder().grant(nodePackage.id(), granted).build());
+        var snapshot = registry.nodePackageBindings();
+        current.set(java.util.Optional.empty());
+        registry.create(new GraphNode("probe", NodeKind.BEHAVIOR, "snapshot", Map.of())).orElseThrow();
+        assertEquals(1, reads.get());
+        assertTrue(snapshot.getFirst().capacityProfile().orElseThrow().limits().isEmpty());
+        assertThrows(UnsupportedOperationException.class, snapshot::clear);
+        assertEquals(snapshot, registry.nodePackageBindings());
+    }
+
+    @Test
+    void sdkOneAndUnusedGrantsNeverConsultTheGrantedProfile() {
+        NodePackageServices unused = profiled(() -> { throw new AssertionError("unused grant inspected"); });
+        var registry = NodePackages.register(new BehaviorRegistry(),
+                packageWith("test.legacy", NodeSdk.LEGACY_CONTRACT, simpleBehavior("legacy")),
+                NodePackageServiceRegistry.builder().grant("test.legacy", unused).grant("test.unused", unused).build());
+        assertEquals(java.util.Optional.of(
+                ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.noManagedEgress()),
+                registry.nodePackageBindings().getFirst().capacityProfile());
+    }
+
+    @Test
+    void customUnknownIsNotInferredFromEmptyCapabilitiesAndSnapshotsAreSorted() {
+        var unknown = services(Set.of());
+        var registry = NodePackages.registerAll(new BehaviorRegistry(), List.of(
+                packageWith("test.z", NodeSdk.CONTRACT, simpleBehavior("z")),
+                packageWith("test.a", NodeSdk.CONTRACT, simpleBehavior("a"))),
+                NodePackageServiceRegistry.builder().grant("test.z", unknown).build());
+        assertEquals(List.of("test.a", "test.z"), registry.nodePackageBindings().stream()
+                .map(binding -> binding.identity().packageId()).toList());
+        assertTrue(registry.nodePackageBindings().get(0).capacityProfile().isPresent());
+        assertTrue(registry.nodePackageBindings().get(1).capacityProfile().isEmpty());
+        assertEquals(registry.nodePackageIdentities(), registry.nodePackageBindings().stream()
+                .map(BehaviorRegistry.RegisteredNodePackageBinding::identity).toList());
+    }
+
+    @Test
+    void aLaterNullThrowingOrInvalidProfileLeavesAllRegistryProjectionsUntouched() {
+        List<java.util.function.Supplier<java.util.Optional<ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile>>>
+                malformed = List.of(() -> null, () -> { throw new IllegalStateException("private-provider-value"); },
+                () -> java.util.Optional.of(ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile.bounded(
+                        0, 1, 1, 1, 1, 1, 1, java.time.Duration.ofSeconds(1),
+                        java.time.Duration.ofSeconds(1), java.time.Duration.ofSeconds(1), 1)));
+        for (var declaration : malformed) {
+            var registry = new BehaviorRegistry();
+            var failure = assertThrows(IllegalArgumentException.class, () -> NodePackages.registerAll(registry,
+                    List.of(packageWith("test.first", NodeSdk.CONTRACT, simpleBehavior("first")),
+                            packageWith("test.bad", NodeSdk.CONTRACT, simpleBehavior("bad"))),
+                    NodePackageServiceRegistry.builder().grant("test.bad", profiled(declaration)).build()));
+            assertEquals("Node package 'test.bad' has an invalid egress capacity profile", failure.getMessage());
+            assertEquals(null, failure.getCause());
+            assertTrue(registry.descriptors().isEmpty());
+            assertTrue(registry.catalogSources().isEmpty());
+            assertTrue(registry.nodePackageBindings().isEmpty());
+        }
+    }
+
+    @Test
+    void repeatedPackagesRequireTheSameIdentityAndProfileBeforeAnyNewBehaviorIsAdded() {
+        var registry = NodePackages.register(new BehaviorRegistry(),
+                packageWith("test.repeat", NodeSdk.CONTRACT, simpleBehavior("first")));
+        NodePackages.register(registry, packageWith("test.repeat", NodeSdk.CONTRACT, simpleBehavior("second")));
+        assertEquals(2, registry.descriptors().size());
+        var snapshot = registry.nodePackageBindings();
+        var unknown = NodePackageServiceRegistry.builder().grant("test.repeat", services(Set.of())).build();
+        assertThrows(IllegalArgumentException.class, () -> NodePackages.registerAll(registry,
+                List.of(packageWith("test.other", NodeSdk.CONTRACT, simpleBehavior("other")),
+                        packageWith("test.repeat", NodeSdk.CONTRACT, simpleBehavior("third"))), unknown));
+        assertTrue(registry.descriptor("other").isEmpty());
+        assertTrue(registry.descriptor("third").isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> NodePackages.register(registry,
+                packageWith("test.repeat", NodeSdk.LEGACY_CONTRACT, simpleBehavior("legacy-third"))));
+        assertEquals(snapshot, registry.nodePackageBindings());
+        assertEquals(2, registry.descriptors().size());
+        NodePackages.register(registry, packageWith("test.last", NodeSdk.CONTRACT, simpleBehavior("last")));
+        assertEquals(1, snapshot.size(), "an earlier projection is an immutable snapshot");
+    }
+
+    private static NodeBehavior simpleBehavior(String name) {
+        return behavior(name, Set.of(), new AtomicBoolean(), new AtomicBoolean(), null);
+    }
+
+    private static NodePackageServices profiled(java.util.function.Supplier<java.util.Optional<
+            ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile>> profile) {
+        NodePackageServices deny = NodePackageServices.unavailable();
+        return new NodePackageServices() {
+            @Override public java.util.Optional<ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile>
+                    egressCapacityProfile() { return profile.get(); }
+            @Override public Set<NodePackageCapability> capabilities() { return Set.of(); }
+            @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() { return deny.credentials(); }
+            @Override public ai.ravenroot.api.node.service.OutboundHttpService outboundHttp() { return deny.outboundHttp(); }
+            @Override public ai.ravenroot.api.node.service.OutboundWebSocketService outboundWebSocket() {
+                return deny.outboundWebSocket();
+            }
+        };
+    }
+
     private static NodeBehavior behavior(String name, Set<NodePackageCapability> required,
                                          AtomicBoolean legacyCalled, AtomicBoolean serviceCalled,
                                          NodePackageServices expected) {

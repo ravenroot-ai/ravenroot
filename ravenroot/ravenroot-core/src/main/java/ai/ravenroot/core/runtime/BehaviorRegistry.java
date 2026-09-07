@@ -6,6 +6,7 @@ import ai.ravenroot.api.catalog.NodeTypeDescriptorValidator;
 import ai.ravenroot.api.catalog.NodeCatalogSource;
 import ai.ravenroot.api.node.InboundSourceCapable;
 import ai.ravenroot.api.node.NodeBehavior;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.publication.PublicationAuditSink;
 import ai.ravenroot.api.publication.PublicationPolicyResolver;
@@ -44,7 +45,7 @@ public final class BehaviorRegistry {
      * the same reason {@link ai.ravenroot.api.node.NodePackage} states for versioning the package and
      * not the individual behavior.</p>
      */
-    private final Map<String, PinnedNodePackage> nodePackageIdentities = new ConcurrentHashMap<>();
+    private final Map<String, RegisteredNodePackageBinding> nodePackageBindings = new ConcurrentHashMap<>();
 
     public static BehaviorRegistry standard() {
         return standard(BehaviorEnvironment.safeDefaults());
@@ -136,12 +137,29 @@ public final class BehaviorRegistry {
 
     BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId,
                                             PinnedNodePackage pinned) {
+        return registerPackageFactory(factory, packageId,
+                new RegisteredNodePackageBinding(pinned, Optional.empty()));
+    }
+
+    BehaviorRegistry registerPackageFactory(NodeBehaviorFactory factory, String packageId,
+                                            RegisteredNodePackageBinding binding) {
+        requireCompatiblePackageBinding(packageId, binding);
         registerFactory(factory, NodeCatalogSource.bundle(packageId));
-        // Recorded after the registration succeeds, so a refused behavior never leaves an identity
-        // claiming a package contributed something it did not. The identity itself was built during
-        // planning, so nothing about it can fail here.
-        nodePackageIdentities.put(packageId, pinned);
+        // A refused behavior never leaves a binding claiming that it contributed to this registry.
+        nodePackageBindings.put(packageId, binding);
         return this;
+    }
+
+    void requireCompatiblePackageBinding(String packageId, RegisteredNodePackageBinding binding) {
+        java.util.Objects.requireNonNull(binding, "binding");
+        if (!binding.identity().packageId().equals(packageId)) {
+            throw new IllegalArgumentException("Node package binding identity does not match package id");
+        }
+        RegisteredNodePackageBinding previous = nodePackageBindings.get(packageId);
+        if (previous != null && !previous.equals(binding)) {
+            throw new IllegalArgumentException("Node package '" + packageId
+                    + "' is already registered with a different identity or egress capacity profile");
+        }
     }
 
     private BehaviorRegistry registerFactory(NodeBehaviorFactory factory, NodeCatalogSource source) {
@@ -328,7 +346,22 @@ public final class BehaviorRegistry {
      * @return immutable, sorted package identities; empty when only built-ins are registered.
      */
     public List<PinnedNodePackage> nodePackageIdentities() {
-        return nodePackageIdentities.values().stream().sorted().toList();
+        return nodePackageBindings.values().stream().map(RegisteredNodePackageBinding::identity).sorted().toList();
+    }
+
+    /** Immutable, sorted snapshot of the identities and actual service capacities captured at registration. */
+    public List<RegisteredNodePackageBinding> nodePackageBindings() {
+        return nodePackageBindings.values().stream()
+                .sorted(java.util.Comparator.comparing(RegisteredNodePackageBinding::identity)).toList();
+    }
+
+    /** Empty capacity means a custom provider has not declared its enforced capacities. */
+    public record RegisteredNodePackageBinding(PinnedNodePackage identity,
+            Optional<NodePackageEgressCapacityProfile> capacityProfile) {
+        public RegisteredNodePackageBinding {
+            java.util.Objects.requireNonNull(identity, "identity");
+            java.util.Objects.requireNonNull(capacityProfile, "capacityProfile");
+        }
     }
 
     private record LegacyNodeBehaviorFactory(String name, NodeHandler handler) implements NodeBehaviorFactory {

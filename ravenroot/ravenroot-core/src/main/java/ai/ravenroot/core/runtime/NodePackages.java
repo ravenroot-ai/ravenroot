@@ -13,6 +13,7 @@ import ai.ravenroot.api.persistence.PinnedNodePackage;
 import ai.ravenroot.api.node.NodeSdk;
 import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServices;
+import ai.ravenroot.api.node.service.NodePackageEgressCapacityProfile;
 import ai.ravenroot.api.deployment.InboundSource;
 import ai.ravenroot.api.deployment.InboundSourceContext;
 import ai.ravenroot.api.execution.CancellationSignal;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -118,6 +120,15 @@ public final class NodePackages {
             boolean serviceAware = NodeSdk.CONTRACT.equals(nodePackage.sdkContract());
             NodePackageServices packageServices = serviceAware
                     ? services.servicesFor(packageId) : NodePackageServices.unavailable();
+            // Capture exactly once from the same view that the behavior factory receives. An empty
+            // capability set is not evidence that a custom provider has no managed egress.
+            Optional<NodePackageEgressCapacityProfile> capacityProfile;
+            try {
+                capacityProfile = Objects.requireNonNull(packageServices.egressCapacityProfile(), "capacityProfile");
+            } catch (RuntimeException invalidProfile) {
+                throw new IllegalArgumentException("Node package '" + packageId
+                        + "' has an invalid egress capacity profile");
+            }
             Set<NodePackageCapability> grantedCapabilities = serviceAware
                     ? services.capabilitiesFor(packageId) : Set.of();
             var validated = new ArrayList<NodeBehavior>(behaviors.size());
@@ -151,15 +162,17 @@ public final class NodePackages {
             // registered -- the same plan-then-apply split every other check in this method observes.
             // PinnedNodePackage.of imposes no shape on either string, so in fact nothing here can
             // fail; the placement is what keeps that true if it ever changes.
-            plans.add(new RegistrationPlan(packageId,
-                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()),
+            var binding = new BehaviorRegistry.RegisteredNodePackageBinding(
+                    PinnedNodePackage.of(packageId, nodePackage.version(), nodePackage.sdkContract()), capacityProfile);
+            registry.requireCompatiblePackageBinding(packageId, binding);
+            plans.add(new RegistrationPlan(packageId, binding,
                     serviceAware, packageServices, List.copyOf(validated)));
         }
 
         for (RegistrationPlan plan : plans) {
             plan.behaviors().forEach(behavior -> registry.registerPackageFactory(
                     new SdkNodeBehaviorFactory(behavior, plan.services(), plan.serviceAware()),
-                    plan.packageId(), plan.pinned()));
+                    plan.packageId(), plan.binding()));
         }
         return registry;
     }
@@ -300,7 +313,7 @@ public final class NodePackages {
         }
     }
 
-    private record RegistrationPlan(String packageId, PinnedNodePackage pinned, boolean serviceAware,
+    private record RegistrationPlan(String packageId, BehaviorRegistry.RegisteredNodePackageBinding binding, boolean serviceAware,
                                     NodePackageServices services, List<NodeBehavior> behaviors) {
     }
 }

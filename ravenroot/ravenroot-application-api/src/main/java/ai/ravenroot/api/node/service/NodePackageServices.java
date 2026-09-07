@@ -1,6 +1,7 @@
 package ai.ravenroot.api.node.service;
 
 import java.util.Set;
+import java.util.Optional;
 
 /** Immutable, package-scoped service view supplied by the trusted runtime composition root. */
 public interface NodePackageServices {
@@ -51,6 +52,14 @@ public interface NodePackageServices {
     }
 
     /**
+     * Describes the actual immutable quantitative egress policy of this same service instance.
+     * Empty means unknown, even when capabilities() is empty. Custom views may explicitly describe
+     * bounded enforcement or deny-only ports; no current grant or default is inferred on their behalf.
+     * @return a stable non-null optional profile, with no credentials or live authorization state
+     */
+    default Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() { return Optional.empty(); }
+
+    /**
      * Deny-only view used for legacy packages and deployments which composed no grants.
      * @return a reusable deny-only view that advertises no capabilities and fails every operation
      */
@@ -59,6 +68,9 @@ public interface NodePackageServices {
                 NodePackageServiceException.Reason.SERVICE_UNAVAILABLE);
         return new NodePackageServices() {
             @Override public Set<NodePackageCapability> capabilities() { return Set.of(); }
+            @Override public Optional<NodePackageEgressCapacityProfile> egressCapacityProfile() {
+                return Optional.of(NodePackageEgressCapacityProfile.noManagedEgress());
+            }
             @Override public NodeCredentialService credentials() {
                 return (message, reference, deadline) -> OutboundCall.failed(unavailable);
             }

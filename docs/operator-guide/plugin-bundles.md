@@ -187,11 +187,11 @@ Optional grant members are `origins`, `httpMethods`, `requestHeaders`, `response
 | `credentialBindings` | `bindingId`, `origin`, `headerName`, `prefix` | optional array; `prefix` is optional and the other nested members are required |
 | `awsSigV4Bindings` | `bindingId`, `origin`, `credentialReference`, `region`, `service` | optional array of exact signing-binding objects |
 | `credentialReferences` | — | optional nonempty array of the only opaque references this package may resolve |
-| `limits` | `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, `maxWebSocketIdleMs` | optional exact object; every supplied value is a positive integer |
+| `limits` | `maxRequestBytes`, `maxResponseBytes`, `maxWebSocketMessageBytes`, `maxWebSocketFragments`, `maxQueuedWebSocketSends`, `maxConcurrentOperations`, `maxConcurrentPerTenant`, `maxDeadlineMs`, `maxWebSocketLifetimeMs`, `maxWebSocketIdleMs`, `maxHttpDecompressionRatio` | optional exact object; every non-null supplied value is a positive integer |
 <!-- node-package-grant-schema:end -->
 
-Omitted ceilings inherit these finite policy defaults; byte values are bytes and time values are
-milliseconds:
+Omitted or JSON `null` ceilings inherit these finite policy defaults; byte values are bytes and time
+values are milliseconds:
 
 <!-- node-package-grant-defaults:start -->
 | Limit | Omission default | Additional relation |
@@ -206,6 +206,7 @@ milliseconds:
 | `maxDeadlineMs` | `30000` | positive |
 | `maxWebSocketLifetimeMs` | `3600000` | positive |
 | `maxWebSocketIdleMs` | `300000` | positive and no greater than `maxWebSocketLifetimeMs` |
+| `maxHttpDecompressionRatio` | `100` | decoded-to-encoded HTTP gzip ratio, from 1 through 1000 |
 <!-- node-package-grant-defaults:end -->
 
 <!-- node-package-egress-rules:start -->
@@ -221,7 +222,35 @@ every signing reference or startup refuses the grant. `credential-resolution` wi
 list can resolve every deployment-held reference for that package, so define the narrow list whenever
 that broader capability is required. `maxConcurrentPerTenant` cannot exceed
 `maxConcurrentOperations`, and `maxWebSocketIdleMs` cannot exceed `maxWebSocketLifetimeMs`.
+`maxHttpDecompressionRatio` bounds HTTP gzip expansion independently of encoded and decoded byte
+ceilings; the effective ratio is the lower of the request and operator limits. A ratio of 1 allows
+no expansion. This setting grants no content encoding that the caller has not accepted.
 <!-- node-package-egress-rules:end -->
+
+For embedded Java composition, `NodePackageServices.egressCapacityProfile()` describes the capacities
+of the exact service view delivered to a package. The managed implementation snapshots all eleven
+values above from its immutable policy. The unavailable view explicitly declares no managed egress;
+a custom provider's default empty `Optional` means unknown, even when its capability set is empty.
+Custom providers can declare `NodePackageEgressCapacityProfile.bounded(...)` with every capacity or
+`noManagedEgress()` for deny-only outbound ports. The declaration must describe the enforced service
+policy and contains no credentials, destinations or live authorization decisions. Registration
+captures this declaration once: SDK /2 uses the supplied view, while SDK /1 uses the unavailable
+view regardless of unused grants. Adding behaviors for an already registered package requires the
+same package identity and capacity profile. Unknown custom profiles can still register.
+
+Existing HTTP request constructors retain their fixed caller envelope: 1 MiB request, 8 MiB encoded,
+decoded and output response bytes, 30 seconds, identity encoding and ratio 1. Wider operator limits
+do not widen those caller limits. The legacy constructors validate response representations only
+for successful statuses; constructors with explicit `ExternalIoLimits` retain validation for all
+statuses unless the caller supplies a different representation policy.
+
+The 2-second `ExternalIoLimits` cancellation hint is advisory for managed HTTP and credential calls.
+Cancellation makes the call terminal and requests interruption; it does not guarantee transport
+teardown or that `cancel()` returns within that time. Completion callbacks can run synchronously.
+A worker that ignores interruption continues to occupy its admission permit until its `finally`
+cleanup runs, so the same tenant can remain unable to admit another call after cancellation. An
+established WebSocket session uses its own terminal release path. There is no separate operator
+cancellation timer.
 
 The compiled documentation gate compares the top-level and nested member sets above with the grant
 reader, compares every omission default with the constructed runtime policy, and exercises the

@@ -36,10 +36,21 @@ public record ExternalIoLimits(
         Set<String> acceptedMediaTypes,
         Set<String> acceptedContentEncodings) {
 
-    /** Finite compatibility limits used by legacy managed HTTP request constructors. */
+    /**
+     * Legacy cooperative cancellation hint. Managed HTTP and credential calls become terminal on
+     * cancellation and retain admission until their workers unwind; this is not a hard resource-teardown
+     * or cancel-return SLA. Established WebSocket sessions have their own terminal release path.
+     */
+    public static final Duration DEFAULT_CANCELLATION_HINT = Duration.ofSeconds(2);
+
+    /**
+     * Frozen caller compatibility limits used by legacy managed HTTP constructors. Raising operator
+     * ceilings cannot relax these byte, duration or identity-representation bounds; callers needing
+     * different finite budgets must supply explicit limits.
+     */
     public static final ExternalIoLimits MANAGED_HTTP_DEFAULTS = new ExternalIoLimits(
             1024L * 1024, 8L * 1024 * 1024, 8L * 1024 * 1024, 8L * 1024 * 1024, 1,
-            Duration.ofSeconds(30), Duration.ofSeconds(2), Set.of(), Set.of("identity"));
+            Duration.ofSeconds(30), DEFAULT_CANCELLATION_HINT, Set.of(), Set.of("identity"));
 
     /** Creates validated finite limits. */
     public ExternalIoLimits {
@@ -97,7 +108,7 @@ public record ExternalIoLimits(
     public static ExternalIoLimits http(long requestBytes, long responseBytes, Duration duration,
                                         Set<String> mediaTypes) {
         return new ExternalIoLimits(requestBytes, responseBytes, responseBytes, responseBytes, 1, duration,
-                Duration.ofSeconds(2), mediaTypes, Set.of("identity"));
+                DEFAULT_CANCELLATION_HINT, mediaTypes, Set.of("identity"));
     }
 
     /**
@@ -115,7 +126,7 @@ public record ExternalIoLimits(
                                                    long decodedResponseBytes, long outputBytes,
                                                    int ratio, Duration duration, Set<String> mediaTypes) {
         return new ExternalIoLimits(requestBytes, encodedResponseBytes, decodedResponseBytes,
-                outputBytes, ratio, duration, Duration.ofSeconds(2), mediaTypes,
+                outputBytes, ratio, duration, DEFAULT_CANCELLATION_HINT, mediaTypes,
                 Set.of("identity", "gzip"));
     }
 

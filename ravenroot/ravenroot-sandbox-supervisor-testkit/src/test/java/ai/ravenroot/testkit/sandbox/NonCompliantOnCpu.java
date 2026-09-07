@@ -6,6 +6,6 @@ import ai.ravenroot.programming.graalvm.SandboxSupervisorLauncher;
 final class NonCompliantOnCpu extends SandboxSupervisorContract {
     @Override
     protected SandboxSupervisorLauncher launcher() {
-        return RealisticFakeSupervisor.missing(RealisticFakeSupervisor.Check.CPU);
+        return new DeterministicNonCompliantCpuSupervisor();
     }
 }

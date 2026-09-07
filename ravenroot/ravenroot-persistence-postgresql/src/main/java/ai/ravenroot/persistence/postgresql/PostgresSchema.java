@@ -8,15 +8,22 @@ import java.util.List;
 /**
  * The versioned PostgreSQL schema for every store in this package.
  *
- * <h2>One migration, and why the numbering is this adapter's own</h2>
- * <p>The whole schema ships as migration 1. The single-host adapter reached the same shape in
- * twenty-two steps because each of those steps was a real upgrade applied to databases that already
- * held production rows; this adapter has no such database anywhere, so replaying that history here
- * would create tables only to alter them a moment later, in a transaction nobody can observe. The
- * version sequence is therefore this adapter's own and starts at 1. Aligning the two numbers would be
- * worse than unhelpful: it would imply a correspondence nothing maintains, and the downgrade guard
- * compares integers, so a number meaning two different structures is exactly the silent mismatch the
- * guard exists to prevent.</p>
+ * <h2>Why the numbering is this adapter's own</h2>
+ * <p>The execution store, journal, inventory, definitions, manifests and results all ship as
+ * migration 1. The single-host adapter reached the same shape in twenty-two steps because each of
+ * those steps was a real upgrade applied to databases that already held production rows; this adapter
+ * had no such database anywhere when it was written, so replaying that history would have created
+ * tables only to alter them a moment later, in a transaction nobody can observe. The version sequence
+ * is therefore this adapter's own and starts at 1. Aligning the two numbers would be worse than
+ * unhelpful: it would imply a correspondence nothing maintains, and the downgrade guard compares
+ * integers, so a number meaning two different structures is exactly the silent mismatch the guard
+ * exists to prevent.</p>
+ *
+ * <p>Migration 2 adds the deployment registry, and it is a <em>step</em> rather than an edit for the
+ * reason that governs every migration after the first: the text of an applied migration is history,
+ * and rewriting it would change what a database that already received it was told it received. A
+ * database standing at version 1 is an ordinary state to be found in, so the upgrade path from it is
+ * exercised rather than assumed.</p>
  *
  * <h2>Table and column names are the single-host adapter's, deliberately</h2>
  * <p>Every table and column here carries the name {@code SqliteSchema} gives it. The two schemas are
@@ -58,18 +65,20 @@ import java.util.List;
  *   written — turning a missing value into a silent historical constant rather than an error.</li>
  * </ul>
  *
- * <h2>Tables for capabilities this build does not declare</h2>
+ * <h2>The continuation tables shipped ahead of the code that writes them</h2>
  * <p>{@code execution_handler}, {@code tool_approval}, {@code human_task}, {@code execution_pause},
- * {@code agent_authority_budget} and {@code agent_authority_control} are created even though
- * {@link ai.ravenroot.api.persistence.StoreCapability#DURABLE_HANDLERS} and its neighbours are not
- * declared and nothing writes to them yet. Creating them now is what makes the work that implements
- * them <em>additive</em> — new code against an unchanged schema — rather than a migration applied to
- * databases that are by then holding executions. An empty table costs nothing; a schema change to a
- * live multi-host deployment is a rolling-upgrade problem.</p>
+ * {@code agent_authority_budget} and {@code agent_authority_control} were created in this migration
+ * before {@link ai.ravenroot.api.persistence.StoreCapability#DURABLE_HANDLERS} and its neighbours
+ * were declared and before anything wrote to them. That is what made implementing them
+ * <em>additive</em> — new code against an unchanged schema — instead of a migration applied to
+ * databases that were by then holding executions. An empty table costs nothing; a schema change to a
+ * live multi-host deployment is a rolling-upgrade problem. All six are now written and read, and no
+ * migration was needed to start doing so, which is the outcome the decision was made for.</p>
  *
- * <p>The deployment-registry tables are deliberately absent. They are a separate body of work with its
- * own aggregate, and creating them speculatively would fix their shape from the outside before
- * anything here reads or writes one.</p>
+ * <p>The deployment-registry tables were deliberately absent from that migration, because they are a
+ * separate aggregate and creating them speculatively would have fixed their shape from the outside
+ * before anything here read or wrote one. They arrive in migration 2 together with
+ * {@link PostgresDeploymentRegistry}, which is the code that decides what shape they need.</p>
  */
 final class PostgresSchema {
 
@@ -780,6 +789,185 @@ final class PostgresSchema {
                 // The primary key leads with traversal_id, so resolving an instance to its results is
                 // the opposite direction and would otherwise scan.
                 "CREATE INDEX execution_result_instance ON execution_result "
-                        + "(tenant_id, process_instance_id)")));
+                        + "(tenant_id, process_instance_id)")),
+
+                // ------------------------------------------------------------------ deployments
+                // Four tables for the deployment registry, purely additive: nothing migration 1
+                // created is touched, which is what makes this the module's first genuine upgrade
+                // path rather than a rewrite. `deployment` carries revision, fence and generation on
+                // the same row because they are three disjoint monotone axes of one aggregate, and
+                // there is no `desired_generation` column because the aggregate's own `generation`
+                // always is the generation the current desired state was stamped with; a second
+                // column could only ever agree with the first or be a bug. The fencing token lives on
+                // `deployment.fence` and not on `deployment_lease`, for the identical reason
+                // `process_instance.fencing_token` lives on the instance and not on `lease`: a
+                // release deletes the lease row without resetting the counter, and a token column on
+                // the lease row would vanish with it and let a fence restart from a value a stale
+                // holder could replay -- and here that stale holder is on another host, so nothing
+                // local would notice.
+                //
+                // There is deliberately no foreign key in either direction between these tables and
+                // the execution-store tables above. The deployment fence and the execution store's
+                // own fencing token govern disjoint concerns, and a constraint would wire together
+                // two aggregates the ports keep independent.
+                new SchemaMigration(2,
+                        "durable deployment registry aggregate, versions, command ledger and lease",
+                        List.of(
+                """
+                CREATE TABLE deployment (
+                    tenant_id                   TEXT    NOT NULL,
+                    deployment_id               TEXT    NOT NULL,
+                    latest_version              BIGINT  NOT NULL,
+                    generation                  BIGINT  NOT NULL,
+                    revision                    BIGINT  NOT NULL,
+                    fence                       BIGINT  NOT NULL,
+                    desired_kind                TEXT    NOT NULL,
+                    desired_version             BIGINT,
+                    update_strategy             TEXT,
+                    observed_kind               TEXT    NOT NULL,
+                    observed_version            BIGINT,
+                    observed_generation         BIGINT  NOT NULL,
+                    observed_at_epoch_second    BIGINT  NOT NULL,
+                    observed_at_nano            INTEGER NOT NULL,
+                    failure_code                TEXT,
+                    failure_message             TEXT,
+                    failure_at_epoch_second     BIGINT,
+                    failure_at_nano             INTEGER,
+                    tombstone_reason            TEXT,
+                    tombstone_at_epoch_second   BIGINT,
+                    tombstone_at_nano           INTEGER,
+                    created_at_epoch_second     BIGINT  NOT NULL,
+                    created_at_nano             INTEGER NOT NULL,
+                    updated_at_epoch_second     BIGINT  NOT NULL,
+                    updated_at_nano             INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id)
+                )
+                """,
+                // The listing walks one tenant's deployments in identifier order, and the collation is
+                // stated rather than inherited. A deployment id is caller-opaque TEXT, so the default
+                // collation is whatever locale the database was initialised with; `C` is bytewise and
+                // is therefore the same order the single-host adapter produces, which is what lets a
+                // cursor minted against one adapter select the same next page against the other. The
+                // index carries the same COLLATE as the query so that stating it does not cost a sort
+                // of the tenant's whole set on every page.
+                "CREATE INDEX idx_deployment_listing ON deployment "
+                        + "(tenant_id, deployment_id COLLATE \"C\")",
+                // Immutable graph bytes, one row per aggregate version. `digest` is redundant with a
+                // SHA-256 recomputed from `canonical_bytes` on every read, on the model of the
+                // manifest store's own verification column: it separates "a field changed" from "this
+                // row cannot be read back", which matters because GraphVersion.canonicalDigest() is
+                // part of the value callers compare against.
+                """
+                CREATE TABLE deployment_version (
+                    tenant_id               TEXT    NOT NULL,
+                    deployment_id           TEXT    NOT NULL,
+                    version                 BIGINT  NOT NULL,
+                    format_version          INTEGER NOT NULL,
+                    canonical_bytes         BYTEA   NOT NULL,
+                    digest                  BYTEA   NOT NULL CHECK (octet_length(digest) = 32),
+                    author                  TEXT    NOT NULL,
+                    created_at_epoch_second BIGINT  NOT NULL,
+                    created_at_nano         INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id, version),
+                    FOREIGN KEY (tenant_id, deployment_id)
+                        REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
+                )
+                """,
+                // The idempotency ledger for every mutation, including `create`. A replayed command
+                // must return the exact outcome it produced the first time, not the aggregate's
+                // current state, because a later unrelated mutation must not change what an earlier
+                // replay reports -- so this table stores the whole Record the mutation produced, as
+                // columns, rather than a reference into the live `deployment` row.
+                """
+                CREATE TABLE deployment_command (
+                    tenant_id                               TEXT    NOT NULL,
+                    deployment_id                           TEXT    NOT NULL,
+                    action                                  TEXT    NOT NULL,
+                    command_key                             TEXT    NOT NULL,
+                    digest                                  TEXT    NOT NULL,
+                    recorded_latest_version                 BIGINT  NOT NULL,
+                    recorded_generation                     BIGINT  NOT NULL,
+                    recorded_revision                       BIGINT  NOT NULL,
+                    recorded_desired_kind                   TEXT    NOT NULL,
+                    recorded_desired_version                BIGINT,
+                    recorded_update_strategy                TEXT,
+                    recorded_observed_kind                  TEXT    NOT NULL,
+                    recorded_observed_version               BIGINT,
+                    recorded_observed_generation            BIGINT  NOT NULL,
+                    recorded_observed_at_epoch_second       BIGINT  NOT NULL,
+                    recorded_observed_at_nano               INTEGER NOT NULL,
+                    recorded_lease_owner                    TEXT,
+                    recorded_lease_fence                    BIGINT,
+                    recorded_lease_acquired_at_epoch_second BIGINT,
+                    recorded_lease_acquired_at_nano         INTEGER,
+                    recorded_lease_expires_at_epoch_second  BIGINT,
+                    recorded_lease_expires_at_nano          INTEGER,
+                    recorded_failure_code                   TEXT,
+                    recorded_failure_message                TEXT,
+                    recorded_failure_at_epoch_second        BIGINT,
+                    recorded_failure_at_nano                INTEGER,
+                    recorded_tombstone_reason               TEXT,
+                    recorded_tombstone_at_epoch_second      BIGINT,
+                    recorded_tombstone_at_nano              INTEGER,
+                    recorded_created_at_epoch_second        BIGINT  NOT NULL,
+                    recorded_created_at_nano                INTEGER NOT NULL,
+                    recorded_updated_at_epoch_second        BIGINT  NOT NULL,
+                    recorded_updated_at_nano                INTEGER NOT NULL,
+                    recorded_at_epoch_second                BIGINT  NOT NULL,
+                    recorded_at_nano                        INTEGER NOT NULL,
+                    expires_at_epoch_second                 BIGINT  NOT NULL,
+                    expires_at_nano                         INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id, action, command_key),
+                    FOREIGN KEY (tenant_id, deployment_id)
+                        REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
+                )
+                """,
+                // Resolves a create-replay by (tenant, key) alone, before any deployment id is known:
+                // `create` has nothing to key on until one is minted, and the primary key -- which
+                // every other action reaches this table by -- therefore cannot serve it.
+                //
+                // UNIQUE, which the single-host adapter's identically named index is not, and this is
+                // the one place where a faithful translation of that index would be wrong. There the
+                // whole database's write lock means two concurrent creates carrying one idempotency
+                // key cannot interleave, so looking the key up and then inserting is atomic and a
+                // plain index suffices. Here the two creates are on different hosts: both would find
+                // no row, both would mint an identity, and one caller's key would end up naming a
+                // deployment a different caller's key also names -- the exact duplicate-execution
+                // that an idempotency ledger exists to prevent, and invisible afterwards because both
+                // callers were told they succeeded. Making the index the arbiter moves the decision
+                // into the write itself, where a lock this process could take has no reach.
+                //
+                // Partial, restricted to the one action ever looked up this way, so the uniqueness
+                // constrains nothing else: `action` is constant inside the predicate, which makes
+                // uniqueness over (tenant_id, action, command_key) exactly uniqueness of a create key
+                // within a tenant, while keeping the column list the single-host adapter shipped.
+                "CREATE UNIQUE INDEX idx_deployment_command_create_replay ON deployment_command "
+                        + "(tenant_id, action, command_key) WHERE action = 'CREATE'",
+                // Serves purgeExpiredCommandRecords(tenantId), on the model of idx_idempotency_expiry:
+                // without it, bounding the ledger's retention would force a full scan of every
+                // tenant's rows on every purge.
+                "CREATE INDEX idx_deployment_command_expiry ON deployment_command "
+                        + "(tenant_id, expires_at_epoch_second, expires_at_nano)",
+                // One row while a lease is held, deleted on release; `fence` here is this lease's own
+                // token, copied from `deployment.fence` at acquire time for direct reads. No expiry
+                // index: every access to this table is a point lookup by (tenant_id, deployment_id),
+                // which the primary key already serves, and unlike idempotency records this table is
+                // never scanned by a background purge -- a lease is evaluated lazily against the
+                // caller's presented token, never reaped.
+                """
+                CREATE TABLE deployment_lease (
+                    tenant_id                TEXT    NOT NULL,
+                    deployment_id            TEXT    NOT NULL,
+                    owner                    TEXT    NOT NULL,
+                    fence                    BIGINT  NOT NULL,
+                    acquired_at_epoch_second BIGINT  NOT NULL,
+                    acquired_at_nano         INTEGER NOT NULL,
+                    expires_at_epoch_second  BIGINT  NOT NULL,
+                    expires_at_nano          INTEGER NOT NULL,
+                    PRIMARY KEY (tenant_id, deployment_id),
+                    FOREIGN KEY (tenant_id, deployment_id)
+                        REFERENCES deployment (tenant_id, deployment_id) ON DELETE CASCADE
+                )
+                """)));
     }
 }

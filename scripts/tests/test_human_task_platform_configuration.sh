@@ -72,6 +72,9 @@ if definitions.get("humanTaskBlank") != {
 properties = schema["properties"]["humanTask"]["properties"]
 if len(properties) != 27:
     raise SystemExit("Helm Human Task policy must expose exactly 27 fields")
+required = schema["properties"]["humanTask"].get("required", [])
+if len(required) != len(set(required)) or set(required) != set(properties):
+    raise SystemExit("Every Helm Human Task policy field must be required")
 used_definitions = set()
 for name, node in properties.items():
     reference = node.get("$ref", "")
@@ -90,36 +93,51 @@ if used_definitions != shared_ranges:
     raise SystemExit("Helm Human Task shared range definitions are stale or unused")
 PY
 
-DEFAULTS="$TEMP_DIR/defaults"
-cat >"$DEFAULTS" <<'EOF'
-RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES=65536
-RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES=262144
-RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS=0
-RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS=2591999
-RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS=604800
-RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS=2592000
-RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES=256
-RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES=4096
-RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES=128
-RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS=16
-RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES=256
-RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES=262144
-RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE=50
-RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE=100
-RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH=32
-RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE=1024
-RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT=4096
-RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH=16384
-RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH=256
-RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS=3
-RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES=4096
-RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES=64
-RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES=4096
-RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS=1000
-RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS=10000
-RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE=20
-RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE=100
-EOF
+EMPTY_ASSIGNMENTS="$TEMP_DIR/empty-assignments"
+sed 's/$/=/' "$POLICY_ENV" >"$EMPTY_ASSIGNMENTS"
+
+# Values and raw Kubernetes must carry all source-owned settings as blank strings. A numerical
+# value here would recreate a second default authority beside HumanTaskPolicy.DEFAULTS.
+python3 - "$PROJECT_DIR/deploy/helm/ravenroot/values.yaml" \
+  "$PROJECT_DIR/deploy/kubernetes/ravenroot.yaml" "$POLICY_ENV" <<'PY'
+import re
+import sys
+
+values_text = open(sys.argv[1], encoding="utf-8").read()
+kubernetes = open(sys.argv[2], encoding="utf-8").read()
+environment = {line.strip() for line in open(sys.argv[3], encoding="utf-8") if line.strip()}
+
+human_task = {}
+inside = False
+for line in values_text.splitlines():
+    if line == "humanTask:":
+        inside = True
+        continue
+    if inside and line and not line.startswith(" "):
+        break
+    if inside:
+        match = re.fullmatch(r"  ([A-Za-z][A-Za-z0-9]*): (.*)", line)
+        if match:
+            if match.group(1) in human_task:
+                raise SystemExit(f"Helm Human Task value {match.group(1)} is duplicated")
+            human_task[match.group(1)] = match.group(2)
+
+def helm_name(name):
+    words = name.removeprefix("RAVENROOT_HUMAN_TASK_").lower().split("_")
+    return words[0] + "".join(word.title() for word in words[1:])
+
+expected_values = {helm_name(name) for name in environment}
+if set(human_task) != expected_values or any(value != '\"\"' for value in human_task.values()):
+    raise SystemExit("Helm Human Task values must be the complete source-owned blank carrier set")
+
+raw_names = re.findall(r"^\s*- name: (RAVENROOT_HUMAN_TASK_[A-Z_]+)\s*$", kubernetes, re.MULTILINE)
+if len(raw_names) != len(set(raw_names)) or set(raw_names) != environment:
+    raise SystemExit("Raw Kubernetes Human Task names must exactly match the source-owned set")
+for name in environment:
+    fragment = f'- name: {name}\n              value: ""'
+    if kubernetes.count(fragment) != 1:
+        raise SystemExit(f"Raw Kubernetes does not carry exactly one blank {name}")
+PY
 
 CUSTOMS="$TEMP_DIR/customs"
 cat >"$CUSTOMS" <<'EOF'
@@ -193,8 +211,7 @@ PY
 }
 
 compose_config "$TEMP_DIR/compose-default.json"
-sed 's/=.*$/=/' "$DEFAULTS" >"$TEMP_DIR/compose-blank-defaults"
-assert_compose_from_file "$TEMP_DIR/compose-default.json" "$TEMP_DIR/compose-blank-defaults"
+assert_compose_from_file "$TEMP_DIR/compose-default.json" "$EMPTY_ASSIGNMENTS"
 
 set --
 while IFS= read -r name; do
@@ -264,7 +281,7 @@ PY
 helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
   --set-string auth.audience=ravenroot-human-task-test \
   --set-string auth.jwksUri=https://idp.example.test/jwks >"$TEMP_DIR/helm-default.yaml"
-assert_helm_from_file "$TEMP_DIR/helm-default.yaml" "$DEFAULTS"
+assert_helm_from_file "$TEMP_DIR/helm-default.yaml" "$EMPTY_ASSIGNMENTS"
 
 set -- helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
   --set-string auth.audience=ravenroot-human-task-test \

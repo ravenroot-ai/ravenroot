@@ -172,7 +172,11 @@
         "maxDescriptionBytes", "maxResponseSchemaBytes", "maxAuthorizationTokens",
         "maxAuthorizationTokenBytes", "maxDecisionBodyBytes", "defaultPageSize", "maxPageSize",
         "responseMaxDepth", "responseMaxCollectionSize", "responseMaxValueCount",
-        "responseMaxTextLength", "responseMaxKeyLength", "writeAttempts"
+        "responseMaxTextLength", "responseMaxKeyLength", "writeAttempts",
+        "maxConfirmationPromptBytes", "maxConfirmationActionLabelBytes",
+        "maxDecisionCommentBytes", "attentionPollMillis",
+        "attentionPollBackoffMaxMillis", "defaultAttentionPageSize",
+        "maxAttentionPageSize"
       ],
       "properties": {
         "defaultResponseBytes": { "$ref": "#/definitions/positiveInt64MiB" },

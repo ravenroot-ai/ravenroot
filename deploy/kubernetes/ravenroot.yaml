@@ -112,6 +112,62 @@ spec:
               value: ""
             - name: RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT
               value: ""
+            # Empty Human Task policy values select the Java typed defaults. Kustomize overlays may
+            # replace individual values with quoted integers within the documented bounds.
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_ESCALATION_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_ESCALATION_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_EXPIRY_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_TITLE_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_DESCRIPTION_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_SCHEMA_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKENS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_AUTHORIZATION_TOKEN_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_BODY_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_DEPTH
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_COLLECTION_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_VALUE_COUNT
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_TEXT_LENGTH
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_RESPONSE_MAX_KEY_LENGTH
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_WRITE_ATTEMPTS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_ACTION_LABEL_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_DECISION_COMMENT_BYTES
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_MILLIS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_ATTENTION_POLL_BACKOFF_MAX_MILLIS
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_DEFAULT_ATTENTION_PAGE_SIZE
+              value: ""
+            - name: RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE
+              value: ""
             # A local SQLite store is a single-pod durability mode. The main database and its WAL
             # sidecars share this RWO PVC with the audit trail; neither may fall back to read-only
             # image layers or the tmpfs below.

@@ -61,6 +61,17 @@ class GraphRunnerShutdownTest {
     private static final Duration NEVER_HANGS = Duration.ofSeconds(20);
 
     @Test
+    void convertsEveryPositiveShutdownDurationWithoutLosingSubMillisecondValuesOrOverflowing() {
+        assertEquals(1L, GraphRunner.shutdownWaitNanos(Duration.ofNanos(1)));
+        assertEquals(Long.MAX_VALUE,
+                GraphRunner.shutdownWaitNanos(Duration.ofSeconds(9_223_372_036L, 854_775_807)));
+        assertEquals(Long.MAX_VALUE,
+                GraphRunner.shutdownWaitNanos(Duration.ofSeconds(Long.MAX_VALUE, 999_999_999)));
+        assertEquals(ExecutionRuntimeConfiguration.DEFAULTS.runnerShutdownStepBound(),
+                GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    @Test
     void escalatesToCancellationWhenAStopWillNotComplete() {
         var engine = new WedgeableEngine(false);
 
@@ -128,6 +139,19 @@ class GraphRunnerShutdownTest {
 
         assertEquals(engine.spawned(), engine.stopped);
         assertEquals(0, engine.cancelled, "a stop that completes must not be escalated");
+    }
+
+    @Test
+    void anActualCloseWithAHugePositiveBoundDoesNotOverflowTheWaitUnit() {
+        var engine = new WedgeableEngine(false);
+        engine.wedgeStops = false;
+        var runner = new GraphRunner(GraphManager.from(graph()), engine, new BehaviorRegistry(),
+                new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
+                Duration.ofSeconds(Long.MAX_VALUE, 999_999_999));
+        runner.execute(TestIdentities.TENANT_A, "payload").toCompletableFuture().join();
+
+        assertTimeoutPreemptively(NEVER_HANGS, runner::close);
+        assertEquals(engine.spawned(), engine.stopped);
     }
 
     private static GraphRunner runner(ExecutionEngine engine) {

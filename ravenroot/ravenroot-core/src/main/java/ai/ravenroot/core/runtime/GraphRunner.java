@@ -80,11 +80,12 @@ public final class GraphRunner implements AutoCloseable {
     /**
      * How long {@link #close()} waits for a stop, and then for the cancellation it escalates to.
      *
-     * <p>It matches the bound both supported adapters already apply inside
-     * {@code ExecutionEngine.close()}, so a runner and the engine underneath it do not give up on the
-     * same node at different times.</p>
+     * <p>The compatibility default matches the historical bound in both supported adapters. A
+     * composed runtime may select the runner and engine lifecycle bounds independently; equality is
+     * the preserved default, not a promise that the two policies always have the same value.</p>
      */
-    public static final Duration DEFAULT_SHUTDOWN_BOUND = Duration.ofSeconds(10);
+    public static final Duration DEFAULT_SHUTDOWN_BOUND =
+            ExecutionRuntimeConfiguration.DEFAULTS.runnerShutdownStepBound();
 
     /**
      * The topology this runner executes, and the <em>only</em> one it consults (ARC-02).
@@ -545,6 +546,16 @@ public final class GraphRunner implements AutoCloseable {
         this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(),
                 DEFAULT_SHUTDOWN_BOUND, unknownBehaviors, null, null, executionPolicy,
                 NO_TIMEOUT_RELINQUISHED_OBSERVER, executionLimits);
+    }
+
+    /** Composes an inline runner with every independently selected runtime policy. */
+    public GraphRunner(GraphManager graphManager, ExecutionEngine engine, BehaviorRegistry behaviors,
+                       ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                       Duration shutdownBound, UnknownBehaviorPolicy unknownBehaviors,
+                       ExecutionPolicy executionPolicy, GraphExecutionLimits executionLimits) {
+        this(graphManager, engine, behaviors, monitor, identitySource, null, Clock.systemUTC(), shutdownBound,
+                unknownBehaviors, null, null, executionPolicy, NO_TIMEOUT_RELINQUISHED_OBSERVER,
+                executionLimits);
     }
 
     /**
@@ -4261,7 +4272,7 @@ public final class GraphRunner implements AutoCloseable {
         try {
             CompletableFuture.allOf(pending.stream().map(Termination::stage)
                             .toArray(CompletableFuture[]::new))
-                    .get(shutdownBound.toMillis(), TimeUnit.MILLISECONDS);
+                    .get(shutdownWaitNanos(shutdownBound), TimeUnit.NANOSECONDS);
         } catch (TimeoutException | ExecutionException | RuntimeException ignored) {
             // Shutdown must not depend on store health, exactly as ExecutionStore.close() requires.
         } catch (InterruptedException interrupted) {
@@ -4323,7 +4334,7 @@ public final class GraphRunner implements AutoCloseable {
                 .map(CompletionStage::toCompletableFuture)
                 .toArray(CompletableFuture[]::new));
         try {
-            pending.get(shutdownBound.toMillis(), TimeUnit.MILLISECONDS);
+            pending.get(shutdownWaitNanos(shutdownBound), TimeUnit.NANOSECONDS);
             return true;
         } catch (TimeoutException timeout) {
             return false;
@@ -4336,6 +4347,23 @@ public final class GraphRunner implements AutoCloseable {
             Thread.currentThread().interrupt();
             return true;
         }
+    }
+
+    /** Converts a positive shutdown duration exactly where possible and saturates only on overflow. */
+    static long shutdownWaitNanos(Duration bound) {
+        java.util.Objects.requireNonNull(bound, "bound");
+        if (bound.isZero() || bound.isNegative()) {
+            throw new IllegalArgumentException("bound must be positive");
+        }
+        long seconds = bound.getSeconds();
+        int nanos = bound.getNano();
+        if (seconds > Long.MAX_VALUE / 1_000_000_000L) {
+            return Long.MAX_VALUE;
+        }
+        long secondsNanos = seconds * 1_000_000_000L;
+        return nanos > Long.MAX_VALUE - secondsNanos
+                ? Long.MAX_VALUE
+                : secondsNanos + nanos;
     }
 
     /**

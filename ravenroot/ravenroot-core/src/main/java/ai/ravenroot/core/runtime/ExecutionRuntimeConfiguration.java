@@ -20,15 +20,18 @@ public record ExecutionRuntimeConfiguration(
     public static final String RUNNER_SHUTDOWN_STEP_SECONDS_VARIABLE =
             "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS";
 
-    private static final int MAX_STASHED_COMMANDS_PER_NODE = 10_000;
-    private static final int MAX_LIFECYCLE_STEP_SECONDS = 10;
-    private static final int MAX_TERMINAL_HISTORY_CAPACITY = 1_024;
+    private static final int MAX_STASHED_COMMANDS_PER_NODE =
+            ExecutionEnginePolicy.FROZEN_LEGACY.maxStashedCommandsPerNode();
+    private static final int MAX_LIFECYCLE_STEP_SECONDS = Math.toIntExact(
+            ExecutionEnginePolicy.FROZEN_LEGACY.lifecycleStepBound().getSeconds());
+    private static final int MAX_TERMINAL_HISTORY_CAPACITY =
+            ExecutionEnginePolicy.FROZEN_LEGACY.terminalNodeHistoryCapacity();
     private static final int MAX_RUNNER_SHUTDOWN_STEP_SECONDS = 10;
 
     /** The effective configuration when every operator binding is absent or blank. */
     public static final ExecutionRuntimeConfiguration DEFAULTS = new ExecutionRuntimeConfiguration(
             ExecutionEnginePolicy.FROZEN_LEGACY,
-            Duration.ofSeconds(10));
+            Duration.ofSeconds(MAX_RUNNER_SHUTDOWN_STEP_SECONDS));
 
     /** Preserves the API policy's positive-value freedom for direct Java composition. */
     public ExecutionRuntimeConfiguration {

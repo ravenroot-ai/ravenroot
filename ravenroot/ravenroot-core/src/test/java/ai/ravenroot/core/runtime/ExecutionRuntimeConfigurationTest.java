@@ -91,16 +91,21 @@ class ExecutionRuntimeConfigurationTest {
 
     private static Stream<Arguments> bindings() {
         return Stream.of(
-                Arguments.of(ExecutionRuntimeConfiguration.MAX_STASHED_COMMANDS_PER_NODE_VARIABLE, 10_000,
+                Arguments.of(ExecutionRuntimeConfiguration.MAX_STASHED_COMMANDS_PER_NODE_VARIABLE,
+                        ExecutionEnginePolicy.FROZEN_LEGACY.maxStashedCommandsPerNode(),
                         (ToIntFunction<ExecutionRuntimeConfiguration>)
                                 configuration -> configuration.enginePolicy().maxStashedCommandsPerNode()),
-                Arguments.of(ExecutionRuntimeConfiguration.LIFECYCLE_STEP_SECONDS_VARIABLE, 10,
+                Arguments.of(ExecutionRuntimeConfiguration.LIFECYCLE_STEP_SECONDS_VARIABLE,
+                        Math.toIntExact(ExecutionEnginePolicy.FROZEN_LEGACY.lifecycleStepBound().getSeconds()),
                         (ToIntFunction<ExecutionRuntimeConfiguration>) configuration ->
                                 Math.toIntExact(configuration.enginePolicy().lifecycleStepBound().getSeconds())),
-                Arguments.of(ExecutionRuntimeConfiguration.TERMINAL_HISTORY_CAPACITY_VARIABLE, 1_024,
+                Arguments.of(ExecutionRuntimeConfiguration.TERMINAL_HISTORY_CAPACITY_VARIABLE,
+                        ExecutionEnginePolicy.FROZEN_LEGACY.terminalNodeHistoryCapacity(),
                         (ToIntFunction<ExecutionRuntimeConfiguration>)
                                 configuration -> configuration.enginePolicy().terminalNodeHistoryCapacity()),
-                Arguments.of(ExecutionRuntimeConfiguration.RUNNER_SHUTDOWN_STEP_SECONDS_VARIABLE, 10,
+                Arguments.of(ExecutionRuntimeConfiguration.RUNNER_SHUTDOWN_STEP_SECONDS_VARIABLE,
+                        Math.toIntExact(ExecutionRuntimeConfiguration.DEFAULTS
+                                .runnerShutdownStepBound().getSeconds()),
                         (ToIntFunction<ExecutionRuntimeConfiguration>) configuration ->
                                 Math.toIntExact(configuration.runnerShutdownStepBound().getSeconds())));
     }

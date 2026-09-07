@@ -283,20 +283,72 @@ def java_type_span(source: str, symbol: str) -> tuple[int, int] | None:
 
 
 def java_type_declares_field(source: str, symbol: str, field: str) -> bool:
-    """Check a record component or member declaration inside the named Java type."""
+    """Check an exact record component or direct member declared by the named Java type."""
     span = java_type_span(source, symbol)
     if span is None:
         return False
     code = strip_c_comments_and_literals(source)[slice(*span)]
     opening = code.find("{")
-    identifier = field.rsplit(".", 1)[-1]
-    if re.search(rf"\b{re.escape(identifier)}\b", code[:opening]):
-        return True
-    declaration = re.compile(
-        rf"(?m)^\s*(?:(?:public|protected|private|static|final|volatile|transient)\s+)*"
-        rf"[A-Za-z_$][\w$<>,.?\[\] @]*\s+{re.escape(identifier)}\s*(?:=|;|,)",
+    parts = field.split(".")
+    if len(parts) > 2 or (len(parts) == 2 and parts[0] != symbol[:1].lower() + symbol[1:]):
+        return False
+    identifier = parts[-1]
+
+    type_match = re.search(
+        rf"\b(?P<kind>class|record|interface|enum|@interface)\s+{re.escape(symbol)}\b", code[:opening],
     )
-    return declaration.search(code[opening + 1:]) is not None
+    if type_match is None:
+        return False
+    declared: set[str] = set()
+    if type_match.group("kind") == "record":
+        parenthesis = code.find("(", type_match.end(), opening)
+        if parenthesis >= 0:
+            depth = 0
+            component_start = parenthesis + 1
+            for offset in range(parenthesis + 1, opening):
+                char = code[offset]
+                if char in "(<[":
+                    depth += 1
+                elif char in ")>]":
+                    if char == ")" and depth == 0:
+                        component = code[component_start:offset]
+                        names = re.findall(r"\b[A-Za-z_$][\w$]*\b", component)
+                        if names:
+                            declared.add(names[-1])
+                        break
+                    depth -= 1
+                elif char == "," and depth == 0:
+                    component = code[component_start:offset]
+                    names = re.findall(r"\b[A-Za-z_$][\w$]*\b", component)
+                    if names:
+                        declared.add(names[-1])
+                    component_start = offset + 1
+
+    body = code[opening + 1:-1]
+    depth = 1
+    statement: list[str] = []
+    for char in body:
+        if char == "{":
+            if depth == 1:
+                statement.clear()
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 1:
+                statement.clear()
+        elif depth == 1:
+            statement.append(char)
+            if char == ";":
+                unit = "".join(statement)
+                statement.clear()
+                declaration = re.match(
+                    r"\s*(?:(?:public|protected|private|static|final|volatile|transient)\s+)*"
+                    r"[A-Za-z_$][\w$<>,.?\[\] @]*\s+([A-Za-z_$][\w$]*)\s*(?:=|;|,)",
+                    unit,
+                )
+                if declaration is not None:
+                    declared.add(declaration.group(1))
+    return identifier in declared
 
 
 def normalized(value: str) -> str:

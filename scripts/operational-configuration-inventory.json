@@ -168753,9 +168753,114 @@
       "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
     },
     {
+      "id": "oc-a1a347333b402b920909",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 321,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"package dev.example;\\n\"",
+      "expressionDigest": "aea3af1d15e8c9fd51361ee517e850a4607ad2c55d92abcebbf2badb66bd751e",
+      "evidenceDigest": "aea3af1d15e8c9fd51361ee517e850a4607ad2c55d92abcebbf2badb66bd751e",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
+      "id": "oc-78185679d26d9aba9472",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 323,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"record Limits(int maxDepth) {}\\n\"",
+      "expressionDigest": "8b91d66f2b11645b3995d2683189c48cbc88dd4bda84754076fa2611d5b7d90f",
+      "evidenceDigest": "f135181202c8733a77774686274d259ea33b0f21c4e6e3c6f43f31180c47cff7",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
+      "id": "oc-571d3bb945d519d14ba3",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 327,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#Limits\"",
+      "expressionDigest": "699242a08b6d663d2314adf91f73f77a239d982e06051a88faee6189d2c32c10",
+      "evidenceDigest": "0f2c531cd028b7dfb47f1ff32551d95a2fce8e51c774dbe85d265dc0a991e5ad",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
+      "id": "oc-ce4f7e46bb3631105ea4",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 330,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"maxDepth\"",
+      "expressionDigest": "a335959a3be2cfba00b442ec4ed6d8c46d6ea6a59c093ffc1951180a7eb3cea6",
+      "evidenceDigest": "07f588beb9a660f17e5e1acfa41d7193ecf3cbda3ba7d6903fa12827ee38395c",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
+      "id": "oc-bcff2f01fca7909e74a5",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 331,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"limits.maxDepth\"",
+      "expressionDigest": "e8413aefe8237ae36bd1fe212294d35bd781f27f51991f278a8edd4510f7e4c3",
+      "evidenceDigest": "05b41568fc5a035fad86480497e01ddae64e64b8c1820276975fd55eb8aba880",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
+      "id": "oc-ce2ea8f1253fd4f0a6db",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 332,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"Limits\"",
+      "expressionDigest": "de426ff2905e9741bf84a78c443a7435a7014c4a60bc749f2461d5bcd3bc89b5",
+      "evidenceDigest": "1db938b95c15538760e24f1f9592f31a6db08398d8db96a2da0f67f59828ec5f",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
+      "id": "oc-93b21319452739a1e198",
+      "path": "scripts/tests/test_audit_operational_configuration.py",
+      "line": 334,
+      "symbol": "test_java_field_owner_excludes_locals_nested_fields_and_record_non_components",
+      "kind": "inline-script-operational",
+      "role": "inline",
+      "expression": "\"Bogus.maxDepth\"",
+      "expressionDigest": "225e974bb4ea2aff48e396647a680ff5fa49e4648d37f553827a0c96ffef769e",
+      "evidenceDigest": "b05b169fa676fff87c7cd516ef64d4d50cc2754a04f269daa676d2005bc1a798",
+      "surface": "test-fixture",
+      "status": "retained",
+      "classification": "test-fixture",
+      "rationale": "A testkit module ships reusable test fixtures under src/main; it is not production runtime configuration."
+    },
+    {
       "id": "oc-826de104ef5908047f2d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 329,
+      "line": 349,
       "symbol": "test_confirmed_hardcoded_setting_fails_the_completion_gate",
       "kind": "script-default",
       "role": "coverage",
@@ -168770,7 +168875,7 @@
     {
       "id": "oc-964f8ac4b99b223620ad",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 337,
+      "line": 357,
       "symbol": "test_confirmed_hardcoded_setting_fails_the_completion_gate",
       "kind": "script-default",
       "role": "report",
@@ -168785,7 +168890,7 @@
     {
       "id": "oc-a933d9a5b94f3f1a8b9c",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 338,
+      "line": 358,
       "symbol": "test_confirmed_hardcoded_setting_fails_the_completion_gate",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168800,7 +168905,7 @@
     {
       "id": "oc-80b9497299f5afab0021",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 355,
+      "line": 375,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "script-default",
       "role": "coverage",
@@ -168815,7 +168920,7 @@
     {
       "id": "oc-3c1e755ea58fd5941b7c",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 359,
+      "line": 379,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168830,7 +168935,7 @@
     {
       "id": "oc-2a9c79bc0f8ab0841737",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 359,
+      "line": 379,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168845,7 +168950,7 @@
     {
       "id": "oc-45f2680b15baa33194c1",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 361,
+      "line": 381,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -168860,7 +168965,7 @@
     {
       "id": "oc-972c69ec19fa5147c089",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 361,
+      "line": 381,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168875,7 +168980,7 @@
     {
       "id": "oc-5f1f5d369ea2821f2512",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 361,
+      "line": 381,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168890,7 +168995,7 @@
     {
       "id": "oc-5d1473689d325b64997e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 361,
+      "line": 381,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168905,7 +169010,7 @@
     {
       "id": "oc-795367663187defa4f7c",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 361,
+      "line": 381,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168920,7 +169025,7 @@
     {
       "id": "oc-4a9fc8247986ef00c719",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 363,
+      "line": 383,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168935,7 +169040,7 @@
     {
       "id": "oc-dca530ba42a49f59e748",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 363,
+      "line": 383,
       "symbol": "test_converted_setting_requires_resolvable_source_revisions",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168950,7 +169055,7 @@
     {
       "id": "oc-a2891b70e9763ac15779",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 387,
+      "line": 407,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "script-default",
       "role": "coverage",
@@ -168965,7 +169070,7 @@
     {
       "id": "oc-4fdfae0e2b45d91daf79",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 391,
+      "line": 411,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168980,7 +169085,7 @@
     {
       "id": "oc-77f71119993f4cb1065e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 391,
+      "line": 411,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -168995,7 +169100,7 @@
     {
       "id": "oc-4fb89841c3b2c6f76f12",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 393,
+      "line": 413,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169010,7 +169115,7 @@
     {
       "id": "oc-068b485936649e98c043",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 393,
+      "line": 413,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169025,7 +169130,7 @@
     {
       "id": "oc-304891824949f1deb229",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 393,
+      "line": 413,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169040,7 +169145,7 @@
     {
       "id": "oc-2a531093a8f52cd812c2",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 393,
+      "line": 413,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169055,7 +169160,7 @@
     {
       "id": "oc-818cd8e17c746e2eb4a9",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 393,
+      "line": 413,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169070,7 +169175,7 @@
     {
       "id": "oc-a172253a3de90723d751",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 395,
+      "line": 415,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169085,7 +169190,7 @@
     {
       "id": "oc-3029e9cc37b05e577809",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 395,
+      "line": 415,
       "symbol": "test_converted_setting_rejects_no_op_revision_provenance",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169100,7 +169205,7 @@
     {
       "id": "oc-d906a2efdf2fbe62beea",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 412,
+      "line": 432,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169115,7 +169220,7 @@
     {
       "id": "oc-599af4beeee7b0f43c6e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 412,
+      "line": 432,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169130,7 +169235,7 @@
     {
       "id": "oc-f27e01de5dbd893caae3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 413,
+      "line": 433,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169145,7 +169250,7 @@
     {
       "id": "oc-2f8a148aae5f28b50bd3",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 428,
+      "line": 448,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169160,7 +169265,7 @@
     {
       "id": "oc-50b3973e68c38657f398",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 428,
+      "line": 448,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169175,7 +169280,7 @@
     {
       "id": "oc-6958cb7e2526e2eb5072",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 428,
+      "line": 448,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169190,7 +169295,7 @@
     {
       "id": "oc-a3fb4f1153d29ef8676d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 428,
+      "line": 448,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169205,7 +169310,7 @@
     {
       "id": "oc-bf8b310d1c9cd8987e45",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 430,
+      "line": 450,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "script-default",
       "role": "coverage",
@@ -169220,7 +169325,7 @@
     {
       "id": "oc-0803a2cd6ae69acf617d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 430,
+      "line": 450,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "script-default",
       "role": "coverage",
@@ -169235,7 +169340,7 @@
     {
       "id": "oc-c333d8c1393378afe0af",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 433,
+      "line": 453,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169250,7 +169355,7 @@
     {
       "id": "oc-cc5e0cef6ccc83dde6c7",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 433,
+      "line": 453,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169265,7 +169370,7 @@
     {
       "id": "oc-c2230ee8a7ef6772e4bd",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 434,
+      "line": 454,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169280,7 +169385,7 @@
     {
       "id": "oc-f36ebba1221359070b63",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 434,
+      "line": 454,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169295,7 +169400,7 @@
     {
       "id": "oc-15c46312362b73a312d5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 434,
+      "line": 454,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169310,7 +169415,7 @@
     {
       "id": "oc-0a411ef54809d0c66e6a",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 434,
+      "line": 454,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169325,7 +169430,7 @@
     {
       "id": "oc-7dccebfcff64ac052fec",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 434,
+      "line": 454,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169340,7 +169445,7 @@
     {
       "id": "oc-00b1da25903d7cd104dd",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 435,
+      "line": 455,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169355,7 +169460,7 @@
     {
       "id": "oc-805bb09da90321bc518e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 435,
+      "line": 455,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169370,7 +169475,7 @@
     {
       "id": "oc-75ca7f4cdec4504e2a78",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 435,
+      "line": 455,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169385,7 +169490,7 @@
     {
       "id": "oc-e9ee831c3a353fe2cdba",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 435,
+      "line": 455,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169400,7 +169505,7 @@
     {
       "id": "oc-5ca8aac883f99e337d1b",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 437,
+      "line": 457,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169415,7 +169520,7 @@
     {
       "id": "oc-c6ee2834da24ff33fabf",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 437,
+      "line": 457,
       "symbol": "test_converted_setting_rejects_comment_only_or_unrelated_source_changes",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169430,7 +169535,7 @@
     {
       "id": "oc-66f64eeaf0a411fb938d",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 454,
+      "line": 474,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169445,7 +169550,7 @@
     {
       "id": "oc-54ffd15b0ff979c4b974",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 454,
+      "line": 474,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169460,7 +169565,7 @@
     {
       "id": "oc-b8cfba5540e24a3af926",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 455,
+      "line": 475,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169475,7 +169580,7 @@
     {
       "id": "oc-abf56885a651b3c4ae06",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 469,
+      "line": 489,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169490,7 +169595,7 @@
     {
       "id": "oc-defa56e69b991021afbe",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 469,
+      "line": 489,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169505,7 +169610,7 @@
     {
       "id": "oc-b2cec5adb68fb4df2341",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 469,
+      "line": 489,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169520,7 +169625,7 @@
     {
       "id": "oc-685f84fba6da6c390e44",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 469,
+      "line": 489,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169535,7 +169640,7 @@
     {
       "id": "oc-9993a04073549ebf20eb",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 471,
+      "line": 491,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "script-default",
       "role": "coverage",
@@ -169550,7 +169655,7 @@
     {
       "id": "oc-bf0cd79b564ab832af24",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 471,
+      "line": 491,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "script-default",
       "role": "coverage",
@@ -169565,7 +169670,7 @@
     {
       "id": "oc-e77e6ec4534e8632aee8",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 474,
+      "line": 494,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169580,7 +169685,7 @@
     {
       "id": "oc-63fe886e05c2dc3b3460",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 474,
+      "line": 494,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169595,7 +169700,7 @@
     {
       "id": "oc-a90f9539deb5a0338b85",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 475,
+      "line": 495,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "environment-binding",
       "role": "RAVENROOT_RUNTIME_LIMIT",
@@ -169610,7 +169715,7 @@
     {
       "id": "oc-682caf6dc291e41576e6",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 475,
+      "line": 495,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169625,7 +169730,7 @@
     {
       "id": "oc-001a8195d59d174da7d7",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 475,
+      "line": 495,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169640,7 +169745,7 @@
     {
       "id": "oc-a5d96e30f31d84555efc",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 475,
+      "line": 495,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169655,7 +169760,7 @@
     {
       "id": "oc-03a370cfcda153d2a24e",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 475,
+      "line": 495,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169670,7 +169775,7 @@
     {
       "id": "oc-1e933094d89d2e477c76",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 476,
+      "line": 496,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169685,7 +169790,7 @@
     {
       "id": "oc-62ff30234fbf48382825",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 476,
+      "line": 496,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169700,7 +169805,7 @@
     {
       "id": "oc-5a34947becff570d5fe0",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 476,
+      "line": 496,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169715,7 +169820,7 @@
     {
       "id": "oc-632fc509ba5ad3948052",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 476,
+      "line": 496,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169730,7 +169835,7 @@
     {
       "id": "oc-c0c9b01ce7413cee47c5",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 478,
+      "line": 498,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169745,7 +169850,7 @@
     {
       "id": "oc-36590af27f2e21f4c4ed",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 478,
+      "line": 498,
       "symbol": "test_converted_setting_rejects_executable_evidence_inside_java_string",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169760,7 +169865,7 @@
     {
       "id": "oc-46e712ee01fa818f7dc0",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 492,
+      "line": 512,
       "symbol": "test_refresh_preserves_review_metadata_and_updates_source_line",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -169775,7 +169880,7 @@
     {
       "id": "oc-4019257c90f2d77a8ddf",
       "path": "scripts/tests/test_audit_operational_configuration.py",
-      "line": 532,
+      "line": 552,
       "symbol": "test_refresh_requires_per_entry_rationale_before_retiring_reviewed_candidate",
       "kind": "inline-script-operational",
       "role": "inline",
@@ -204943,6 +205048,7 @@
     "0580e3007a115b37219b38ac70f2bfd81b38059fd6fca7fd3594ddba12c2ab39": "const hide = text === '';",
     "058447cb8998b77c3987baadfb7fec01ebea63f1e8332bbcddecc334f0281bc8": "\"retry\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"version\",\"status\",\"reason\",\"retryAtEpochMs\",\"generation\",\"attempts\",\"remoteId\"],\"properties\":{\"version\":{\"const\":\"github.operation.retry.v1\"},\"status\":{\"const\":\"waiting\"},\"reason\":{\"const\":\"RATE_LIMITED\"},\"retryAtEpochMs\":{\"type\":\"integer\",\"minimum\":1},\"generation\":{\"type\":\"integer\"},\"attempts\":{\"type\":\"integer\",\"maximum\":2147483647},\"remoteId\":{\"type\":\"string\"}}},",
     "05878d63de9a91c1123d5bbd5618b275bfcde5cd0260b6c06eb477af4ae8e303": "public final class GraphMlCompatibilityException extends IllegalArgumentException implements GraphMlRejectionDetail { private static final long serialVersionUID = 1L;",
+    "05b41568fc5a035fad86480497e01ddae64e64b8c1820276975fd55eb8aba880": "self.assertTrue(audit.current_source_field(root, record_owner, \"limits.maxDepth\"))",
     "05bc32c85bc52808d691abebbdcc4d830255aaba9934712f89583cbc894e16de": "const settleWithoutMoving = () => { this.emit('layoutready');",
     "05ca5188c3c23fbbfb86e624833e38740b310f50041fadf95a61dc9366081d44": "public final class EmbedLaunchTicketAuthority { public static final Duration DEFAULT_TTL = Duration.ofMinutes(1);",
     "05ceeddffcb02bad78ad9de18df4f7a38f462657bcd0d81d4acf71a96dd9c27b": "const width = Math.min(240, Math.max(24, text.length * 7 + 12));",
@@ -204985,6 +205091,7 @@
     "07dfe66ed1ff12867f7eeaf78c6494a41f41003a5eb57eefc34142b9f0d4fd16": "static final String ENVIRONMENT = \"RAVENROOT_SLACK_CONFIG\";",
     "07e119f9f81d8dd737f1d3ce29de55a1cf175f9b75804d08b0dbe4c93d6a5b72": "private static final AttributeKey<Boolean> ATTR_FALLBACK = AttributeKey.booleanKey(\"ravenroot.fallback\");",
     "07f1f81aa4c9d412680751f14b9efc32a3a5ab6134eadaa7e60c8ed3c382377c": "this.drainBound = positive(drainBound, \"drainBound\");",
+    "07f588beb9a660f17e5e1acfa41d7193ecf3cbda3ba7d6903fa12827ee38395c": "self.assertTrue(audit.current_source_field(root, record_owner, \"maxDepth\"))",
     "07f712113f6335c08e6f806fe711edd96c0021724dcb1869b908d094f7b41d56": "public final class AmqpConsumeNodeBehavior implements NodeBehavior, InboundSourceCapable { public static final String BEHAVIOR = \"amqp.consume\";",
     "08019ae73a319041c30f3380a5f361ea3f686ef819555942f33962cf90c428d0": "BAD_DRIVER_DIR=\"$TEMP_DIR/install-bad-driver\"",
     "083dd167cbf4cfb38fe57adaca6f5744d2387d627235036a60019465f0dbfb48": "public static final String SUBMISSION_GRAPH_ID = \"submission\";",
@@ -205145,6 +205252,7 @@
     "0f1fdf01659e61a33efac9780f9794ae2564b2228189222f0dfbc4543148ac7c": "public static final String HANDLER_RESOLVED = \"HANDLER_RESOLVED\";",
     "0f21ec8518a9bd8fe35eb514761df10a67c70ba91669f6d3a9cd1eb7b87c5817": "} Semaphore gate(SlackProfile profile) { return gates.computeIfAbsent(profile.tenantId() + \"\\u0000\" + profile.name(), ignored -> new Semaphore(profile.maxConcurrency()));",
     "0f2a02d49b846122354120bddd53888c97a301ce3a241a0e389d1b4cc7587011": "echo \"install --all: cannot stage $extension_id ($manifest_id)\" >&2",
+    "0f2c531cd028b7dfb47f1ff32551d95a2fce8e51c774dbe85d265dc0a991e5ad": "record_owner = \"ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#Limits\"",
     "0f2df2f67785e1f9950f082c98f88ab94cd312d3e347eec43a6c5d222fcd5368": "RAVENROOT_HUMAN_TASK_MAX_EXPIRY_SECONDS",
     "0f319632936b22cd35f504546e30297a7bb54d0b095efba45b5843dbd0e418db": "private static final AttributeKey<String> ATTR_NODE_ID = AttributeKey.stringKey(\"ravenroot.node_id\");",
     "0f4a53123a24dd1047ff3b775f730d7f6efe6660601546daedbeb141e04264c7": "TARGET='leaves the zoom badge describing the active document'",
@@ -205462,6 +205570,7 @@
     "1dad59f97d0de5aa04b5f71ba718ffcf996aec31313353681bdd9c72592b4225": "driver_plan=$(mktemp \"${TMPDIR:-/tmp}/plugin-install-jdbc.XXXXXX\")",
     "1db02526bf08931d8383fdc253a268a6b13d1123febc90c67886a227faee67c7": "} int bytes = tighten(configuration, \"maxBytes\", profile.maxObjectBytes());",
     "1db2804b0c326be43a55dca288929e0f68f080b311f92cf0b206ad2d0a7a231c": "grep -q \"RAVENROOT_GRAAL_SANDBOX_SUPERVISOR: $SUPERVISOR_CONTAINER_PATH\" \"$COMPOSE_FILE\" || wired=false",
+    "1db938b95c15538760e24f1f9592f31a6db08398d8db96a2da0f67f59828ec5f": "self.assertFalse(audit.current_source_field(root, record_owner, \"Limits\"))",
     "1dc2bdbc979c690fcdba6faa6fd04f5e52ca4f7b43db7ef0c8caea9e9bcdcec6": "public IngressAuthorityDeclaration { packageId = text(packageId, \"packageId\");",
     "1dc64f20312435eea23ce5f4a4a3458f22d25f9511e2574b40cde86d598cb33f": "const beside = Math.max(0, labelled.x2 - (position.x + width / 2));",
     "1dc9d26a4f41c511702ccd0f92f4b7e21fae14323578764f203ed67d9f495c80": "RAVENROOT_HUMAN_TASK_MAX_CONFIRMATION_PROMPT_BYTES=65536",
@@ -208728,6 +208837,7 @@
     "b037986ada0b31c14d80e494eeabd9e352d4310781a079fd19e0c5bcc428ec52": "private static final int FIELDS = 11;",
     "b0450beb372f3d43b93d3cd0812a72c2268b8b48506931b9112edac6982c018d": "if name.startswith(\"RAVENROOT_RATELIMIT_\") or name in {",
     "b0486fb9bcd8dfebd03f0dc8e74fbf8b29c3bbac2e9ec15ba1f8234312829121": "static final int MAX_OPERATIONS = 2_048;",
+    "b05b169fa676fff87c7cd516ef64d4d50cc2754a04f269daa676d2005bc1a798": "self.assertFalse(audit.current_source_field(root, record_owner, \"Bogus.maxDepth\"))",
     "b0741d7c39935773022d09f55ab447f1f8f3597ea0d349d904ac3b954387d75a": "} const counts = object(page.counts, 'Human Task attention counts are missing');",
     "b074ac003c2bc2e0b8272234285b1421c9148ed5dfb894fed0809b13a288f8d7": "two_space) printf '# %s\\n' \"$significant_line\" >>\"$WORKDIR/compose.yaml\" ;;",
     "b0783581c3d3813eec75ff86a07f8265606f4600351f22878a2a5861ad298659": "public final class DefaultGraphDeployment implements GraphDeployment, DeploymentLifecycleTarget { public static final int DEFAULT_INGRESS_BUFFER_CAPACITY = 64;",
@@ -210226,6 +210336,7 @@
     "f11b481061ed98612463ae00b24d8aeddc37c6d37c816324976fdf920b3f0e5b": "\"result\":{\"type\":\"object\",\"additionalProperties\":false,\"required\":[\"version\",\"status\",\"itemId\",\"fromStatus\",\"toStatus\",\"generation\",\"attempts\",\"remoteId\"],\"properties\":{\"version\":{\"const\":\"github.project-transition.result.v1\"},\"status\":{\"type\":\"string\"},\"itemId\":{\"type\":\"string\"},\"fromStatus\":{\"type\":\"string\"},\"toStatus\":{\"type\":\"string\"},\"generation\":{\"type\":\"integer\"},\"attempts\":{\"type\":\"integer\",\"maximum\":2147483647},\"remoteId\":{\"type\":\"string\"},\"reason\":{\"type\":\"string\"},\"retryAtEpochMs\":{\"type\":\"integer\"}}},",
     "f12e25da1af0e5a0bddca61949a1a3ded9c49cb005c55f99b5b88e85a134c150": "const element = document.createElement('div');",
     "f12f15023b00df9271a4b795ffd91c28e088b082d3b6b273597061e6bb0d5e1a": "const PROGRAM_BUILD_POLL_INTERVAL_MS = 100;",
+    "f135181202c8733a77774686274d259ea33b0f21c4e6e3c6f43f31180c47cff7": "\"record Limits(int maxDepth) {}\\n\",",
     "f13b6943acf01d11c33b3caa5855198eaefdf8cf3211273e7b65e44ef2f39bb8": "const offsetY = map.y + (map.height - world.h * scale) / 2 - world.y1 * scale;",
     "f147806a827273135b2f885776706a5bcc39e3cd20b32d7f25816a0f3bdfd842": "const flight = Object.freeze({ binding, executionId: binding.executionId, client: binding.reconciliationClient, generation: binding.generation, unknown: binding.reconciliationState === 'unknown', controller: new AbortController(), });",
     "f148b6a931dab26c52e7e6515c1affa5b60feea033165805f69c434685db0047": "const timeElement = document.createElement('span');",

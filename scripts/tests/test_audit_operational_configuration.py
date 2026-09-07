@@ -313,6 +313,26 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             errors = audit.inventory_errors(root, document, audit.discover(root))
         self.assertTrue(any("field is not declared by its typed owner" in error for error in errors), errors)
 
+    def test_java_field_owner_excludes_locals_nested_fields_and_record_non_components(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            source = root / "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"
+            source.write_text(
+                "package dev.example;\n"
+                "final class Real { void f() { int fake = 1; } class Inner { int nested; } }\n"
+                "record Limits(int maxDepth) {}\n",
+                encoding="utf-8",
+            )
+            owner = "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#Real"
+            record_owner = "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#Limits"
+            self.assertFalse(audit.current_source_field(root, owner, "fake"))
+            self.assertFalse(audit.current_source_field(root, owner, "nested"))
+            self.assertTrue(audit.current_source_field(root, record_owner, "maxDepth"))
+            self.assertTrue(audit.current_source_field(root, record_owner, "limits.maxDepth"))
+            self.assertFalse(audit.current_source_field(root, record_owner, "Limits"))
+            self.assertFalse(audit.current_source_field(root, record_owner, "int"))
+            self.assertFalse(audit.current_source_field(root, record_owner, "Bogus.maxDepth"))
+
     def test_confirmed_hardcoded_setting_fails_the_completion_gate(self) -> None:
         with synthetic_repository() as location:
             root = Path(location)

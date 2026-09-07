@@ -17,12 +17,12 @@ import java.util.Map;
  * ordinary constructor parameter.</p>
  *
  * <h2>The default is pass-through, deliberately</h2>
- * <p>An unset, blank or unrecognised value selects pass-through. That is a
- * judgement, not an omission. Pass-through is a documented product capability: a partially built
- * graph stays submittable, openable and inspectable, which is what makes the editor usable while a
- * graph is still being assembled. A default that refused every not-yet-built node would be hostile
- * to the person most likely to be running the product, and reversing it is an ADR-level decision
- * about what Ravenroot promises rather than a switch someone flips.</p>
+ * <p>An unset or blank value selects pass-through. That is a judgement, not an omission.
+ * Pass-through is a documented product capability: a partially built graph stays submittable,
+ * openable and inspectable, which is what makes the editor usable while a graph is still being
+ * assembled. A default that refused every not-yet-built node would be hostile to the person most
+ * likely to be running the product, and reversing it is an ADR-level decision about what Ravenroot
+ * promises rather than a switch someone flips.</p>
  *
  * <p>What made pass-through dangerous was never the pass-through — it was the run reporting plain
  * success afterwards with nothing saying it had been degraded. The execution result now carries
@@ -30,11 +30,10 @@ import java.util.Map;
  * case, someone testing a graph they expect to actually work, where stopping and naming the missing
  * node beats completing and quietly doing nothing.</p>
  *
- * <h2>Unrecognised values do not fail startup</h2>
- * <p>An unrecognised value selects the default rather than refusing to boot, matching
- * {@code ExecutionStoreConfiguration}'s existing treatment of its own flag. The alternative —
- * refusing to start on a typo — turns a misconfigured word into an outage, and this switch's
- * safe direction is the one that keeps a deployment running the way it ran yesterday.</p>
+ * <h2>Declared values are strict</h2>
+ * <p>A nonblank declaration is trimmed and matched case-insensitively against the supported
+ * {@code pass-through} and {@code refuse} values. Any other value produces a setting-named startup
+ * refusal rather than silently selecting a policy the operator did not declare.</p>
  */
 public record UnknownBehaviorConfiguration(boolean refuse) {
 

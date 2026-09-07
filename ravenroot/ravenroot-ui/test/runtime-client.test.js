@@ -403,6 +403,16 @@ function streamResponse(frames, status = 200) {
   };
 }
 
+function deferredValue() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolve_, reject_) => {
+    resolve = resolve_;
+    reject = reject_;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('Ravenroot runtime client security boundary', () => {
   it('uses same-origin endpoints, bearer headers and explicitly omits credentials', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
@@ -483,21 +493,180 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(fetchImpl.mock.calls[0][1]).toEqual(expect.objectContaining({ credentials: 'omit' }));
   });
 
-  it('still surfaces a service 401 as the same typed error and clears the in-memory token', async () => {
+  it.each([
+    [401, 'Authentication expired'],
+    [403, 'Access revoked'],
+  ])('surfaces a current service %s and clears only that credential snapshot', async (status, message) => {
     const provider = memoryTokenProvider('stale');
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: false,
-      status: 401,
+      status,
       json: async () => ({ error: 'unauthorized' }),
     });
     const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
 
     await expect(client.nodeTypes()).rejects.toEqual(expect.objectContaining({
       name: 'RuntimeAuthorizationError',
-      status: 401,
-      message: 'Authentication expired',
+      status,
+      message,
     }));
     expect(await provider.getAccessToken()).toBe('');
+  });
+
+  it.each([
+    [401, 'Authentication expired'],
+    [403, 'Access revoked'],
+  ])('retains a replacement credential after a delayed JSON %s', async (status, message) => {
+    const rejected = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    const fetchImpl = vi.fn(async (_url, request) => request.headers.Authorization === 'Bearer token-a'
+      ? rejected.promise
+      : { ok: true, status: 200, text: async () => '[]' });
+    const oldClient = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+    const replacementClient = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+
+    const oldRequest = oldClient.nodeTypes().catch(error => error);
+    try {
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('token-b');
+      await expect(replacementClient.nodeTypes()).resolves.toEqual([]);
+      expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe('Bearer token-b');
+
+      rejected.resolve({ ok: false, status });
+      await expect(oldRequest).resolves.toEqual(expect.objectContaining({
+        name: 'RuntimeAuthorizationError', status, message,
+      }));
+      expect(await provider.getAccessToken()).toBe('token-b');
+      await expect(replacementClient.nodeTypes()).resolves.toEqual([]);
+      expect(fetchImpl.mock.calls[2][1].headers.Authorization).toBe('Bearer token-b');
+    } finally {
+      rejected.resolve({ ok: false, status });
+    }
+  });
+
+  it('treats reinstalling the same token value as a new credential generation', async () => {
+    const rejected = deferredValue();
+    const provider = memoryTokenProvider('same-token');
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => rejected.promise)
+      .mockResolvedValue({ ok: true, status: 200, text: async () => '[]' });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+
+    const oldRequest = client.nodeTypes().catch(error => error);
+    try {
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('same-token');
+      rejected.resolve({ ok: false, status: 401 });
+
+      await expect(oldRequest).resolves.toBeInstanceOf(RuntimeAuthorizationError);
+      expect(await provider.getAccessToken()).toBe('same-token');
+      await client.nodeTypes();
+      expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe('Bearer same-token');
+    } finally {
+      rejected.resolve({ ok: false, status: 401 });
+    }
+  });
+
+  it('keeps explicit revocation unconditional while invalidating old snapshots', async () => {
+    const provider = memoryTokenProvider('token');
+    const oldSnapshot = provider.getAccessTokenSnapshot();
+
+    provider.clearAccessToken();
+
+    expect(await provider.getAccessToken()).toBe('');
+    expect(provider.clearAccessTokenIfCurrent(oldSnapshot)).toBe(false);
+  });
+
+  it('keeps legacy token providers readable without invoking unsafe automatic mutation hooks', async () => {
+    const provider = {
+      getAccessToken: vi.fn(async () => 'legacy-token'),
+      clearAccessToken: vi.fn(),
+      refreshAccessToken: vi.fn(),
+    };
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+
+    await expect(client.nodeTypes()).rejects.toEqual(expect.objectContaining({
+      name: 'RuntimeAuthorizationError', status: 401, message: 'Authentication expired',
+    }));
+    expect(provider.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(provider.clearAccessToken).not.toHaveBeenCalled();
+    expect(provider.refreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('does not replace the typed authorization error when conditional invalidation rejects', async () => {
+    const provider = memoryTokenProvider('token');
+    provider.clearAccessTokenIfCurrent = vi.fn(async () => {
+      throw new Error('provider-secret-canary');
+    });
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 403 }),
+      tokenProvider: provider,
+    });
+
+    const error = await client.nodeTypes().catch(caught => caught);
+
+    expect(error).toBeInstanceOf(RuntimeAuthorizationError);
+    expect(error).toMatchObject({ status: 403, message: 'Access revoked' });
+    expect(error.message).not.toContain('provider-secret-canary');
+    expect(await provider.getAccessToken()).toBe('token');
+  });
+
+  it('awaits an asynchronous custom snapshot and its atomic conditional clear', async () => {
+    let current = Object.freeze({ accessToken: 'async-token' });
+    const provider = {
+      getAccessTokenSnapshot: vi.fn(async () => current),
+      clearAccessTokenIfCurrent: vi.fn(async snapshot => {
+        if (snapshot !== current) return false;
+        current = Object.freeze({ accessToken: '' });
+        return true;
+      }),
+    };
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+
+    await expect(client.nodeTypes()).rejects.toBeInstanceOf(RuntimeAuthorizationError);
+
+    expect(provider.getAccessTokenSnapshot).toHaveBeenCalledTimes(1);
+    expect(provider.clearAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
+    expect(current.accessToken).toBe('');
+  });
+
+  it('lets an asynchronous custom clear reject a snapshot replaced while it was pending', async () => {
+    const clearEntered = deferredValue();
+    const releaseClear = deferredValue();
+    let current = Object.freeze({ accessToken: 'token-a' });
+    const provider = {
+      getAccessTokenSnapshot: vi.fn(async () => current),
+      setAccessToken: value => { current = Object.freeze({ accessToken: value }); },
+      clearAccessTokenIfCurrent: vi.fn(async snapshot => {
+        clearEntered.resolve();
+        await releaseClear.promise;
+        if (snapshot !== current) return false;
+        current = Object.freeze({ accessToken: '' });
+        return true;
+      }),
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+    try {
+      const request = client.nodeTypes().catch(error => error);
+      await clearEntered.promise;
+      provider.setAccessToken('token-b');
+      releaseClear.resolve();
+
+      await expect(request).resolves.toEqual(expect.objectContaining({
+        name: 'RuntimeAuthorizationError', status: 403, message: 'Access revoked',
+      }));
+      expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer token-a');
+      expect(current.accessToken).toBe('token-b');
+    } finally {
+      releaseClear.resolve();
+    }
   });
 
   it('parses multiline SSE fields without interpreting event content as markup', () => {
@@ -650,7 +819,11 @@ describe('Ravenroot runtime client security boundary', () => {
 
   it('refreshes once on 401 and never retries terminal 403', async () => {
     const provider = memoryTokenProvider('expired');
-    provider.refreshAccessToken = vi.fn(async () => provider.setAccessToken('fresh'));
+    provider.refreshAccessTokenIfCurrent = vi.fn(async snapshot => {
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      provider.setAccessToken('fresh');
+      return true;
+    });
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 401 })
       .mockResolvedValueOnce({ ok: false, status: 403 });
@@ -660,9 +833,141 @@ describe('Ravenroot runtime client security boundary', () => {
     client.connect(() => {}, (status, message) => states.push([status, message]));
     await vi.waitFor(() => expect(states.at(-1)?.[0]).toBe('revoked'));
 
-    expect(provider.refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(provider.refreshAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map(([, request]) => request.headers.Authorization))
+      .toEqual(['Bearer expired', 'Bearer fresh']);
     expect(await provider.getAccessToken()).toBe('');
+  });
+
+  it('does not invoke a legacy SSE refresh or clear without an atomic snapshot capability', async () => {
+    const provider = {
+      getAccessToken: vi.fn(async () => 'legacy-token'),
+      refreshAccessToken: vi.fn(),
+      clearAccessToken: vi.fn(),
+    };
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(provider.refreshAccessToken).not.toHaveBeenCalled();
+      expect(provider.clearAccessToken).not.toHaveBeenCalled();
+    } finally {
+      disconnect();
+    }
+  });
+
+  it('does not start a conditional refresh for a stale SSE 401 snapshot', async () => {
+    const response = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    let refreshWork = 0;
+    provider.refreshAccessTokenIfCurrent = vi.fn(async snapshot => {
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      refreshWork += 1;
+      provider.setAccessToken('refreshed');
+      return true;
+    });
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn(() => response.promise), tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(client.fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('token-b');
+      response.resolve({ ok: false, status: 401 });
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(provider.refreshAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
+      expect(refreshWork).toBe(0);
+      expect(await provider.getAccessToken()).toBe('token-b');
+    } finally {
+      response.resolve({ ok: false, status: 401 });
+      disconnect();
+    }
+  });
+
+  it('does not commit a conditional refresh when a replacement arrives during refresh work', async () => {
+    const refreshEntered = deferredValue();
+    const releaseRefresh = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    provider.refreshAccessTokenIfCurrent = vi.fn(async snapshot => {
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      refreshEntered.resolve();
+      await releaseRefresh.promise;
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      provider.setAccessToken('refreshed');
+      return true;
+    });
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await refreshEntered.promise;
+      provider.setAccessToken('token-b');
+      releaseRefresh.resolve();
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(provider.refreshAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
+      expect(await provider.getAccessToken()).toBe('token-b');
+    } finally {
+      releaseRefresh.resolve();
+      disconnect();
+    }
+  });
+
+  it('keeps a rejected refresh failure behind the fixed typed SSE 401', async () => {
+    const provider = memoryTokenProvider('token');
+    provider.refreshAccessTokenIfCurrent = vi.fn(async () => {
+      throw new Error('refresh-provider-secret-canary');
+    });
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(states.flat().join(' ')).not.toContain('refresh-provider-secret-canary');
+      expect(await provider.getAccessToken()).toBe('');
+    } finally {
+      disconnect();
+    }
+  });
+
+  it('retains token B when an old SSE 403 arrives before that client disconnects', async () => {
+    const response = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    const states = [];
+    const fetchImpl = vi.fn(() => response.promise);
+    const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('token-b');
+      response.resolve({ ok: false, status: 403 });
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['revoked', 'Access revoked']));
+
+      expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer token-a');
+      expect(await provider.getAccessToken()).toBe('token-b');
+    } finally {
+      response.resolve({ ok: false, status: 403 });
+      disconnect();
+    }
   });
 
   it('rejects oversized unframed SSE input and stops after the bounded retry budget', async () => {

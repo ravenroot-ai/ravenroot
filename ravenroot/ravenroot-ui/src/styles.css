@@ -2477,3 +2477,26 @@
       border-radius: 4px; padding: 2px 7px; font-size: 11px; font-family: monospace;
     }
     .hk span { color: var(--tx-2); }
+
+.visual-group-dialog {
+  width: min(440px, calc(100vw - 32px));
+  padding: 24px; color: var(--tx-1); background: var(--bg-1);
+  border: 1px solid var(--bd); border-radius: 12px;
+  box-shadow: 0 18px 60px #0006;
+}
+.visual-group-dialog::backdrop { background: #0006; }
+.visual-group-dialog h2 { margin: 0 0 12px; font-size: 18px; }
+.visual-group-dialog p { line-height: 1.5; }
+.visual-group-dialog input { box-sizing: border-box; width: 100%; padding: 10px; background: var(--bg-2); color: var(--tx-1); border: 1px solid var(--bd); border-radius: 6px; }
+.visual-group-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.visual-group-dialog button, .visual-group-members button { min-height: 36px; padding: 6px 12px; }
+.visual-group-inspector { display: grid; gap: 14px; }
+.visual-group-inspector p { margin: 0; line-height: 1.5; }
+.visual-group-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.visual-group-actions .btn { min-height: 36px; padding: 7px 12px; font-size: 12px; }
+.visual-group-help { color: var(--tx-2); font-size: 12px; }
+.visual-group-members { list-style: none; padding: 0; margin: 0; display: grid; gap: 7px; }
+.visual-group-members .btn { width: 100%; min-height: 38px; white-space: normal; overflow-wrap: anywhere; text-align: left; justify-content: flex-start; font-size: 12px; }
+@media (pointer: coarse) {
+  .visual-group-actions .btn, .visual-group-members .btn, .visual-group-dialog button { min-height: 44px; }
+}

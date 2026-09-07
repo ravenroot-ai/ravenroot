@@ -1,5 +1,6 @@
 import * as d3 from 'd3';
 import { edgeFlowWidth, formatRuntimeTime } from './monitoring-runtime-state.js';
+import { createElasticVisualGroupRenderer } from './visual-group-elastic-renderer.js';
 
 function requiredElement(value, name) {
   if (!(value instanceof Element)) throw new TypeError(`${name} is required.`);
@@ -52,6 +53,7 @@ export function mountD3ElasticRenderer({
   let destroyed = false;
   let hovered = null;
   let refreshTooltip = () => {};
+  let visualGroups = null;
   const pulseTimers = new Map();
 
   const root = d3.select(svg)
@@ -195,6 +197,7 @@ export function mountD3ElasticRenderer({
       .attr('y', link => (link.source.y + link.target.y) / 2 - 8);
     nodeSelection.attr('cx', node => node.x).attr('cy', node => node.y);
     nodeLabelSelection.attr('x', node => node.x).attr('y', node => node.y + node.r + 5);
+    visualGroups?.refresh();
   };
 
   const simulation = d3.forceSimulation(nodes)
@@ -224,6 +227,7 @@ export function mountD3ElasticRenderer({
   nodeSelection.call(d3.drag()
     .on('start', (event, node) => {
       if (destroyed || !isLive()) return;
+      visualGroups?.finish();
       if (!event.active) simulation.alphaTarget(.3).restart();
       node.fx = node.x;
       node.fy = node.y;
@@ -240,6 +244,10 @@ export function mountD3ElasticRenderer({
       node.fy = null;
     }));
 
+  visualGroups = createElasticVisualGroupRenderer({ zoomGroup, nodes, links, simulation,
+    nodeSelection, nodeLabelSelection, edgeSelection, edgeLabelSelection, isLive,
+    marker: color => markerId(markerKey, color), nodeText, edgeLabel, onViewportChange });
+
   return {
     nodes,
     links,
@@ -251,11 +259,18 @@ export function mountD3ElasticRenderer({
     nodeLabelSelection,
     edgeLabelSelection,
     paint: paintGeometry,
+    setVisualGroups: options => visualGroups.setGroups(options),
+    finishVisualGroupTransition: () => visualGroups.finish(),
+    clearVisualGroups: () => visualGroups.clear(),
+    getVisibleGraph: () => visualGroups.visible,
+    get visualGroupProjection() { return visualGroups.projection; },
+    get visualGroupAnimating() { return visualGroups.isAnimating; },
     updateNode(nodeId, changes) {
       const datum = nodes.find(node => node.id === nodeId);
       if (!datum || destroyed) return;
       Object.assign(datum, changes);
       refreshTooltip();
+      visualGroups.refresh();
     },
     updateEdgeFlow(edgeId, flow, { reducedMotion = false, decayMs = 1_400, onDecay = null } = {}) {
       const link = links.find(candidate => candidate.id === edgeId);
@@ -275,6 +290,7 @@ export function mountD3ElasticRenderer({
         pulseTimers.set(edgeId, setTimeout(onDecay, Math.max(0, decayMs)));
       }
       refreshTooltip();
+      visualGroups.refresh();
     },
     fit(padding = 40) {
       if (destroyed || nodes.length === 0) return;
@@ -303,6 +319,7 @@ export function mountD3ElasticRenderer({
       if (destroyed) return;
       destroyed = true;
       simulation.stop();
+      visualGroups.destroy();
       pulseTimers.forEach(clearTimeout);
       pulseTimers.clear();
       root.on('.zoom', null).interrupt();

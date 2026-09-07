@@ -1116,6 +1116,53 @@ def java_method_header(source: str, type_symbol: str, method: str) -> str | None
     return normalized(source[start:opening])
 
 
+def java_method_annotations(source: str, type_symbol: str, method: str) -> tuple[str, ...] | None:
+    """Return the contiguous, one-line annotations on one supported direct Java method."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    declaration_line = source.rfind("\n", 0, span[0]) + 1
+    preceding = source[:declaration_line].splitlines()
+    annotations: list[str] = []
+    while preceding:
+        line = preceding.pop().strip()
+        if not line.startswith("@"):
+            break
+        annotations.append(normalized(line))
+    annotations.reverse()
+    return tuple(annotations)
+
+
+def java_direct_stream_string_return(source: str, type_symbol: str,
+                                     method: str) -> tuple[str, ...] | None:
+    """Parse one direct `return Stream.of("...")` body with quoted literals only."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    actual = strip_c_comments(source[slice(*span)])
+    code = strip_c_comments_and_literals(source[slice(*span)])
+    body = code.find("{")
+    if body < 0:
+        return None
+    direct = re.match(r"\s*return\s+Stream\s*\.\s*of\s*\(", code[body + 1:])
+    if direct is None:
+        return None
+    opening = body + 1 + direct.end() - 1
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None:
+        return None
+    arguments, closing = parsed
+    if re.fullmatch(r"\s*;\s*}", code[closing + 1:]) is None:
+        return None
+    values: list[str] = []
+    for argument, _start, _end in arguments:
+        literal = re.fullmatch(r'"(RAVENROOT_[A-Z0-9_]+)"', argument)
+        if literal is None:
+            return None
+        values.append(literal.group(1))
+    return tuple(values)
+
+
 def java_compact_constructor_span(source: str, type_symbol: str) -> tuple[int, int] | None:
     """Resolve one direct compact record constructor, excluding methods and nested types."""
     type_span = java_type_span(source, type_symbol)
@@ -1538,6 +1585,34 @@ def environment_resolver_authority_errors(root: Path, identifier: str,
                 or any(java_method_digest(test_source, test_type, method) != digests.get(method)
                        for method in methods.values()):
             errors.append(f"resolver authority {identifier} has missing rate-limit test evidence")
+        else:
+            parameterized = {"malformedOverflowRefusal", "nonPositiveRefusal"}
+            ordinary = {
+                "blankTypedDefault", "asciiTrimContract", "documentedBoundaryAcceptance",
+                "relationalConstraintRefusal",
+            }
+            for role in parameterized:
+                method = str(methods[role])
+                if java_method_annotations(test_source, test_type, method) != (
+                        "@ParameterizedTest", f'@MethodSource("{methods["bindingEnumeration"]}")'):
+                    errors.append(
+                        f"resolver authority {identifier} test role {role} is not linked to its enumeration")
+            for role in ordinary:
+                method = str(methods[role])
+                if java_method_annotations(test_source, test_type, method) != ("@Test",):
+                    errors.append(
+                        f"resolver authority {identifier} test role {role} is not a runnable @Test")
+            blank_span = java_method_span(
+                test_source, test_type, str(methods["blankTypedDefault"]),
+            )
+            blank_code = strip_c_comments_and_literals(
+                test_source[slice(*blank_span)] if blank_span is not None else "",
+            )
+            if re.search(
+                    rf'\b{re.escape(str(methods["bindingEnumeration"]))}\s*\(', blank_code,
+            ) is None:
+                errors.append(
+                    f"resolver authority {identifier} blank-default test does not use its enumeration")
     return errors
 
 
@@ -1979,12 +2054,13 @@ def environment_resolver_group_errors(root: Path,
         test_source = ((root / test_path).read_text(encoding="utf-8")
                        if current_source_owner(root, f"{test_path.as_posix()}#{test_type}") is not None
                        else "")
-        enumeration_span = (java_method_span(test_source, test_type, str(enumeration))
-                            if enumeration else None)
-        enumerated = (Counter(ENVIRONMENT_BINDING.findall(test_source[slice(*enumeration_span)]))
-                      if enumeration_span is not None else Counter())
-        if enumerated != Counter(environments):
-            errors.append(f"resolver authority {resolver_id} binding enumeration is not the exact environment set")
+        enumerated = (java_direct_stream_string_return(
+            test_source, test_type, str(enumeration),
+        ) if enumeration else None)
+        if enumerated is None or Counter(enumerated) != Counter(environments) \
+                or len(enumerated) != len(environments):
+            errors.append(
+                f"resolver authority {resolver_id} binding enumeration is not one direct exact Stream.of literal list")
     return errors
 
 

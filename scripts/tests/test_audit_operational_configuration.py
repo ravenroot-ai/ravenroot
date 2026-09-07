@@ -101,13 +101,24 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         test_path.parent.mkdir(parents=True, exist_ok=True)
         test_path.write_text(
             "package dev.example;\n"
+            "import org.junit.jupiter.api.Test;\n"
+            "import org.junit.jupiter.params.ParameterizedTest;\n"
+            "import org.junit.jupiter.params.provider.MethodSource;\n"
             "import java.util.stream.Stream;\n"
             "final class RuntimeLimitsTest {\n"
-            "  void blankDefaults() {}\n"
+            "  @Test\n"
+            "  void blankDefaults() { settingNames().count(); }\n"
+            "  @Test\n"
             "  void asciiTrim() {}\n"
-            "  void malformedOverflow() {}\n"
-            "  void nonPositive() {}\n"
+            "  @ParameterizedTest\n"
+            "  @MethodSource(\"settingNames\")\n"
+            "  void malformedOverflow(String setting) {}\n"
+            "  @ParameterizedTest\n"
+            "  @MethodSource(\"settingNames\")\n"
+            "  void nonPositive(String setting) {}\n"
+            "  @Test\n"
             "  void boundaries() {}\n"
+            "  @Test\n"
             "  void relations() {}\n"
             "  Stream<String> settingNames() { return Stream.of(\n"
             "      \"RAVENROOT_SYNTHETIC_MAX_RETRIES\", \"RAVENROOT_SYNTHETIC_MAX_BURST\",\n"
@@ -428,7 +439,67 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 encoding="utf-8",
             )
             errors = audit.inventory_errors(root, document, discovered)
-            self.assertTrue(any("binding enumeration is not the exact environment set" in error
+            self.assertTrue(any("one direct exact Stream.of literal list" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            def enumeration_mutation(mutant: str) -> list[str]:
+                test_path.write_text(mutant, encoding="utf-8")
+                mutated = copy.deepcopy(document)
+                resolver = mutated["resolverAuthorities"]["synthetic-environment-resolver-v1"]
+                resolver["testMethodDigests"]["settingNames"] = audit.java_method_digest(
+                    mutant, "RuntimeLimitsTest", "settingNames",
+                )
+                return audit.inventory_errors(root, mutated, discovered)
+
+            commented = original_test.replace(
+                '"RAVENROOT_SYNTHETIC_MAX_RETRIES", ',
+                '/* "RAVENROOT_SYNTHETIC_MAX_RETRIES", */ ',
+            )
+            errors = enumeration_mutation(commented)
+            self.assertTrue(any("one direct exact Stream.of literal list" in error
+                                for error in errors), errors)
+
+            unrelated = original_test.replace(
+                'Stream<String> settingNames() { return Stream.of(\n'
+                '      "RAVENROOT_SYNTHETIC_MAX_RETRIES", ',
+                'Stream<String> settingNames() {\n'
+                '    String ignored = "RAVENROOT_SYNTHETIC_MAX_RETRIES";\n'
+                '    return Stream.of(\n      ',
+            )
+            errors = enumeration_mutation(unrelated)
+            self.assertTrue(any("one direct exact Stream.of literal list" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            for role in ("malformedOverflow", "nonPositive"):
+                with self.subTest(missing_parameterized_annotation=role):
+                    mutant = original_test.replace(
+                        '  @ParameterizedTest\n  @MethodSource("settingNames")\n'
+                        f'  void {role}',
+                        '  @MethodSource("settingNames")\n'
+                        f'  void {role}',
+                    )
+                    test_path.write_text(mutant, encoding="utf-8")
+                    errors = audit.inventory_errors(root, document, discovered)
+                    self.assertTrue(any("is not linked to its enumeration" in error
+                                        for error in errors), errors)
+                with self.subTest(retargeted_method_source=role):
+                    mutant = original_test.replace(
+                        '@MethodSource("settingNames")\n  void ' + role,
+                        '@MethodSource("otherNames")\n  void ' + role,
+                    )
+                    test_path.write_text(mutant, encoding="utf-8")
+                    errors = audit.inventory_errors(root, document, discovered)
+                    self.assertTrue(any("is not linked to its enumeration" in error
+                                        for error in errors), errors)
+
+            test_path.write_text(
+                original_test.replace('  @Test\n  void asciiTrim', '  void asciiTrim'),
+                encoding="utf-8",
+            )
+            errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("asciiTrimContract is not a runnable @Test" in error
                                 for error in errors), errors)
             test_path.write_text(original_test, encoding="utf-8")
 

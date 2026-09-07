@@ -327,6 +327,61 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                 for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
+            direct_receiver_shadow = original_generator.replace(
+                "public final class OpenApiSpecGenerator {",
+                """public final class OpenApiSpecGenerator {
+    private static final ShadowCollectors Collectors = new ShadowCollectors();
+    private static final class ShadowCollectors {
+        java.util.stream.Collector<CharSequence, ?, String> joining(CharSequence delimiter) {
+            return java.util.stream.Collectors.joining(delimiter);
+        }
+    }""",
+                1,
+            )
+            generator_path.write_text(direct_receiver_shadow, encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("import/receiver identity has drifted" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            local_receiver_shadow = original_generator.replace(
+                "public final class OpenApiSpecGenerator {",
+                """public final class OpenApiSpecGenerator {
+    private static final class ShadowJsonStrings {
+        String escape(String value) { return "shadow"; }
+    }""",
+                1,
+            )
+            local_receiver_shadow = local_receiver_shadow.replace(
+                "private static String operationEntry(RouteDescriptor route, String method) {",
+                "private static String operationEntry(RouteDescriptor route, String method) {\n"
+                "        ShadowJsonStrings JsonStrings = new ShadowJsonStrings();",
+                1,
+            )
+            generator_path.write_text(local_receiver_shadow, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["consumerBodyDigests"]["openApiOperationEntry"] = audit.java_method_digest(
+                local_receiver_shadow, "OpenApiSpecGenerator", "operationEntry")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("import/receiver identity has drifted" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            qualified_local_shadow = local_receiver_shadow.replace(
+                "ShadowJsonStrings JsonStrings =",
+                "OpenApiSpecGenerator.ShadowJsonStrings JsonStrings =",
+                1,
+            )
+            self.assertNotEqual(local_receiver_shadow, qualified_local_shadow)
+            generator_path.write_text(qualified_local_shadow, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["consumerBodyDigests"]["openApiOperationEntry"] = audit.java_method_digest(
+                qualified_local_shadow, "OpenApiSpecGenerator", "operationEntry")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("import/receiver identity has drifted" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
             generate_span = audit.java_method_span(
                 original_generator, "OpenApiSpecGenerator", "generate")
             self.assertIsNotNone(generate_span)
@@ -353,8 +408,13 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 original_generator, "OpenApiSpecGenerator", "successResponse")
             self.assertIsNotNone(success_span)
             start, end = success_span
+            expected_status = 'return "          \\"" + status + "\\": {\\"description\\": \\"success\\""'
             lost_status = original_generator[start:end].replace(
-                '" + status + "', '" + 200 + "', 1)
+                expected_status,
+                "// " + expected_status + "\n"
+                + '        return "          \\"" + 200 + "\\": {\\"description\\": \\"success\\""',
+                1,
+            )
             self.assertNotEqual(original_generator[start:end], lost_status)
             generator_path.write_text(
                 original_generator[:start] + lost_status + original_generator[end:],

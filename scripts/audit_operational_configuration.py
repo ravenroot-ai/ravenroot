@@ -2671,6 +2671,36 @@ def java_has_exact_junit_assertions(source: str, type_symbol: str,
     return True
 
 
+def java_span_uses_only_simple_receiver(source: str, span: tuple[int, int] | None,
+                                        name: str) -> bool:
+    """Require every occurrence of one supported imported name to be a dotted receiver."""
+    if span is None:
+        return False
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    return all(re.match(r"\s*\.", code[match.end():]) is not None
+               for match in re.finditer(rf"\b{re.escape(name)}\b", code))
+
+
+def java_direct_return_expression(source: str, type_symbol: str, method: str) -> str | None:
+    """Return the one direct return expression from a supported method, without comments."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    actual = strip_c_comments(source[slice(*span)])
+    code = strip_c_comments_and_literals(source[slice(*span)])
+    depths = java_brace_depths(code)
+    returns = [match for match in re.finditer(r"\breturn\b", code)
+               if depths[match.start()] == 1]
+    if len(returns) != 1:
+        return None
+    start = returns[0].end()
+    semicolon = next((offset for offset in range(start, len(code))
+                      if code[offset] == ";" and depths[offset] == 1), None)
+    if semicolon is None:
+        return None
+    return normalized(actual[start:semicolon])
+
+
 def java_direct_field_has_annotation(source: str, type_symbol: str, field: str,
                                      annotation: str) -> bool:
     span = java_type_span(source, type_symbol)
@@ -2845,12 +2875,23 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
         errors.append("RouteTable RouteDescriptor convenience constructor lost positional forwarding")
 
     generator = (root / OPENAPI_GENERATOR_PATH).read_text(encoding="utf-8")
+    authoritative_methods = ("generate", "pathEntry", "operationEntry", "successResponse")
+    receiver_names = {"JsonStrings", "Collectors"}
+    receiver_values_are_unshadowed = all(
+        java_span_uses_only_simple_receiver(
+            generator, java_method_span(generator, "OpenApiSpecGenerator", method), receiver)
+        for method in authoritative_methods for receiver in receiver_names
+    )
     if not same_package_type_identity(
-            generator, "OpenApiSpecGenerator", "ai.ravenroot.server.spec.RouteDescriptor") \
-            or not exact_import_identity(generator, "ai.ravenroot.server.audit.JsonStrings") \
-            or not exact_import_identity(generator, "java.util.List") \
-            or not exact_import_identity(generator, "java.util.stream.Collectors"):
+            generator, "OpenApiSpecGenerator", "ai.ravenroot.server.spec.RouteDescriptor"):
         errors.append("RouteTable OpenAPI consumer does not resolve the same-package RouteDescriptor type")
+    if not exact_import_identity(generator, "ai.ravenroot.server.audit.JsonStrings") \
+            or not exact_import_identity(generator, "java.util.List") \
+            or not exact_import_identity(generator, "java.util.stream.Collectors") \
+            or not java_has_no_simple_name_shadow(
+                generator, "OpenApiSpecGenerator", receiver_names) \
+            or not receiver_values_are_unshadowed:
+        errors.append("RouteTable OpenAPI consumer import/receiver identity has drifted")
     generate_span = java_method_span(generator, "OpenApiSpecGenerator", "generate")
     generate_source = generator[slice(*generate_span)] if generate_span else ""
     generate_code = normalized(strip_c_comments_and_literals(generate_source))
@@ -2885,13 +2926,17 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
             if normalized(expression) not in code:
                 errors.append(f"RouteTable typed consumer {method} lost {expression}")
     success_span = java_method_span(generator, "OpenApiSpecGenerator", "successResponse")
-    success_source = generator[slice(*success_span)] if success_span else ""
+    success_return = java_direct_return_expression(
+        generator, "OpenApiSpecGenerator", "successResponse")
+    status_prefix = normalized(
+        '"          \\"" + status + "\\": {\\"description\\": \\"success\\"" +')
     if java_method_header(generator, "OpenApiSpecGenerator", "successResponse") != \
             "private static String successResponse(RouteDescriptor route, String method, int status)" \
             or java_method_digest(generator, "OpenApiSpecGenerator", "successResponse") != \
             consumer_digests["openApiSuccessResponse"] \
-            or 'return "          \\"" + status + "\\": {\\"description\\": \\"success\\""' \
-            not in success_source:
+            or success_return is None or not success_return.startswith(status_prefix) \
+            or normalized("schema == null ?") not in success_return \
+            or normalized("+ schema +") not in success_return:
         errors.append("RouteTable OpenAPI successResponse lost status serialization")
     return errors
 

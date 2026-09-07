@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Inventory fixed operational candidates and reject unreviewed source drift.
 
-The scanner is deliberately lexical.  It does not claim that every number is an
-operator setting; it finds a stable, reviewable superset and leaves that semantic
-decision in ``scripts/operational-configuration-inventory.json``.  The inventory
-and generated report are the source of the issue's counts.
+The scanner is deliberately lexical. It finds a stable, reviewable set of candidates
+within its documented patterns and leaves each semantic decision in
+``scripts/operational-configuration-inventory.json``. The inventory and generated
+report are the source of the issue's counts.
 """
 
 from __future__ import annotations
@@ -88,6 +88,12 @@ YAML_SCALAR = re.compile(r'''^\s*["']?([A-Za-z_][A-Za-z0-9_.-]*)["']?\s*:\s*(\S.
 ENVIRONMENT_BINDING = re.compile(r"RAVENROOT_[A-Z0-9_]+")
 PROPERTY_BINDING = re.compile(r'''"(ravenroot\.[A-Za-z0-9_.-]*)"''')
 SYSTEM_PROPERTY_READ = re.compile(r"\bSystem\.getProperty\s*\(\s*([^,)]+)")
+RESOLVER_TEST_ROLES = {
+    "propertyPrecedence",
+    "blankPropertyEnvironmentFallback",
+    "blankSourcesTypedDefault",
+    "malformedNonblankRefusal",
+}
 
 
 @dataclass(frozen=True)
@@ -208,6 +214,16 @@ def strip_c_comments(text: str) -> str:
                 state = "code"
             else:
                 out.append("\n" if char == "\n" else " ")
+        elif state == "textblock":
+            if text.startswith('"""', index):
+                out.extend(('"', '"', '"'))
+                index += 2
+                state = "code"
+            elif char == "\\" and following:
+                out.extend((char, following))
+                index += 1
+            else:
+                out.append(char)
         elif state == "string":
             out.append(char)
             if char == "\\" and following:
@@ -223,6 +239,10 @@ def strip_c_comments(text: str) -> str:
             out.extend((" ", " "))
             index += 1
             state = "block"
+        elif text.startswith('"""', index):
+            state = "textblock"
+            out.extend(('"', '"', '"'))
+            index += 2
         elif char in {'"', "'", "`"}:
             quote = char
             state = "string"
@@ -239,10 +259,21 @@ def strip_c_comments_and_literals(text: str) -> str:
     out: list[str] = []
     index = 0
     quote = ""
+    textblock = False
     while index < len(without_comments):
         char = without_comments[index]
         following = without_comments[index + 1] if index + 1 < len(without_comments) else ""
-        if quote:
+        if textblock:
+            if without_comments.startswith('"""', index):
+                out.extend((" ", " ", " "))
+                index += 2
+                textblock = False
+            elif char == "\\" and following:
+                out.extend((" ", " "))
+                index += 1
+            else:
+                out.append("\n" if char == "\n" else " ")
+        elif quote:
             if char == "\\" and following:
                 out.extend((" ", " "))
                 index += 1
@@ -251,6 +282,10 @@ def strip_c_comments_and_literals(text: str) -> str:
                 quote = ""
             else:
                 out.append("\n" if char == "\n" else " ")
+        elif without_comments.startswith('"""', index):
+            textblock = True
+            out.extend((" ", " ", " "))
+            index += 2
         elif char in {'"', "'", "`"}:
             quote = char
             out.append(" ")
@@ -290,7 +325,7 @@ def java_type_declares_field(source: str, symbol: str, field: str) -> bool:
     code = strip_c_comments_and_literals(source)[slice(*span)]
     opening = code.find("{")
     parts = field.split(".")
-    if len(parts) > 2 or (len(parts) == 2 and parts[0] != symbol[:1].lower() + symbol[1:]):
+    if len(parts) != 1:
         return False
     identifier = parts[-1]
 
@@ -511,6 +546,96 @@ def line_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
     return rows
 
 
+def json_pointer(document: object, reference: str) -> object:
+    """Resolve one same-document JSON Pointer, rejecting external and malformed references."""
+    if not reference.startswith("#/"):
+        raise ValueError("only same-document JSON Pointer references are supported")
+    value = document
+    for encoded in reference[2:].split("/"):
+        token = encoded.replace("~1", "/").replace("~0", "~")
+        if isinstance(value, dict) and token in value:
+            value = value[token]
+        elif isinstance(value, list) and token.isdigit() and int(token) < len(value):
+            value = value[int(token)]
+        else:
+            raise ValueError("JSON Pointer target is absent")
+    return value
+
+
+def resolved_json_schema_value(document: object, value: object,
+                               references: tuple[str, ...] = ()) -> object:
+    """Return a canonicalizable local-ref expansion and fail closed on cycles."""
+    if isinstance(value, dict):
+        if set(value) == {"$ref"} and isinstance(value["$ref"], str):
+            reference = value["$ref"]
+            if reference in references:
+                raise ValueError("cyclic local JSON reference")
+            target = json_pointer(document, reference)
+            return {"$ref": reference,
+                    "resolved": resolved_json_schema_value(document, target, references + (reference,))}
+        return {key: resolved_json_schema_value(document, child, references)
+                for key, child in sorted(value.items())}
+    if isinstance(value, list):
+        return [resolved_json_schema_value(document, child, references) for child in value]
+    return value
+
+
+def json_schema_reference_candidates(text: str) -> list[tuple[int, str, str, str, str, str]]:
+    """Discover per-property local `$ref` edges with their resolved constraint evidence."""
+    try:
+        document = json.loads(text)
+    except json.JSONDecodeError:
+        return []
+    rows: list[tuple[int, str, str, str, str, str]] = []
+    cursor = 0
+
+    def visit(value: object, pointer: str, required_property: bool = False) -> None:
+        nonlocal cursor
+        if isinstance(value, dict):
+            reference = value.get("$ref")
+            if isinstance(reference, str):
+                offset = text.find('"$ref"', cursor)
+                if offset < 0:
+                    offset = 0
+                else:
+                    cursor = offset + len('"$ref"')
+                try:
+                    if set(value) != {"$ref"}:
+                        raise ValueError("unsupported sibling next to $ref")
+                    target = json_pointer(document, reference)
+                    resolved = resolved_json_schema_value(document, target, (reference,))
+                    resolution_error = None
+                except ValueError as invalid:
+                    resolved = None
+                    resolution_error = str(invalid)
+                reference_pointer = f"{pointer}/$ref"
+                evidence = {
+                    "pointer": reference_pointer,
+                    "reference": reference,
+                    "required": required_property,
+                    "resolved": resolved,
+                    "resolutionError": resolution_error,
+                }
+                rows.append((offset, pointer, "schema-reference-binding", reference_pointer,
+                             reference, json.dumps(evidence, sort_keys=True, separators=(",", ":"))))
+            for key, child in value.items():
+                escaped = str(key).replace("~", "~0").replace("/", "~1")
+                if key == "properties" and isinstance(child, dict):
+                    required = set(value.get("required", [])) if isinstance(value.get("required"), list) else set()
+                    for property_name, property_schema in child.items():
+                        property_token = str(property_name).replace("~", "~0").replace("/", "~1")
+                        visit(property_schema, f"{pointer}/{escaped}/{property_token}",
+                              property_name in required)
+                else:
+                    visit(child, f"{pointer}/{escaped}", required_property)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, f"{pointer}/{index}", required_property)
+
+    visit(document, "")
+    return rows
+
+
 def discover(root: Path) -> tuple[Candidate, ...]:
     provisional: list[tuple[str, int, str, str, str, str, str, str, bool]] = []
     for relative in tracked_files(root):
@@ -523,6 +648,8 @@ def discover(root: Path) -> tuple[Candidate, ...]:
             found = code_candidates(relative, text, surface_name)
         else:
             found = line_candidates(relative, text, surface_name)
+            if relative.suffix == ".json":
+                found.extend(json_schema_reference_candidates(text))
         for offset, symbol_name, kind, role, expression, evidence in found:
             provisional.append((relative.as_posix(), line_number(text, offset), symbol_name,
                                 kind, role, expression, evidence, surface_name,
@@ -612,8 +739,244 @@ def current_source_field(root: Path, owner: str, field: str) -> bool:
         return False
     relative, owner_symbol = resolved
     if relative.suffix != ".java":
-        return True
+        return False
     return java_type_declares_field((root / relative).read_text(encoding="utf-8"), owner_symbol, field)
+
+
+def java_record_components(source: str, symbol: str) -> tuple[str, ...]:
+    span = java_type_span(source, symbol)
+    if span is None:
+        return ()
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    declaration = re.search(rf"\brecord\s+{re.escape(symbol)}\b", code)
+    opening_brace = code.find("{")
+    if declaration is None or opening_brace < 0:
+        return ()
+    opening = code.find("(", declaration.end(), opening_brace)
+    if opening < 0:
+        return ()
+    components: list[str] = []
+    start = opening + 1
+    depth = 0
+    for offset in range(start, opening_brace):
+        char = code[offset]
+        if char in "(<[":
+            depth += 1
+        elif char in ")>]":
+            if char == ")" and depth == 0:
+                names = re.findall(r"\b[A-Za-z_$][\w$]*\b", code[start:offset])
+                if names:
+                    components.append(names[-1])
+                return tuple(components)
+            depth -= 1
+        elif char == "," and depth == 0:
+            names = re.findall(r"\b[A-Za-z_$][\w$]*\b", code[start:offset])
+            if names:
+                components.append(names[-1])
+            start = offset + 1
+    return ()
+
+
+def java_record_default_expression_span(source: str, symbol: str, instance_symbol: str,
+                                        field: str) -> tuple[str, int, int] | None:
+    """Read one positional component expression and span from a unique direct record default."""
+    components = java_record_components(source, symbol)
+    if field not in components:
+        return None
+    span = java_type_span(source, symbol)
+    assert span is not None
+    base, limit = span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    initializers = list(re.finditer(
+        rf"\b{re.escape(instance_symbol)}\b\s*=\s*new\s+{re.escape(symbol)}\s*\(", code,
+    ))
+    if len(initializers) != 1:
+        return None
+    opening = code.find("(", initializers[0].start())
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None or len(parsed[0]) != len(components):
+        return None
+    expression, start, end = parsed[0][components.index(field)]
+    return expression, base + start, base + end
+
+
+def java_record_default_expression(source: str, symbol: str, instance_symbol: str,
+                                   field: str) -> str | None:
+    result = java_record_default_expression_span(source, symbol, instance_symbol, field)
+    return result[0] if result is not None else None
+
+
+def candidate_ids_in_source_span(relative: Path, source: str, start: int, end: int,
+                                 kind: str, role: str,
+                                 discovered: dict[str, Candidate]) -> list[str]:
+    """Reconcile lexical offsets with stable candidate occurrences without storing offsets publicly."""
+    grouped: dict[tuple[str, str, str, str, str], list[str]] = {}
+    for candidate in discovered.values():
+        if candidate.path != relative.as_posix():
+            continue
+        key = (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+               candidate.evidence_digest)
+        grouped.setdefault(key, []).append(candidate.id)
+    occurrences: Counter[tuple[str, str, str, str, str]] = Counter()
+    selected: list[str] = []
+    for offset, symbol_name, candidate_kind, candidate_role, expression, evidence in code_candidates(
+            relative, source, surface(relative) or "java"):
+        evidence_digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+        key = (symbol_name, candidate_kind, candidate_role, expression, evidence_digest)
+        occurrence = occurrences[key]
+        occurrences[key] += 1
+        ids = grouped.get(key, [])
+        if start <= offset < end and candidate_kind == kind and candidate_role == role \
+                and occurrence < len(ids):
+            selected.append(ids[occurrence])
+    return selected
+
+def matching_delimiter(code: str, opening: int, left: str, right: str) -> int | None:
+    depth = 0
+    for offset in range(opening, len(code)):
+        if code[offset] == left:
+            depth += 1
+        elif code[offset] == right:
+            depth -= 1
+            if depth == 0:
+                return offset
+    return None
+
+
+def java_method_span(source: str, type_symbol: str, method: str) -> tuple[int, int] | None:
+    """Resolve exactly one Java method body in a named type, excluding calls and quoted text."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return None
+    base, limit = type_span
+    code = strip_c_comments_and_literals(source)[base:limit]
+    matches: list[tuple[int, int]] = []
+    for name in re.finditer(rf"\b{re.escape(method)}\s*\(", code):
+        if name.start() and code[name.start() - 1] == ".":
+            continue
+        opening = code.find("(", name.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            continue
+        suffix = re.match(r"\s*(?:throws\s+[^{};]+)?\s*\{", code[closing + 1:])
+        if suffix is None:
+            continue
+        opening_brace = closing + 1 + suffix.end() - 1
+        closing_brace = matching_delimiter(code, opening_brace, "{", "}")
+        if closing_brace is not None:
+            matches.append((base + name.start(), base + closing_brace + 1))
+    return matches[0] if len(matches) == 1 else None
+
+
+def split_java_arguments(actual: str, code: str, opening: int) -> tuple[list[tuple[str, int, int]], int] | None:
+    closing = matching_delimiter(code, opening, "(", ")")
+    if closing is None:
+        return None
+    arguments: list[tuple[str, int, int]] = []
+    start = opening + 1
+    round_depth = square_depth = brace_depth = 0
+    for offset in range(start, closing):
+        char = code[offset]
+        if char == "(": round_depth += 1
+        elif char == ")": round_depth -= 1
+        elif char == "[": square_depth += 1
+        elif char == "]": square_depth -= 1
+        elif char == "{": brace_depth += 1
+        elif char == "}": brace_depth -= 1
+        elif char == "," and round_depth == square_depth == brace_depth == 0:
+            arguments.append((normalized(actual[start:offset]), start, offset))
+            start = offset + 1
+    arguments.append((normalized(actual[start:closing]), start, closing))
+    return arguments, closing
+
+
+def java_constructor_component_call(source: str, type_symbol: str, method: str,
+                                    constructor_type: str, components: tuple[str, ...],
+                                    component: str) -> tuple[str, int, int] | None:
+    """Return the exact direct constructor argument occupying one record-component position."""
+    method_span = java_method_span(source, type_symbol, method)
+    if method_span is None or component not in components:
+        return None
+    base, limit = method_span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    constructor = re.compile(rf"\bnew\s+{re.escape(constructor_type)}\s*\(")
+    found: list[tuple[list[tuple[str, int, int]], int, int]] = []
+    for match in constructor.finditer(code):
+        opening = code.find("(", match.start())
+        parsed = split_java_arguments(actual, code, opening)
+        if parsed is not None and len(parsed[0]) == len(components):
+            found.append((parsed[0], opening, parsed[1]))
+    if len(found) != 1:
+        return None
+    arguments, opening, closing = found[0]
+    argument, start, end = arguments[components.index(component)]
+    return argument, base + start, base + end
+
+
+def java_method_digest(source: str, type_symbol: str, method: str) -> str | None:
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    body = normalized(strip_c_comments(source[slice(*span)]))
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
+def java_declared_method_names(source: str, type_symbol: str) -> set[str]:
+    """Return unambiguous method names declared directly or lexically inside one Java type."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return set()
+    base, limit = type_span
+    code = strip_c_comments_and_literals(source)[base:limit]
+    names: Counter[str] = Counter()
+    for match in re.finditer(r"\b([A-Za-z_$][\w$]*)\s*\(", code):
+        name = match.group(1)
+        if name in {"if", "for", "while", "switch", "catch", "synchronized", "try", "do"}:
+            continue
+        opening = code.find("(", match.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            continue
+        suffix = re.match(r"\s*(?:throws\s+[^{};]+)?\s*\{", code[closing + 1:])
+        if suffix is not None:
+            names[name] += 1
+    return {name for name, count in names.items() if count == 1}
+
+
+def java_method_calls(source: str, type_symbol: str, method: str,
+                      declared_methods: set[str]) -> set[str] | None:
+    """Find same-type helper names called from one supported, unambiguous method body."""
+    span = java_method_span(source, type_symbol, method)
+    if span is None:
+        return None
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    opening = code.find("{")
+    if opening < 0:
+        return None
+    body = code[opening + 1:-1]
+    return {name for name in declared_methods
+            if re.search(rf"\b{re.escape(name)}\s*\(", body)}
+
+
+def java_reachable_helper_methods(source: str, type_symbol: str,
+                                  roots: tuple[str, ...]) -> set[str] | None:
+    """Close direct same-type calls from resolver roots; overloads fail closed."""
+    declared = java_declared_method_names(source, type_symbol)
+    if any(root not in declared for root in roots):
+        return None
+    reachable = set(roots)
+    pending = list(roots)
+    while pending:
+        method = pending.pop()
+        calls = java_method_calls(source, type_symbol, method, declared)
+        if calls is None:
+            return None
+        for called in calls - reachable:
+            reachable.add(called)
+            pending.append(called)
+    return reachable - set(roots)
 
 
 @lru_cache(maxsize=None)
@@ -700,6 +1063,304 @@ def conversion_evidence_errors(identifier: str, entry: dict[str, object],
     )
     if not declared_binding:
         errors.append(f"{identifier}: conversion bindingSymbol does not declare the named binding")
+    return errors
+
+
+def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
+    if not isinstance(authorities, dict):
+        return ["property-bound settings require a resolverAuthorities object"]
+    errors: list[str] = []
+    required = ("path", "type", "integerMethod", "wholeMethod", "integerBodyDigest",
+                "wholeBodyDigest", "dependencyBodyDigests", "testPath", "testType",
+                "testMethods", "testMethodDigests")
+    for identifier, authority in authorities.items():
+        if not isinstance(authority, dict) or any(key not in authority for key in required):
+            errors.append(f"resolver authority {identifier} requires {', '.join(required)}")
+            continue
+        relative = Path(str(authority["path"]))
+        source_path = root / relative
+        if current_source_owner(root, f"{relative.as_posix()}#{authority['type']}") is None:
+            errors.append(f"resolver authority {identifier} has no tracked Java type")
+            continue
+        source = source_path.read_text(encoding="utf-8")
+        for key in ("integerMethod", "wholeMethod"):
+            method = str(authority[key])
+            digest = java_method_digest(source, str(authority["type"]), method)
+            if digest != authority[f"{key.removesuffix('Method')}BodyDigest"]:
+                errors.append(f"resolver authority {identifier} {method} body digest has drifted")
+        integer_span = java_method_span(source, str(authority["type"]), str(authority["integerMethod"]))
+        if integer_span is None or not re.search(
+                rf"\b{re.escape(str(authority['wholeMethod']))}\s*\(",
+                strip_c_comments_and_literals(source[slice(*integer_span)])):
+            errors.append(f"resolver authority {identifier} integer helper does not delegate to whole")
+        dependencies = authority["dependencyBodyDigests"]
+        reachable = java_reachable_helper_methods(
+            source, str(authority["type"]),
+            (str(authority["integerMethod"]), str(authority["wholeMethod"])),
+        )
+        if not isinstance(dependencies, dict) or reachable is None or set(dependencies) != reachable \
+                or any(java_method_digest(source, str(authority["type"]), method) != digest
+                       for method, digest in dependencies.items()):
+            errors.append(f"resolver authority {identifier} has incomplete or drifted helper dependencies")
+        test_relative = Path(str(authority["testPath"]))
+        if current_source_owner(root, f"{test_relative.as_posix()}#{authority['testType']}") is None:
+            errors.append(f"resolver authority {identifier} has no tracked Java test type")
+        else:
+            test_source = (root / test_relative).read_text(encoding="utf-8")
+            methods = authority["testMethods"]
+            digests = authority["testMethodDigests"]
+            if not isinstance(methods, dict) or set(methods) != RESOLVER_TEST_ROLES \
+                    or any(not isinstance(method, str) or not method for method in methods.values()) \
+                    or not isinstance(digests, dict) or set(digests) != set(methods.values()) or any(
+                    java_method_digest(test_source, str(authority["testType"]), method)
+                    != digests.get(method) for method in methods.values()):
+                errors.append(f"resolver authority {identifier} has missing precedence/refusal test evidence")
+    return errors
+
+
+def binding_authority_errors(root: Path, setting: str, contract: dict[str, object],
+                             entries: dict[str, dict[str, object]],
+                             discovered: dict[str, Candidate],
+                             resolver_authorities: object) -> list[str]:
+    bindings = contract.get("bindings", [])
+    property_candidates = [entry for entry in entries.values()
+                           if entry.get("setting") == setting and entry.get("kind") == "property-binding"]
+    authority = contract.get("bindingAuthority")
+    if not property_candidates:
+        return [] if authority is None else [f"{setting}: bindingAuthority exists without a property candidate"]
+    required = ("kind", "sourceOwner", "method", "constructorType", "component", "helper",
+                "propertyCandidateId", "property", "environmentCandidateId", "environment",
+                "defaultAccessor", "callDigest", "resolverAuthority")
+    if not isinstance(authority, dict) or any(not isinstance(authority.get(key), str)
+                                              or not str(authority[key]).strip() for key in required):
+        return [f"{setting}: property-bound setting requires atomic bindingAuthority fields {', '.join(required)}"]
+    errors: list[str] = []
+    if authority["kind"] != "java-dual-source-constructor-v1":
+        errors.append(f"{setting}: unsupported bindingAuthority kind")
+    source_owner = str(authority["sourceOwner"])
+    resolved_source = current_source_owner(root, source_owner)
+    if resolved_source is None or resolved_source[0].suffix != ".java":
+        errors.append(f"{setting}: bindingAuthority sourceOwner must be a tracked Java type")
+        return errors
+    source_path, source_type = resolved_source
+    owner = current_source_owner(root, str(contract.get("owner", "")))
+    component = str(authority["component"])
+    if owner is None or owner[0].suffix != ".java" or component != contract.get("field"):
+        errors.append(f"{setting}: bindingAuthority component must match its Java setting owner")
+        return errors
+    owner_source = (root / owner[0]).read_text(encoding="utf-8")
+    components = java_record_components(owner_source, owner[1])
+    if str(authority["constructorType"]).rsplit(".", 1)[-1] != owner[1]:
+        errors.append(f"{setting}: bindingAuthority constructorType does not match its setting owner")
+        return errors
+    call = java_constructor_component_call(
+        (root / source_path).read_text(encoding="utf-8"), source_type, str(authority["method"]),
+        str(authority["constructorType"]), components, component,
+    )
+    if call is None:
+        errors.append(f"{setting}: bindingAuthority has no unique constructor-position call")
+        return errors
+    argument, start, end = call
+    pattern = re.compile(
+        r'^(integer|whole)\(properties, environment, "([^"]+)", "([^"]+)", '
+        rf'defaults\.{re.escape(component)}\(\)\)$'
+    )
+    parsed = pattern.fullmatch(argument)
+    if parsed is None or parsed.group(1) != authority["helper"]:
+        errors.append(f"{setting}: constructor component is not a supported direct integer/whole authority call")
+        return errors
+    helper, property_name, environment_name = parsed.groups()
+    expected_accessor = f"defaults.{component}()"
+    if (property_name != authority["property"] or environment_name != authority["environment"]
+            or authority["defaultAccessor"] != expected_accessor):
+        errors.append(f"{setting}: bindingAuthority literals/default accessor do not match the direct call")
+    digest = hashlib.sha256(argument.encode("utf-8")).hexdigest()
+    if digest != authority["callDigest"]:
+        errors.append(f"{setting}: bindingAuthority callDigest has drifted")
+    if not isinstance(bindings, list) or sorted(str(value) for value in bindings) != sorted(
+            (property_name, environment_name)):
+        errors.append(f"{setting}: bindings do not equal the constructor authority pair")
+    source = (root / source_path).read_text(encoding="utf-8")
+    expected_candidates = (
+        (str(authority["propertyCandidateId"]), "property-binding", property_name),
+        (str(authority["environmentCandidateId"]), "environment-binding", environment_name),
+    )
+    component_candidate_ids: dict[str, list[str]] = {}
+    for candidate_id, kind, name in expected_candidates:
+        candidate = discovered.get(candidate_id)
+        entry = entries.get(candidate_id)
+        if candidate is None or entry is None or entry.get("setting") != setting:
+            errors.append(f"{setting}: binding authority candidate is absent or assigned elsewhere: {candidate_id}")
+            continue
+        actual_ids = candidate_ids_in_source_span(
+            source_path, source, start, end, kind, name, discovered,
+        )
+        component_candidate_ids[kind] = actual_ids
+        if candidate.path != source_path.as_posix() or candidate.kind != kind or candidate.expression != name \
+                or actual_ids != [candidate_id]:
+            errors.append(f"{setting}: binding candidate is not the literal in its constructor component: {candidate_id}")
+    assigned_property_ids = {str(entry["id"]) for entry in property_candidates}
+    if assigned_property_ids != {str(authority["propertyCandidateId"])}:
+        errors.append(f"{setting}: every property candidate must be the one atomic binding authority")
+    assigned_environment_ids = {
+        candidate_id for candidate_id in component_candidate_ids.get("environment-binding", [])
+        if entries.get(candidate_id, {}).get("setting") == setting
+    }
+    if assigned_environment_ids != {str(authority["environmentCandidateId"])}:
+        errors.append(f"{setting}: constructor binding authority must select exactly one environment candidate")
+    resolver = str(authority["resolverAuthority"])
+    if not isinstance(resolver_authorities, dict) or resolver not in resolver_authorities:
+        errors.append(f"{setting}: bindingAuthority references an absent resolver authority")
+    else:
+        resolver_contract = resolver_authorities[resolver]
+        if not isinstance(resolver_contract, dict) or helper not in {
+                resolver_contract.get("integerMethod"), resolver_contract.get("wholeMethod")}:
+            errors.append(f"{setting}: binding helper is outside its resolver authority")
+        elif resolver_contract.get("path") != source_path.as_posix() \
+                or resolver_contract.get("type") != source_type:
+            errors.append(f"{setting}: resolver authority must be the binding source type")
+    return errors
+
+def default_authority_errors(root: Path, setting: str, contract: dict[str, object],
+                             entries: dict[str, dict[str, object]],
+                             discovered: dict[str, Candidate]) -> list[str]:
+    property_bound = any(entry.get("setting") == setting and entry.get("kind") == "property-binding"
+                         for entry in entries.values())
+    authority = contract.get("defaultAuthority")
+    if authority is None:
+        return ([f"{setting}: property-bound setting requires defaultAuthority"] if property_bound else [])
+    required = ("owner", "instanceSymbol", "field", "sourceExpression", "candidateIds")
+    if not isinstance(authority, dict) or any(key not in authority for key in required):
+        return [f"{setting}: defaultAuthority requires {', '.join(required)}"]
+    errors: list[str] = []
+    owner = str(authority["owner"])
+    field = str(authority["field"])
+    if owner != contract.get("owner") or field != contract.get("field"):
+        errors.append(f"{setting}: defaultAuthority owner/field must match the setting authority")
+    resolved = current_source_owner(root, owner)
+    if resolved is None or resolved[0].suffix != ".java":
+        errors.append(f"{setting}: defaultAuthority must resolve to a tracked Java record")
+    else:
+        relative, symbol = resolved
+        owner_source = (root / relative).read_text(encoding="utf-8")
+        actual_span = java_record_default_expression_span(
+            owner_source, symbol, str(authority["instanceSymbol"]), field)
+        if actual_span is None or normalized(str(authority["sourceExpression"])) != normalized(actual_span[0]):
+            errors.append(f"{setting}: defaultAuthority sourceExpression does not match the record component")
+    candidate_ids = authority.get("candidateIds")
+    if not isinstance(candidate_ids, list):
+        errors.append(f"{setting}: defaultAuthority candidateIds must be an array")
+    elif resolved is not None and resolved[0].suffix == ".java" and actual_span is not None:
+        expected_ids = candidate_ids_in_source_span(
+            resolved[0], owner_source, actual_span[1], actual_span[2],
+            "fixed-declaration", str(authority["instanceSymbol"]), discovered,
+        )
+        if [str(candidate_id) for candidate_id in candidate_ids] != expected_ids or any(
+                entries.get(candidate_id, {}).get("setting") != setting for candidate_id in expected_ids):
+            errors.append(f"{setting}: defaultAuthority candidateIds are not the exact initializer atom multiset")
+    return errors
+
+
+def schema_evidence_errors(setting: str, contract: dict[str, object],
+                           entries: dict[str, dict[str, object]],
+                           discovered: dict[str, Candidate],
+                           evidence_records: dict[str, object]) -> list[str]:
+    schema = contract.get("schemaEvidence")
+    if schema is None:
+        return []
+    required = ("candidateId", "path", "pointer", "reference", "required")
+    if not isinstance(schema, dict) or any(key not in schema for key in required):
+        return [f"{setting}: schemaEvidence requires {', '.join(required)}"]
+    errors: list[str] = []
+    candidate_id = str(schema["candidateId"])
+    candidate = discovered.get(candidate_id)
+    inventory_entry = entries.get(candidate_id)
+    if candidate is None or inventory_entry is None:
+        return [f"{setting}: schemaEvidence candidate is not current: {candidate_id}"]
+    if candidate.kind != "schema-reference-binding" or candidate.path != schema["path"] \
+            or candidate.role != schema["pointer"] or candidate.expression != schema["reference"]:
+        errors.append(f"{setting}: schemaEvidence does not match its reference candidate")
+    if inventory_entry.get("setting") != setting:
+        errors.append(f"{setting}: schemaEvidence candidate is assigned to another setting")
+    try:
+        resolved = json.loads(str(evidence_records.get(candidate.evidence_digest, "")))
+    except json.JSONDecodeError:
+        resolved = {}
+    if resolved.get("resolutionError") is not None or resolved.get("resolved") is None:
+        errors.append(f"{setting}: schemaEvidence reference is not a resolved local edge")
+    if resolved.get("pointer") != schema["pointer"] or resolved.get("reference") != schema["reference"] \
+            or resolved.get("required") is not schema["required"]:
+        errors.append(f"{setting}: schemaEvidence pointer/reference/required metadata has drifted")
+    return errors
+
+
+def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str, object],
+                                   entries: dict[str, dict[str, object]],
+                                   discovered: dict[str, Candidate],
+                                   evidence_records: dict[str, object],
+                                   tracked_paths: set[Path]) -> list[str]:
+    """Verify graph carrier coverage against exact current candidates and drift-test bodies."""
+    if not setting.startswith("graph."):
+        return []
+    coverage = contract.get("coverageEvidence")
+    candidate_fields = {
+        "composeCandidateIds": ("compose.yaml", "environment-binding", None, 2),
+        "helmValueCandidateIds": ("deploy/helm/ravenroot/values.yaml", "configuration-scalar", '""', 1),
+        "helmTemplateCandidateIds": (
+            "deploy/helm/ravenroot/templates/deployment.yaml", "environment-binding", None, 1),
+        "helmSchemaEnvironmentCandidateIds": (
+            "deploy/helm/ravenroot/values.schema.json", "environment-binding", None, 1),
+        "helmSchemaReferenceCandidateIds": (
+            "deploy/helm/ravenroot/values.schema.json", "schema-reference-binding",
+            "#/definitions/graphBlank", 1),
+        "rawKubernetesCandidateIds": (
+            "deploy/kubernetes/ravenroot.yaml", "environment-binding", None, 1),
+    }
+    required = ("kind", "environment", "helmPath", "contractTestPath", "contractTestDigest",
+                "shellTestPath", "shellTestDigest", *candidate_fields)
+    if not isinstance(coverage, dict) or any(key not in coverage for key in required):
+        return [f"{setting}: graph coverageEvidence requires {', '.join(required)}"]
+    errors: list[str] = []
+    if coverage["kind"] != "graph-platform-carriers-v1":
+        errors.append(f"{setting}: unsupported graph coverageEvidence kind")
+    environment = str(coverage["environment"])
+    bindings = contract.get("bindings", [])
+    if not isinstance(bindings, list) or bindings != [environment]:
+        errors.append(f"{setting}: graph coverage environment must be the setting's sole binding")
+    helm_leaf = str(coverage["helmPath"]).rsplit(".", 1)[-1]
+    for field, (path, kind, fixed_expression, count) in candidate_fields.items():
+        identifiers = coverage[field]
+        if not isinstance(identifiers, list) or len(identifiers) != count \
+                or len(set(str(identifier) for identifier in identifiers)) != count:
+            errors.append(f"{setting}: {field} must contain {count} unique candidate ids")
+            continue
+        for identifier in identifiers:
+            candidate = discovered.get(str(identifier))
+            entry = entries.get(str(identifier))
+            expected_expression = fixed_expression if fixed_expression is not None else environment
+            if candidate is None or entry is None or entry.get("setting") != setting:
+                errors.append(f"{setting}: {field} candidate is absent or assigned elsewhere: {identifier}")
+                continue
+            if candidate.path != path or candidate.kind != kind or candidate.expression != expected_expression:
+                errors.append(f"{setting}: {field} candidate does not match its carrier: {identifier}")
+            if field == "helmValueCandidateIds" and candidate.role != helm_leaf:
+                errors.append(f"{setting}: Helm value candidate does not match helmPath: {identifier}")
+            if field == "helmSchemaReferenceCandidateIds":
+                try:
+                    schema = json.loads(str(evidence_records.get(candidate.evidence_digest, "")))
+                except json.JSONDecodeError:
+                    schema = {}
+                if schema.get("required") is not True or schema.get("resolutionError") is not None:
+                    errors.append(f"{setting}: Helm schema reference must be required and locally resolved")
+    for path_field, digest_field in (("contractTestPath", "contractTestDigest"),
+                                     ("shellTestPath", "shellTestDigest")):
+        relative = Path(str(coverage[path_field]))
+        if relative.is_absolute() or ".." in relative.parts or relative not in tracked_paths:
+            errors.append(f"{setting}: {path_field} must be a tracked in-repository file")
+            continue
+        actual_digest = hashlib.sha256((root / relative).read_bytes()).hexdigest()
+        if actual_digest != coverage[digest_field]:
+            errors.append(f"{setting}: {path_field} body digest has drifted")
     return errors
 
 
@@ -889,6 +1550,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             continue
         metadata = tuple(entry.get(field) for field in authority_fields) + (
             tuple(entry.get("bindings", [])), tuple(entry.get("defaultEvidence", [])),
+            json.dumps(entry.get("bindingAuthority"), sort_keys=True),
+            json.dumps(entry.get("defaultAuthority"), sort_keys=True),
+            json.dumps(entry.get("schemaEvidence"), sort_keys=True),
+            json.dumps(entry.get("coverageEvidence"), sort_keys=True),
         )
         previous = authorities.get(setting)
         if previous is not None and previous[1] != metadata:
@@ -899,14 +1564,29 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         else:
             authorities[setting] = (identifier, metadata)
 
+    resolver_authorities = document.get("resolverAuthorities")
+    if any(entry.get("kind") == "property-binding" and entry.get("classification") == "operator-configurable"
+           and entry.get("status") != "pending-review" for entry in entries.values()):
+        errors.extend(resolver_authority_errors(root, resolver_authorities))
+
+    tracked_paths = set(tracked_files(root))
     for setting in authorities:
         setting_entries = [entry for entry in entries.values() if entry.get("setting") == setting]
         setting_ids = {str(entry["id"]) for entry in setting_entries}
+        representative = entries[authorities[setting][0]]
         bindings = {str(binding) for entry in setting_entries for binding in entry.get("bindings", [])}
-        evidenced_bindings = {str(entry.get("expression")) for entry in setting_entries
-                              if entry.get("kind") == "environment-binding"}
-        for binding in sorted(bindings - evidenced_bindings):
-            errors.append(f"{setting}: binding {binding} has no same-setting environment-binding candidate")
+        if representative.get("bindingAuthority") is None:
+            evidenced_bindings = {str(entry.get("expression")) for entry in setting_entries
+                                  if entry.get("kind") == "environment-binding"}
+            for binding in sorted(bindings - evidenced_bindings):
+                errors.append(f"{setting}: binding {binding} has no same-setting environment-binding candidate")
+        errors.extend(binding_authority_errors(root, setting, representative, entries, discovered,
+                                               resolver_authorities))
+        errors.extend(default_authority_errors(root, setting, representative, entries, discovered))
+        errors.extend(schema_evidence_errors(setting, representative, entries, discovered, evidence_records))
+        errors.extend(graph_platform_coverage_errors(
+            root, setting, representative, entries, discovered, evidence_records, tracked_paths,
+        ))
         for entry in setting_entries:
             evidence_ids = entry.get("defaultEvidence", [])
             if isinstance(evidence_ids, list):
@@ -944,9 +1624,9 @@ def render_report(document: dict[str, object]) -> str:
     lines = [
         "# Operational configuration audit", "",
         "<!-- Generated by scripts/audit_operational_configuration.py; do not edit directly. -->", "",
-        "This report is generated from the checked operational-configuration inventory. The scanner",
-        "finds a reviewable superset of fixed values; a candidate is not an operator setting until its",
-        "semantic classification says so.", "",
+        "This report is generated from the checked operational-configuration inventory. The bounded",
+        "lexical scanner records candidates matched by its documented patterns; a candidate is not an",
+        "operator setting until its semantic classification says so.", "",
         f"**Audit state:** {'complete' if complete else 'in progress'}. "
         f"{statuses['pending-review']} candidate(s) still require semantic review, {deferred} are deferred, "
         f"and {hardcoded} confirmed hard-coded candidates remain unresolved.", "",

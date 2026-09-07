@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import copy
 import subprocess
 import sys
 import tempfile
@@ -280,7 +281,8 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             source.write_text(source.read_text(encoding="utf-8").replace(
                 "package dev.example;",
                 'package dev.example;\n// final class CommentOwner {}\n'
-                'final class Holder { String text = "final class StringOwner {}"; }',
+                'final class Holder { String text = "final class StringOwner {}";\n'
+                'String block = """\nfinal class TextBlockOwner {}\n"""; }',
             ), encoding="utf-8")
             comment_owner = audit.current_source_owner(
                 root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#CommentOwner",
@@ -288,12 +290,26 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             string_owner = audit.current_source_owner(
                 root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#StringOwner",
             )
+            text_block_owner = audit.current_source_owner(
+                root, "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java#TextBlockOwner",
+            )
         self.assertIsNone(escaped)
         self.assertIsNone(untracked_owner)
         self.assertIsNone(keyword_owner)
         self.assertIsNone(comment_owner)
         self.assertIsNone(string_owner)
+        self.assertIsNone(text_block_owner)
         self.assertIsNotNone(tracked_owner)
+
+    def test_non_java_owner_does_not_claim_unverified_field_membership(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            source = root / "scripts/runtime_config.py"
+            source.parent.mkdir(exist_ok=True)
+            source.write_text("class RuntimeConfig:\n    retries = 7\n", encoding="utf-8")
+            subprocess.run(["git", "add", str(source.relative_to(root))], cwd=root, check=True)
+            self.assertIsNotNone(audit.current_source_owner(root, "scripts/runtime_config.py#RuntimeConfig"))
+            self.assertFalse(audit.current_source_field(root, "scripts/runtime_config.py#RuntimeConfig", "retries"))
 
     def test_operator_field_must_be_declared_by_its_typed_owner(self) -> None:
         with synthetic_repository() as location:
@@ -328,7 +344,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertFalse(audit.current_source_field(root, owner, "fake"))
             self.assertFalse(audit.current_source_field(root, owner, "nested"))
             self.assertTrue(audit.current_source_field(root, record_owner, "maxDepth"))
-            self.assertTrue(audit.current_source_field(root, record_owner, "limits.maxDepth"))
+            self.assertFalse(audit.current_source_field(root, record_owner, "limits.maxDepth"))
             self.assertFalse(audit.current_source_field(root, record_owner, "Limits"))
             self.assertFalse(audit.current_source_field(root, record_owner, "int"))
             self.assertFalse(audit.current_source_field(root, record_owner, "Bogus.maxDepth"))
@@ -501,6 +517,426 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             errors = audit.inventory_errors(root, document, audit.discover(root))
         self.assertTrue(any("afterExpression does not identify the added source" in error
                             for error in errors), errors)
+
+    def test_java_text_block_cannot_supply_conversion_evidence(self) -> None:
+        source = '''record Limits(int maxDepth) {
+  static final Limits DEFAULTS = new Limits(7);
+  String fake = """
+      read(LIMIT_VARIABLE, maxDepth)
+      """;
+}
+'''
+        executable = audit.normalized(audit.strip_c_comments_and_literals(source))
+        self.assertNotIn("read(LIMIT_VARIABLE, maxDepth)", executable)
+
+        escaped = '''record Limits(int maxDepth) {
+  String fake = """
+      escaped quote: \" and fake terminator: \\"""
+      read(LIMIT_VARIABLE, maxDepth)
+      """;
+  int real() { return read(REAL_LIMIT_VARIABLE, maxDepth); }
+}
+'''
+        executable = audit.normalized(audit.strip_c_comments_and_literals(escaped))
+        self.assertNotIn("read(LIMIT_VARIABLE, maxDepth)", executable)
+        self.assertIn("read(REAL_LIMIT_VARIABLE, maxDepth)", executable)
+
+    def test_json_schema_reference_edge_carries_resolved_constraint_and_required_state(self) -> None:
+        schema = {
+            "type": "object", "required": ["retries"], "properties": {
+                "retries": {"oneOf": [
+                    {"type": "integer", "minimum": 1},
+                    {"$ref": "#/definitions/positive"},
+                ]},
+                "external": {"$ref": "other.json#/definitions/value"},
+            },
+            "definitions": {"positive": {"oneOf": [
+                {"type": "integer", "minimum": 1, "maximum": 9},
+                {"$ref": "#/definitions/blank"},
+            ]}, "blank": {"type": "string", "maxLength": 0}},
+        }
+        rows = audit.json_schema_reference_candidates(json.dumps(schema, indent=2))
+        retry = next(row for row in rows if row[3] == "/properties/retries/oneOf/1/$ref")
+        evidence = json.loads(retry[5])
+        external = next(row for row in rows if row[3] == "/properties/external/$ref")
+        self.assertEqual("schema-reference-binding", retry[2])
+        self.assertEqual("#/definitions/positive", retry[4])
+        self.assertTrue(evidence["required"])
+        self.assertEqual(9, evidence["resolved"]["oneOf"][0]["maximum"])
+        self.assertIn("same-document", json.loads(external[5])["resolutionError"])
+
+        schema["properties"]["retries"]["oneOf"][1]["description"] = "unsupported sibling"
+        siblings = audit.json_schema_reference_candidates(json.dumps(schema, indent=2))
+        retry_sibling = next(row for row in siblings if row[3] == "/properties/retries/oneOf/1/$ref")
+        self.assertIn("unsupported sibling", json.loads(retry_sibling[5])["resolutionError"])
+        del schema["properties"]["retries"]["oneOf"][1]["description"]
+
+        schema["definitions"]["blank"] = {"$ref": "#/definitions/positive"}
+        cyclic = audit.json_schema_reference_candidates(json.dumps(schema, indent=2))
+        retry_cycle = next(row for row in cyclic if row[3] == "/properties/retries/oneOf/1/$ref")
+        self.assertIn("cyclic", json.loads(retry_cycle[5])["resolutionError"])
+
+    def test_nested_record_binding_and_default_authorities_use_component_positions(self) -> None:
+        policy = '''record Policy(Confirmation confirmation) {
+  record Confirmation(long timeoutMillis, int responseBytes) {
+    static final Confirmation DEFAULTS = new Confirmation(
+        Duration.ofSeconds(5).toMillis(),
+        16 * 1024);
+  }
+}
+'''
+        configuration = '''final class Configuration {
+  Policy.Confirmation confirmation(Object properties, Object environment,
+      Policy.Confirmation defaults) {
+    return new Policy.Confirmation(
+        whole(properties, environment, "ravenroot.timeout", "RAVENROOT_TIMEOUT",
+            defaults.timeoutMillis()),
+        integer(properties, environment, "ravenroot.response-bytes", "RAVENROOT_RESPONSE_BYTES",
+            defaults.responseBytes()));
+  }
+}
+'''
+        components = audit.java_record_components(policy, "Confirmation")
+        self.assertEqual(("timeoutMillis", "responseBytes"), components)
+        timeout = audit.java_constructor_component_call(
+            configuration, "Configuration", "confirmation", "Policy.Confirmation",
+            components, "timeoutMillis",
+        )
+        response = audit.java_constructor_component_call(
+            configuration, "Configuration", "confirmation", "Policy.Confirmation",
+            components, "responseBytes",
+        )
+        self.assertEqual(
+            'whole(properties, environment, "ravenroot.timeout", "RAVENROOT_TIMEOUT", '
+            'defaults.timeoutMillis())', timeout[0],
+        )
+        self.assertEqual(
+            'integer(properties, environment, "ravenroot.response-bytes", '
+            '"RAVENROOT_RESPONSE_BYTES", defaults.responseBytes())', response[0],
+        )
+        self.assertEqual(
+            "Duration.ofSeconds(5).toMillis()",
+            audit.java_record_default_expression(policy, "Confirmation", "DEFAULTS", "timeoutMillis"),
+        )
+        self.assertEqual(
+            "16 * 1024",
+            audit.java_record_default_expression(policy, "Confirmation", "DEFAULTS", "responseBytes"),
+        )
+
+    def test_graph_platform_coverage_is_tied_to_carrier_candidates_and_test_bodies(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            environment = "RAVENROOT_GRAPH_SYNTHETIC_MAX_RETRIES"
+            files = {
+                "compose.yaml": f"services:\n  app:\n    environment:\n      {environment}: ${{{environment}:-}}\n",
+                "deploy/helm/ravenroot/values.yaml": "graph:\n  synthetic:\n    maxRetries: \"\"\n",
+                "deploy/helm/ravenroot/templates/deployment.yaml":
+                    f"env:\n  - name: {environment}\n    value: {{{{ .Values.graph.synthetic.maxRetries | quote }}}}\n",
+                "deploy/helm/ravenroot/values.schema.json": json.dumps({
+                    "type": "object", "required": ["graph"], "properties": {
+                        "graph": {"type": "object", "required": ["synthetic"], "properties": {
+                            "synthetic": {"type": "object", "required": ["maxRetries"], "properties": {
+                                "maxRetries": {"x-ravenroot-environment": environment, "oneOf": [
+                                    {"type": "integer", "minimum": 1, "maximum": 9},
+                                    {"$ref": "#/definitions/graphBlank"},
+                                ]},
+                            }},
+                        }},
+                    }, "definitions": {"graphBlank": {"type": "string", "maxLength": 0}},
+                }, indent=2),
+                "deploy/kubernetes/ravenroot.yaml": f"env:\n  - name: {environment}\n    value: \"\"\n",
+                "ravenroot/example/src/test/java/dev/example/GraphCarrierContractTest.java":
+                    "final class GraphCarrierContractTest { void carriersMatchJavaAuthority() {} }\n",
+                "scripts/tests/test_graph_carriers.sh": f"#!/bin/sh\n# checks {environment}\n",
+            }
+            for relative, text in files.items():
+                path = root / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(text, encoding="utf-8")
+            subprocess.run(["git", "add", "."], cwd=root, check=True)
+            candidates = audit.discover(root)
+            discovered = {candidate.id: candidate for candidate in candidates}
+
+            def ids(path: str, kind: str, expression: str) -> list[str]:
+                return [candidate.id for candidate in candidates if candidate.path == path
+                        and candidate.kind == kind and candidate.expression == expression]
+
+            coverage = {
+                "kind": "graph-platform-carriers-v1", "environment": environment,
+                "helmPath": "graph.synthetic.maxRetries",
+                "composeCandidateIds": ids("compose.yaml", "environment-binding", environment),
+                "helmValueCandidateIds": ids(
+                    "deploy/helm/ravenroot/values.yaml", "configuration-scalar", '""'),
+                "helmTemplateCandidateIds": ids(
+                    "deploy/helm/ravenroot/templates/deployment.yaml", "environment-binding", environment),
+                "helmSchemaEnvironmentCandidateIds": ids(
+                    "deploy/helm/ravenroot/values.schema.json", "environment-binding", environment),
+                "helmSchemaReferenceCandidateIds": ids(
+                    "deploy/helm/ravenroot/values.schema.json", "schema-reference-binding",
+                    "#/definitions/graphBlank"),
+                "rawKubernetesCandidateIds": ids(
+                    "deploy/kubernetes/ravenroot.yaml", "environment-binding", environment),
+                "contractTestPath": "ravenroot/example/src/test/java/dev/example/GraphCarrierContractTest.java",
+                "shellTestPath": "scripts/tests/test_graph_carriers.sh",
+            }
+            for path_field, digest_field in (("contractTestPath", "contractTestDigest"),
+                                             ("shellTestPath", "shellTestDigest")):
+                coverage[digest_field] = audit.hashlib.sha256(
+                    (root / coverage[path_field]).read_bytes()).hexdigest()
+            identifiers = {identifier for field, value in coverage.items()
+                           if field.endswith("CandidateIds") for identifier in value}
+            entries = {identifier: {"id": identifier, "setting": "graph.synthetic.max-retries"}
+                       for identifier in identifiers}
+            records = {candidate.evidence_digest: candidate.evidence for candidate in candidates}
+            errors = audit.graph_platform_coverage_errors(
+                root, "graph.synthetic.max-retries",
+                {"bindings": [environment], "coverageEvidence": coverage},
+                entries, discovered, records, set(audit.tracked_files(root)),
+            )
+            self.assertEqual([], errors)
+
+            (root / coverage["contractTestPath"]).write_text(
+                "final class GraphCarrierContractTest {}\n", encoding="utf-8")
+            drift = audit.graph_platform_coverage_errors(
+                root, "graph.synthetic.max-retries",
+                {"bindings": [environment], "coverageEvidence": coverage},
+                entries, discovered, records, set(audit.tracked_files(root)),
+            )
+            self.assertTrue(any("body digest has drifted" in error for error in drift), drift)
+
+    def test_paired_binding_default_and_schema_evidence_are_source_verified(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            limits = root / "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java"
+            limits.write_text(
+                "package dev.example;\n"
+                "record RuntimeLimits(int maxRetries, int maxBatch) {\n"
+                "  static final RuntimeLimits DEFAULTS = new RuntimeLimits(7, 9);\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            config = root / "ravenroot/example/src/main/java/dev/example/RuntimeLimitConfiguration.java"
+            authority_call = ('integer(properties, environment, "ravenroot.example.max-retries", '
+                              '"RAVENROOT_EXAMPLE_MAX_RETRIES", defaults.maxRetries())')
+            second_call = ('integer(properties, environment, "ravenroot.example.max-batch", '
+                           '"RAVENROOT_EXAMPLE_MAX_BATCH", defaults.maxBatch())')
+            config.write_text(
+                "package dev.example;\n"
+                "final class RuntimeLimitConfiguration {\n"
+                "  Object fromSources(Object properties, Object environment, RuntimeLimits defaults) {\n"
+                "    String diagnostic = \"RAVENROOT_EXAMPLE_MAX_RETRIES\"; "
+                f"return new RuntimeLimits({authority_call}, {second_call});\n"
+                "  }\n"
+                "  int integer(Object properties, Object environment, String property, String variable, int fallback) {\n"
+                "    return (int) whole(properties, environment, property, variable, fallback);\n"
+                "  }\n"
+                "  long whole(Object properties, Object environment, String property, String variable, long fallback) {\n"
+                "    String raw = nonBlank(property == null ? variable : property);\n"
+                "    if (raw == null) return fallback;\n"
+                "    try { return Long.parseLong(raw); } catch (NumberFormatException failure) { throw invalid(); }\n"
+                "  }\n"
+                "  String nonBlank(String raw) { return raw == null || blank(raw) ? null : raw.strip(); }\n"
+                "  boolean blank(String raw) { return raw.isBlank(); }\n"
+                "  IllegalArgumentException invalid() { return new IllegalArgumentException(); }\n"
+                "}\n",
+                encoding="utf-8",
+            )
+            tests = root / "ravenroot/example/src/test/java/dev/example/RuntimeLimitConfigurationTest.java"
+            tests.parent.mkdir(parents=True)
+            tests.write_text(
+                "package dev.example;\n"
+                "class RuntimeLimitConfigurationTest {\n"
+                "  void propertyPrecedesEnvironment() {}\n"
+                "  void blankPropertyUsesEnvironment() {}\n"
+                "  void blankBothUseDefault() {}\n"
+                "  void malformedValueRefuses() {}\n"
+                "}\n", encoding="utf-8",
+            )
+            schema_path = root / "deploy/example/values.schema.json"
+            schema_path.parent.mkdir(parents=True)
+            schema_path.write_text(json.dumps({
+                "type": "object", "required": ["maxRetries"],
+                "properties": {"maxRetries": {"$ref": "#/definitions/positive"}},
+                "definitions": {"positive": {"type": "integer", "minimum": 1, "maximum": 32}},
+            }, indent=2), encoding="utf-8")
+            subprocess.run(["git", "add", "ravenroot", "deploy"], cwd=root, check=True)
+            errors, _summary = audit.refresh_inventory(
+                root, root / "scripts/operational-configuration-inventory.json",
+                root / "docs/architecture/operational-configuration-audit.md",
+            )
+            self.assertEqual([], errors)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            discovered = audit.discover(root)
+            candidates = {candidate.id: candidate for candidate in discovered}
+
+            def one(path_suffix: str, kind: str, expression: str):
+                return next(candidate for candidate in discovered
+                            if candidate.path.endswith(path_suffix) and candidate.kind == kind
+                            and candidate.expression == expression)
+
+            default = one("RuntimeLimits.java", "fixed-declaration", "7")
+            prop = one("RuntimeLimitConfiguration.java", "property-binding",
+                       "ravenroot.example.max-retries")
+            retry_environments = [candidate for candidate in discovered
+                                  if candidate.path.endswith("RuntimeLimitConfiguration.java")
+                                  and candidate.kind == "environment-binding"
+                                  and candidate.expression == "RAVENROOT_EXAMPLE_MAX_RETRIES"]
+            env = next(candidate for candidate in retry_environments
+                       if "return new RuntimeLimits" in candidate.evidence)
+            diagnostic_env = next(candidate for candidate in retry_environments if candidate is not env)
+            schema = next(candidate for candidate in discovered
+                          if candidate.path.endswith("values.schema.json")
+                          and candidate.role == "/properties/maxRetries/$ref")
+            setting = "example.runtime.max-retries"
+            resolver_id = "synthetic-number-resolver-v1"
+            document["resolverAuthorities"] = {resolver_id: {
+                "path": str(config.relative_to(root)), "type": "RuntimeLimitConfiguration",
+                "integerMethod": "integer", "wholeMethod": "whole",
+                "integerBodyDigest": audit.java_method_digest(
+                    config.read_text(encoding="utf-8"), "RuntimeLimitConfiguration", "integer"),
+                "wholeBodyDigest": audit.java_method_digest(
+                    config.read_text(encoding="utf-8"), "RuntimeLimitConfiguration", "whole"),
+                "dependencyBodyDigests": {
+                    method: audit.java_method_digest(
+                        config.read_text(encoding="utf-8"), "RuntimeLimitConfiguration", method)
+                    for method in ("nonBlank", "blank", "invalid")
+                },
+                "testPath": str(tests.relative_to(root)), "testType": "RuntimeLimitConfigurationTest",
+                "testMethods": {
+                    "propertyPrecedence": "propertyPrecedesEnvironment",
+                    "blankPropertyEnvironmentFallback": "blankPropertyUsesEnvironment",
+                    "blankSourcesTypedDefault": "blankBothUseDefault",
+                    "malformedNonblankRefusal": "malformedValueRefuses",
+                },
+                "testMethodDigests": {
+                    method: audit.java_method_digest(
+                        tests.read_text(encoding="utf-8"), "RuntimeLimitConfigurationTest", method)
+                    for method in ("propertyPrecedesEnvironment", "blankPropertyUsesEnvironment",
+                                   "blankBothUseDefault", "malformedValueRefuses")
+                },
+            }}
+            binding_authority = {
+                "kind": "java-dual-source-constructor-v1",
+                "sourceOwner": str(config.relative_to(root)) + "#RuntimeLimitConfiguration",
+                "method": "fromSources", "constructorType": "RuntimeLimits",
+                "component": "maxRetries", "helper": "integer",
+                "propertyCandidateId": prop.id, "property": prop.expression,
+                "environmentCandidateId": env.id, "environment": env.expression,
+                "defaultAccessor": "defaults.maxRetries()",
+                "callDigest": audit.hashlib.sha256(audit.normalized(authority_call).encode()).hexdigest(),
+                "resolverAuthority": resolver_id,
+            }
+            contract = {
+                "status": "already-centralized", "classification": "operator-configurable",
+                "setting": setting,
+                "owner": "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java#RuntimeLimits",
+                "field": "maxRetries", "bindings": [prop.expression, env.expression],
+                "bindingAuthority": binding_authority, "default": "7 attempts",
+                "defaultEvidence": [default.id],
+                "defaultAuthority": {
+                    "owner": "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java#RuntimeLimits",
+                    "instanceSymbol": "DEFAULTS", "field": "maxRetries", "sourceExpression": "7",
+                    "candidateIds": [default.id],
+                },
+                "schemaEvidence": {
+                    "candidateId": schema.id, "path": schema.path,
+                    "pointer": schema.role, "reference": schema.expression, "required": True,
+                },
+                "validation": "1..32", "scope": "process", "pinning": "read once at startup",
+                "coverage": "synthetic authority and schema", "rationale": "Synthetic paired proof.",
+            }
+            by_id = {entry["id"]: entry for entry in document["entries"]}
+            for candidate in (default, prop, env, schema):
+                by_id[candidate.id].update(contract)
+            valid = audit.inventory_errors(root, document, discovered)
+            self.assertFalse([error for error in valid if setting in error], valid)
+
+            missing_property = copy.deepcopy(document)
+            for entry in missing_property["entries"]:
+                if entry.get("setting") == setting:
+                    entry["bindingAuthority"]["propertyCandidateId"] = "oc-missing"
+            missing_errors = audit.inventory_errors(root, missing_property, discovered)
+            self.assertTrue(any("authority candidate is absent" in error for error in missing_errors), missing_errors)
+
+            wrong_occurrence = copy.deepcopy(document)
+            wrong_rows = {entry["id"]: entry for entry in wrong_occurrence["entries"]}
+            source_metadata = {key: wrong_rows[diagnostic_env.id][key]
+                               for key in diagnostic_env.source_fields()}
+            wrong_rows[diagnostic_env.id].update(copy.deepcopy(contract))
+            wrong_rows[diagnostic_env.id].update(source_metadata)
+            for entry in wrong_occurrence["entries"]:
+                if entry.get("setting") == setting:
+                    entry["bindingAuthority"]["environmentCandidateId"] = diagnostic_env.id
+            occurrence_errors = audit.inventory_errors(root, wrong_occurrence, discovered)
+            self.assertTrue(any("not the literal in its constructor component" in error
+                                for error in occurrence_errors), occurrence_errors)
+
+            original_config = config.read_text(encoding="utf-8")
+            config.write_text(original_config.replace(
+                f"new RuntimeLimits({authority_call}, {second_call})",
+                f"new RuntimeLimits({second_call}, {authority_call})",
+            ), encoding="utf-8")
+            swapped_errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("not a supported direct integer/whole authority call" in error
+                                or "literals/default accessor" in error for error in swapped_errors),
+                            swapped_errors)
+            config.write_text(original_config, encoding="utf-8")
+
+            missing_default_atom = copy.deepcopy(document)
+            for entry in missing_default_atom["entries"]:
+                if entry.get("setting") == setting:
+                    entry["defaultAuthority"]["candidateIds"] = []
+            default_atom_errors = audit.inventory_errors(root, missing_default_atom, discovered)
+            self.assertTrue(any("exact initializer atom multiset" in error
+                                for error in default_atom_errors), default_atom_errors)
+
+            wrong_resolver = copy.deepcopy(document)
+            wrong_resolver["resolverAuthorities"][resolver_id]["wholeBodyDigest"] = "0" * 64
+            resolver_errors = audit.inventory_errors(root, wrong_resolver, discovered)
+            self.assertTrue(any("whole body digest has drifted" in error for error in resolver_errors),
+                            resolver_errors)
+
+            wrong_resolver_test = copy.deepcopy(document)
+            wrong_resolver_test["resolverAuthorities"][resolver_id]["testMethodDigests"][
+                "malformedValueRefuses"] = "0" * 64
+            resolver_test_errors = audit.inventory_errors(root, wrong_resolver_test, discovered)
+            self.assertTrue(any("missing precedence/refusal test evidence" in error
+                                for error in resolver_test_errors), resolver_test_errors)
+
+            changed_blank_source = config.read_text(encoding="utf-8")
+            config.write_text(changed_blank_source.replace("return raw.isBlank();", "return raw.isEmpty();"),
+                              encoding="utf-8")
+            blank_drift_errors = audit.inventory_errors(root, document, discovered)
+            self.assertTrue(any("incomplete or drifted helper dependencies" in error
+                                for error in blank_drift_errors), blank_drift_errors)
+            config.write_text(changed_blank_source, encoding="utf-8")
+
+            other_resolver = root / "ravenroot/example/src/main/java/dev/example/OtherResolver.java"
+            other_resolver.write_text(config.read_text(encoding="utf-8").replace(
+                "RuntimeLimitConfiguration", "OtherResolver"), encoding="utf-8")
+            subprocess.run(["git", "add", str(other_resolver.relative_to(root))], cwd=root, check=True)
+            wrong_source = copy.deepcopy(document)
+            wrong_source["resolverAuthorities"][resolver_id]["path"] = str(other_resolver.relative_to(root))
+            wrong_source["resolverAuthorities"][resolver_id]["type"] = "OtherResolver"
+            source_errors = audit.inventory_errors(root, wrong_source, discovered)
+            self.assertTrue(any("resolver authority must be the binding source type" in error
+                                for error in source_errors), source_errors)
+
+            wrong_default = copy.deepcopy(document)
+            for entry in wrong_default["entries"]:
+                if entry.get("setting") == setting:
+                    entry["defaultAuthority"]["sourceExpression"] = "9"
+            default_errors = audit.inventory_errors(root, wrong_default, discovered)
+            self.assertTrue(any("sourceExpression does not match" in error for error in default_errors),
+                            default_errors)
+
+            wrong_schema = copy.deepcopy(document)
+            for entry in wrong_schema["entries"]:
+                if entry.get("setting") == setting:
+                    entry["schemaEvidence"]["required"] = False
+            schema_errors = audit.inventory_errors(root, wrong_schema, discovered)
+            self.assertTrue(any("metadata has drifted" in error for error in schema_errors), schema_errors)
 
     def test_refresh_preserves_review_metadata_and_updates_source_line(self) -> None:
         with synthetic_repository() as location:

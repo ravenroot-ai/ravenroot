@@ -44,7 +44,34 @@ test('existing edge text autosaves as one focus-session undo and manual Save is 
     .toBe('Autosaved edge description');
   expect((await edgeState(page)).depth).toBe(before.depth + 1);
 
+  await page.evaluate(() => { window.__edgeSaveRenderer = window.cy; });
+  const beforeSaveView = await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      activeId: document_.id,
+      zoom: window.cy.zoom(),
+      pan: window.cy.pan(),
+      renderMode: document_.renderMode,
+      layoutMode: document_.layoutMode,
+      visualStyle: document_.visualStyle,
+    };
+  });
   const autosavedGraphML = await downloadGraphML(page);
+  expect(await page.evaluate(() => window.cy.$(':selected').map(element => element.id())))
+    .toEqual([EDGE_ID]);
+  expect(await page.evaluate(() => window.cy === window.__edgeSaveRenderer)).toBe(true);
+  expect(await page.evaluate(() => {
+    const document_ = window.ravenroot.activeDocument();
+    return {
+      activeId: document_.id,
+      zoom: window.cy.zoom(),
+      pan: window.cy.pan(),
+      renderMode: document_.renderMode,
+      layoutMode: document_.layoutMode,
+      visualStyle: document_.visualStyle,
+    };
+  })).toEqual(beforeSaveView);
+  await expect(page.locator('#edge-editor')).toBeVisible();
   await page.getByRole('button', { name: 'Save edge' }).click();
   expect((await edgeState(page)).depth).toBe(before.depth + 1);
   expect(await downloadGraphML(page)).toBe(autosavedGraphML);
@@ -54,6 +81,108 @@ test('existing edge text autosaves as one focus-session undo and manual Save is 
   await page.locator('#btn-redo').click();
   await expect.poll(async () => (await edgeState(page)).edge.description)
     .toBe('Autosaved edge description');
+});
+
+test('Save GraphML keeps an Autosave OFF edge draft through Save, Cancel, and invalid Discard', async ({ page }) => {
+  await openEditable(page);
+  const siblingBefore = await page.evaluate(() => {
+    const activeId = window.ravenroot.activeDocument().id;
+    const siblingId = window.ravenroot.openDocument({ name: 'save-isolation.graphml' });
+    const sibling = window.ravenroot.workspace.find(siblingId);
+    window.__manualEdgeSaveSiblingRenderer = sibling.cy;
+    const state = {
+      id: sibling.id,
+      edgeDescriptions: sibling.graph.edges.map(edge => edge.description),
+      depth: sibling.history.depth(),
+      selected: sibling.cy.$(':selected').map(element => element.id()),
+      zoom: sibling.cy.zoom(),
+      pan: sibling.cy.pan(),
+      renderMode: sibling.renderMode,
+      layoutMode: sibling.layoutMode,
+      visualStyle: sibling.visualStyle,
+    };
+    window.ravenroot.activateDocument(activeId);
+    return state;
+  });
+  if ((await page.locator('#btn-modify').getAttribute('aria-pressed')) !== 'true') {
+    await page.locator('#btn-modify').click();
+  }
+  await page.locator('#btn-autosave').click();
+  await selectOnly(page, EDGE_ID);
+  const form = page.locator('#edge-editor');
+  const description = form.locator('textarea[name="description"]');
+  const before = await edgeState(page);
+  const activeId = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  await page.evaluate(() => { window.__manualEdgeSaveRenderer = window.cy; });
+
+  await description.fill('Pending manual edge draft');
+  await page.locator('#btn-export').click();
+  const dialog = page.locator('#inspector-unsaved-dialog');
+  await expect(dialog).toBeVisible();
+  expect((await edgeState(page)).edge.description).toBe(before.edge.description);
+  expect(await page.evaluate(() => window.cy.$(':selected').map(element => element.id())))
+    .toEqual([EDGE_ID]);
+  await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
+  await expect(description).toHaveValue('Pending manual edge draft');
+  await expect(description).toBeFocused();
+
+  await page.locator('#btn-export').click();
+  await expect(dialog).toBeVisible();
+  const [download] = await Promise.all([
+    page.waitForEvent('download'),
+    dialog.locator('[data-inspector-unsaved-action="save"]').click(),
+  ]);
+  expect(await readFile(await download.path(), 'utf8')).toContain('Pending manual edge draft');
+  expect((await edgeState(page)).edge.description).toBe('Pending manual edge draft');
+  expect((await edgeState(page)).depth).toBe(before.depth + 1);
+  expect(await page.evaluate(() => window.ravenroot.activeDocument().id)).toBe(activeId);
+  expect(await page.evaluate(() => window.cy === window.__manualEdgeSaveRenderer)).toBe(true);
+  expect(await page.evaluate(() => window.cy.$(':selected').map(element => element.id())))
+    .toEqual([EDGE_ID]);
+  await expect(description).toHaveValue('Pending manual edge draft');
+  await page.getByRole('button', { name: 'Save edge' }).click();
+  expect((await edgeState(page)).depth).toBe(before.depth + 1);
+
+  const source = form.locator('select[name="source"]');
+  await source.evaluate(control => {
+    control.value = '';
+    control.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await page.locator('#btn-export').click();
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('#inspector-unsaved-description')).toContainText('invalid Inspector changes');
+  await dialog.locator('[data-inspector-unsaved-action="cancel"]').click();
+  await expect(source).toHaveValue('');
+  expect((await edgeState(page)).edge.source).toBe(before.edge.source);
+
+  await page.locator('#btn-export').click();
+  const [discardedDownload] = await Promise.all([
+    page.waitForEvent('download'),
+    dialog.locator('[data-inspector-unsaved-action="discard"]').click(),
+  ]);
+  expect(await readFile(await discardedDownload.path(), 'utf8')).toContain('Pending manual edge draft');
+  await expect(page.locator('#edge-editor select[name="source"]')).toHaveValue(before.edge.source);
+  expect((await edgeState(page)).edge.source).toBe(before.edge.source);
+  expect((await edgeState(page)).depth).toBe(before.depth + 1);
+  expect(await page.evaluate(() => window.cy.$(':selected').map(element => element.id())))
+    .toEqual([EDGE_ID]);
+  expect(await page.evaluate(siblingId => {
+    const sibling = window.ravenroot.workspace.find(siblingId);
+    return {
+      id: sibling.id,
+      edgeDescriptions: sibling.graph.edges.map(edge => edge.description),
+      depth: sibling.history.depth(),
+      selected: sibling.cy.$(':selected').map(element => element.id()),
+      zoom: sibling.cy.zoom(),
+      pan: sibling.cy.pan(),
+      renderMode: sibling.renderMode,
+      layoutMode: sibling.layoutMode,
+      visualStyle: sibling.visualStyle,
+    };
+  }, siblingBefore.id)).toEqual(siblingBefore);
+  expect(await page.evaluate(siblingId =>
+    window.ravenroot.workspace.find(siblingId).cy === window.__manualEdgeSaveSiblingRenderer,
+  siblingBefore.id)).toBe(true);
 });
 
 test('edge autosave preserves endpoints, routing, ordinary fields, and custom typed properties', async ({ page }) => {

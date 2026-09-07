@@ -887,7 +887,7 @@ def render_report(document: dict[str, object]) -> str:
     pending_files = Counter(str(entry["path"]) for entry in typed if entry.get("status") == "pending-review")
     lines.extend(("", "## Pending-review distribution", "",
                   "The machine-readable inventory retains every pending expression and its digest. This compact",
-                  "view identifies where semantic review remains without copying thousands of source excerpts", 
+                  "view identifies where semantic review remains without copying thousands of source excerpts",
                   "into the operator report.", "", "| Source | Candidates |", "|---|---:|"))
     for path, count in sorted(pending_files.items()):
         lines.append(f"| `{path}` | {count} |")

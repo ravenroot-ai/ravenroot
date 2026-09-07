@@ -56,6 +56,40 @@ if configured != expected:
     raise SystemExit(f"Human Task platform mapping differs from source (missing={missing}, stale={stale})")
 PY
 
+# Every Human Task leaf shares Java's Character.isWhitespace-or-isSpaceChar blank contract.
+python3 - "$PROJECT_DIR/deploy/helm/ravenroot/values.schema.json" <<'PY'
+import json
+import sys
+
+schema = json.load(open(sys.argv[1], encoding="utf-8"))
+definitions = schema["definitions"]
+expected_human_task_blank = ("^[\u0009-\u000D\u001C-\u0020\u00A0\u1680\u2000-\u200A"
+                             "\u2028-\u2029\u202F\u205F\u3000]*$")
+if definitions.get("humanTaskBlank") != {
+        "type": "string", "pattern": expected_human_task_blank}:
+    raise SystemExit("Helm Human Task blank definition differs from the Java character contract")
+
+properties = schema["properties"]["humanTask"]["properties"]
+if len(properties) != 27:
+    raise SystemExit("Helm Human Task policy must expose exactly 27 fields")
+used_definitions = set()
+for name, node in properties.items():
+    reference = node.get("$ref", "")
+    prefix = "#/definitions/"
+    if not reference.startswith(prefix):
+        raise SystemExit(f"Helm Human Task field {name} does not use a shared bounded definition")
+    definition_name = reference[len(prefix):]
+    used_definitions.add(definition_name)
+    choices = definitions[definition_name].get("oneOf", [])
+    blank_references = [choice.get("$ref") for choice in choices if "$ref" in choice]
+    if blank_references != ["#/definitions/humanTaskBlank"]:
+        raise SystemExit(f"Helm Human Task field {name} does not use the Human Task blank contract")
+
+shared_ranges = set(definitions) - {"graphBlank", "humanTaskBlank"}
+if used_definitions != shared_ranges:
+    raise SystemExit("Helm Human Task shared range definitions are stale or unused")
+PY
+
 DEFAULTS="$TEMP_DIR/defaults"
 cat >"$DEFAULTS" <<'EOF'
 RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES=65536
@@ -210,6 +244,23 @@ for name in open(sys.argv[2], encoding="utf-8"):
 PY
 }
 
+assert_helm_scalar() {
+  rendered=$1
+  name=$2
+  expected=$3
+  python3 - "$rendered" "$name" "$expected" <<'PY'
+import json
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+pattern = r"- name: " + re.escape(sys.argv[2]) + r'\n\s+value: ("(?:\\.|[^"\\])*")'
+matches = re.findall(pattern, text)
+if len(matches) != 1 or json.loads(matches[0]) != sys.argv[3]:
+    raise SystemExit(f"Helm did not preserve the exact Human Task scalar for {sys.argv[2]}")
+PY
+}
+
 helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
   --set-string auth.audience=ravenroot-human-task-test \
   --set-string auth.jwksUri=https://idp.example.test/jwks >"$TEMP_DIR/helm-default.yaml"
@@ -250,6 +301,33 @@ while IFS= read -r name; do
 done <"$POLICY_ENV"
 "$@" >"$TEMP_DIR/helm-blank.yaml"
 assert_helm_blank "$TEMP_DIR/helm-blank.yaml"
+
+tab=$(printf '\011')
+em_space=$(printf '\342\200\203')
+nbsp=$(printf '\302\240')
+non_whitespace=$(printf '\342\230\203')
+for label_and_value in "empty|" "space| " "tab|$tab" "em-space|$em_space" "nbsp|$nbsp"; do
+  label=${label_and_value%%|*}
+  value=${label_and_value#*|}
+  helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
+    --set-string auth.audience=ravenroot-human-task-test \
+    --set-string auth.jwksUri=https://idp.example.test/jwks \
+    --set-string "humanTask.maxResponseBytes=$value" >"$TEMP_DIR/helm-human-task-$label.yaml"
+  assert_helm_scalar "$TEMP_DIR/helm-human-task-$label.yaml" RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES "$value"
+done
+
+for label_and_value in "unicode-text|$non_whitespace" "non-number|not-a-number"; do
+  label=${label_and_value%%|*}
+  value=${label_and_value#*|}
+  if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
+      --set-string auth.audience=ravenroot-human-task-test \
+      --set-string auth.jwksUri=https://idp.example.test/jwks \
+      --set-string "humanTask.maxResponseBytes=$value" \
+      >"$TEMP_DIR/helm-human-task-invalid-$label.out" 2>&1; then
+    echo "Helm accepted an invalid Human Task blank carrier: $label" >&2
+    exit 1
+  fi
+done
 
 if helm template ravenroot "$CHART" --set-string auth.issuer=https://idp.example.test/ \
   --set-string auth.audience=ravenroot-human-task-test \

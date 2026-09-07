@@ -58,6 +58,11 @@ if source_names != mapped_names:
                      f"stale={sorted(mapped_names-source_names)})")
 
 schema = json.load(open(root + "/deploy/helm/ravenroot/values.schema.json", encoding="utf-8"))
+expected_graph_blank = ("^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006"
+                        "\u2008-\u200A\u2028-\u2029\u205F\u3000]*$")
+if schema.get("definitions", {}).get("graphBlank") != {
+        "type": "string", "pattern": expected_graph_blank}:
+    raise SystemExit("Helm graph blank definition differs from Java 21 Character.isWhitespace")
 graph = schema["properties"]["graph"]
 if "graph" not in schema.get("required", []) or graph.get("additionalProperties") is not False:
     raise SystemExit("Helm graph policy must be required and closed")
@@ -83,7 +88,7 @@ for name, path in mappings:
         raise SystemExit(f"Helm schema path {path} is not bound to {name}")
     choices = node.get("oneOf", [])
     integers = [choice for choice in choices if choice.get("type") == "integer"]
-    blanks = [choice for choice in choices if choice.get("$ref") == "#/definitions/blank"]
+    blanks = [choice for choice in choices if choice.get("$ref") == "#/definitions/graphBlank"]
     if len(integers) != 1 or integers[0].get("minimum") != 1 or not isinstance(integers[0].get("maximum"), int):
         raise SystemExit(f"Helm schema path {path} lacks one positive bounded integer choice")
     if len(blanks) != 1:
@@ -169,6 +174,23 @@ for line in open(sys.argv[2], encoding="utf-8"):
 PY
 }
 
+assert_helm_scalar() {
+  rendered=$1
+  name=$2
+  expected=$3
+  python3 - "$rendered" "$name" "$expected" <<'PY'
+import json
+import re
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+pattern = r"- name: " + re.escape(sys.argv[2]) + r'\n\s+value: ("(?:\\.|[^"\\])*")'
+matches = re.findall(pattern, text)
+if len(matches) != 1 or json.loads(matches[0]) != sys.argv[3]:
+    raise SystemExit(f"Helm did not preserve the exact graph scalar for {sys.argv[2]}")
+PY
+}
+
 helm_base >"$TEMP_DIR/helm-default.yaml"
 assert_helm "$TEMP_DIR/helm-default.yaml" "$TEMP_DIR/defaults"
 
@@ -189,6 +211,27 @@ while read -r name path; do
 done <"$MAPPINGS"
 helm_base "$@" >"$TEMP_DIR/helm-blank.yaml"
 assert_helm "$TEMP_DIR/helm-blank.yaml" "$TEMP_DIR/blanks"
+
+tab=$(printf '\011')
+em_space=$(printf '\342\200\203')
+nbsp=$(printf '\302\240')
+non_whitespace=$(printf '\342\230\203')
+for label_and_value in "empty|" "space| " "tab|$tab" "em-space|$em_space"; do
+  label=${label_and_value%%|*}
+  value=${label_and_value#*|}
+  helm_base --set-string "graph.graphMl.maxDepth=$value" >"$TEMP_DIR/helm-graph-$label.yaml"
+  assert_helm_scalar "$TEMP_DIR/helm-graph-$label.yaml" RAVENROOT_GRAPHML_MAX_DEPTH "$value"
+done
+
+for label_and_value in "nbsp|$nbsp" "unicode-text|$non_whitespace" "non-number|not-a-number"; do
+  label=${label_and_value%%|*}
+  value=${label_and_value#*|}
+  if helm_base --set-string "graph.graphMl.maxDepth=$value" \
+      >"$TEMP_DIR/helm-graph-invalid-$label.out" 2>&1; then
+    echo "Helm accepted an invalid graph blank carrier: $label" >&2
+    exit 1
+  fi
+done
 
 # Render every exact schema ceiling in one chart invocation, then verify that each next integer is
 # rejected. The core Java test independently proves every schema ceiling equals its typed constant.

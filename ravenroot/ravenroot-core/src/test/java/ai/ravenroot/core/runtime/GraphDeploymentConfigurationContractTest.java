@@ -64,7 +64,7 @@ class GraphDeploymentConfigurationContractTest {
     private static void assertSchemaLeaf(String schema, Setting setting) {
         String expected = "\"x-ravenroot-environment\": \"" + setting.environment() + "\",\n"
                 + "              \"oneOf\": [{ \"type\": \"integer\", \"minimum\": 1, \"maximum\": "
-                + setting.ceiling() + " }, { \"$ref\": \"#/definitions/blank\" }]";
+                + setting.ceiling() + " }, { \"$ref\": \"#/definitions/graphBlank\" }]";
         assertEquals(1, occurrences(schema, expected), setting.environment());
     }
 

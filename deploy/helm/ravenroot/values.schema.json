@@ -39,43 +39,43 @@
           "properties": {
             "maxBytes": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_BYTES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 268435456 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 268435456 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxNodes": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_NODES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxEdges": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_EDGES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 5000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 5000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxProperties": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PROPERTIES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 10000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 10000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxDepth": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_DEPTH",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1024 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1024 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxStringLength": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_STRING_LENGTH",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 67108864 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 67108864 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxKeys": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_KEYS",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 100000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 100000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxElements": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_ELEMENTS",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 10000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 10000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxAttributes": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_ATTRIBUTES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 20000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 20000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxNamespaceDeclarations": {
               "x-ravenroot-environment": "RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
             }
           }
         },
@@ -89,27 +89,27 @@
           "properties": {
             "maxEncodedBytes": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 67108864 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 67108864 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxDepth": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 256 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 256 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxCollectionSize": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxValueCount": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 5000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 5000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxTextLength": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 67108864 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 67108864 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxKeyLength": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/graphBlank" }]
             }
           }
         },
@@ -125,39 +125,39 @@
           "properties": {
             "maxFanOut": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_FAN_OUT",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 256 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 256 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxResidentActors": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxLiveActorsPerTraversal": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1024 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1024 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxInFlightHopsPerTraversal": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxQueuedAdmissionsPerNode": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 4096 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxTraversalSteps": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxAmplifiedDeliveries": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 1000000 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxCumulativePayloadBytes": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 268435456 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 268435456 }, { "$ref": "#/definitions/graphBlank" }]
             },
             "maxRecoveryDeliveriesPerAttempt": {
               "x-ravenroot-environment": "RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT",
-              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 64 }, { "$ref": "#/definitions/blank" }]
+              "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 64 }, { "$ref": "#/definitions/graphBlank" }]
             }
           }
         }
@@ -219,69 +219,70 @@
     }
   },
   "definitions": {
-    "blank": { "type": "string", "pattern": "^[\\s]*$" },
+    "graphBlank": { "type": "string", "pattern": "^[\u0009-\u000D\u001C-\u0020\u1680\u2000-\u2006\u2008-\u200A\u2028-\u2029\u205F\u3000]*$" },
+    "humanTaskBlank": { "type": "string", "pattern": "^[\u0009-\u000D\u001C-\u0020\u00A0\u1680\u2000-\u200A\u2028-\u2029\u202F\u205F\u3000]*$" },
     "positiveInt64MiB": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 67108864 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positiveInt32": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 2147483647 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "nonNegativeEscalationSeconds": {
       "oneOf": [
         { "type": "integer", "minimum": 0, "maximum": 2147483646 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positiveMillion": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 1000000 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positiveFiveMillion": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 5000000 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positive4096": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 4096 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
-    "positive65536": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 65536 }, { "$ref": "#/definitions/blank" }] },
-    "positive16384": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 16384 }, { "$ref": "#/definitions/blank" }] },
-    "positive100": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 100 }, { "$ref": "#/definitions/blank" }] },
-    "pollMillis": { "oneOf": [{ "type": "integer", "minimum": 250, "maximum": 300000 }, { "$ref": "#/definitions/blank" }] },
+    "positive65536": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 65536 }, { "$ref": "#/definitions/humanTaskBlank" }] },
+    "positive16384": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 16384 }, { "$ref": "#/definitions/humanTaskBlank" }] },
+    "positive100": { "oneOf": [{ "type": "integer", "minimum": 1, "maximum": 100 }, { "$ref": "#/definitions/humanTaskBlank" }] },
+    "pollMillis": { "oneOf": [{ "type": "integer", "minimum": 250, "maximum": 300000 }, { "$ref": "#/definitions/humanTaskBlank" }] },
     "positive256": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 256 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positive128": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 128 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positive1000": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 1000 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     },
     "positive32": {
       "oneOf": [
         { "type": "integer", "minimum": 1, "maximum": 32 },
-        { "$ref": "#/definitions/blank" }
+        { "$ref": "#/definitions/humanTaskBlank" }
       ]
     }
   }

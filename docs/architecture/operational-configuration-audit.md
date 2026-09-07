@@ -25,9 +25,11 @@ kind/semantic role + normalized atomic value + normalized full-expression digest
 index`; source line remains checked metadata.
 
 The scanner is deliberately lexical: it covers declared constants, known policy constructors,
-timed Java calls with explicit `TimeUnit` arguments, environment bindings, deployment scalars,
-and container identity/port directives. Dynamic or statically imported time units and values assembled
-only through reflection, generated sources, or arbitrary data flow remain outside this bounded pattern;
+and `get`, `await`, `tryAcquire`, `tryLock`, `waitFor`, and `awaitTermination` calls whose supported
+forms use a simple or fully qualified explicit `TimeUnit` constant. Other method names, dynamic or
+statically imported units, receiver-type inference, and values assembled only through reflection,
+generated sources, or arbitrary data flow remain outside this bounded pattern. Environment bindings,
+deployment scalars, and container identity/port directives are covered separately;
 semantic review and focused source inventories remain required for those boundaries.
 
 ## Reproducible counts

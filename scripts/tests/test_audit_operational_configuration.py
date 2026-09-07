@@ -2781,6 +2781,25 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             subprocess.run(["git", "init", "-q"], cwd=root, check=True)
             subprocess.run(["git", "add", assistant.relative_to(root).as_posix()],
                            cwd=root, check=True)
+            assistant_source = assistant.read_text(encoding="utf-8")
+            candidate = next(
+                candidate for _offset, candidate in audit.java_source_candidates(
+                    audit.ASSISTANT_CONFIGURATION_PATH, assistant_source)
+                if candidate.kind == "environment-binding"
+                and candidate.expression == "RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS")
+            entry = candidate.inventory_entry()
+            entry.update(
+                status="already-centralized", classification="operator-configurable",
+                setting="synthetic.assistant.max-output-tokens",
+                owner=f"{audit.ASSISTANT_CONFIGURATION_PATH.as_posix()}#AssistantConfiguration",
+                field="maxOutputTokens", bindings=[candidate.expression], default="4096 tokens",
+                defaultEvidence=[candidate.id], validation="positive integer",
+                scope="synthetic assistant service", pinning="live service policy",
+                coverage="source owner ordering regression fixture",
+                rationale="Exercises source-owner validation after migration preflight.")
+            base["entries"] = [entry]
+            base["evidenceRecords"] = {candidate.evidence_digest: candidate.evidence}
+            discovered = (candidate,)
             for revision, source_path in cases:
                 with self.subTest(revision=revision, source_path=source_path):
                     audit.current_source_owner.cache_clear()
@@ -2799,10 +2818,47 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                         "rationale": "Synthetic invalid migration source.",
                     }]
                     with mock.patch.object(audit.subprocess, "run") as run:
-                        errors = audit.inventory_errors(root, document, ())
+                        errors = audit.inventory_errors(root, document, discovered)
                     self.assertTrue(any("migration source is not locally resolvable" in error
                                         for error in errors), errors)
                     run.assert_not_called()
+
+            audit.current_source_owner.cache_clear()
+            audit.committed_source.cache_clear()
+            audit.commit_exists.cache_clear()
+            audit.revision_is_ancestor.cache_clear()
+            misplaced = copy.deepcopy(base)
+            misplaced["migrationHistory"] = [{
+                "fromSchema": 1,
+                "toSchema": audit.SCHEMA_VERSION,
+                "sourceRevision": "--output=/tmp/never-write",
+                "sourcePath": "inventory.json",
+                "sourceFileDigest": "0" * 64,
+                "candidateCount": 0,
+                "statusCounts": {},
+                "rationale": "Synthetic misplaced-preflight mutation.",
+            }]
+            real_locator = audit.historical_source_locator_is_safe
+            locator_calls = 0
+
+            def skip_only_preflight(revision, source_path):
+                nonlocal locator_calls
+                locator_calls += 1
+                return True if locator_calls == 1 else real_locator(revision, source_path)
+
+            with mock.patch.object(
+                    audit, "historical_source_locator_is_safe",
+                    side_effect=skip_only_preflight), \
+                    mock.patch.object(audit.subprocess, "run") as run:
+                audit.inventory_errors(root, misplaced, discovered)
+                with self.assertRaises(AssertionError):
+                    run.assert_not_called()
+            self.assertEqual(
+                ["git", "ls-files", "--error-unmatch", "--",
+                 audit.ASSISTANT_CONFIGURATION_PATH.as_posix()],
+                run.call_args_list[0].args[0])
+            self.assertTrue(all("--output=/tmp/never-write" not in call.args[0]
+                                for call in run.call_args_list))
 
     def test_migration_history_accepts_full_revision_and_tracked_json_source(self) -> None:
         with tempfile.TemporaryDirectory() as location:

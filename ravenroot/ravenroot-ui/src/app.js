@@ -6017,9 +6017,15 @@ function inspectInspectorDraft(draft = inspectorDraft) {
 }
 
 function syncAutosavedNodeRenderer(nodeId) {
-  const element = cy?.getElementById(nodeId);
+  const owner = workspace.active;
+  const target = cy;
+  const element = target?.getElementById(nodeId);
   if (!element?.nonempty()) return;
+  const selectedIds = target.$(':selected').map(candidate => candidate.id());
   syncGraphRendererInPlace({ nodeIds: [nodeId], refreshDependentEdges: true });
+  if (!owner || workspace.active !== owner || owner.cy !== target || cy !== target || target.destroyed()) return;
+  applyStableSelection(target, selectedIds.filter(id => target.getElementById(id).nonempty()));
+  scheduleSelectionOverlay(target);
 }
 
 function syncAutosavedEdgeRenderer(edgeId) {
@@ -6184,6 +6190,41 @@ function bindInspectorDraft(form, model, elementType, creating) {
     draft.dirty = true;
     draft.dirty = inspectInspectorDraft(draft).changed;
     scheduleInspectorDraftCommit(draft, true);
+  });
+}
+
+function preserveNodeInspectorAfterSave({ owner, target, draft, selectedIds }) {
+  if (!owner || !target || workspace.active !== owner || owner.cy !== target || cy !== target
+      || target.destroyed() || draft?.documentId !== owner.id || !draft.form.isConnected) return;
+  const model = owner.graph?.nodeMap?.[draft.elementId];
+  const rendered = target.getElementById(draft.elementId);
+  if (!model || rendered.empty()) return;
+
+  // A node save updates the existing renderer element in place. Keep the same stable-ID selection
+  // authoritative as well: neither a data/style event nor a delayed click repair may turn saving
+  // into a selection change, and IDs from another document are never consulted here.
+  const intendedSelection = selectedIds.includes(draft.elementId) ? selectedIds : [draft.elementId];
+  invalidateStableSelection(target);
+  applyStableSelection(target, intendedSelection.filter(id => target.getElementById(id).nonempty()));
+  scheduleSelectionOverlay(target);
+
+  document.getElementById('info-title').textContent = model.name || model.id;
+  if (model.behavior === 'human-task') void humanTaskController?.selectNode(model.id);
+  else humanTaskController?.selectNode(null);
+
+  // Do not rebuild the form after editing an existing node: its controls already contain the
+  // committed values, while replacing the markup detaches the active edit session. Return focus to
+  // the last surviving editor control after a pointer submission; dynamically replaced controls
+  // fall back to the stable Name field.
+  const focusTarget = draft.lastFocusControl?.isConnected
+    ? draft.lastFocusControl : draft.form.elements.name;
+  queueMicrotask(() => {
+    if (workspace.active !== owner || owner.cy !== target || cy !== target
+        || target.destroyed() || inspectorDraft !== draft || !draft.form.isConnected) return;
+    const current = owner.graph?.nodeMap?.[draft.elementId];
+    if (!current || target.getElementById(draft.elementId).empty()) return;
+    const survivingFocus = focusTarget?.isConnected ? focusTarget : draft.form.elements.name;
+    survivingFocus?.focus?.({ preventScroll: true });
   });
 }
 
@@ -6430,16 +6471,21 @@ function renderNodeForm(model, creating) {
     if (!modifyEnabled || !canModifyGraph(graphData, layoutMode)) return showFormError(form, 'Modify mode is OFF');
     const values = new FormData(form);
     const id = String(values.get('id') || '').trim();
+    const owner = workspace.active;
+    const target = cy;
+    const selectedIds = target?.$(':selected').map(element => element.id()) || [];
     if (creating && graphData.nodeMap[id]) return showFormError(form, `Node ID ${id} already exists`);
     const patch = readNodeEditorPatch(form, model);
     // Creating applies the values to a detached node and inserts it as one command; editing patches
     // the document node. Either way the mutation is a command, never a write from the form.
+    let savedDraft = null;
     if (creating) {
       const created = createNode(id, patch.name, patch.kind);
       Object.assign(created, patch);
       insertNodeElement(graphData, created, editHistory);
     } else {
       const draft = inspectorDraft?.form === form ? inspectorDraft : null;
+      savedDraft = draft;
       if (draft) {
         const assessment = inspectInspectorDraft(draft);
         if (!assessment.valid) return showFormError(form, uiText('inspector.unsaved.invalidDescription'));
@@ -6453,10 +6499,15 @@ function renderNodeForm(model, creating) {
         syncAutosavedNodeRenderer(model.id);
       }
     }
-    retireInspectorDraft(form);
-    if (creating) rebuildGraph();
-    updateHistoryUi();
-    showNodeInfo(cy.getElementById(id));
+    if (creating) {
+      retireInspectorDraft(form);
+      rebuildGraph();
+      updateHistoryUi();
+      showNodeInfo(cy.getElementById(id));
+    } else if (savedDraft) {
+      updateHistoryUi();
+      preserveNodeInspectorAfterSave({ owner, target, draft: savedDraft, selectedIds });
+    }
     scheduleProgramGraphReadiness(workspace.active);
   });
   document.getElementById('delete-node')?.addEventListener('click', () => {

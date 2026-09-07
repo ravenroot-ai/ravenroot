@@ -1,10 +1,13 @@
 package ai.ravenroot.persistence.postgresql;
 
 import org.postgresql.ds.PGSimpleDataSource;
+import org.testcontainers.containers.Container;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 
 import javax.sql.DataSource;
+import java.io.IOException;
+import java.net.URI;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.sql.Statement;
@@ -79,6 +82,47 @@ final class PostgresTestDatabase {
     /** Runtime-minted, container-scoped, and never written down anywhere. */
     static String password() {
         return container().getPassword();
+    }
+
+    /** The database every {@link #dataSourceFor} schema lives in, which is the one a dump names. */
+    static String databaseName() {
+        return container().getDatabaseName();
+    }
+
+    /**
+     * The same server, addressed as a different database on it.
+     *
+     * <p>Derived from the container's own URL rather than rebuilt from a host and a port, so a change
+     * in how Testcontainers exposes the server — a different host, a mapped port, a query parameter it
+     * appends — reaches this method without anybody having to notice. Only the database segment of the
+     * path is replaced; everything else is carried over exactly.</p>
+     */
+    static String jdbcUrlForDatabase(String database) {
+        String url = container().getJdbcUrl();
+        // The JDBC form is "jdbc:" followed by a URI, so the URI parser is what should decide where the
+        // path ends and a query begins. String surgery on the last '/' would be wrong for any URL whose
+        // query happened to contain one.
+        URI uri = URI.create(url.substring("jdbc:".length()));
+        String rebuilt = uri.getScheme() + "://" + uri.getAuthority() + "/" + database;
+        return "jdbc:" + (uri.getRawQuery() == null ? rebuilt : rebuilt + "?" + uri.getRawQuery());
+    }
+
+    /**
+     * Runs a command inside the server's own container, the way an operator runs one on the host that
+     * holds the database.
+     *
+     * <p>This exists for {@code pg_dump}, {@code pg_restore}, {@code createdb} and {@code psql}: the
+     * tools the operator documentation names, run as the versions that shipped with the server being
+     * dumped. Reaching them any other way — a client binary from the test host, or a row copier written
+     * in Java — would exercise a procedure nobody performs.</p>
+     *
+     * <p>{@code PGPASSWORD} is exported inside the shell rather than passed as an argument, and the
+     * value is the credential this container minted for itself at startup. Nothing here is a literal
+     * and nothing outlives the container.</p>
+     */
+    static Container.ExecResult psqlTool(String command) throws IOException, InterruptedException {
+        return container().execInContainer("sh", "-c",
+                "export PGPASSWORD='" + password() + "'; " + command);
     }
 
     /**

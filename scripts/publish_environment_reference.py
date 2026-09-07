@@ -28,6 +28,9 @@ GROUPS = {
     "bundle": Group("Bundle profile", "bundles/"),
     "credential": Group("Credentials and egress", "configuration.md#secret-handling"),
     "embed": Group("Embedded viewer", "embed-extension-contracts.md"),
+    "execution-runtime": Group(
+        "Execution runtime", "configuration.md#execution-runtime-and-engine-limits"
+    ),
     "graph": Group("Graph execution", "configuration.md#graph-execution-resource-limits"),
     "human-task": Group("Human Task policy", "configuration.md#human-task-operational-policy"),
     "identity": Group("Identity and HTTP boundary", "configuration.md#identity-and-browser-controls"),
@@ -132,6 +135,13 @@ def undocumented_variables() -> list[str]:
 
 
 def group(name: str) -> str:
+    if name in {
+        "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",
+        "RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS",
+        "RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY",
+        "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS",
+    }:
+        return "execution-runtime"
     if name.startswith("RAVENROOT_ASSISTANT_"):
         return "assistant"
     if name in INTERACTION_WEBSOCKET_VARIABLES:

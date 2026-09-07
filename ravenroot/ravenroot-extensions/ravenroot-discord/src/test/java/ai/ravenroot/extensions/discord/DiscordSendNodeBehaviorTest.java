@@ -1,9 +1,13 @@
 package ai.ravenroot.extensions.discord;
 
 import ai.ravenroot.api.execution.CancellationSignal;
+import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.node.NodeAction;
+import ai.ravenroot.api.node.NodeBehavior;
 import ai.ravenroot.api.node.NodeConfiguration;
+import ai.ravenroot.api.node.service.NodePackageCapability;
 import ai.ravenroot.api.node.service.NodePackageServiceException;
+import ai.ravenroot.api.node.service.NodePackageServices;
 import ai.ravenroot.api.node.service.OutboundCall;
 import ai.ravenroot.api.node.service.OutboundHttpResponse;
 import org.junit.jupiter.api.Test;
@@ -13,9 +17,17 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -114,35 +126,253 @@ class DiscordSendNodeBehaviorTest {
         assertEquals(1, http.requests.size());
     }
 
-    @Test void cancellationCancelsManagedCallAndConcurrencyPermitRecovers() {
-        var http = new DiscordTestSupport.HttpHarness(); CompletableFuture<OutboundHttpResponse> pending = new CompletableFuture<>();
-        http.pending = new OutboundCall<>() {
-            @Override public java.util.concurrent.CompletionStage<OutboundHttpResponse> completion() { return pending; }
-            @Override public boolean cancel() { return pending.cancel(true); }
-        };
-        NodeAction action = action(http, Map.of("maxConcurrency", "1")); TestCancellation cancellation = new TestCancellation();
-        var first = action.handle(DiscordTestSupport.message(message("one", List.of())), cancellation);
-        waitForRequests(http, 1);
-        var second = action.handle(DiscordTestSupport.message(message("two", List.of()))).toCompletableFuture().join();
-        assertEquals("capacity", ((Map<?, ?>) second.payload()).get("status"));
-        cancellation.cancel(); assertFailure(first, DiscordException.Code.CANCELLED);
+    @Test void successfulCompletionPublishesAfterTheNodePermitIsReleased() throws Exception {
+        var http = new TerminalOrderingHarness(1);
+        NodeAction action = action(http, Map.of("maxConcurrency", "1", "retries", "0"));
+        var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
+        CompletionStage<NodeResult> first = action.handle(
+                DiscordTestSupport.message(message("one", List.of())));
+        stages.add(first);
+        try {
+            http.awaitCaptured();
+            assertCapacity(await(action.handle(DiscordTestSupport.message(message("in-flight", List.of())))),
+                    "local-capacity");
+            var nextAtTerminal = invokeAtTerminal(first,
+                    () -> action.handle(DiscordTestSupport.message(message("after-success", List.of()))));
+            stages.add(nextAtTerminal);
 
-        http.pending = null; http.reply(200, Map.of("id", "923456789012345678", "channel_id", DiscordTestSupport.CHANNEL));
-        var third = action.handle(DiscordTestSupport.message(message("three", List.of()))).toCompletableFuture().join();
-        assertEquals("sent", ((Map<?, ?>) third.payload()).get("status"));
+            http.call(0).succeed();
+
+            assertEquals("sent", status(await(first)));
+            assertEquals("sent", status(await(nextAtTerminal)),
+                    "terminal success must not be visible while the node permit is still held");
+            assertEquals(2, http.dispatches());
+        } finally {
+            http.releaseAll();
+            drain(stages);
+        }
     }
 
-    private NodeAction action(DiscordTestSupport.HttpHarness services, Map<String, String> extra) {
+    @Test void exceptionalCompletionPublishesAfterTheNodePermitIsReleased() throws Exception {
+        var http = new TerminalOrderingHarness(1);
+        NodeAction action = action(http, Map.of("maxConcurrency", "1", "retries", "0"));
+        var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
+        CompletionStage<NodeResult> first = action.handle(
+                DiscordTestSupport.message(message("one", List.of())));
+        stages.add(first);
+        try {
+            http.awaitCaptured();
+            assertCapacity(await(action.handle(DiscordTestSupport.message(message("in-flight", List.of())))),
+                    "local-capacity");
+            var nextAtTerminal = invokeAtTerminal(first,
+                    () -> action.handle(DiscordTestSupport.message(message("after-failure", List.of()))));
+            stages.add(nextAtTerminal);
+
+            http.call(0).fail(new NodePackageServiceException(NodePackageServiceException.Reason.TRANSPORT_FAILED));
+
+            assertFailureWithin(first, DiscordException.Code.INDETERMINATE);
+            assertEquals("sent", status(await(nextAtTerminal)),
+                    "terminal failure must not be visible while the node permit is still held");
+            assertEquals(2, http.dispatches());
+        } finally {
+            http.releaseAll();
+            drain(stages);
+        }
+    }
+
+    @Test void cancellationPublishesAfterTheManagedCallAndNodePermitAreReleased() throws Exception {
+        var http = new TerminalOrderingHarness(1);
+        NodeAction action = action(http, Map.of("maxConcurrency", "1", "retries", "0"));
+        TestCancellation cancellation = new TestCancellation();
+        var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
+        CompletionStage<NodeResult> first = action.handle(
+                DiscordTestSupport.message(message("one", List.of())), cancellation);
+        stages.add(first);
+        try {
+            http.awaitCaptured();
+            assertCapacity(await(action.handle(DiscordTestSupport.message(message("in-flight", List.of())))),
+                    "local-capacity");
+            var nextAtTerminal = invokeAtTerminal(first,
+                    () -> action.handle(DiscordTestSupport.message(message("after-cancel", List.of()))));
+            stages.add(nextAtTerminal);
+
+            http.call(0).awaitCompletionObserved();
+            cancellation.cancel();
+
+            assertFailureWithin(first, DiscordException.Code.CANCELLED);
+            assertEquals(1, http.call(0).cancellations());
+            assertEquals("sent", status(await(nextAtTerminal)),
+                    "terminal cancellation must not be visible while the node permit is still held");
+            assertEquals(2, http.dispatches());
+        } finally {
+            http.releaseAll();
+            drain(stages);
+        }
+    }
+
+    @Test void successfulCompletionPublishesAfterTheSharedProfilePermitIsReleased() throws Exception {
+        var http = new TerminalOrderingHarness(2);
+        DiscordNodePackage nodePackage = DiscordTestSupport.nodePackage(directory.resolve("profile-permits.db"));
+        var behavior = DiscordTestSupport.behavior(nodePackage, DiscordBehaviorDescriptors.SEND);
+        List<NodeAction> actions = java.util.stream.IntStream.range(0, 3)
+                .mapToObj(index -> createAction(behavior, http, Map.of("retries", "0")))
+                .toList();
+        var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
+        stages.add(actions.getFirst().handle(DiscordTestSupport.message(message("held-0", List.of()))));
+        try {
+            http.awaitCaptured(1);
+            for (int index = 1; index < 2; index++) {
+                stages.add(actions.get(index).handle(
+                        DiscordTestSupport.message(message("held-" + index, List.of()))));
+            }
+            http.awaitCaptured(2);
+            assertCapacity(await(actions.get(2).handle(
+                    DiscordTestSupport.message(message("profile-full", List.of())))), "profile-capacity");
+            @SuppressWarnings("unchecked")
+            CompletionStage<NodeResult> first = (CompletionStage<NodeResult>) stages.getFirst();
+            var nextAtTerminal = invokeAtTerminal(first,
+                    () -> actions.get(2).handle(DiscordTestSupport.message(message("after-profile", List.of()))));
+            stages.add(nextAtTerminal);
+
+            http.call(0).succeed();
+
+            assertEquals("sent", status(await(first)));
+            assertEquals("sent", status(await(nextAtTerminal)),
+                    "terminal success must not be visible while the shared profile permit is still held");
+            assertEquals(3, http.dispatches());
+        } finally {
+            http.releaseAll();
+            drain(stages);
+        }
+    }
+
+    private NodeAction action(NodePackageServices services, Map<String, String> extra) {
         return action(services, extra, 1_048_576);
     }
-    private NodeAction action(DiscordTestSupport.HttpHarness services, Map<String, String> extra,
+    private NodeAction action(NodePackageServices services, Map<String, String> extra,
                               int maximumRequestBytes) {
         DiscordNodePackage nodePackage = DiscordTestSupport.nodePackage(
                 directory.resolve("deliveries-" + maximumRequestBytes + ".db"), maximumRequestBytes);
+        return createAction(DiscordTestSupport.behavior(nodePackage, DiscordBehaviorDescriptors.SEND), services, extra);
+    }
+    private static NodeAction createAction(NodeBehavior behavior, NodePackageServices services,
+                                           Map<String, String> extra) {
         Map<String, Object> properties = new java.util.LinkedHashMap<>(); properties.put("discordProfile", DiscordTestSupport.PROFILE);
         properties.putAll(extra);
-        return DiscordTestSupport.behavior(nodePackage, DiscordBehaviorDescriptors.SEND)
-                .create(new NodeConfiguration("discord", DiscordBehaviorDescriptors.SEND, properties), services);
+        return behavior.create(new NodeConfiguration("discord", DiscordBehaviorDescriptors.SEND, properties), services);
+    }
+    private static void assertCapacity(NodeResult result, String evidence) {
+        assertEquals("capacity", status(result));
+        assertEquals(evidence, ((Map<?, ?>) result.payload()).get("evidence"));
+    }
+    private static String status(NodeResult result) {
+        return String.valueOf(((Map<?, ?>) result.payload()).get("status"));
+    }
+    private static <T> T await(CompletionStage<T> stage) throws Exception {
+        return stage.toCompletableFuture().get(2, TimeUnit.SECONDS);
+    }
+    private static void assertFailureWithin(CompletionStage<?> stage, DiscordException.Code code) {
+        ExecutionException thrown = assertThrows(ExecutionException.class,
+                () -> stage.toCompletableFuture().get(2, TimeUnit.SECONDS));
+        assertInstanceOf(DiscordException.class, thrown.getCause());
+        assertEquals(code, ((DiscordException) thrown.getCause()).code());
+        assertFalse(thrown.getCause().getMessage().contains("hello"));
+        assertFalse(thrown.getCause().getMessage().contains("discord-bot-token"));
+    }
+    private static <T> CompletableFuture<T> invokeAtTerminal(
+            CompletionStage<?> terminal, Supplier<CompletionStage<T>> invocation) {
+        var observed = new CompletableFuture<T>();
+        terminal.whenComplete((ignored, failure) -> {
+            try {
+                invocation.get().whenComplete((value, invocationFailure) -> {
+                    if (invocationFailure == null) observed.complete(value);
+                    else observed.completeExceptionally(invocationFailure);
+                });
+            } catch (Throwable invocationFailure) {
+                observed.completeExceptionally(invocationFailure);
+            }
+        });
+        return observed;
+    }
+    private static void drain(List<? extends CompletionStage<?>> stages) throws Exception {
+        CompletableFuture<?>[] drained = stages.stream()
+                .map(stage -> stage.handle((value, failure) -> null).toCompletableFuture())
+                .toArray(CompletableFuture[]::new);
+        CompletableFuture.allOf(drained).get(2, TimeUnit.SECONDS);
+    }
+    private static OutboundHttpResponse sentResponse() {
+        return new OutboundHttpResponse(200, Map.of("content-type", List.of("application/json")),
+                DiscordValues.jsonBytes(Map.of(
+                        "id", "923456789012345678",
+                        "channel_id", DiscordTestSupport.CHANNEL)), 65_536);
+    }
+    private static final class TerminalOrderingHarness implements NodePackageServices {
+        private final int heldCalls;
+        private final List<CountDownLatch> capturedCounts;
+        private final List<ControlledCall> calls = new CopyOnWriteArrayList<>();
+        private final AtomicInteger dispatches = new AtomicInteger();
+        private final AtomicBoolean releasing = new AtomicBoolean();
+
+        private TerminalOrderingHarness(int heldCalls) {
+            this.heldCalls = heldCalls;
+            this.capturedCounts = java.util.stream.IntStream.rangeClosed(1, heldCalls)
+                    .mapToObj(CountDownLatch::new)
+                    .toList();
+        }
+        private void awaitCaptured() throws InterruptedException {
+            awaitCaptured(heldCalls);
+        }
+        private void awaitCaptured(int count) throws InterruptedException {
+            assertTrue(capturedCounts.get(count - 1).await(2, TimeUnit.SECONDS),
+                    "managed Discord calls were not captured");
+            assertTrue(calls.size() >= count);
+        }
+        private ControlledCall call(int index) { return calls.get(index); }
+        private int dispatches() { return dispatches.get(); }
+        private void releaseAll() {
+            releasing.set(true);
+            calls.forEach(ControlledCall::succeed);
+        }
+        @Override public Set<NodePackageCapability> capabilities() {
+            return Set.of(NodePackageCapability.OUTBOUND_HTTP);
+        }
+        @Override public ai.ravenroot.api.node.service.NodeCredentialService credentials() {
+            return NodePackageServices.unavailable().credentials();
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundHttpService outboundHttp() {
+            return (message, request) -> {
+                int ordinal = dispatches.getAndIncrement();
+                if (ordinal >= heldCalls) return OutboundCall.completed(sentResponse());
+                var call = new ControlledCall();
+                calls.add(call);
+                capturedCounts.forEach(CountDownLatch::countDown);
+                if (releasing.get()) call.succeed();
+                return call;
+            };
+        }
+        @Override public ai.ravenroot.api.node.service.OutboundWebSocketService outboundWebSocket() {
+            return NodePackageServices.unavailable().outboundWebSocket();
+        }
+    }
+    private static final class ControlledCall implements OutboundCall<OutboundHttpResponse> {
+        private final CompletableFuture<OutboundHttpResponse> completion = new CompletableFuture<>();
+        private final CountDownLatch completionObserved = new CountDownLatch(1);
+        private final AtomicInteger cancellations = new AtomicInteger();
+
+        @Override public CompletionStage<OutboundHttpResponse> completion() {
+            completionObserved.countDown();
+            return completion;
+        }
+        @Override public boolean cancel() {
+            cancellations.incrementAndGet();
+            return completion.cancel(true);
+        }
+        private void succeed() { completion.complete(sentResponse()); }
+        private void fail(Throwable failure) { completion.completeExceptionally(failure); }
+        private int cancellations() { return cancellations.get(); }
+        private void awaitCompletionObserved() throws InterruptedException {
+            assertTrue(completionObserved.await(2, TimeUnit.SECONDS), "managed call was not active");
+        }
     }
     private static Map<String, Object> message(String content, List<Map<String, Object>> attachments) {
         return Map.of("version", "discord.message.v1", "channelId", DiscordTestSupport.CHANNEL,

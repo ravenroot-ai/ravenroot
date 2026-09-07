@@ -7,7 +7,10 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.net.http.HttpRequest;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -92,6 +95,32 @@ class DeviceFlowAssistantConnectionTest {
                 "an operator key stored per author would silently replace the per-author token");
         assertEquals(0, connection.pendingCount(),
                 "a redeemed grant must stop being pending, or the next poll redeems it again");
+    }
+
+    @Test
+    void anUnrepresentableSessionConsumesTheGrantOnceWithoutRetainingTheToken() {
+        var requests = new ArrayList<HttpRequest>();
+        var bodies = new ArrayList<String>();
+        var tokens = new InMemoryAssistantTokenStore(Clock.fixed(
+                Instant.MAX.minusSeconds(60), ZoneOffset.UTC));
+        var connection = new DeviceFlowAssistantConnection(
+                authorization(requests, bodies, responses(GRANT, """
+                        {"access_token":"the-authors-own-token","token_type":"bearer"}""")),
+                tokens, Duration.ofSeconds(61));
+        connection.begin(AUTHOR);
+
+        var failure = assertThrows(IllegalArgumentException.class, () -> connection.poll(AUTHOR));
+
+        assertEquals("assistant session lifetime cannot be represented at the current time",
+                failure.getMessage());
+        assertNull(failure.getCause());
+        assertEquals(0, tokens.signedInCount());
+        assertEquals(0, connection.pendingCount(),
+                "the already-redeemed grant must be consumed even when local retention refuses");
+        assertEquals(2, requests.size(), "begin and redemption must each call the provider once");
+
+        assertInstanceOf(AssistantConnection.Progress.None.class, connection.poll(AUTHOR));
+        assertEquals(2, requests.size(), "a second poll must not attempt a second redemption");
     }
 
     /**

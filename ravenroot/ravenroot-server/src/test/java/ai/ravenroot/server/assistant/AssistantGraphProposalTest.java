@@ -275,6 +275,26 @@ class AssistantGraphProposalTest {
         }
     }
 
+    @Test
+    void configuredOperationalLimitsReachEveryRequestAndStopTheProviderLoop() {
+        try (var engine = new PekkoExecutionEngine("assistant-operational-limits-test")) {
+            var provider = new AssistantHarness.ScriptedProviderView()
+                    .callingTool("unknown-read-one")
+                    .callingTool("unknown-read-two")
+                    .answering("a third provider call must never happen");
+            var configuration = AssistantHarness.readyConfiguration(17, 2);
+
+            var failure = assertInstanceOf(AssistantOutcome.Failure.class,
+                    provider.service(configuration).send(author(), application(engine), BOUND_TURN));
+
+            assertEquals(AssistantOutcome.Reason.TOOL_LOOP_EXHAUSTED, failure.reason());
+            assertEquals(2, provider.callCount());
+            assertEquals(2, provider.received().size());
+            assertTrue(provider.received().stream().allMatch(request -> request.maxTokens() == 17),
+                    "every provider turn must carry the configured output ceiling");
+        }
+    }
+
     private static PayloadValue.MapValue map(PayloadValue value) {
         return assertInstanceOf(PayloadValue.MapValue.class, value);
     }

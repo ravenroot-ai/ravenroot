@@ -18,13 +18,18 @@ public record HttpSecurityConfiguration(BrowserOriginPolicy browserOrigins,
     }
 
     public static HttpSecurityConfiguration fromEnvironment(Map<String, String> environment, int port) {
-        long seconds;
+        String name = "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS";
+        String declared = environment.get(name);
+        long seconds = 30;
         try {
-            seconds = Long.parseLong(environment.getOrDefault(
-                    "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS", "30"));
+            if (declared != null && !declared.isBlank()) {
+                seconds = Long.parseLong(declared);
+            }
         } catch (NumberFormatException invalid) {
-            throw new IllegalArgumentException(
-                    "RAVENROOT_SSE_AUTH_REVALIDATION_SECONDS must be an integer", invalid);
+            throw new IllegalArgumentException(name + " must be an integer between 1 and 300");
+        }
+        if (seconds < 1 || seconds > 300) {
+            throw new IllegalArgumentException(name + " must be an integer between 1 and 300");
         }
         return new HttpSecurityConfiguration(BrowserOriginPolicy.fromEnvironment(environment, port),
                 SecurityHeadersPolicy.fromEnvironment(environment), Duration.ofSeconds(seconds));

@@ -156,14 +156,20 @@ final class ImapConsumerTestSupport {
         final Map<String, JournalCursor> cursors = new ConcurrentHashMap<>();
         final CountDownLatch offered;
         final CountDownLatch checkpointRequested = new CountDownLatch(1);
+        final CompletableFuture<IngressReceipt> receiptAvailable = new CompletableFuture<>();
+        final CompletableFuture<Long> checkpointAdvanceRequested = new CompletableFuture<>();
+        final CompletableFuture<Long> checkpointCompleted = new CompletableFuture<>();
         volatile boolean durable = true;
         volatile boolean deduplicate;
         volatile CompletableFuture<JournalCursor> checkpointOverride;
         volatile CountDownLatch offerGate = new CountDownLatch(0);
+        volatile CompletableFuture<Void> checkpointGate = CompletableFuture.completedFuture(null);
         Ingress() { this(1); }
         Ingress(int expected) { offered = new CountDownLatch(expected); }
         Ingress gateOffer() { offerGate = new CountDownLatch(1); return this; }
         void releaseOffer() { offerGate.countDown(); }
+        Ingress gateCheckpoint() { checkpointGate = new CompletableFuture<>(); return this; }
+        void releaseCheckpoint() { checkpointGate.complete(null); }
         @Override public IngressDisposition offer(SecurityContext security, IngressTarget target, Object payload) {
             return IngressDisposition.ACCEPTED;
         }
@@ -177,9 +183,15 @@ final class ImapConsumerTestSupport {
             sourceIds.add(sourceId);
             offered.countDown();
             await(offerGate);
-            if (!receipts.isEmpty()) return receipts.removeFirst();
-            if (deduplicate && !durableKeys.add(idempotentKey)) return new IngressReceipt.Duplicate(idempotentKey);
-            return new IngressReceipt.DurablyCommitted(idempotentKey);
+            IngressReceipt receipt;
+            if (!receipts.isEmpty()) receipt = receipts.removeFirst();
+            else if (deduplicate && !durableKeys.add(idempotentKey)) {
+                receipt = new IngressReceipt.Duplicate(idempotentKey);
+            } else {
+                receipt = new IngressReceipt.DurablyCommitted(idempotentKey);
+            }
+            receiptAvailable.complete(receipt);
+            return receipt;
         }
         @Override public java.util.concurrent.CompletionStage<JournalCursor> sourceCheckpoint(
                 SecurityContext security, String sourceId) {
@@ -189,15 +201,24 @@ final class ImapConsumerTestSupport {
             return CompletableFuture.completedFuture(cursors.computeIfAbsent(sourceId,
                     key -> JournalCursor.start(security.tenantId(), key)));
         }
-        @Override public synchronized java.util.concurrent.CompletionStage<JournalCursor> advanceSourceCheckpoint(
+        @Override public java.util.concurrent.CompletionStage<JournalCursor> advanceSourceCheckpoint(
                 JournalCursor expected, long position) {
+            checkpointAdvanceRequested.complete(position);
+            CompletableFuture<JournalCursor> completion = checkpointGate.thenApply(
+                    ignored -> completeCheckpoint(expected, position));
+            completion.whenComplete((advanced, failure) -> {
+                if (failure != null) checkpointCompleted.completeExceptionally(failure);
+                else checkpointCompleted.complete(advanced.deliveredThrough());
+            });
+            return completion;
+        }
+        private synchronized JournalCursor completeCheckpoint(JournalCursor expected, long position) {
             JournalCursor current = cursors.get(expected.destination());
-            if (!expected.equals(current)) return CompletableFuture.failedFuture(
-                    new IllegalStateException("conflict"));
+            if (!expected.equals(current)) throw new IllegalStateException("conflict");
             JournalCursor advanced = new JournalCursor(expected.tenantId(), expected.destination(), position);
             cursors.put(expected.destination(), advanced);
             advances.add(position);
-            return CompletableFuture.completedFuture(advanced);
+            return advanced;
         }
     }
 
@@ -205,6 +226,14 @@ final class ImapConsumerTestSupport {
         try { org.junit.jupiter.api.Assertions.assertTrue(latch.await(3, TimeUnit.SECONDS), "gate timed out"); }
         catch (InterruptedException interrupted) {
             Thread.currentThread().interrupt(); throw new AssertionError(interrupted);
+        }
+    }
+    static <T> T await(CompletableFuture<T> completion) {
+        try { return completion.get(3, TimeUnit.SECONDS); }
+        catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt(); throw new AssertionError(interrupted);
+        } catch (java.util.concurrent.ExecutionException | java.util.concurrent.TimeoutException failure) {
+            throw new AssertionError(failure);
         }
     }
 }

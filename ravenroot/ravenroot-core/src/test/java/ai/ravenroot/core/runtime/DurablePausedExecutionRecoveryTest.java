@@ -5,6 +5,7 @@ import ai.ravenroot.api.application.ExecutionIdentitySource;
 import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.execution.NodeResult;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.ExecutionKey;
@@ -261,9 +262,14 @@ final class DurablePausedExecutionRecoveryTest {
     void resumeAfterRestartContinuesFromTheBoundaryWithoutRepeatingACompletedEffect() throws Exception {
         var stores = new DurableStores();
         Held held = holdAndStop(stores);
+        var shutdownProbe = new ShutdownBoundProbeEngine();
+        CompletableFuture<Boolean> resuming = null;
 
-        try (Restarted restarted = stores.restart()) {
-            assertTrue(restarted.application().resumeTraversal(TENANT, held.traversalId()),
+        try (Restarted restarted = stores.restart(shutdownProbe, Duration.ofMillis(50))) {
+            resuming = CompletableFuture.supplyAsync(() ->
+                    restarted.application().resumeTraversal(TENANT, held.traversalId()));
+            shutdownProbe.firstCancellation().toCompletableFuture().get(2, TimeUnit.SECONDS);
+            assertTrue(resuming.get(5, TimeUnit.SECONDS),
                     "an inherited hold must be releasable");
             assertTrue(restarted.awaitTerminal(BOUND),
                     "and the continued traversal must reach its terminal event");
@@ -280,6 +286,13 @@ final class DurablePausedExecutionRecoveryTest {
             assertFalse(restarted.application().executionPaused(TENANT, held.traversalId()));
             assertEquals(TraversalStatus.COMPLETED,
                     stores.load(held.key()).state().traversals().get(held.traversalId()).status());
+            assertTrue(shutdownProbe.cancellationCount() > 0,
+                    "pause recovery must use the application-selected runner shutdown bound");
+        } finally {
+            shutdownProbe.close();
+            if (resuming != null) {
+                resuming.handle((ignored, failure) -> null).get(5, TimeUnit.SECONDS);
+            }
         }
     }
 
@@ -825,6 +838,12 @@ final class DurablePausedExecutionRecoveryTest {
                     Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS);
         }
 
+        private Restarted restart(ShutdownBoundProbeEngine engine, Duration shutdownBound) {
+            return new Restarted(forApplication(), definitions,
+                    Collections.synchronizedList(new ArrayList<>()), TWO_EFFECTS,
+                    null, engine, shutdownBound);
+        }
+
         /** A restart that records manifests, and has none for work accepted before it did. */
         private Restarted restartRecordingManifests(
                 ai.ravenroot.api.persistence.ExecutionManifestStore manifests) {
@@ -877,7 +896,7 @@ final class DurablePausedExecutionRecoveryTest {
 
     /** One "process": its own engine, monitor, registry and application over the shared stores. */
     private static final class Restarted implements AutoCloseable {
-        private final SameThreadExecutionEngine engine = new SameThreadExecutionEngine();
+        private final ExecutionEngine engine;
         private final ExecutionMonitor monitor = new ExecutionMonitor();
         private final List<String> effects;
         private final DefaultRavenrootApplication application;
@@ -907,8 +926,17 @@ final class DurablePausedExecutionRecoveryTest {
         private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
                           List<String> effects, String graphMl,
                           ai.ravenroot.api.persistence.ExecutionManifestStore manifests) {
+            this(executions, definitions, effects, graphMl, manifests,
+                    new SameThreadExecutionEngine(), GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+        }
+
+        private Restarted(ExecutionStore executions, InMemoryGraphDefinitionStore definitions,
+                          List<String> effects, String graphMl,
+                          ai.ravenroot.api.persistence.ExecutionManifestStore manifests,
+                          ExecutionEngine engine, Duration runnerShutdownStepBound) {
             this.effects = effects;
             this.graphMl = graphMl;
+            this.engine = engine;
             var registry = new BehaviorRegistry()
                     // "first" additionally selects the exclusive route in EXCLUSIVE_MERGE, so only
                     // one of the two branches is ever dispatched and the traversal never fans out.
@@ -921,7 +949,7 @@ final class DurablePausedExecutionRecoveryTest {
                     new InMemoryArtifactRegistry(), new DisabledProgramRuntime(),
                     ExecutionIdentitySource.randomUuids(), executions, 8,
                     UnknownBehaviorPolicy.passThrough(), definitions, null, null,
-                    GraphExecutionLimits.DEFAULTS, null, manifests);
+                    GraphExecutionLimits.DEFAULTS, null, manifests, runnerShutdownStepBound);
             this.self.set(application);
             this.subscription = monitor.subscribe(event -> {
                 if (event.type() == ExecutionEventType.EXECUTION_PAUSED) {

@@ -12,6 +12,28 @@ Configuration is environment-owned. A graph cannot select an engine, authenticat
 
 Unknown-behavior pass-through is observable in `defaultedNodes`; `refuse` rejects the unresolved graph.
 
+## Execution runtime and engine limits
+
+The local server and embedded CLI resolve these limits once when they compose their execution engine.
+The remote CLI does not parse them. Blank or absent values select the Java-owned defaults; every
+explicit value is a positive whole number within the supported environment range. These ranges are
+operator-facing tightening bounds chosen to preserve the existing safe defaults, rather than limits
+on direct Java composition. Changing a value requires a process restart.
+
+| Variable | Default | Supported range | What it bounds |
+|---|---:|---:|---|
+| `RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE` | 10,000 | 1–10,000 | commands one busy engine node may retain |
+| `RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS` | 10 seconds | 1–10 seconds | each bounded engine spawn, stop, cancellation, drain, and termination step |
+| `RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY` | 1,024 | 1–1,024 | terminal node observations retained by one engine instance |
+| `RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS` | 10 seconds | 1–10 seconds | graph-runner stop and cancellation waits during cleanup |
+
+The stash and engine-lifecycle settings affect the engine compatibility fingerprint stored in an
+execution manifest; recovery under a different fingerprint refuses with an `ENGINE` mismatch.
+Terminal history changes only observation retention and is excluded from that fingerprint. The
+graph-runner shutdown setting is also outside the manifest: changing it affects cleanup begun after
+the restart and does not reject an existing execution as drift. Direct Java composition retains its
+positive-value API and is not restricted to these environment ceilings.
+
 ## Graph execution resource limits
 
 Graph admission and execution use operator-owned limits. Graph content cannot raise or disable them;
@@ -21,10 +43,21 @@ Values outside the supported ceilings refuse startup instead of silently expandi
 | Variable | Default | Supported maximum | What it bounds |
 |---|---:|---:|---|
 | `RAVENROOT_GRAPHML_MAX_BYTES` | 10 MiB | 256 MiB | one graph-document budget across the served UI, HTTP ingress, core admission and recovery, structured submissions, and durable canonical definitions |
+| `RAVENROOT_GRAPHML_MAX_DEPTH` | 64 | 1,024 | GraphML XML nesting levels |
+| `RAVENROOT_GRAPHML_MAX_STRING_LENGTH` | 1 MiB | 64 MiB | UTF-16 code units in one GraphML string value |
+| `RAVENROOT_GRAPHML_MAX_KEYS` | 4,096 | 100,000 | distinct GraphML key declarations |
+| `RAVENROOT_GRAPHML_MAX_ELEMENTS` | 250,000 | 10,000,000 | XML elements in one GraphML document |
+| `RAVENROOT_GRAPHML_MAX_ATTRIBUTES` | 500,000 | 20,000,000 | XML attributes in one GraphML document |
+| `RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS` | 10,000 | 1,000,000 | XML namespace declarations in one GraphML document |
 | `RAVENROOT_GRAPH_MAX_NODES` | 10,000 | 1,000,000 | nodes admitted |
 | `RAVENROOT_GRAPH_MAX_EDGES` | 25,000 | 5,000,000 | edges admitted |
 | `RAVENROOT_GRAPH_MAX_PROPERTIES` | 100,000 | 10,000,000 | graph, node, and edge properties |
 | `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | 256 KiB | 64 MiB | each input, node output, or attribute map |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH` | 32 | 256 | structured payload nesting levels |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE` | 1,000 | 1,000,000 | members in one payload list or map |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT` | 10,000 | 5,000,000 | values across one payload tree, including containers |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH` | 32 KiB | 64 MiB | UTF-16 code units in one payload text value |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH` | 256 | 4,096 | UTF-16 code units in one payload map key |
 | `RAVENROOT_GRAPH_MAX_FAN_OUT` | 64 | 256 | distinct targets for one routed outcome or failure route |
 | `RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS` | 256 | 4,096 | resident actors allocated when a runner starts |
 | `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | 256 | 1,024 | demand-created worker and traversal actors alive or retiring in one traversal, with the same ceiling enforced across its runner |
@@ -223,24 +256,43 @@ metric labels.
 
 ## HTTP rate and representation limits
 
-All values below are positive integers unless a row states otherwise. Blank uses the default; malformed
-or invalid relationships refuse startup. Burst values must be at least their sustained rate and at
-most 1,000,000.
+The server resolves this immutable policy once at startup. An absent or Java-whitespace-only value
+uses the Java-owned default. A nonblank value must be a positive integer; malformed values and invalid
+sibling relationships refuse startup. Compose and raw Kubernetes carry quoted strings. Helm accepts
+canonical YAML integers or Java-blank strings and carries no numerical defaults.
+
+| Variable | Default | Scalar range and unit | Boundary or relationship |
+|---|---:|---|---|
+| `RAVENROOT_RATELIMIT_ADDRESS_RPS` | `20` | 1–1,000,000 requests/s | one pre-authentication address key: one IPv4 address or IPv6 /64; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_ADDRESS_BURST` | `120` | 1–1,000,000 requests | must be at least address RPS |
+| `RAVENROOT_RATELIMIT_TENANT_RPS` | `50` | 1–1,000,000 requests/s | one authenticated tenant; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_TENANT_BURST` | `200` | 1–1,000,000 requests | must be at least tenant RPS |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_RPS` | `20` | 1–1,000,000 requests/s | one principal within a tenant; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_BURST` | `80` | 1–1,000,000 requests | must be at least principal RPS |
+| `RAVENROOT_RATELIMIT_SUBMISSION_RPS` | `2` | 1–1,000,000 submissions/s | execution submissions per tenant; maximum is the largest rate with a valid burst |
+| `RAVENROOT_RATELIMIT_SUBMISSION_BURST` | `10` | 1–1,000,000 submissions | must be at least submission RPS |
+| `RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS` | `4` | 1–2,147,483,647 submissions | in-flight submissions for one tenant |
+| `RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS` | `64` | 1–2,147,483,647 executions | process-wide active-execution ceiling |
+| `RAVENROOT_RATELIMIT_TENANT_STREAMS` | `16` | 1–2,147,483,647 streams | concurrent SSE streams for one tenant |
+| `RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS` | `4` | 1–2,147,483,647 streams | cannot exceed tenant streams |
+| `RAVENROOT_SSE_QUEUE_CAPACITY` | `256` | 1–2,147,483,647 events | buffered events per stream before a slow consumer is dropped |
+| `RAVENROOT_RATELIMIT_MAX_QUERY_BYTES` | `4096` | 1–2,147,483,647 Java string code units | raw query string length; the current limiter uses `String.length()`, despite the variable's historical `BYTES` name |
+| `RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS` | `64` | 1–2,147,483,647 segments | one for a nonempty raw query plus each `&` separator |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_COUNT` | `64` | 1–2,147,483,647 headers | request header count |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_BYTES` | `16384` | 1–2,147,483,647 Java string code units | sum of each header name and value's `String.length()`; the variable's historical `BYTES` name does not imply UTF-8 measurement |
+| `RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES` | `8192` | 1–2,147,483,647 Java string code units | one value's `String.length()`; cannot exceed the total header representation budget |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS` | `10000` | 1–2,147,483,647 entries | retained per-address limiter identities |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS` | `1000` | 1–2,147,483,647 entries | retained per-tenant limiter identities |
+| `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | `10000` | 1–2,147,483,647 entries | retained per-principal limiter identities |
+| `RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS` | `60` | 1–3,600 seconds | idle limiter-state retention |
+| `RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS` | `3600` | 1–86,400 seconds | active-execution accounting retention |
+
+The Helm Draft-07 schema enforces each scalar range. It cannot compare sibling fields, so the four
+burst/rate relationships, principal-stream/tenant-stream relationship, and single-value/total-header
+relationship are checked by `RateLimitConfiguration` when the server starts.
 
 | Variables | Defaults | Boundary |
 |---|---|---|
-| `RAVENROOT_RATELIMIT_ADDRESS_RPS`, `RAVENROOT_RATELIMIT_ADDRESS_BURST` | `20`, `120` | one client address before authentication |
-| `RAVENROOT_RATELIMIT_TENANT_RPS`, `RAVENROOT_RATELIMIT_TENANT_BURST` | `50`, `200` | one authenticated tenant |
-| `RAVENROOT_RATELIMIT_PRINCIPAL_RPS`, `RAVENROOT_RATELIMIT_PRINCIPAL_BURST` | `20`, `80` | one principal within a tenant |
-| `RAVENROOT_RATELIMIT_SUBMISSION_RPS`, `RAVENROOT_RATELIMIT_SUBMISSION_BURST` | `2`, `10` | execution submissions per tenant |
-| `RAVENROOT_RATELIMIT_TENANT_CONCURRENT_SUBMISSIONS`, `RAVENROOT_RATELIMIT_GLOBAL_ACTIVE_EXECUTIONS` | `4`, `64` | in-flight submissions and process-wide executions |
-| `RAVENROOT_RATELIMIT_TENANT_STREAMS`, `RAVENROOT_RATELIMIT_PRINCIPAL_STREAMS` | `16`, `4` | concurrent SSE streams; principal cannot exceed tenant |
-| `RAVENROOT_SSE_QUEUE_CAPACITY` | `256` | buffered events per stream |
-| `RAVENROOT_RATELIMIT_MAX_QUERY_BYTES`, `RAVENROOT_RATELIMIT_MAX_QUERY_PARAMETERS` | `4096`, `64` | raw query representation |
-| `RAVENROOT_RATELIMIT_MAX_HEADER_COUNT`, `RAVENROOT_RATELIMIT_MAX_HEADER_BYTES`, `RAVENROOT_RATELIMIT_MAX_HEADER_VALUE_BYTES` | `64`, `16384`, `8192` | header representation; one value cannot exceed the total |
-| `RAVENROOT_RATELIMIT_MAX_TRACKED_CLIENTS`, `RAVENROOT_RATELIMIT_MAX_TRACKED_TENANTS`, `RAVENROOT_RATELIMIT_MAX_TRACKED_PRINCIPALS` | `10000`, `1000`, `10000` | retained limiter identities |
-| `RAVENROOT_RATELIMIT_IDLE_TTL_SECONDS` | `60` (1–3600) | idle limiter-state retention |
-| `RAVENROOT_RATELIMIT_EXECUTION_MAX_AGE_SECONDS` | `3600` (1–86400) | active-execution accounting retention |
 | `RAVENROOT_TRUSTED_PROXY_HOPS`, `RAVENROOT_TRUSTED_PROXY_ADDRESSES` | `0`, empty | exact trusted suffix length (0–32) and IP-literal peers; both must be configured together |
 
 ## Server process and readiness

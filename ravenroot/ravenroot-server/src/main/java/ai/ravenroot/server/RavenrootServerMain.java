@@ -70,6 +70,7 @@ public final class RavenrootServerMain {
         refuseUnsupportablePackagedEmbed(System.getenv());
         int port = Integer.parseInt(System.getenv().getOrDefault("RAVENROOT_PORT", "8080"));
         String engineId = System.getenv().getOrDefault("RAVENROOT_ENGINE", "pekko");
+        var executionRuntime = ResolvedExecutionRuntime.fromEnvironment(System.getenv());
         String uiPath = System.getenv().getOrDefault("RAVENROOT_UI_DIR", "").trim();
         // The reserved-network exception list is operator-only and read exactly here,
         // at the composition root, with the same shape and the same authority as the host allowlist
@@ -97,7 +98,7 @@ public final class RavenrootServerMain {
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
                 humanTaskPolicy);
         try (var startupGuard = executionStoreOwner.startupGuard()) {
-        var engine = ExecutionEngines.create(engineId, "ravenroot-server");
+        var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
             case "graalvm" -> GraalVmProgramRuntime.fromEnvironment();
             case "disabled" -> new DisabledProgramRuntime();
@@ -249,7 +250,8 @@ public final class RavenrootServerMain {
                 executionIdentities, executionStore,
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
                 executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
-                graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore());
+                graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore(),
+                executionRuntime.applicationRunnerShutdownStepBound());
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
         // two composition sites was updated and the other was not, and the refusals that followed
@@ -284,7 +286,7 @@ public final class RavenrootServerMain {
                         executionStoreOwner.graphDefinitionStore(), executionStore, toolApprovals, humanTasks,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
-                        executionManifests);
+                        executionManifests, executionRuntime.toolApprovalRunnerShutdownStepBound());
                 dispatchers.add(new ai.ravenroot.core.approval.ToolApprovalHandlerDispatcher(
                         executionStore, toolApprovals, environment.toolPolicy(), continuationExecutor));
             }
@@ -294,7 +296,7 @@ public final class RavenrootServerMain {
                         executionStoreOwner.graphDefinitionStore(), executionStore, humanTasks, toolApprovals,
                         engine, behaviors, monitor, executionIdentities, recoveryWorker,
                         recoveryConfiguration.leaseTtl(), graphExecutionLimits, agentBudgets,
-                        executionManifests);
+                        executionManifests, executionRuntime.humanTaskRunnerShutdownStepBound());
                 dispatchers.add(new ai.ravenroot.core.humantask.HumanTaskHandlerDispatcher(
                         executionStore, humanTasks, continuationExecutor));
             }
@@ -703,6 +705,44 @@ public final class RavenrootServerMain {
     @FunctionalInterface
     interface Startup {
         void run() throws InterruptedException;
+    }
+
+    /** One immutable engine/runner tuple shared by every server execution path. */
+    static final class ResolvedExecutionRuntime {
+        private final ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration configuration;
+
+        private ResolvedExecutionRuntime(
+                ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration configuration) {
+            this.configuration = java.util.Objects.requireNonNull(configuration, "configuration");
+        }
+
+        static ResolvedExecutionRuntime fromEnvironment(Map<String, String> environment) {
+            return new ResolvedExecutionRuntime(
+                    ai.ravenroot.core.runtime.ExecutionRuntimeConfiguration.fromEnvironment(environment));
+        }
+
+        <T> T createEngine(String engineId, String systemName, EngineFactory<T> factory) {
+            return java.util.Objects.requireNonNull(factory, "factory")
+                    .create(engineId, systemName, configuration.enginePolicy());
+        }
+
+        Duration applicationRunnerShutdownStepBound() {
+            return configuration.runnerShutdownStepBound();
+        }
+
+        Duration toolApprovalRunnerShutdownStepBound() {
+            return configuration.runnerShutdownStepBound();
+        }
+
+        Duration humanTaskRunnerShutdownStepBound() {
+            return configuration.runnerShutdownStepBound();
+        }
+    }
+
+    @FunctionalInterface
+    interface EngineFactory<T> {
+        T create(String engineId, String systemName,
+                 ai.ravenroot.api.execution.ExecutionEnginePolicy policy);
     }
 
     static final class PluginStartupRefused extends RuntimeException {

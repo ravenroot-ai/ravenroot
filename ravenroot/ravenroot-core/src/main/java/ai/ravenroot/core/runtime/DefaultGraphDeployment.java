@@ -199,6 +199,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
     private final RequestReplyLimits requestReplyLimits;
     private final Clock clock;
     private final GraphExecutionLimits graphExecutionLimits;
+    private final Duration runnerShutdownStepBound;
     /** Node ids currently reporting degraded, via {@link InboundSourceContext#reportDegraded}. */
     private final Set<String> degradedSources = ConcurrentHashMap.newKeySet();
 
@@ -604,8 +605,28 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                            String executionContextDeploymentId) {
         this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
                 executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
+                graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
+                executionManifests, executionContextDeploymentId, GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    /** Package-private composition seam for the process-resolved runner shutdown policy. */
+    DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                           ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                           ai.ravenroot.core.manifest.ExecutionManifestService executionManifests,
+                           String executionContextDeploymentId,
+                           Duration runnerShutdownStepBound) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits,
                 Clock.systemUTC(), graphDefinitionStore, graphExecutionLimits, agentBudgets,
-                humanTasks, executionManifests, executionContextDeploymentId);
+                humanTasks, executionManifests, executionContextDeploymentId, runnerShutdownStepBound);
     }
 
     /** Package-private deterministic-clock seam; production constructors always use UTC system time. */
@@ -661,6 +682,25 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
                            ai.ravenroot.core.humantask.HumanTaskService humanTasks,
                            ai.ravenroot.core.manifest.ExecutionManifestService executionManifests,
                            String executionContextDeploymentId) {
+        this(id, engine, behaviors, monitor, identitySource, graphMl, ingressBufferCapacity,
+                executionStore, inboxRetention, workerId, executionLeaseTtl, requestReplyLimits, clock,
+                graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
+                executionManifests, executionContextDeploymentId, GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    private DefaultGraphDeployment(DeploymentId id, ExecutionEngine engine, BehaviorRegistry behaviors,
+                           ExecutionMonitor monitor, ExecutionIdentitySource identitySource,
+                           byte[] graphMl, int ingressBufferCapacity,
+                           ai.ravenroot.api.persistence.ExecutionStore executionStore,
+                           Duration inboxRetention, String workerId, Duration executionLeaseTtl,
+                           RequestReplyLimits requestReplyLimits, Clock clock,
+                           ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                           GraphExecutionLimits graphExecutionLimits,
+                           ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                           ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                           ai.ravenroot.core.manifest.ExecutionManifestService executionManifests,
+                           String executionContextDeploymentId,
+                           Duration runnerShutdownStepBound) {
         this.executionManifests = executionManifests;
         this.graphDefinitionStore = graphDefinitionStore;
         this.agentBudgets = agentBudgets;
@@ -670,6 +710,10 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
         this.requestReplyLimits = Objects.requireNonNull(requestReplyLimits, "requestReplyLimits");
         this.clock = Objects.requireNonNull(clock, "clock");
         this.graphExecutionLimits = Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
+        this.runnerShutdownStepBound = Objects.requireNonNull(runnerShutdownStepBound, "runnerShutdownStepBound");
+        if (runnerShutdownStepBound.isZero() || runnerShutdownStepBound.isNegative()) {
+            throw new IllegalArgumentException("runnerShutdownStepBound must be positive");
+        }
         this.id = Objects.requireNonNull(id, "id");
         this.executionContextDeploymentId = executionContextDeploymentId == null
                 ? this.id.value()
@@ -1210,7 +1254,7 @@ public final class DefaultGraphDeployment implements GraphDeployment, Deployment
             openedDomain = engine.openDomain(id.value());
             openedManager = GraphManager.readGraphMl(new ByteArrayInputStream(graphMl), graphExecutionLimits.graphMl());
             builtRunner = new GraphRunner(openedManager, engine, openedDomain, behaviors, monitor,
-                    identitySource, GraphRunner.DEFAULT_SHUTDOWN_BOUND, graphExecutionLimits);
+                    identitySource, runnerShutdownStepBound, graphExecutionLimits);
             // Sources are discovered and started here -- while this graph's nodes are being spawned,
             // never earlier -- and only after the runner itself is built, so a source's start failure
             // rolls back a fully-formed runner rather than a half-built one.

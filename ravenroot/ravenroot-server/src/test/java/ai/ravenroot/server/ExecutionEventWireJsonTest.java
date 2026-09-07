@@ -18,7 +18,13 @@ class ExecutionEventWireJsonTest {
                 "correlation", "graph-v1", Instant.parse("2026-01-01T00:00:00Z"), null, null, null);
         String frame = new String(RavenrootServer.durableExecutionEventFrame(event), StandardCharsets.UTF_8);
 
-        assertEquals("id: 9\nevent: execution\ndata: {\"journalOffset\":9,\"streamSequence\":3,"
+        // The expected frame carries the versioned envelope this stream gained while this branch
+        // was open: schemaVersion, source, id and eventId ahead of the fields already there. Every
+        // legacy field is still present and unchanged, which is what this test is about - it asserts
+        // that extracting the serializer preserved the data, not that the format is frozen.
+        assertEquals("id: 9\nevent: execution\ndata: {\"schemaVersion\":1,\"source\":\"DURABLE\","
+                + "\"id\":\"9\",\"eventId\":\"10000000-0000-0000-0000-000000000001\","
+                + "\"journalOffset\":9,\"streamSequence\":3,"
                 + "\"occurredAt\":\"2026-01-01T00:00:00Z\",\"eventType\":\"EXECUTION_STARTED\","
                 + "\"description\":\"Execution started.\",\"graphVersion\":\"graph-v1\","
                 + "\"processInstanceId\":\"20000000-0000-0000-0000-000000000002\","

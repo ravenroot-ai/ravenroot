@@ -137,9 +137,14 @@ class InteractionWebSocketWireTest {
                 assertContains(result, "\"outcome\":\"resolved\"");
                 assertContains(result, "\"generation\":2");
 
+                // No comment on the deny. These fixtures are built through the compatibility
+                // constructor, which pins the classic presentation, whose comment requirement is
+                // DISALLOWED - so a comment here is refused by the service, and the refusal is
+                // correct. Carrying one would test the confirmation policy rather than the wire
+                // protocol this class is about, and would do it by asserting the policy is wrong.
                 socket.sendText("{\"version\":1,\"type\":\"command\",\"messageId\":\"client-deny\","
                         + "\"command\":\"human-task.deny\",\"taskId\":\""
-                        + denyTask.taskId() + "\",\"generation\":1,\"comment\":\"declined\"}", true)
+                        + denyTask.taskId() + "\",\"generation\":1}", true)
                         .get(5, TimeUnit.SECONDS);
                 result = listener.messages.poll(5, TimeUnit.SECONDS);
                 assertContains(result, "\"inReplyTo\":\"client-deny\"");

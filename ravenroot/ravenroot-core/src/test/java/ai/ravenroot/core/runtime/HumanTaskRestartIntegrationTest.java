@@ -347,25 +347,36 @@ class HumanTaskRestartIntegrationTest {
             assertEquals(ProcessInstanceStatus.RUNNING,
                     store.load(key).toCompletableFuture().join().state().status(),
                     "a verified durable suspension must not fail the process");
-            var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
-                    engine, behaviors, new ExecutionMonitor(), ExecutionIdentitySource.randomUuids(),
-                    "recovery-race", TTL);
-            var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-race",
-                    10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
-                    new HumanTaskHandlerDispatcher(store, tasks, continuation));
+            try (var continuationEngine = new ShutdownBoundProbeEngine()) {
+                var continuation = new PinnedGraphHumanTaskContinuationExecutor(definitions, store, tasks,
+                        null, continuationEngine, behaviors, new ExecutionMonitor(),
+                        ExecutionIdentitySource.randomUuids(), "recovery-race", TTL,
+                        GraphExecutionLimits.DEFAULTS, null, null, Duration.ofMillis(50));
+                var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "recovery-race",
+                        10, TTL, RepeatabilityDeclarations.NONE_DECLARED,
+                        new HumanTaskHandlerDispatcher(store, tasks, continuation));
+                var sweeping = CompletableFuture.supplyAsync(recovery::sweepOnce);
+                try {
+                    continuationEngine.firstCancellation().toCompletableFuture().get(2, TimeUnit.SECONDS);
+                    List<RecoveryOutcome> firstSweep = sweeping.get(5, TimeUnit.SECONDS);
+                    assertEquals(1, dispatched(firstSweep));
+                    assertEquals(1, raceExecutions.get());
+                    assertEquals(1, captures.get(), "the fresh pinned continuation must proceed once");
+                    assertEquals(ProcessInstanceStatus.COMPLETED,
+                            store.load(key).toCompletableFuture().join().state().status());
+                    assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+                    assertTrue(continuationEngine.cancellationCount() > 0,
+                            "Human Task continuation cleanup must use its composed runner shutdown bound");
 
-            List<RecoveryOutcome> firstSweep = recovery.sweepOnce();
-            assertEquals(1, dispatched(firstSweep));
-            assertEquals(1, raceExecutions.get());
-            assertEquals(1, captures.get(), "the fresh pinned continuation must proceed once");
-            assertEquals(ProcessInstanceStatus.COMPLETED,
-                    store.load(key).toCompletableFuture().join().state().status());
-            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
-
-            clock.now = NOW.plus(TTL).plusSeconds(1);
-            assertTrue(recovery.sweepOnce().isEmpty());
-            assertEquals(1, raceExecutions.get());
-            assertEquals(1, captures.get());
+                    clock.now = NOW.plus(TTL).plusSeconds(1);
+                    assertTrue(recovery.sweepOnce().isEmpty());
+                    assertEquals(1, raceExecutions.get());
+                    assertEquals(1, captures.get());
+                } finally {
+                    continuationEngine.close();
+                    sweeping.handle((ignored, failure) -> null).get(5, TimeUnit.SECONDS);
+                }
+            }
         }
     }
 

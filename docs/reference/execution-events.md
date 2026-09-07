@@ -74,9 +74,78 @@ the failure classification on the event.
 
 ## Event delivery
 
-`GET /v1/events` is the live SSE stream. `GET /v1/events/recent` returns events after a cursor in ascending order. Its optional limit above the server cap is refused rather than clamped. `source=DURABLE` identifies journal replay; `source=RING` identifies the bounded live buffer.
+`GET /v1/events` is an authenticated SSE stream. Without a selector, it serves the durable journal when available and otherwise the process-local ring. `include=diagnostics` selects the ring for the whole connection. The source does not change within a connection.
 
-If the requested cursor predates retained history, the response marks a retention gap. The client must reconcile from the execution resource or another snapshot before continuing; it must not infer missing state.
+`GET /v1/events/recent` remains a separate legacy polling projection. It returns events after a cursor in ascending order; a limit above the server cap is refused rather than clamped. Its `source=DURABLE` or `source=RING` describes the selected source. Polling rows do not use the versioned stream envelope, and durable polling rows contain fewer fields than durable SSE data.
+
+### Version 1 execution data
+
+The HTTP response is UTF-8 `text/event-stream`, containing SSE frames, not one JSON document or a JSON array. Parse SSE framing first, then decode the JSON `data` of each `event: execution` frame. Every such object has these common fields:
+
+| Field | Meaning |
+| --- | --- |
+| `schemaVersion` | Integer `1`; independent of the internal journal-envelope version. |
+| `source` | `RING` or `DURABLE`; selects the explicit variant below. |
+| `id` | Exact decimal string equal to the SSE `id`, and to the source's native cursor. |
+| `eventType` | Canonical event classifier. Unknown classifiers remain readable. |
+| `occurredAt` | Producer time in Java `Instant` text form, including supported extended years. It is not an ordering axis. |
+| `processInstanceId` | Existing process-instance UUID. |
+| `traversalId` | Existing traversal UUID. |
+
+Both variants retain `description`, `graphVersion`, `invocationId`, `attemptId`, `nodeId` and `edgeId`. Nullable identities remain null where unavailable; node identity on durable events is a best-effort join to retained process structure. A null measurement means not measured, not zero.
+
+| Variant | Source-specific fields and guarantees |
+| --- | --- |
+| `RING` | Numeric `sequence`, `engineId`, legacy `executionId` and `type`, `activeInstances`, `inFlightArrivals`, `fallback`, `publicReason`, `message` and redaction/truncation flags, optional `output` and flags, and nullable `processingDuration` in seconds. Diagnostics are process-local and never persisted. |
+| `DURABLE` | Numeric tenant-local `journalOffset`, process-instance `streamSequence`, persisted UUID `eventId`, nullable `causationId` and `handlerId`. Causation refers to journal event UUIDs, not cursor IDs. Live diagnostic fields and measurements are unavailable and are not replaced with defaults. |
+
+`X-Ravenroot-Event-Source` equals every execution object's `source`. `X-Ravenroot-Event-Schema-Version` is `1`. `X-Ravenroot-Event-Continuity` is `PROCESS_LOCAL` for RING and `DURABLE` for the journal. These headers describe execution data; they do not turn comments or control frames into execution envelopes. Browser clients must not assume custom headers are exposed by cross-origin policy.
+
+Compare cursor identities only within the authenticated tenant and source. RING comparisons additionally require the same process-local continuity domain: sequence numbers reset on restart, and the stream does not provide a durable process epoch. Neither numeric cursor nor common `id` is a globally unique event UUID. Namespace client state by its authenticated context and source; do not carry another tenant's or source's cursor into a new stream. Retain the exact string `id` for resumption. JavaScript must not compare it to a numeric compatibility cursor rounded beyond its safe-integer range. Live IDs preserve signed-long values; durable offsets are positive.
+
+### Compatibility and validation
+
+New writers emit `eventType`. RING writers also retain `type`, with the same value, and `executionId` remains an alias of `traversalId`. Readers accept an optional equal `type` alias on either source; the DURABLE writer need not emit it. Version 1 requires canonical `eventType` in the original object. Fallback to `type` applies only to legacy unversioned inputs; conflicting aliases are invalid. This compatibility period continues until a separately announced breaking migration. No removal date or release count is scheduled.
+
+Version 1 permits unknown extra fields and unknown event classifiers. Readers must still reject unsupported schema versions, unknown source variants and known contradictions, such as a RING event carrying a durable cursor or a DURABLE event claiming live measurements. Do not guess a version or silently reinterpret one variant as the other. Legacy source inference is possible only when the native cursor fields identify it unambiguously.
+
+The OpenAPI document models the HTTP body as an SSE string. Its `x-ravenroot-sse-events` extension maps named frames to schemas for their decoded JSON data; ordinary OpenAPI tools may ignore this extension. The component schemas describe the common envelope and both variants. Equality between SSE IDs, payload IDs, native cursors and compatibility aliases requires semantic validation in addition to schema validation.
+
+### Frames and retention
+
+For example, one RING execution frame is followed here by a keepalive comment:
+
+```text
+id: 7
+event: execution
+data: {"schemaVersion":1,"source":"RING","id":"7","eventType":"EXECUTION_STARTED","sequence":7,"occurredAt":"2026-01-01T00:00:00Z","engineId":"pekko","graphVersion":"graph-v1","processInstanceId":"10000000-0000-0000-0000-000000000001","traversalId":"20000000-0000-0000-0000-000000000002","executionId":"20000000-0000-0000-0000-000000000002","invocationId":null,"attemptId":null,"type":"EXECUTION_STARTED","nodeId":null,"edgeId":null,"activeInstances":0,"inFlightArrivals":0,"fallback":false,"description":"Execution started.","publicReason":null,"message":null,"messageRedacted":false,"messageTruncated":false,"processingDuration":null}
+
+: keepalive
+
+```
+
+A durable frame carries journal identity and causal fields instead:
+
+```text
+id: 12
+event: execution
+data: {"schemaVersion":1,"source":"DURABLE","id":"12","eventId":"30000000-0000-0000-0000-000000000003","journalOffset":12,"streamSequence":1,"occurredAt":"2026-01-01T00:00:00Z","eventType":"EXECUTION_STARTED","description":"Execution started.","graphVersion":"graph-v1","processInstanceId":"10000000-0000-0000-0000-000000000001","traversalId":"20000000-0000-0000-0000-000000000002","invocationId":null,"attemptId":null,"causationId":null,"nodeId":null,"edgeId":null,"handlerId":null}
+
+```
+
+Keepalive comments dispatch no event. `stream-overrun` terminates a slow consumer and carries `code=STREAM_CONSUMER_TOO_SLOW` with `resumeAfter`. `stream-truncated` reports unavailable durable history, carries `code=STREAM_RETENTION_EXCEEDED`, `retainedFrom` and `resumeFrom`, and terminates the stream. These are separate control shapes with no invented process or traversal identity:
+
+```text
+event: stream-truncated
+data: {"code":"STREAM_RETENTION_EXCEEDED","retainedFrom":10,"resumeFrom":9}
+
+```
+
+When durable replay or recent-event polling declares that a cursor predates retained history, reconcile from the execution resource or another snapshot before continuing; do not infer missing state.
+
+Durable replay survives a restart within retained history. RING eviction and restart can lose observations; the process-local stream cannot prove complete history across a restart. A closed connection or a clean end of a captured file is not evidence that an execution finished. The journal also has narrower event coverage and no live author diagnostics; do not fill gaps by interleaving ring and journal cursor domains.
+
+Raw `detail`, tenant attributes, correlation strings and journal payloads are not published in this envelope. Live message/output fields are already bounded and targeted-redacted at their producing boundary. They remain author diagnostics, never assistant/provider context. The stable-edge limit remains 8192 UTF-8 bytes, auxiliary traversal strings share the 12287-byte escaped budget, and the complete traversal SSE frame remains below 65536 bytes.
 
 The optional [authenticated interaction WebSocket](interactions-websocket.md) reuses this durable
 journal projection and adds bounded acknowledgement flow control plus durable Human Task commands.

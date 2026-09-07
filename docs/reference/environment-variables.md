@@ -58,6 +58,8 @@ Detailed contract: [Authoring assistant](../operator-guide/authoring-assistant.m
 | `RAVENROOT_ASSISTANT_DEVICE_AUTHORIZATION_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_ENABLED` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_MODEL` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_OAUTH_CLIENT_ID` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_PROVIDER` | See the linked contract for exact type, default, and applicability. |
@@ -134,13 +136,30 @@ Detailed contract: [Embedded viewer](embed-extension-contracts.md).
 | `RAVENROOT_EMBED_VIEWER_ORIGIN` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_REPLICAS` | positive replica count; unset defaults to `1` |
 
+## Execution runtime
+
+Detailed contract: [Execution runtime](configuration.md#execution-runtime-and-engine-limits).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS` | See the linked contract for exact type, default, and applicability. |
+
 ## Graph execution
 
 Detailed contract: [Graph execution](configuration.md#graph-execution-resource-limits).
 
 | Variable or family | Applicability and default boundary |
 |---|---|
+| `RAVENROOT_GRAPHML_MAX_ATTRIBUTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPHML_MAX_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPHML_MAX_DEPTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPHML_MAX_ELEMENTS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPHML_MAX_KEYS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPHML_MAX_STRING_LENGTH` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_EDGES` | See the linked contract for exact type, default, and applicability. |
@@ -149,6 +168,11 @@ Detailed contract: [Graph execution](configuration.md#graph-execution-resource-l
 | `RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_NODES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_PROPERTIES` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT` | See the linked contract for exact type, default, and applicability. |

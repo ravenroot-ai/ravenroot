@@ -11,6 +11,14 @@
     <artifactId>ravenroot-server</artifactId>
     <name>Ravenroot Server</name>
     <description>Standalone HTTP adapter and composition root.</description>
+    <properties>
+        <!--
+            This module creates bare JDK HttpServer fixtures. Set the process-wide request-header cap
+            before the reused Surefire fork loads any server class by populating the parent's
+            composable extra-argument property; the inherited argLine still appends the locale pin.
+        -->
+        <ravenroot.surefire.extraArgLine>-Dsun.net.httpserver.maxReqHeaderSize=2097152</ravenroot.surefire.extraArgLine>
+    </properties>
     <dependencies>
         <dependency>
             <groupId>com.nimbusds</groupId>

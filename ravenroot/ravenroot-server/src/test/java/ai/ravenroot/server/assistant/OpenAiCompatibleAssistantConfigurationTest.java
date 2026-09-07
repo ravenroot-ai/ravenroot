@@ -86,8 +86,9 @@ class OpenAiCompatibleAssistantConfigurationTest {
     void invalidOrCredentialBearingEndpointUrisFailBeforeAnyClientExists() {
         Map<String, String> malformed = localHttp();
         malformed.put(AssistantConfiguration.ENDPOINT_VARIABLE, "not a URI");
-        assertThrows(IllegalArgumentException.class,
+        var malformedFailure = assertThrows(IllegalArgumentException.class,
                 () -> AssistantConfiguration.fromEnvironment(malformed));
+        org.junit.jupiter.api.Assertions.assertNull(malformedFailure.getCause());
 
         Map<String, String> userInfo = localHttp();
         userInfo.put(AssistantConfiguration.ENDPOINT_VARIABLE,

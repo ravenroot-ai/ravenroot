@@ -46,6 +46,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -418,6 +419,26 @@ class AgentAuthorityBudgetServiceTest {
             NodeMessage child = fixture.addChildMessage();
             assertThrows(NodePackageServiceException.class, () -> parent.createChild(
                     new AgentChildResourceRequest(child, Set.of(), Set.of(), resources())));
+        }
+    }
+
+    @Test
+    void durableRootConstructionPreservesTheEffectiveAuthorityScopeBoundary() throws Exception {
+        var authorityScopes = new LinkedHashSet<String>();
+        for (int index = 0; index < 255; index++) {
+            authorityScopes.add("authority/" + index);
+        }
+        AgentAuthorityBudgetPolicy boundary = new AgentAuthorityBudgetPolicy("runtime-a", 1,
+                "policy-v1", "rate-v1", "USD", Duration.ofHours(1), maxima(), 100, 20, 1, 3,
+                Set.of("data-a"), authorityScopes);
+        var expectedRootScopes = new LinkedHashSet<>(authorityScopes);
+        expectedRootScopes.add(AgentAuthorityBudgetPolicy.INTERNAL_ROOT_SCOPE);
+
+        try (Fixture fixture = new Fixture(boundary, AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession session = fixture.budgets.admit(fixture.message, resources());
+            assertEquals(Set.copyOf(expectedRootScopes), fixture.budget().root().authorityScopes());
+            assertEquals(256, fixture.budget().root().authorityScopes().size());
+            session.complete();
         }
     }
 

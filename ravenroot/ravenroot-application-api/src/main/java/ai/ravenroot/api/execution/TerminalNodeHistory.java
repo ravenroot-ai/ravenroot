@@ -40,7 +40,8 @@ public final class TerminalNodeHistory {
      * <p>Large enough that a caller holding a reference from a recent execution always gets the
      * accurate answer, small enough that the worst case is a few hundred kilobytes of immutable
      * snapshots rather than an unbounded leak: each entry is one {@link NodeStatus} and one already
-     * completed stage, and neither the node, its behaviour nor its actor is reachable from here.</p>
+     * completed stage, and neither the node, its behaviour nor its actor is reachable from here.
+     * This literal also anchors the history component of {@link ExecutionEnginePolicy#FROZEN_LEGACY}.</p>
      */
     public static final int DEFAULT_CAPACITY = 1024;
 

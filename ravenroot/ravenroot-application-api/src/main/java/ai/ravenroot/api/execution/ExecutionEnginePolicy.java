@@ -26,10 +26,12 @@ public record ExecutionEnginePolicy(
      * Values used by every engine before typed policy injection existed.
      *
      * <p>This constant is a compatibility anchor. It must remain frozen even if a future operator
-     * default changes.</p>
+     * default changes. Its history capacity aliases the public terminal-history default that
+     * originally supplied that value.</p>
      */
     public static final ExecutionEnginePolicy FROZEN_LEGACY =
-            new ExecutionEnginePolicy(10_000, Duration.ofSeconds(10), 1_024);
+            new ExecutionEnginePolicy(
+                    10_000, Duration.ofSeconds(10), TerminalNodeHistory.DEFAULT_CAPACITY);
 
     private static final String FINGERPRINT_DOMAIN = "ravenroot.execution-engine-policy";
     private static final String FINGERPRINT_VERSION = "1";

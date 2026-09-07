@@ -16,6 +16,8 @@ class ExecutionEnginePolicyTest {
         assertEquals(10_000, ExecutionEnginePolicy.FROZEN_LEGACY.maxStashedCommandsPerNode());
         assertEquals(Duration.ofSeconds(10), ExecutionEnginePolicy.FROZEN_LEGACY.lifecycleStepBound());
         assertEquals(1_024, ExecutionEnginePolicy.FROZEN_LEGACY.terminalNodeHistoryCapacity());
+        assertEquals(TerminalNodeHistory.DEFAULT_CAPACITY,
+                ExecutionEnginePolicy.FROZEN_LEGACY.terminalNodeHistoryCapacity());
     }
 
     @Test

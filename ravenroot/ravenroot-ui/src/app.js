@@ -1107,10 +1107,10 @@ function humanTaskPageSignature(page) {
 function receiveHumanTaskProjection(state) {
   const owner = humanTaskControllerOwner;
   if (!owner || !tenantAuthorityAllows(owner)) return;
-  if (state.kind === 'error' && humanTaskDecisionDialog?.selected()) {
-    // A failed authoritative refresh makes every displayed task detail stale. Close the modal so
-    // the normal reconnect controls remain reachable, retaining only the opaque locator. A later
-    // successful poll or authentication rebuilds the form through the exact authorized lookup.
+  if (state.kind === 'error') {
+    // A failed authoritative refresh retires an exact recovery that may not have opened a dialog
+    // yet, and makes any displayed task detail stale. Keep only the opaque locator; a later
+    // successful poll or authentication starts a new exact lookup under the current lifetime.
     suspendHumanTaskRecovery();
   }
   const signature = state.kind === 'ready' ? [...state.nodeCounts.entries()]

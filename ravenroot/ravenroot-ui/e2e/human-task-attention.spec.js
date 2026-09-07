@@ -188,6 +188,7 @@ async function holdExactRecovery(page, outcome) {
         || url.searchParams.get('generation') !== String(original.generation)) {
       await route.continue(); return;
     }
+    const successResponse = outcome === 'success' ? await route.fetch() : null;
     started += 1;
     await released;
     try {
@@ -199,7 +200,7 @@ async function holdExactRecovery(page, outcome) {
       } else if (outcome === 'error') {
         await route.abort('connectionfailed');
       } else {
-        await route.continue();
+        await route.fulfill({ response: successResponse });
       }
     } finally {
       finished += 1;
@@ -474,6 +475,18 @@ for (const outcome of ['success', 'empty', 'error']) {
       localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(replacement);
   });
 }
+
+test('an attention outage retires an exact success that was already waiting to open', async ({ page }) => {
+  const held = await holdExactRecovery(page, 'success');
+  attentionMode = 'network';
+  await expect(page.locator('.human-task-status')).toContainText('could not be refreshed');
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+
+  await held.release();
+  await expect(page.locator('#human-task-dialog')).toBeHidden();
+  expect(await page.evaluate(() => JSON.parse(
+    localStorage.getItem('ravenroot.human-task.selection.v1')))).toEqual(held.original);
+});
 
 test('an outage suspends stale modal details and retains only the exact recovery locator', async ({ page }) => {
   await connectAndCreate(page);

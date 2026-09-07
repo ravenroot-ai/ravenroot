@@ -42,6 +42,11 @@ services:
       # is overridden, set this explicitly to match or the UI's own API calls will get 403.
       RAVENROOT_BROWSER_ALLOWED_ORIGINS: ${RAVENROOT_BROWSER_ALLOWED_ORIGINS:-}
       RAVENROOT_ENGINE: ${RAVENROOT_ENGINE:-pekko}
+      # Execution runtime bounds are resolved once by Java. Blank carriers select its typed defaults.
+      RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE: ${RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE:-}
+      RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS: ${RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS:-}
+      RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY: ${RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY:-}
+      RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS: ${RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS:-}
       # Graph admission and execution limits are read once at startup. Empty values deliberately
       # reach the centralized parser and select its typed defaults; overlays may narrow or raise a
       # limit only within the parser's fixed safety ceiling.

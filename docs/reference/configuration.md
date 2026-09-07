@@ -12,6 +12,28 @@ Configuration is environment-owned. A graph cannot select an engine, authenticat
 
 Unknown-behavior pass-through is observable in `defaultedNodes`; `refuse` rejects the unresolved graph.
 
+## Execution runtime and engine limits
+
+The local server and embedded CLI resolve these limits once when they compose their execution engine.
+The remote CLI does not parse them. Blank or absent values select the Java-owned defaults; every
+explicit value is a positive whole number within the supported environment range. These ranges are
+operator-facing tightening bounds chosen to preserve the existing safe defaults, rather than limits
+on direct Java composition. Changing a value requires a process restart.
+
+| Variable | Default | Supported range | What it bounds |
+|---|---:|---:|---|
+| `RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE` | 10,000 | 1–10,000 | commands one busy engine node may retain |
+| `RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS` | 10 seconds | 1–10 seconds | each bounded engine spawn, stop, cancellation, drain, and termination step |
+| `RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY` | 1,024 | 1–1,024 | terminal node observations retained by one engine instance |
+| `RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS` | 10 seconds | 1–10 seconds | graph-runner stop and cancellation waits during cleanup |
+
+The stash and engine-lifecycle settings affect the engine compatibility fingerprint stored in an
+execution manifest; recovery under a different fingerprint refuses with an `ENGINE` mismatch.
+Terminal history changes only observation retention and is excluded from that fingerprint. The
+graph-runner shutdown setting is also outside the manifest: changing it affects cleanup begun after
+the restart and does not reject an existing execution as drift. Direct Java composition retains its
+positive-value API and is not restricted to these environment ceilings.
+
 ## Graph execution resource limits
 
 Graph admission and execution use operator-owned limits. Graph content cannot raise or disable them;

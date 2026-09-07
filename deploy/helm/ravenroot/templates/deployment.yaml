@@ -47,6 +47,15 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: {{ .Values.engine | quote }}
+            # Blank runtime values select Java's typed defaults; explicit integers only tighten them.
+            - name: RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE
+              value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.maxStashedCommandsPerNode }}
+            - name: RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS
+              value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.lifecycleStepSeconds }}
+            - name: RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY
+              value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.terminalHistoryCapacity }}
+            - name: RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS
+              value: {{ include "ravenroot.graphLimitValue" .Values.executionRuntime.runnerShutdownStepSeconds }}
             # Empty graph-limit values select the Java typed defaults at startup. Explicit Helm
             # integers are rendered as quoted environment strings after schema validation.
             - name: RAVENROOT_GRAPHML_MAX_BYTES

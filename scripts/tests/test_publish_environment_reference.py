@@ -21,6 +21,25 @@ class PublishEnvironmentReferenceTest(unittest.TestCase):
         self.assertEqual("bundle", group("RAVENROOT_JDBC_PROFILE_"))
         self.assertEqual("human-task", group("RAVENROOT_HUMAN_TASK_"))
 
+    def test_execution_runtime_group_is_exact_and_links_its_dedicated_contract(self):
+        names = (
+            "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",
+            "RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS",
+            "RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY",
+            "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS",
+        )
+        inventory = variables()
+        for name in names:
+            self.assertIn(name, inventory)
+            self.assertEqual("execution-runtime", group(name))
+        self.assertEqual("graph", group("RAVENROOT_GRAPHML_MAX_DEPTH"))
+
+        published = render()
+        self.assertIn("## Execution runtime", published)
+        self.assertIn(
+            "configuration.md#execution-runtime-and-engine-limits", published
+        )
+
     def test_render_names_every_production_literal(self):
         published = render()
         for name in variables():

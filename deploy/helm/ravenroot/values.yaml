@@ -22,6 +22,14 @@ auth:
 
 engine: pekko
 
+# Engine and graph-runner bounds. Blank values select ExecutionRuntimeConfiguration's Java-owned
+# defaults; explicit Helm integers may tighten the deployed limits.
+executionRuntime:
+  maxStashedCommandsPerNode: ""
+  lifecycleStepSeconds: ""
+  terminalHistoryCapacity: ""
+  runnerShutdownStepSeconds: ""
+
 # Graph admission and execution policy. Empty values are intentional: they are rendered into the
 # pod and resolved by GraphExecutionLimits, which owns the numerical defaults and safety ceilings.
 # Use YAML integers for configured values; the template converts them to environment strings.

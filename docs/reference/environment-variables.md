@@ -136,6 +136,17 @@ Detailed contract: [Embedded viewer](embed-extension-contracts.md).
 | `RAVENROOT_EMBED_VIEWER_ORIGIN` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_REPLICAS` | positive replica count; unset defaults to `1` |
 
+## Execution runtime
+
+Detailed contract: [Execution runtime](configuration.md#execution-runtime-and-engine-limits).
+
+| Variable or family | Applicability and default boundary |
+|---|---|
+| `RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS` | See the linked contract for exact type, default, and applicability. |
+
 ## Graph execution
 
 Detailed contract: [Graph execution](configuration.md#graph-execution-resource-limits).

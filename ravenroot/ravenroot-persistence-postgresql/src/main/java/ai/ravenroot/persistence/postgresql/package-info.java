@@ -9,10 +9,21 @@
  * whose {@link ai.ravenroot.api.persistence.StoreCapability#CROSS_PROCESS_LEASE} extends past the
  * machine the process happens to be running on.</p>
  *
+ * <p>The execution store is the largest thing here but not the only one. The graph-definition and
+ * manifest stores sit beside it because acceptance is ordered across all three, and
+ * {@link ai.ravenroot.persistence.postgresql.PostgresDeploymentRegistry} joins them because a
+ * deployment aggregate is exactly the kind of state several hosts contend for: its lease, its fencing
+ * token and its lifecycle generation are decided by the same row locks, on the same connection, as
+ * the executions that deployment dispatches.</p>
+ *
  * <h2>Correctness rests on the database, never on the process</h2>
  * <p>Every mutation that reads state and then writes a decision derived from it does so under a
  * row-level lock taken in the same transaction, or as a conditional update whose {@code WHERE} clause
- * carries the value the decision was made on. There is no process-local lock anywhere in this
+ * carries the value the decision was made on. The uniqueness rules that span a whole tenant rather
+ * than one process instance — a handler's or a human task's correlation and deduplication keys, and a
+ * traversal's live hold — take a third shape, because no row either competitor holds is shared: the
+ * partial unique index decides the winner and the loser reads it back to say which rule it hit. There
+ * is no process-local lock anywhere in this
  * package, and there could not be one that helped: the second writer is in a different JVM, usually
  * on a different host. This is the single structural difference from the single-host SQLite adapter,
  * which takes the whole database's write lock for the length of every batch and can therefore read
@@ -23,8 +34,10 @@
  * <h2>Where it must not be deployed</h2>
  * <p><strong>All durable stores of one deployment must address one database.</strong> Acceptance is
  * ordered rather than distributed: a graph definition is committed, then the manifest that pins it,
- * then the batch that references both. That ordering is safe because a later step can check the
- * earlier one's row inside its own transaction, and it stops being safe the moment the rows live in
+ * then the batch that references both, and the deployment registry that decides which version is
+ * meant to be running is read in the same place. That ordering is safe because a later step can
+ * check the earlier one's row inside its own transaction, and it stops being safe the moment the
+ * rows live in
  * databases that can fail independently. Splitting them does not weaken a guarantee gradually; it
  * removes the only mechanism by which an accepted execution is known to have its exact definition
  * and manifest.</p>

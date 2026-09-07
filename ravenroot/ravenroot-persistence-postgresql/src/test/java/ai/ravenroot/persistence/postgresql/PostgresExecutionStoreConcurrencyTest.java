@@ -1,12 +1,19 @@
 package ai.ravenroot.persistence.postgresql;
 
+import ai.ravenroot.api.application.NodeInvocation;
+import ai.ravenroot.api.application.NodeInvocationStatus;
+import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.Traversal;
 import ai.ravenroot.api.application.TraversalStatus;
+import ai.ravenroot.api.execution.NodeCommand;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
 import ai.ravenroot.api.persistence.OpaquePayload;
 import ai.ravenroot.api.persistence.PendingWork;
 import ai.ravenroot.api.persistence.RevisionExpectation;
@@ -293,6 +300,179 @@ class PostgresExecutionStoreConcurrencyTest {
             togetherWith.addAll(bySecond);
             assertTrue(expected.containsAll(togetherWith), "no work was invented");
             assertTrue(!togetherWith.isEmpty(), "at least one of the two polls must have taken work");
+        }
+    }
+
+    /**
+     * A live correlation key is taken by exactly one of the hosts racing for it.
+     *
+     * <p>This is the one uniqueness rule on this port that spans a <em>tenant</em> rather than one
+     * process instance, so it is the one the instance row lock does not cover: the competitors are
+     * different instances, and nothing either of them locks is shared. A store that looked the key up
+     * and then inserted would let every racer read "free" and every racer insert, leaving several live
+     * handlers under one key — after which {@code findHandler} returns whichever row the planner
+     * reached first and the rest of the processes wait forever for a trigger that resolves to somebody
+     * else.</p>
+     *
+     * <p>The suite cannot see this. It is single-threaded, so the lookup is always current and the
+     * insert never collides; the savepoint that turns a collision back into a classified answer is
+     * dead code under it. Only a race reaches that path, and only a count can show the outcome:
+     * exactly one handler stored, exactly one caller told it registered, and every loser told the key
+     * is taken rather than handed a success.</p>
+     */
+    @Test
+    void onlyOneOfManyHostsTakesALiveCorrelationKey() throws Exception {
+        String storeId = "concurrency-correlation-" + UUID.randomUUID();
+        var clock = new MutableClock(EPOCH);
+        String tenantId = "acme";
+
+        try (var store = new PostgresExecutionStore(PostgresTestDatabase.dataSourceFor(storeId), clock)) {
+            List<Waiting> waiting = prepareWaitingInvocations(store, tenantId, WRITERS);
+            var start = new CountDownLatch(1);
+            var attempts = new ArrayList<CompletableFuture<Object>>();
+            for (int writer = 0; writer < WRITERS; writer++) {
+                Waiting candidate = waiting.get(writer);
+                // One correlation key, a different deduplication key per racer. Sharing the
+                // deduplication key too would let the losers be refused by the wrong rule, and the
+                // test would pass without the correlation index ever being consulted.
+                String deduplicationKey = "dedup-" + writer;
+                attempts.add(CompletableFuture.supplyAsync(() -> {
+                    awaitLatch(start);
+                    return register(store, candidate, "approval", "invoice-42", deduplicationKey);
+                }));
+            }
+            start.countDown();
+            CompletableFuture.allOf(attempts.toArray(CompletableFuture[]::new)).get(2, TimeUnit.MINUTES);
+
+            int registered = 0;
+            for (CompletableFuture<Object> attempt : attempts) {
+                Object result = attempt.join();
+                if (result instanceof StoredProcessInstance) {
+                    registered++;
+                } else {
+                    var taken = assertInstanceOf(ExecutionStoreFailure.HandlerCorrelationTaken.class,
+                            result, "a registration that lost the race must be told the key is taken, "
+                                    + "not handed a success for a wait nobody is recording");
+                    assertEquals("invoice-42", taken.correlationKey());
+                }
+            }
+            assertEquals(1, registered, "exactly one host may hold a live correlation key");
+
+            // The decisive assertion: the surviving handler is findable, which is the whole purpose of
+            // the key. Several winners would leave this ambiguous rather than empty.
+            UUID resolved = await(store.findHandler(tenantId, "approval", "invoice-42"))
+                    .orElseThrow().handlerId();
+            int stored = 0;
+            for (Waiting candidate : waiting) {
+                stored += await(store.handlers(candidate.key())).size();
+            }
+            assertEquals(1, stored, "a refused registration leaves no handler behind anywhere");
+            assertTrue(waiting.stream().anyMatch(candidate -> candidate.handlerId().equals(resolved)));
+        }
+    }
+
+    /**
+     * A deduplication key is honoured across instances, and a different handler under it is refused.
+     *
+     * <p>Deduplication is what makes a retried wait safe, and it is tenant-wide for the same reason
+     * the correlation key is: a retry may be re-sent by a different host against a different process
+     * instance. The racers here present genuinely different handlers under one key, so the correct
+     * outcome is one winner and refusals — not the silent collapse that an exact repeat earns.</p>
+     */
+    @Test
+    void aDeduplicationKeyAdmitsOneHandlerAcrossConcurrentInstances() throws Exception {
+        String storeId = "concurrency-dedup-" + UUID.randomUUID();
+        var clock = new MutableClock(EPOCH);
+        String tenantId = "acme";
+
+        try (var store = new PostgresExecutionStore(PostgresTestDatabase.dataSourceFor(storeId), clock)) {
+            List<Waiting> waiting = prepareWaitingInvocations(store, tenantId, WRITERS);
+            var start = new CountDownLatch(1);
+            var attempts = new ArrayList<CompletableFuture<Object>>();
+            for (int writer = 0; writer < WRITERS; writer++) {
+                Waiting candidate = waiting.get(writer);
+                // A distinct correlation key per racer, so the only rule in play is deduplication.
+                String correlationKey = "invoice-" + writer;
+                attempts.add(CompletableFuture.supplyAsync(() -> {
+                    awaitLatch(start);
+                    return register(store, candidate, "approval", correlationKey, "same-dedup");
+                }));
+            }
+            start.countDown();
+            CompletableFuture.allOf(attempts.toArray(CompletableFuture[]::new)).get(2, TimeUnit.MINUTES);
+
+            int registered = 0;
+            for (CompletableFuture<Object> attempt : attempts) {
+                Object result = attempt.join();
+                if (result instanceof StoredProcessInstance) {
+                    registered++;
+                } else {
+                    assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, result,
+                            "a different handler under a taken deduplication key is a caller bug, and "
+                                    + "answering it as a success would discard a wait somebody asked for");
+                }
+            }
+            assertEquals(1, registered, "one deduplication key admits one handler");
+
+            int stored = 0;
+            for (Waiting candidate : waiting) {
+                stored += await(store.handlers(candidate.key())).size();
+            }
+            assertEquals(1, stored, "a refused registration leaves no handler behind anywhere");
+        }
+    }
+
+    /** One instance already running, with an invocation a handler may be registered against. */
+    private record Waiting(ExecutionKey key, UUID traversalId, UUID invocationId, UUID handlerId) {
+    }
+
+    /**
+     * Creates {@code count} instances, each carrying one scheduled invocation, before any race starts.
+     *
+     * <p>Prepared sequentially and deliberately: the race under test is the registration, and setting
+     * the instances up concurrently would put contention on the part of the batch this test is not
+     * about, so a failure would no longer say which rule broke.</p>
+     */
+    private static List<Waiting> prepareWaitingInvocations(PostgresExecutionStore store,
+                                                           String tenantId, int count) {
+        var prepared = new ArrayList<Waiting>();
+        for (int index = 0; index < count; index++) {
+            var key = new ExecutionKey(tenantId, UUID.randomUUID());
+            UUID traversalId = UUID.randomUUID();
+            UUID invocationId = UUID.randomUUID();
+            StoredProcessInstance created = await(store.apply(creationBatch(key, traversalId)));
+            await(store.apply(ExecutionBatch.to(key)
+                    .expecting(RevisionExpectation.exactly(created.revision()))
+                    .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                    .apply(new ExecutionTransition.TraversalTransitioned(traversalId,
+                            TraversalStatus.RUNNING))
+                    .apply(new ExecutionTransition.InvocationAdded(traversalId,
+                            new NodeInvocation(invocationId, "await-approval", Set.of(),
+                                    NodeInvocationStatus.SCHEDULED, List.of(), NodeCommand.PROCESS)))
+                    .build()));
+            prepared.add(new Waiting(key, traversalId, invocationId, UUID.randomUUID()));
+        }
+        return prepared;
+    }
+
+    /** Registers one handler exactly as the runtime does, and returns the outcome either way. */
+    private static Object register(PostgresExecutionStore store, Waiting candidate, String name,
+                                   String correlationKey, String deduplicationKey) {
+        var registration = new HandlerRegistration(candidate.handlerId(), name,
+                candidate.traversalId(), candidate.invocationId(), correlationKey, deduplicationKey,
+                new HandlerPayloadSchema("application/vnd.ravenroot.test-approval", "approval/v1", 1024),
+                HandlerAuthorization.ofRoles("APPROVER"));
+        try {
+            return await(store.apply(ExecutionBatch.to(candidate.key())
+                    .expecting(RevisionExpectation.any())
+                    .apply(new ExecutionTransition.TraversalTransitioned(candidate.traversalId(),
+                            TraversalStatus.WAITING))
+                    .registerHandler(registration)
+                    .build()));
+        } catch (CompletionException thrown) {
+            ExecutionStoreException failure = ExecutionStoreException.unwrap(thrown);
+            assertNotNull(failure, "adapters must not leak non-store exceptions: " + thrown);
+            return failure.failure();
         }
     }
 

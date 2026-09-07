@@ -160,8 +160,9 @@ export function validateLocalDeploymentStatus(value, expectedDeploymentId = '') 
 
 // Whether the service requires authentication is the SERVICE'S answer, never a constant compiled
 // into this bundle. The client sends the request and reacts to the status it gets back: a 401 or a
-// 403 is surfaced as a RuntimeAuthorizationError exactly as before, and the in-memory token is
-// cleared. What was removed is only the client's refusal to ASK — which made a loopback service
+// 403 is surfaced as a RuntimeAuthorizationError exactly as before, and a rejected credential is
+// cleared when its provider can atomically prove that the rejected snapshot is still current. What
+// was removed is only the client's refusal to ASK — which made a loopback service
 // that authorises everyone look like a service that had rejected us, and emptied the node palette
 // without a single request leaving the browser. The gate itself lives on the server and is
 // untouched; a bearer token is still attached whenever one is held, still never placed in a URL,
@@ -193,23 +194,30 @@ export class RavenrootRuntimeClient {
     let refreshed = false;
     while (!signal.aborted && failures <= this.maxRetries) {
       try {
-        const token = await this.#accessToken();
+        const credential = await this.#requestCredential();
+        if (signal.aborted) return;
         const headers = { Accept: 'text/event-stream' };
         if (this.lastEventId) headers['Last-Event-ID'] = this.lastEventId;
         const response = await this.fetchImpl(`${this.baseUrl}/v1/events?include=diagnostics`, {
           method: 'GET',
-          headers: this.#headers(headers, token),
+          headers: this.#headers(headers, credential.accessToken),
           credentials: 'omit',
           cache: 'no-store',
           signal,
         });
-        if (response.status === 401 && !refreshed && this.tokenProvider.refreshAccessToken) {
-          refreshed = true;
-          await this.tokenProvider.refreshAccessToken();
-          continue;
+        if (signal.aborted) return;
+        if (response.status === 401 && !refreshed
+            && typeof this.tokenProvider.refreshAccessTokenIfCurrent === 'function') {
+          const refreshSucceeded = await this.#refreshAccessTokenIfCurrent(credential);
+          if (signal.aborted) return;
+          if (refreshSucceeded) {
+            refreshed = true;
+            continue;
+          }
         }
         if (response.status === 401 || response.status === 403) {
-          await this.tokenProvider.clearAccessToken?.();
+          await this.#clearAccessTokenIfCurrent(credential);
+          if (signal.aborted) return;
           throw new RuntimeAuthorizationError(
             response.status === 401 ? 'Authentication expired' : 'Access revoked', response.status);
         }
@@ -692,7 +700,7 @@ export class RavenrootRuntimeClient {
 
   async #json(path, options) {
     if (!this.fetchImpl) throw new Error('Fetch API is not supported by this browser');
-    const token = await this.#accessToken();
+    const credential = await this.#requestCredential();
     const method = options.method || 'GET';
     let response;
     try {
@@ -700,13 +708,13 @@ export class RavenrootRuntimeClient {
         ...options,
         credentials: 'omit',
         cache: 'no-store',
-        headers: this.#headers(options.headers, token),
+        headers: this.#headers(options.headers, credential.accessToken),
       });
     } catch (error) {
       throw new RuntimeRequestError(error.message || 'the request failed', { method, path });
     }
     if (response.status === 401 || response.status === 403) {
-      await this.tokenProvider.clearAccessToken?.();
+      await this.#clearAccessTokenIfCurrent(credential);
       throw new RuntimeAuthorizationError(response.status === 401 ? 'Authentication expired' : 'Access revoked',
         response.status);
     }
@@ -754,6 +762,38 @@ export class RavenrootRuntimeClient {
     return String(await this.tokenProvider.getAccessToken?.() || '');
   }
 
+  async #requestCredential() {
+    if (typeof this.tokenProvider.getAccessTokenSnapshot !== 'function') {
+      return Object.freeze({ accessToken: await this.#accessToken(), providerSnapshot: null });
+    }
+    const providerSnapshot = await this.tokenProvider.getAccessTokenSnapshot();
+    if (!providerSnapshot || typeof providerSnapshot !== 'object'
+        || typeof providerSnapshot.accessToken !== 'string') {
+      throw new Error('Access token provider returned an invalid credential snapshot');
+    }
+    return Object.freeze({ accessToken: providerSnapshot.accessToken, providerSnapshot });
+  }
+
+  async #clearAccessTokenIfCurrent(credential) {
+    if (!credential.providerSnapshot
+        || typeof this.tokenProvider.clearAccessTokenIfCurrent !== 'function') return false;
+    try {
+      return Boolean(await this.tokenProvider.clearAccessTokenIfCurrent(credential.providerSnapshot));
+    } catch {
+      return false;
+    }
+  }
+
+  async #refreshAccessTokenIfCurrent(credential) {
+    if (!credential.providerSnapshot
+        || typeof this.tokenProvider.clearAccessTokenIfCurrent !== 'function') return false;
+    try {
+      return Boolean(await this.tokenProvider.refreshAccessTokenIfCurrent(credential.providerSnapshot));
+    } catch {
+      return false;
+    }
+  }
+
   #headers(headers = {}, token = '') {
     return token ? { ...headers, Authorization: `Bearer ${token}` } : { ...headers };
   }
@@ -788,12 +828,33 @@ export function normalizeRuntimeEvent(value) {
   return { ...value, type, executionId };
 }
 
+/**
+ * Returns the process-memory credential provider used by the UI.
+ *
+ * Runtime authorization failures use the snapshot methods to clear only the credential generation
+ * that issued the rejected request. Custom providers may implement the same three-method capability:
+ * `getAccessTokenSnapshot`, `clearAccessTokenIfCurrent`, and optionally
+ * `refreshAccessTokenIfCurrent`. The conditional methods may return promises, but must compare and
+ * commit atomically. A conditional refresh must also reject a stale snapshot before starting its
+ * external work and check it again when committing the new credential. Legacy providers that only
+ * expose `getAccessToken` remain usable for requests; the runtime deliberately does not call their
+ * unconditional clear or refresh methods on 401/403.
+ */
 export function memoryTokenProvider(initialToken = '') {
-  let token = String(initialToken || '');
+  let current = Object.freeze({ accessToken: String(initialToken || '') });
+  const replace = value => {
+    current = Object.freeze({ accessToken: String(value || '') });
+  };
   return {
-    getAccessToken: () => token,
-    setAccessToken: value => { token = String(value || ''); },
-    clearAccessToken: () => { token = ''; },
+    getAccessToken: () => current.accessToken,
+    getAccessTokenSnapshot: () => current,
+    setAccessToken: replace,
+    clearAccessToken: () => replace(''),
+    clearAccessTokenIfCurrent: snapshot => {
+      if (snapshot !== current) return false;
+      replace('');
+      return true;
+    },
   };
 }
 

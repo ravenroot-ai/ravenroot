@@ -79,6 +79,9 @@ import java.util.Set;
 
 /** Lightweight JDK HTTP adapter. Business use cases remain in RavenrootApplication. */
 public final class RavenrootServer implements AutoCloseable {
+    private static final String EVENT_SOURCE_HEADER = "X-Ravenroot-Event-Source";
+    private static final String EVENT_CONTINUITY_HEADER = "X-Ravenroot-Event-Continuity";
+    private static final String EVENT_SCHEMA_VERSION_HEADER = "X-Ravenroot-Event-Schema-Version";
     private static final int MAX_PROGRAM_BUILD_BYTES = 10 * 1024 * 1024;
     private static final int MAX_PROGRAM_BYTES = 1024 * 1024;
     /** The same ceiling {@code AssistantTurn.TURN_LIMITS} parses under, applied before parsing. */
@@ -4470,8 +4473,10 @@ public final class RavenrootServer implements AutoCloseable {
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-cache, no-transform");
             exchange.getResponseHeaders().set("Connection", "keep-alive");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Source", "RING");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Continuity", "PROCESS_LOCAL");
+            exchange.getResponseHeaders().set(EVENT_SOURCE_HEADER, ExecutionEventWireJson.RING_SOURCE);
+            exchange.getResponseHeaders().set(EVENT_CONTINUITY_HEADER, "PROCESS_LOCAL");
+            exchange.getResponseHeaders().set(EVENT_SCHEMA_VERSION_HEADER,
+                    Integer.toString(ExecutionEventWireJson.SCHEMA_VERSION));
             exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
                 long sentSequence = requestedSequence;
@@ -4615,8 +4620,10 @@ public final class RavenrootServer implements AutoCloseable {
             exchange.getResponseHeaders().set("Content-Type", "text/event-stream; charset=utf-8");
             exchange.getResponseHeaders().set("Cache-Control", "no-cache, no-transform");
             exchange.getResponseHeaders().set("Connection", "keep-alive");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Source", "DURABLE");
-            exchange.getResponseHeaders().set("X-Ravenroot-Event-Continuity", "DURABLE");
+            exchange.getResponseHeaders().set(EVENT_SOURCE_HEADER, ExecutionEventWireJson.DURABLE_SOURCE);
+            exchange.getResponseHeaders().set(EVENT_CONTINUITY_HEADER, ExecutionEventWireJson.DURABLE_SOURCE);
+            exchange.getResponseHeaders().set(EVENT_SCHEMA_VERSION_HEADER,
+                    Integer.toString(ExecutionEventWireJson.SCHEMA_VERSION));
             exchange.sendResponseHeaders(200, 0);
             try (OutputStream output = exchange.getResponseBody()) {
                 long sentOffset = requestedOffset;
@@ -4813,28 +4820,7 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Complete UTF-8 durable frame, exposed package-locally for the shared transport-size proof. */
     static byte[] durableExecutionEventFrame(ai.ravenroot.api.application.DurableExecutionEvent event) {
-        String description = PublicExecutionDescription.forEventType(event.eventType());
-        String body = "{\"journalOffset\":" + event.journalOffset()
-                + ",\"streamSequence\":" + event.streamSequence()
-                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
-                + ",\"eventType\":\"" + escape(event.eventType()) + "\""
-                + ",\"description\":\"" + escape(description) + "\""
-                + ",\"graphVersion\":\"" + escape(event.graphVersion()) + "\""
-                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
-                + ",\"traversalId\":\"" + event.traversalId() + "\""
-                + ",\"invocationId\":" + (event.invocationId() == null ? "null" : "\"" + event.invocationId() + "\"")
-                + ",\"attemptId\":" + (event.attemptId() == null ? "null" : "\"" + event.attemptId() + "\"")
-                + ",\"causationId\":" + (event.causationId() == null ? "null" : "\"" + event.causationId() + "\"")
-                + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
-                + ",\"edgeId\":" + (event.edgeId() == null ? "null"
-                        : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
-                // The fourth identity, beside the process, the traversal and the invocation, so a
-                // client can tell a handler event apart from a node event that shares all three
-                // instead of parsing the sentence. A UUID, so it needs no escaping and costs a fixed
-                // 36 bytes inside the projection's own reserve.
-                + ",\"handlerId\":" + (event.handlerId() == null ? "null"
-                        : "\"" + event.handlerId() + "\"")
-                + "}";
+        String body = ExecutionEventWireJson.durable(event);
         String frame = "id: " + event.journalOffset() + "\nevent: execution\ndata: " + body + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);
     }
@@ -4847,18 +4833,21 @@ public final class RavenrootServer implements AutoCloseable {
 
     /** Complete UTF-8 live frame, exposed package-locally so the client-size contract is tested exactly. */
     static byte[] executionEventFrame(ai.ravenroot.api.application.ExecutionEvent event) {
-        String frame = "id: " + event.sequence() + "\nevent: execution\ndata: " + executionEventJson(event) + "\n\n";
+        String frame = "id: " + event.sequence() + "\nevent: execution\ndata: "
+                + ExecutionEventWireJson.live(event) + "\n\n";
         return frame.getBytes(StandardCharsets.UTF_8);
     }
 
     /**
-     * The single serialization of an {@link ai.ravenroot.api.application.ExecutionEvent} for the wire,
-     * shared by the SSE stream and by {@code /v1/events/recent}.
+     * The legacy serialization of an {@link ai.ravenroot.api.application.ExecutionEvent} for
+     * {@code /v1/events/recent}. The SSE stream layers its versioned envelope around this exact
+     * projection through {@link ExecutionEventWireJson#live(ExecutionEvent)}.
      *
      * <p>Shared deliberately. {@code description} is a source-authored sentence;
      * {@link ExecutionEvent#detail()} is never serialized because it can contain a raw exception
      * message or graph-authored value. Two serializers would let either safety rule silently miss the
-     * polling path.</p>
+     * polling path. Keeping this projection as one helper also gives the stream an exact legacy
+     * suffix instead of a second spelling of those fields.</p>
      *
      * <h2>The sentence depends on the classifier, and the {@code detail} alias is absent</h2>
      * <p>{@code description} is selected from {@link ExecutionEvent#publicReason()} as well as the
@@ -4875,44 +4864,7 @@ public final class RavenrootServer implements AutoCloseable {
      * in this repository reads {@code description} and ignores it.</p>
      */
     static String executionEventJson(ai.ravenroot.api.application.ExecutionEvent event) {
-        String description = PublicExecutionDescription.forType(event.type(), event.publicReason());
-        RuntimeActivityData.TextProjection message = event.authorMessage();
-        return "{\"sequence\":" + event.sequence()
-                + ",\"occurredAt\":\"" + event.occurredAt() + "\""
-                + ",\"engineId\":\"" + escape(event.engineId()) + "\""
-                + ",\"graphVersion\":\"" + escape(event.graphVersion()) + "\""
-                + ",\"processInstanceId\":\"" + event.processInstanceId() + "\""
-                + ",\"traversalId\":\"" + event.traversalId() + "\""
-                + ",\"executionId\":\"" + event.executionId() + "\""
-                + ",\"invocationId\":" + (event.invocationId() == null ? "null" : "\"" + event.invocationId() + "\"")
-                + ",\"attemptId\":" + (event.attemptId() == null ? "null" : "\"" + event.attemptId() + "\"")
-                + ",\"type\":\"" + event.type() + "\""
-                + ",\"nodeId\":" + (event.nodeId() == null ? "null" : "\"" + escape(event.nodeId()) + "\"")
-                + ",\"edgeId\":" + (event.edgeId() == null ? "null"
-                        : "\"" + escape(StableEdgeId.requireValid(event.edgeId())) + "\"")
-                + ",\"activeInstances\":" + event.activeInstances()
-                // The second number, under a name that cannot be mistaken for the first. Both are
-                // emitted because they answer different questions -- how much work this node's role is
-                // carrying, and how deep the queue at it is -- and a client given only one of them
-                // cannot derive the other.
-                + ",\"inFlightArrivals\":" + event.inFlightArrivals()
-                + ",\"fallback\":" + event.fallback()
-                + ",\"description\":\"" + escape(description) + "\""
-                // The bare classifier beside the sentence built from it, so a client branches on
-                // a token instead of matching prose. Null stays null: absent means this event type
-                // carries no classifier, and "" would be a token no reader could look up.
-                + ",\"publicReason\":" + (event.publicReason() == null ? "null"
-                        : "\"" + escape(event.publicReason()) + "\"")
-                + ",\"message\":" + (message == null ? "null" : "\"" + escape(message.value()) + "\"")
-                + ",\"messageRedacted\":" + (message != null && message.redacted())
-                + ",\"messageTruncated\":" + (message != null && message.truncated())
-                + (event.authorOutput() == null ? ""
-                        : ",\"output\":" + PayloadJson.write(event.authorOutput().value())
-                                + ",\"outputRedacted\":" + event.authorOutput().redacted()
-                                + ",\"outputTruncated\":" + event.authorOutput().truncated())
-                + ",\"processingDuration\":" + (event.processingDuration() == null ? "null"
-                        : event.processingDuration().toNanos() / 1_000_000_000.0)
-                + "}";
+        return ExecutionEventWireJson.legacyLive(event);
     }
 
     private static boolean method(HttpExchange exchange, HttpRequestContext httpContext, String expected) throws IOException {

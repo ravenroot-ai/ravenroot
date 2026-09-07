@@ -128,7 +128,7 @@ class DiscordSendNodeBehaviorTest {
 
     @Test void successfulCompletionPublishesAfterTheNodePermitIsReleased() throws Exception {
         var http = new TerminalOrderingHarness(1);
-        NodeAction action = action(http, Map.of("maxConcurrency", "1"));
+        NodeAction action = action(http, Map.of("maxConcurrency", "1", "retries", "0"));
         var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
         CompletionStage<NodeResult> first = action.handle(
                 DiscordTestSupport.message(message("one", List.of())));
@@ -155,7 +155,7 @@ class DiscordSendNodeBehaviorTest {
 
     @Test void exceptionalCompletionPublishesAfterTheNodePermitIsReleased() throws Exception {
         var http = new TerminalOrderingHarness(1);
-        NodeAction action = action(http, Map.of("maxConcurrency", "1"));
+        NodeAction action = action(http, Map.of("maxConcurrency", "1", "retries", "0"));
         var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
         CompletionStage<NodeResult> first = action.handle(
                 DiscordTestSupport.message(message("one", List.of())));
@@ -182,7 +182,7 @@ class DiscordSendNodeBehaviorTest {
 
     @Test void cancellationPublishesAfterTheManagedCallAndNodePermitAreReleased() throws Exception {
         var http = new TerminalOrderingHarness(1);
-        NodeAction action = action(http, Map.of("maxConcurrency", "1"));
+        NodeAction action = action(http, Map.of("maxConcurrency", "1", "retries", "0"));
         TestCancellation cancellation = new TestCancellation();
         var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
         CompletionStage<NodeResult> first = action.handle(
@@ -211,27 +211,27 @@ class DiscordSendNodeBehaviorTest {
     }
 
     @Test void successfulCompletionPublishesAfterTheSharedProfilePermitIsReleased() throws Exception {
-        var http = new TerminalOrderingHarness(4);
+        var http = new TerminalOrderingHarness(2);
         DiscordNodePackage nodePackage = DiscordTestSupport.nodePackage(directory.resolve("profile-permits.db"));
         var behavior = DiscordTestSupport.behavior(nodePackage, DiscordBehaviorDescriptors.SEND);
-        List<NodeAction> actions = java.util.stream.IntStream.range(0, 5)
-                .mapToObj(index -> createAction(behavior, http, Map.of()))
+        List<NodeAction> actions = java.util.stream.IntStream.range(0, 3)
+                .mapToObj(index -> createAction(behavior, http, Map.of("retries", "0")))
                 .toList();
         var stages = new CopyOnWriteArrayList<CompletionStage<?>>();
         stages.add(actions.getFirst().handle(DiscordTestSupport.message(message("held-0", List.of()))));
         try {
             http.awaitCaptured(1);
-            for (int index = 1; index < 4; index++) {
+            for (int index = 1; index < 2; index++) {
                 stages.add(actions.get(index).handle(
                         DiscordTestSupport.message(message("held-" + index, List.of()))));
             }
-            http.awaitCaptured(4);
-            assertCapacity(await(actions.get(4).handle(
+            http.awaitCaptured(2);
+            assertCapacity(await(actions.get(2).handle(
                     DiscordTestSupport.message(message("profile-full", List.of())))), "profile-capacity");
             @SuppressWarnings("unchecked")
             CompletionStage<NodeResult> first = (CompletionStage<NodeResult>) stages.getFirst();
             var nextAtTerminal = invokeAtTerminal(first,
-                    () -> actions.get(4).handle(DiscordTestSupport.message(message("after-profile", List.of()))));
+                    () -> actions.get(2).handle(DiscordTestSupport.message(message("after-profile", List.of()))));
             stages.add(nextAtTerminal);
 
             http.call(0).succeed();
@@ -239,7 +239,7 @@ class DiscordSendNodeBehaviorTest {
             assertEquals("sent", status(await(first)));
             assertEquals("sent", status(await(nextAtTerminal)),
                     "terminal success must not be visible while the shared profile permit is still held");
-            assertEquals(5, http.dispatches());
+            assertEquals(3, http.dispatches());
         } finally {
             http.releaseAll();
             drain(stages);
@@ -276,6 +276,8 @@ class DiscordSendNodeBehaviorTest {
                 () -> stage.toCompletableFuture().get(2, TimeUnit.SECONDS));
         assertInstanceOf(DiscordException.class, thrown.getCause());
         assertEquals(code, ((DiscordException) thrown.getCause()).code());
+        assertFalse(thrown.getCause().getMessage().contains("hello"));
+        assertFalse(thrown.getCause().getMessage().contains("discord-bot-token"));
     }
     private static <T> CompletableFuture<T> invokeAtTerminal(
             CompletionStage<?> terminal, Supplier<CompletionStage<T>> invocation) {

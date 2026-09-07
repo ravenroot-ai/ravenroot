@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -28,7 +29,7 @@ class ExecutionStoreBootstrapTest {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("store"));
 
         try (var opened = ExecutionStoreBootstrap.openOwned(
-                new ExecutionStoreConfiguration(true, location), Clock.systemUTC())) {
+                new ExecutionStoreConfiguration.SingleHost(location), Clock.systemUTC())) {
             assertTrue(Files.isRegularFile(location.databaseFile()));
             assertTrue(opened.store().capabilities().contains(ai.ravenroot.api.persistence.StoreCapability.DURABLE));
         }
@@ -43,7 +44,7 @@ class ExecutionStoreBootstrapTest {
                 defaults.maxElements(), defaults.maxAttributes(), defaults.maxNamespaceDeclarations());
 
         try (var opened = ExecutionStoreBootstrap.openOwned(
-                new ExecutionStoreConfiguration(true, location), Clock.systemUTC(), narrow)) {
+                new ExecutionStoreConfiguration.SingleHost(location), Clock.systemUTC(), narrow)) {
             assertEquals(4_096, opened.graphDefinitionStore().maxDefinitionBytes());
         }
     }
@@ -51,7 +52,7 @@ class ExecutionStoreBootstrapTest {
     @Test
     void disabledStoreStillExcludesBackupAndRestoreForTheAuditLifetime() {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("disabled"));
-        var configuration = new ExecutionStoreConfiguration(false, location);
+        var configuration = new ExecutionStoreConfiguration.Disabled(location);
 
         try (var opened = ExecutionStoreBootstrap.openOwned(configuration, Clock.systemUTC())) {
             assertNull(opened.store());
@@ -70,7 +71,7 @@ class ExecutionStoreBootstrapTest {
     void unusableLocationFailsClosedWithAStablePathFreeDiagnostic() throws Exception {
         Path secretConfiguredPath = temporaryDirectory.resolve("customer-secret-volume");
         Files.writeString(secretConfiguredPath, "not a directory");
-        var configuration = new ExecutionStoreConfiguration(true,
+        var configuration = new ExecutionStoreConfiguration.SingleHost(
                 SqliteStoreLocation.underDirectory(secretConfiguredPath));
 
         var failure = assertThrows(ExecutionStoreBootstrap.StartupException.class,
@@ -117,7 +118,7 @@ class ExecutionStoreBootstrapTest {
     @Test
     void ownedStoreCheckpointsClosesAndCanBeReopened() {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("reopen"));
-        var configuration = new ExecutionStoreConfiguration(true, location);
+        var configuration = new ExecutionStoreConfiguration.SingleHost(location);
 
         try (var first = ExecutionStoreBootstrap.openOwned(configuration, Clock.systemUTC())) {
             first.store().forgottenBefore("tenant-a").toCompletableFuture().join();
@@ -134,7 +135,7 @@ class ExecutionStoreBootstrapTest {
     @Test
     void aSecondOwnerFailsClosedWhileTheServerLeaseIsHeld() {
         var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("busy"));
-        var configuration = new ExecutionStoreConfiguration(true, location);
+        var configuration = new ExecutionStoreConfiguration.SingleHost(location);
 
         try (var first = ExecutionStoreBootstrap.openOwned(configuration, Clock.systemUTC())) {
             var failure = assertThrows(ExecutionStoreBootstrap.StartupException.class,
@@ -153,7 +154,7 @@ class ExecutionStoreBootstrapTest {
 
         var failure = assertThrows(ExecutionStoreBootstrap.StartupException.class,
                 () -> ExecutionStoreBootstrap.openOwned(
-                        new ExecutionStoreConfiguration(true, location), Clock.systemUTC()));
+                        new ExecutionStoreConfiguration.SingleHost(location), Clock.systemUTC()));
 
         assertEquals(ExecutionStoreBootstrap.FailureReason.RECOVERY_PENDING, failure.reason());
         assertFalse(failure.getMessage().contains(location.directory().toString()));
@@ -168,6 +169,22 @@ class ExecutionStoreBootstrapTest {
             return Files.size(path);
         } catch (java.io.IOException failed) {
             throw new AssertionError(failed);
+        }
+    }
+    @Test
+    void theSingleHostVariantSelectsTheSingleHostAdapterAndNothingElse() throws Exception {
+        var location = SqliteStoreLocation.underDirectory(temporaryDirectory.resolve("selected"));
+
+        try (var opened = ExecutionStoreBootstrap.openOwned(
+                new ExecutionStoreConfiguration.SingleHost(location), Clock.systemUTC())) {
+            // Asserted by type, because the selection is the whole subject: a switch that fell
+            // through to the wrong branch would still produce three working stores, and every other
+            // assertion in this class would still pass.
+            assertInstanceOf(ai.ravenroot.persistence.sqlite.SqliteExecutionStore.class, opened.store());
+            assertInstanceOf(ai.ravenroot.persistence.sqlite.SqliteGraphDefinitionStore.class,
+                    opened.graphDefinitionStore());
+            assertInstanceOf(ai.ravenroot.persistence.sqlite.SqliteExecutionManifestStore.class,
+                    opened.executionManifestStore());
         }
     }
 }

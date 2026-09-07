@@ -30,7 +30,7 @@ public final class RavenrootCliMain {
         // against rather than for.
         if (args.length >= 1 && ("backup".equals(args[0]) || "restore".equals(args[0])
                 || "verify".equals(args[0]))) {
-            System.exit(runBackupRestore(args));
+            System.exit(runBackupRestore(args, System.getenv(), System.out, System.err));
             return;
         }
         // Validate is intercepted for the same reason and at the same
@@ -236,26 +236,59 @@ public final class RavenrootCliMain {
         }
     }
 
-    private static int runBackupRestore(String[] args) {
+    /**
+     * The bundle verbs, with their environment and streams passed in rather than read from statics.
+     *
+     * <p>Package-private and parameterised for the reason {@link #embeddedRuntime} already is in this
+     * class: a seam that reads the real environment is a seam a test cannot drive, and the refusal
+     * below is a behaviour claim that has to be red when it breaks rather than asserted in prose.</p>
+     *
+     * @param args the command and its one argument.
+     * @param environment the process environment.
+     * @param output where a successful command's machine-readable line goes.
+     * @param errors where a refusal goes.
+     * @return the process exit code.
+     */
+    static int runBackupRestore(String[] args, java.util.Map<String, String> environment,
+                                java.io.PrintStream output, java.io.PrintStream errors) {
         if (args.length != 2) {
-            System.err.println("Usage: ravenroot " + args[0] + " <directory>");
+            errors.println("Usage: ravenroot " + args[0] + " <directory>");
             return 2;
         }
         try {
-            var command = new BackupRestoreCommand(System.out, System.err);
+            var command = new BackupRestoreCommand(output, errors);
             var directory = java.nio.file.Path.of(args[1]);
             if ("verify".equals(args[0])) {
                 // Verification is bundle-local and must not depend on ambient live-store paths.
                 return command.verify(directory);
             }
-            var configuration = BackupRestoreConfiguration.fromEnvironment(System.getenv());
+            if (BackupRestoreConfiguration.sharedStoreSelected(environment)) {
+                // Not "unimplemented for now". A recovery bundle is a copy of SQLite files taken
+                // under a single-host file lock, and every part of that is adapter-local
+                // administration: there are no files to copy, the lock excludes a process on this
+                // host and none of the deployment's other replicas, and a restore that replaced the
+                // shared database underneath live replicas would be a way to lose the deployment
+                // rather than to recover it. The database's own tooling is the procedure, and it is
+                // documented; porting these two verbs onto it would produce commands that share a
+                // name with these and nothing else.
+                //
+                // 'verify' is deliberately still allowed above: it reads only the bundle handed to
+                // it, never the configured store, so refusing it would stop an operator checking an
+                // old single-host bundle for no benefit at all.
+                errors.println("Error: " + args[0] + " refused: the recovery bundle is "
+                        + "single-host administration and this deployment selected the shared "
+                        + "execution store; use the database's own backup and restore tooling, as "
+                        + "described in the shared PostgreSQL persistence reference");
+                return 2;
+            }
+            var configuration = BackupRestoreConfiguration.fromEnvironment(environment);
             return switch (args[0]) {
                 case "backup" -> command.backup(configuration, directory);
                 default -> command.restore(configuration, directory);
             };
         } catch (RuntimeException invalidConfiguration) {
             // Path parser/provider diagnostics can echo the raw argument or environment value.
-            System.err.println("Error: recovery command refused: INVALID_CONFIGURATION");
+            errors.println("Error: recovery command refused: INVALID_CONFIGURATION");
             return 2;
         }
     }

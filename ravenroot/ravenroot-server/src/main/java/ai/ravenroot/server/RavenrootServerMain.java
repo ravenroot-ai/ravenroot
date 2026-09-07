@@ -63,6 +63,10 @@ public final class RavenrootServerMain {
             exit.accept(1);
         } catch (PackagedEmbedStartupRefused refused) {
             exit.accept(1);
+        } catch (ReplicaTopologyRefused refused) {
+            // The same boundary, for the same reason: the diagnostic is already on stderr and the
+            // exit must happen outside every owned startup scope so no close or checkpoint is skipped.
+            exit.accept(1);
         }
     }
 
@@ -87,13 +91,26 @@ public final class RavenrootServerMain {
                 .fromEnvironment(System.getenv());
         var humanTaskPolicy = HumanTaskConfiguration.fromSystem(System.getProperties(), System.getenv());
         HumanTaskConfiguration.requireCompatible(humanTaskPolicy, graphExecutionLimits);
-        // This lease is the offline-maintenance authority shared with backup/restore. It is
-        // acquired before the audit trail is opened and retained until both stores are closed.
+        // Which execution store this deployment runs, read before anything durable opens. On the
+        // single-host branch this also decides the offline-maintenance authority shared with
+        // backup/restore, acquired before the audit trail opens and retained until both stores are
+        // closed; the shared branch has no such lease and must not have one, because excluding a
+        // second process is the guarantee it exists to remove. See ExecutionStoreBootstrap.
         var executionStoreConfiguration = ai.ravenroot.server.persistence.ExecutionStoreConfiguration
                 .fromEnvironment(System.getenv());
+        // Every combination of replica count, store selection and still-per-replica authority that
+        // this build cannot honour, refused before anything durable is opened. Evaluated here rather
+        // than beside the embed check at the top of run because it needs the parsed store selection,
+        // and still before the first store, listener or audit file exists.
+        refuseUnsupportableReplicaTopology(System.getenv(), executionStoreConfiguration);
+        // Who this replica is to the store and how long it claims for. Read here because core has no
+        // configuration channel; checked against the store's own published bounds once it is open.
+        var executionOwnershipConfiguration = ai.ravenroot.server.persistence
+                .ExecutionOwnershipConfiguration.fromEnvironment(System.getenv());
         var executionStoreOwner = ai.ravenroot.server.persistence.ExecutionStoreBootstrap.openOwned(
                 executionStoreConfiguration, java.time.Clock.systemUTC(), graphExecutionLimits.graphMl(),
                 humanTaskPolicy);
+        executionOwnershipConfiguration.requireCompatible(executionStoreOwner.store());
         try (var startupGuard = executionStoreOwner.startupGuard()) {
         var engine = executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create);
         ProgramRuntime programRuntime = switch (System.getenv().getOrDefault("RAVENROOT_PROGRAM_RUNTIME", "graalvm")) {
@@ -248,7 +265,8 @@ public final class RavenrootServerMain {
                 deploymentCap.maxActiveDeployments(), unknownBehavior.policy(),
                 executionStoreOwner.graphDefinitionStore(), toolApprovals, humanTasks,
                 graphExecutionLimits, agentBudgets, executionStoreOwner.executionManifestStore(),
-                executionRuntime.applicationRunnerShutdownStepBound());
+                executionRuntime.applicationRunnerShutdownStepBound(),
+                executionOwnershipConfiguration.runtimeOwnership());
         // Every recovery path verifies against the application's own resolver rather than one built
         // beside it. Two resolvers assembled from the same inputs would agree until the day one of the
         // two composition sites was updated and the other was not, and the refusals that followed
@@ -275,7 +293,13 @@ public final class RavenrootServerMain {
         } else {
             var recoveryConfiguration = ai.ravenroot.server.approval.ToolApprovalRecoveryConfiguration
                     .fromEnvironment(System.getenv());
-            String recoveryWorker = "ravenroot-durable-decision-" + java.util.UUID.randomUUID();
+            // The same replica and the same JVM start as the runtime above, and a different role.
+            // Distinct on purpose: the shared store's claim-candidate query skips instances whose
+            // live lease belongs to a different worker, and a claim by the same worker keeps the
+            // fencing token where a claim by a different one rotates it. Give the sweep the runtime's
+            // identity and it stops skipping the work its own runtime is advancing, claims it, and
+            // leaves the fence unchanged under the runtime's recorder.
+            String recoveryWorker = executionOwnershipConfiguration.recoveryIdentity().value();
             var dispatchers = new java.util.ArrayList<ai.ravenroot.core.recovery.RecoveryDispatcher>();
             if (toolApprovals != null) {
                 toolApprovals.restrictRecoveryTenants(java.util.Set.copyOf(recoveryConfiguration.tenantIds()));
@@ -614,6 +638,23 @@ public final class RavenrootServerMain {
     }
 
     /**
+     * Refuses a replica count the selected store and this build's remaining per-replica authorities
+     * cannot honour.
+     *
+     * <p>Written to stderr in the same one-line JSON shape the embed refusal uses, so an operator
+     * greps one event name for both. The detail names environment variables and named authorities
+     * only: no path, no URL, no credential, because a startup refusal reaches a log aggregator and a
+     * refusal that leaks the deployment's topology is worse than the misconfiguration it reports.</p>
+     */
+    static void refuseUnsupportableReplicaTopology(Map<String, String> environment,
+            ai.ravenroot.server.persistence.ExecutionStoreConfiguration configuration) {
+        var refusal = ReplicaTopologyStartupCheck.evaluate(environment, configuration);
+        if (refusal == null) return;
+        System.err.println(refusal.diagnostic());
+        throw new ReplicaTopologyRefused();
+    }
+
+    /**
      * Opens the durable embed registration authority, or refuses startup before the listener binds.
      *
      * <p>{@link ai.ravenroot.server.embed.EmbedStartupCheck} has already decided that the directory
@@ -646,6 +687,13 @@ public final class RavenrootServerMain {
     static final class PackagedEmbedStartupRefused extends RuntimeException {
         private PackagedEmbedStartupRefused() {
             super("packaged embed composition unavailable", null, false, false);
+        }
+    }
+
+    /** Payload-free, like its two siblings: the operator-facing detail already reached stderr. */
+    static final class ReplicaTopologyRefused extends RuntimeException {
+        private ReplicaTopologyRefused() {
+            super("replica topology unsupportable", null, false, false);
         }
     }
 

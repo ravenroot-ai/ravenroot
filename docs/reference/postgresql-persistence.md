@@ -10,6 +10,54 @@ an embedded installation. See [Persistence, lifecycle, and recovery](../operator
 for the procedures that are common to both. The architecture decision record collection in the
 repository explains why the two adapters share their contract and not their code.
 
+## Selecting this store
+
+A deployment chooses its execution store with `RAVENROOT_EXECUTION_STORE`. It is `sqlite` when unset,
+which is the single-host store and the behaviour every existing deployment already has; setting it to
+`postgresql` selects the store this page describes. Any other value refuses to start rather than
+falling back, because a mistyped selector that quietly kept the old store is the failure this setting
+exists to prevent.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RAVENROOT_EXECUTION_STORE` | `sqlite` | `sqlite` or `postgresql`. Anything else refuses startup. |
+| `RAVENROOT_EXECUTION_STORE_URL` | none | The JDBC URL, required under `postgresql`. Must begin `jdbc:postgresql:`. Never logged. |
+| `RAVENROOT_EXECUTION_STORE_USER` | unset | Database role, when the URL does not carry it. |
+| `RAVENROOT_EXECUTION_STORE_PASSWORD` | unset | Never logged, never trimmed, and never rendered by any diagnostic. |
+| `RAVENROOT_EXECUTION_STORE_POOL_SIZE` | `10` | Connections this replica may hold. See the pool sizing section. |
+| `RAVENROOT_EXECUTION_STORE_POOL_TIMEOUT_MS` | `10000` | How long a caller waits for a connection. Must stay below the statement timeout, so that waiting for a connection is distinguishable from waiting on a lock. |
+| `RAVENROOT_WORKER_ID` | the host name | The replica half of the identity every lease is taken under. |
+| `RAVENROOT_EXECUTION_LEASE_TTL_SECONDS` | `30` | How long a replica's claim on an execution outlives its last renewal. Bounded by what the store publishes and required to exceed the clock-skew budget. |
+
+`RAVENROOT_EXECUTION_STORE_DIR` belongs to the single-host store, and setting it while selecting this
+one refuses startup instead of being ignored: the two name different stores, and a deployment that set
+both has not decided which it wants.
+
+### Which replica holds an execution
+
+Every claim on an execution is taken under an identity of the form `<replica>#<incarnation>/<role>`,
+and it is what `ownerWorkerId` reports in the process inventory, so an operator reading the inventory
+can name the pod. The replica half comes from `RAVENROOT_WORKER_ID`, defaulting to the host name; in
+Kubernetes, set it from the pod name.
+
+The incarnation is minted fresh at every start, and it — not the name — is what makes an identity
+unique. A name that repeats across restarts, or two pods misconfigured with one name, would otherwise
+each look like the other renewing its own claim, which is the single condition the fence exists to make
+impossible. The role half separates the runtime that advances an execution from the recovery sweep
+that reclaims abandoned work, because a sweep sharing an identity with its own runtime would reclaim
+the work that runtime is still doing.
+
+Work held by a replica that never returns needs no cleanup: a claim is evaluated against the store's
+clock when the next claimant asks for it, so an expired one is simply no obstacle.
+
+### Several replicas
+
+Selecting this store does not by itself enable several replicas, and a deployment that configures more
+than one is refused at startup today. Distributed request ownership, the readiness handoff that must
+precede it, and the deployment manifests that would express it are delivered separately; until they
+are, this store is the durable, shared-capable foundation rather than a supported multi-replica
+topology. The refusal names the specific combination it will not run.
+
 ## Supported topology
 
 | Property | Contract |

@@ -39,6 +39,39 @@ A graph contains exactly one `START`, exactly one `END`, and no more than one `E
 
 Original bytes are authoritative. Unknown keys, data, and extensions are retained for an unmodified round trip. A mutation after import invalidates byte-exact preservation; export refuses instead of emitting a lossy document under a preservation claim.
 
+## Editor visual groups
+
+The editor stores visual group definitions in the graph-scoped string property
+`ravenroot.ui.visualGroups`. Version 1 is a JSON object with `version: 1` and a `groups` array.
+Each entry contains a unique `id`, a non-empty `name` of at most 160 characters,
+`memberNodeIds` naming at least two real nodes, an `anchorNodeId` belonging to those members,
+and a boolean `collapsed` import default. Groups are flat and disjoint. The editor accepts at most
+2,000 groups and 1 MiB of UTF-8 metadata. Detailed coordinates remain ordinary node layout data.
+
+```xml
+<key id="visual-groups" for="graph" attr.name="ravenroot.ui.visualGroups" attr.type="string"/>
+```
+
+Inside the top-level `<graph>`, reference IDs of real nodes already declared in that graph:
+
+```xml
+<data key="visual-groups">{"version":1,"groups":[{"id":"group-request","name":"Request &amp; response","memberNodeIds":["request","response"],"anchorNodeId":"request","collapsed":true}]}</data>
+```
+
+Here `request` and `response` remain ordinary `<node id="…">` elements. XML escaping still applies
+to the JSON string, as the `&amp;` in the name illustrates.
+
+This scalar property does not create nested GraphML graphs or synthetic runtime nodes and edges.
+It does not change behaviors, edge outcomes, parallel flags or join semantics. Explicit authoring
+exports include the document's current collapsed state; such metadata changes can change the file's
+bytes and content hash. Test/deployed presentation changes remain local to the view.
+
+The editor replaces this owned property's current data on save and removes stale owned defaults.
+An empty version-1 `groups` array records explicit removal without resurrecting an imported default.
+Unrelated graph metadata and opaque XML remain preserved. Unsupported future versions or malformed
+grouping are preserved without interpretation and display the complete real graph, with an explicit
+repair command. The runtime treats the property as scalar graph metadata.
+
 ## Validation interface
 
 `ravenroot validate graph.graphml` exits 0 for acceptance, 1 for a refused or invalid document, and 2 for CLI misuse. The HTTP inspection surface is `POST /v1/graphs/inspect`.

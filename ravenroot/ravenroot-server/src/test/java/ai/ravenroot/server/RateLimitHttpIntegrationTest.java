@@ -39,6 +39,7 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -282,13 +283,46 @@ class RateLimitHttpIntegrationTest {
 
     @Test
     void anOversizedQueryIsRejectedWithoutBeingProcessed() throws Exception {
-        try (var fixture = fixture(limits(builder -> builder), new RecordingAudit())) {
+        var audit = new RecordingAudit();
+        try (var fixture = fixture(limits(builder -> builder), audit)) {
             var client = HttpClient.newHttpClient();
 
             var response = fixture.get(client, "/v1/status?probe=" + "a".repeat(8_000), "tenant-a");
 
             assertEquals(414, response.statusCode());
             assertTrue(response.body().contains("QUERY_TOO_LARGE"), response.body());
+            var event = audit.events().stream()
+                    .filter(candidate -> candidate.code().equals("QUERY_TOO_LARGE"))
+                    .findFirst().orElseThrow();
+            assertEquals("127.0.0.1", event.clientAddress());
+            assertFalse(event.forwarded());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.tenantId());
+            assertEquals(correlationIn(response.body()), event.requestId());
+        }
+    }
+
+    @Test
+    void aRejectedProxyTopologyUsesThePreResolutionContextAndOneCorrelationId() throws Exception {
+        var audit = new RecordingAudit();
+        var limits = limits(builder -> builder);
+        var limiter = new RateLimiter(limits,
+                new TrustedProxyConfiguration(2, Set.of("127.0.0.1")), audit, nanos::get);
+        InetAddress ipv4Loopback = InetAddress.getByName("127.0.0.1");
+        try (var fixture = fixture(limits, limiter, tenantAuthenticator(), ipv4Loopback)) {
+            String refused = rawRequest(fixture.server().port(), "GET", "tenant-a:alice",
+                    "203.0.113.6", ipv4Loopback,
+                    new java.util.concurrent.ConcurrentLinkedQueue<>());
+
+            assertTrue(refused.startsWith("HTTP/1.1 400 "), refused);
+            assertTrue(refused.contains("FORWARDED_CHAIN_TOO_SHORT"), refused);
+            var event = audit.events().stream()
+                    .filter(candidate -> candidate.code().equals("FORWARDED_CHAIN_TOO_SHORT"))
+                    .findFirst().orElseThrow();
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.clientAddress());
+            assertFalse(event.forwarded());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.tenantId());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.subject());
+            assertEquals(correlationIn(refused), event.requestId());
         }
     }
 
@@ -455,8 +489,9 @@ class RateLimitHttpIntegrationTest {
         var audit = new RecordingAudit();
         try (var fixture = fixture(limits, audit)) {
             var client = HttpClient.newHttpClient();
-            fixture.plainGet(client, "/health");
-            fixture.plainGet(client, "/health");
+            assertEquals(200, fixture.plainGet(client, "/health").statusCode());
+            var refused = fixture.plainGet(client, "/health");
+            assertEquals(429, refused.statusCode(), refused.body());
 
             var rejection = audit.events().stream()
                     .filter(event -> event.code().equals("ADDRESS_RATE_LIMIT_EXCEEDED"))
@@ -468,6 +503,8 @@ class RateLimitHttpIntegrationTest {
             assertFalse(rejection.forwarded());
             assertEquals(429, rejection.status());
             assertTrue(rejection.retryAfterSeconds() >= 1);
+            assertEquals(correlationIn(refused.body()), rejection.requestId(),
+                    "the unauthenticated error and its audit record must name the same request");
         }
     }
 
@@ -488,6 +525,137 @@ class RateLimitHttpIntegrationTest {
             assertEquals("tenant-a", rejection.tenantId());
             assertEquals("alice", rejection.subject());
             assertEquals("tenant", rejection.scope());
+        }
+    }
+
+    /**
+     * Two exchanges matched to one JDK route must never borrow each other's network identity.
+     *
+     * <p>The authenticator gates make the interleaving exact: A has finished client resolution before
+     * B starts; B has then finished its own resolution before A is allowed to reach the exhausted
+     * principal budget; and B remains inside authentication until A's refusal is complete. Both
+     * requests are real HTTP requests through {@code publicContext} and {@code protectedRequest}.
+     * This is the schedule that exposes route-context attributes: B's write is the last one on the
+     * shared JDK context, so an A refusal that reads the attribute back reports B's address.</p>
+     */
+    @Test
+    void simultaneousRequestsOnOneRouteKeepTheirOwnClientAndAuditIdentity() throws Throwable {
+        var limits = limits(builder -> builder.principal(1, 1));
+        var audit = new RecordingAudit();
+        var trustedProxy = new TrustedProxyConfiguration(1, Set.of("127.0.0.1"));
+        var limiter = new RateLimiter(limits, trustedProxy, audit, nanos::get);
+        var racing = new java.util.concurrent.atomic.AtomicBoolean();
+        var aEnteredAuthentication = new java.util.concurrent.CountDownLatch(1);
+        var bEnteredAuthentication = new java.util.concurrent.CountDownLatch(1);
+        var releaseB = new java.util.concurrent.CountDownLatch(1);
+        RequestAuthenticator authenticator = headers -> {
+            String bearer = headers.getFirst("Authorization");
+            if (racing.get() && "Bearer tenant-a:alice".equals(bearer)) {
+                aEnteredAuthentication.countDown();
+                awaitAuthenticationGate(bEnteredAuthentication, "request B never entered authentication");
+            } else if (racing.get() && "Bearer tenant-b:bob".equals(bearer)) {
+                bEnteredAuthentication.countDown();
+                awaitAuthenticationGate(releaseB, "request B was never released after request A's refusal");
+            }
+            return tenantAuthenticator().authenticate(headers);
+        };
+        InetAddress ipv4Loopback = InetAddress.getByName("127.0.0.1");
+        try (var fixture = fixture(limits, limiter, authenticator, ipv4Loopback)) {
+            var requests = java.util.concurrent.Executors.newFixedThreadPool(2);
+            var submitted = new ArrayList<java.util.concurrent.Future<String>>();
+            var activeSockets = new java.util.concurrent.ConcurrentLinkedQueue<java.net.Socket>();
+            Throwable testFailure = null;
+            try {
+                String primedA = rawRequest(fixture.server().port(), "GET", "tenant-a:alice",
+                        "203.0.113.6", ipv4Loopback, activeSockets);
+                String primedB = rawRequest(fixture.server().port(), "GET", "tenant-b:bob",
+                        "203.0.113.7", ipv4Loopback, activeSockets);
+                assertTrue(primedA.startsWith("HTTP/1.1 200 "), primedA);
+                assertTrue(primedB.startsWith("HTTP/1.1 200 "), primedB);
+
+                racing.set(true);
+                var requestA = requests.submit(() -> rawRequest(
+                        fixture.server().port(), "GET", "tenant-a:alice", "203.0.113.6",
+                        ipv4Loopback, activeSockets));
+                submitted.add(requestA);
+                assertTrue(aEnteredAuthentication.await(10, java.util.concurrent.TimeUnit.SECONDS),
+                        "request A never reached authentication after resolving its client");
+
+                var requestB = requests.submit(() -> rawRequest(
+                        fixture.server().port(), "GET", "tenant-b:bob", "203.0.113.7",
+                        ipv4Loopback, activeSockets));
+                submitted.add(requestB);
+                assertTrue(bEnteredAuthentication.await(10, java.util.concurrent.TimeUnit.SECONDS),
+                        "request B never reached authentication after resolving its client");
+
+                String refusedA = requestA.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                releaseB.countDown();
+                String refusedB = requestB.get(10, java.util.concurrent.TimeUnit.SECONDS);
+                assertTrue(refusedA.startsWith("HTTP/1.1 429 "), refusedA);
+                assertTrue(refusedB.startsWith("HTTP/1.1 429 "), refusedB);
+                assertTrue(refusedA.contains("PRINCIPAL_RATE_LIMIT_EXCEEDED"), refusedA);
+                assertTrue(refusedB.contains("PRINCIPAL_RATE_LIMIT_EXCEEDED"), refusedB);
+                assertEquals(2, audit.events().size(), "only the two measured principal refusals are audited");
+
+                RateLimitAuditEvent auditA = audit.event("tenant-a", "alice");
+                RateLimitAuditEvent auditB = audit.event("tenant-b", "bob");
+                String correlationA = correlationIn(refusedA);
+                String correlationB = correlationIn(refusedB);
+                assertEquals(correlationA, auditA.requestId(), "A's error and audit cannot name different requests");
+                assertEquals(correlationB, auditB.requestId(), "B's error and audit cannot name different requests");
+                assertFalse(correlationA.isBlank());
+                assertFalse(correlationB.isBlank());
+                assertNotEquals(correlationA, correlationB, "simultaneous requests reused one correlation id");
+                assertEquals("PRINCIPAL_RATE_LIMIT_EXCEEDED", auditA.code());
+                assertEquals("tenant-a", auditA.tenantId());
+                assertEquals("alice", auditA.subject());
+                assertEquals("203.0.113.6", auditA.clientAddress(),
+                        "request A borrowed request B's address from their shared JDK route context");
+                assertTrue(auditA.forwarded());
+                assertEquals("PRINCIPAL_RATE_LIMIT_EXCEEDED", auditB.code());
+                assertEquals("tenant-b", auditB.tenantId());
+                assertEquals("bob", auditB.subject());
+                assertEquals("203.0.113.7", auditB.clientAddress());
+                assertTrue(auditB.forwarded());
+            } catch (Throwable failure) {
+                testFailure = failure;
+                throw failure;
+            } finally {
+                bEnteredAuthentication.countDown();
+                releaseB.countDown();
+                Throwable cleanupFailure = drainRequests(requests, submitted, activeSockets);
+                if (cleanupFailure != null) {
+                    if (testFailure == null) throw cleanupFailure;
+                    testFailure.addSuppressed(cleanupFailure);
+                }
+            }
+        }
+    }
+
+    /** The forwarded flag and address in a real public-route refusal come from the trusted resolution. */
+    @Test
+    void aTrustedForwardedRejectionAuditsTheResolvedClientAndCorrelation() throws Exception {
+        var limits = limits(builder -> builder.address(1, 1));
+        var audit = new RecordingAudit();
+        var limiter = new RateLimiter(limits,
+                new TrustedProxyConfiguration(1, Set.of("127.0.0.1")), audit, nanos::get);
+        InetAddress ipv4Loopback = InetAddress.getByName("127.0.0.1");
+        try (var fixture = fixture(limits, limiter, tenantAuthenticator(), ipv4Loopback)) {
+            String first = rawRequest(fixture.server().port(), "GET", "tenant-a:alice", "203.0.113.6",
+                    ipv4Loopback, new java.util.concurrent.ConcurrentLinkedQueue<>());
+            String refused = rawRequest(fixture.server().port(), "GET", "tenant-a:alice", "203.0.113.6",
+                    ipv4Loopback, new java.util.concurrent.ConcurrentLinkedQueue<>());
+            assertTrue(first.startsWith("HTTP/1.1 200 "), first);
+            assertTrue(refused.startsWith("HTTP/1.1 429 "), refused);
+
+            RateLimitAuditEvent event = audit.events().stream()
+                    .filter(candidate -> candidate.code().equals("ADDRESS_RATE_LIMIT_EXCEEDED"))
+                    .findFirst().orElseThrow();
+            assertEquals("203.0.113.6", event.clientAddress());
+            assertTrue(event.forwarded());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.tenantId());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.subject());
+            assertEquals(correlationIn(refused), event.requestId());
         }
     }
 
@@ -733,6 +901,99 @@ class RateLimitHttpIntegrationTest {
         }
     }
 
+    private static String rawRequest(int port, String method, String bearer, String forwardedFor,
+                                     InetAddress destination,
+                                     java.util.concurrent.ConcurrentLinkedQueue<java.net.Socket> activeSockets)
+            throws java.io.IOException {
+        var socket = new java.net.Socket();
+        activeSockets.add(socket);
+        try (socket) {
+            socket.connect(new InetSocketAddress(destination, port), 10_000);
+            socket.setSoTimeout(10_000);
+            String request = method + " /v1/status HTTP/1.1\r\n"
+                    + "Host: 127.0.0.1:" + port + "\r\n"
+                    + "Authorization: Bearer " + bearer + "\r\n"
+                    + "X-Forwarded-For: " + forwardedFor + "\r\n"
+                    + "Connection: close\r\n\r\n";
+            socket.getOutputStream().write(request.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+            socket.getOutputStream().flush();
+            return new String(socket.getInputStream().readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+        } finally {
+            activeSockets.remove(socket);
+        }
+    }
+
+    private static String correlationIn(String response) {
+        var matcher = java.util.regex.Pattern.compile("\\\"correlationId\\\":\\\"([^\\\"]+)\\\"")
+                .matcher(response);
+        if (!matcher.find()) throw new AssertionError("response has no correlation id: " + response);
+        return matcher.group(1);
+    }
+
+    private static void awaitAuthenticationGate(java.util.concurrent.CountDownLatch gate, String failure)
+            throws ai.ravenroot.server.security.AuthenticationException {
+        try {
+            if (!gate.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                throw new ai.ravenroot.server.security.AuthenticationException(failure);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new ai.ravenroot.server.security.AuthenticationException(
+                    "authentication gate was interrupted", interrupted);
+        }
+    }
+
+    private static Throwable drainRequests(
+            java.util.concurrent.ExecutorService executor,
+            List<java.util.concurrent.Future<String>> requests,
+            java.util.concurrent.ConcurrentLinkedQueue<java.net.Socket> activeSockets) {
+        Throwable failure = null;
+        executor.shutdown();
+        long drainDeadline = System.nanoTime() + Duration.ofSeconds(10).toNanos();
+        for (var request : requests) {
+            try {
+                request.get(Math.max(1L, drainDeadline - System.nanoTime()),
+                        java.util.concurrent.TimeUnit.NANOSECONDS);
+            } catch (Throwable drainFailure) {
+                if (failure == null) failure = drainFailure;
+                else failure.addSuppressed(drainFailure);
+                request.cancel(true);
+            }
+        }
+        for (var socket : activeSockets) {
+            try {
+                socket.close();
+            } catch (java.io.IOException closeFailure) {
+                if (failure == null) failure = closeFailure;
+                else failure.addSuppressed(closeFailure);
+            }
+        }
+        executor.shutdownNow();
+        try {
+            if (!executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                var timeout = new AssertionError("raw HTTP request executor did not terminate");
+                if (failure == null) failure = timeout;
+                else failure.addSuppressed(timeout);
+            }
+        } catch (InterruptedException interrupted) {
+            executor.shutdownNow();
+            boolean terminated = false;
+            try {
+                terminated = executor.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS);
+            } catch (InterruptedException repeated) {
+                interrupted.addSuppressed(repeated);
+            } finally {
+                Thread.currentThread().interrupt();
+            }
+            if (!terminated) {
+                interrupted.addSuppressed(new AssertionError("interrupted request executor did not terminate"));
+            }
+            if (failure == null) failure = interrupted;
+            else failure.addSuppressed(interrupted);
+        }
+        return failure;
+    }
+
     private RateLimiter limiter(RateLimitConfiguration limits, RateLimitAuditSink audit) {
         return new RateLimiter(limits, TrustedProxyConfiguration.direct(), audit, nanos::get);
     }
@@ -742,12 +1003,22 @@ class RateLimitHttpIntegrationTest {
     }
 
     private Fixture fixture(RateLimitConfiguration limits, RateLimiter limiter) {
+        return fixture(limits, limiter, tenantAuthenticator());
+    }
+
+    private Fixture fixture(RateLimitConfiguration limits, RateLimiter limiter,
+                            RequestAuthenticator authenticator) {
+        return fixture(limits, limiter, authenticator, InetAddress.getLoopbackAddress());
+    }
+
+    private Fixture fixture(RateLimitConfiguration limits, RateLimiter limiter,
+                            RequestAuthenticator authenticator, InetAddress bindAddress) {
         var engine = new PekkoExecutionEngine("ratelimit-http-test-" + System.nanoTime());
         var quiet = new PrintStream(java.io.OutputStream.nullOutputStream());
         var server = new RavenrootServer(
                 new DefaultRavenrootApplication(engine, new ExecutionMonitor()),
-                new InetSocketAddress(InetAddress.getLoopbackAddress(), 0), null, true,
-                tenantAuthenticator(), httpSecurity(), Clock.systemUTC(),
+                new InetSocketAddress(bindAddress, 0), null, true,
+                authenticator, httpSecurity(), Clock.systemUTC(),
                 new DefaultAuthorizationService(new StructuredAuthorizationLogger(quiet)), limiter);
         server.start();
         return new Fixture(server, engine);
@@ -827,6 +1098,12 @@ class RateLimitHttpIntegrationTest {
 
         List<String> codes() {
             return events.stream().map(RateLimitAuditEvent::code).toList();
+        }
+
+        RateLimitAuditEvent event(String tenantId, String subject) {
+            return events.stream()
+                    .filter(event -> event.tenantId().equals(tenantId) && event.subject().equals(subject))
+                    .findFirst().orElseThrow();
         }
     }
 

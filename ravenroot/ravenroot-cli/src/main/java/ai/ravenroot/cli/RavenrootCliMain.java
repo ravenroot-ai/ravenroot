@@ -44,6 +44,14 @@ public final class RavenrootCliMain {
             System.exit(GraphMlValidateCommand.run(args, System.out, System.err));
             return;
         }
+        // A captured SSE response is local input just like a GraphML document. Decode before the
+        // remote/embedded split so this command never resolves a token, opens a connection or starts
+        // an execution engine, including when global --server options were supplied and stripped.
+        Integer localEventResult = runLocalEventCommand(args, System.in, System.out, System.err);
+        if (localEventResult != null) {
+            System.exit(localEventResult);
+            return;
+        }
         // Intercepted here for the same reason backup/restore are: provisioning and revoking an
         // embed registration is not a RavenrootApplication use case. It operates directly on the
         // durable registration store (adapter-local administration, see
@@ -116,6 +124,13 @@ public final class RavenrootCliMain {
         if (exitCode != 0) {
             System.exit(exitCode);
         }
+    }
+
+    static Integer runLocalEventCommand(String[] args, java.io.InputStream input,
+                                        java.io.PrintStream output, java.io.PrintStream errors) {
+        return args.length >= 1 && "events".equals(args[0])
+                ? EventStreamDecodeCommand.run(args, input, output, errors)
+                : null;
     }
 
     /**

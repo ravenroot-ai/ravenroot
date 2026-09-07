@@ -191,8 +191,12 @@ to publish `dist` as static assets.
   can be maximised because column panels already occupy their available vertical axis at rest;
 - `src/runtime-client.js` owns authenticated HTTP execution commands and fetch-based SSE streaming.
   Bearer credentials remain in the `Authorization` header, cookies are explicitly omitted, SSE
-  frames and reconnect attempts are bounded, and reconnects resume with `Last-Event-ID`. A 401 may
-  invoke the configured external token provider once; a 403 is terminal and exposes a revoked state;
+  frames and reconnect attempts are bounded, and reconnects resume with `Last-Event-ID`. Automatic
+  clearing and the single 401 refresh require a provider-owned `getAccessTokenSnapshot` generation
+  plus atomic `clearAccessTokenIfCurrent` and optional `refreshAccessTokenIfCurrent` operations. A
+  legacy provider with only `getAccessToken` remains usable for requests, but its unconditional
+  clear or refresh methods are never called for a response that may belong to an older credential.
+  A 403 is terminal and exposes a revoked state;
 - `src/app.js` owns Cytoscape rendering and the existing interactions;
 - `public/examples` contains small, real, server-executable examples: every GraphML file here is
   admitted by `POST /v1/executions` and names only behaviors the standard catalog registers, checked

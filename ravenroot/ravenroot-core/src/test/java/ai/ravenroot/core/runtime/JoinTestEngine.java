@@ -204,6 +204,17 @@ final class JoinTestEngine implements ExecutionEngine {
         private final CountDownLatch enteredSchedule = new CountDownLatch(1);
 
         /**
+         * Signals the first task that has actually become visible to {@link #fireAll()}.
+         *
+         * <p>This is deliberately distinct from {@link #enteredSchedule}: the latter identifies the
+         * scheduler callback boundary before an optional test gate, while this one identifies the
+         * registration boundary after the task has been added to {@link #pending}. A scheduler
+         * instance belongs to one test, and callers that need more than the first registration use
+         * the recorded task counts directly.</p>
+         */
+        private final CountDownLatch firstRegistration = new CountDownLatch(1);
+
+        /**
          * Optional block <em>inside</em> {@code cancel}, for the other end of the same handoff.
          *
          * <p>Holding a caller inside {@code cancel} is what turns "was the timer cancelled before or
@@ -239,6 +250,10 @@ final class JoinTestEngine implements ExecutionEngine {
 
         boolean awaitInsideSchedule(long millis) throws InterruptedException {
             return enteredSchedule.await(millis, TimeUnit.MILLISECONDS);
+        }
+
+        boolean awaitFirstRegistration(long millis) throws InterruptedException {
+            return firstRegistration.await(millis, TimeUnit.MILLISECONDS);
         }
 
         void releaseSchedule() {
@@ -277,6 +292,7 @@ final class JoinTestEngine implements ExecutionEngine {
             }
             var entry = new Pending(delay, task);
             pending.add(entry);
+            firstRegistration.countDown();
             return entry;
         }
 

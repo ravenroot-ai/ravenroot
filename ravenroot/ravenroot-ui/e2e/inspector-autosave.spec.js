@@ -82,6 +82,35 @@ test('valid text autosaves as one focus-session undo and undo/redo refresh the I
     .resolves.toBe('Automatically saved');
 });
 
+test('node saves preserve selection and Inspector continuity with Autosave ON and OFF', async ({ page }) => {
+  await openEditable(page);
+  await selectOnly(page, 'dosomething');
+  const activeDocument = await page.evaluate(() => window.ravenroot.activeDocument().id);
+  const beforeViewport = await page.evaluate(() => ({ zoom: window.cy.zoom(), pan: window.cy.pan() }));
+
+  const name = page.locator('#node-editor input[name="name"]');
+  await name.fill('Selected through autosave');
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.activeDocument().graph.nodeMap.dosomething.name))
+    .toBe('Selected through autosave');
+  await expect.poll(() => selected(page)).toEqual(['dosomething']);
+  await expect(name).toBeFocused();
+  await expect(page.locator('#node-editor')).toBeVisible();
+
+  await page.locator('#btn-autosave').click();
+  await expect(page.locator('#btn-autosave')).toHaveAttribute('aria-pressed', 'false');
+  await name.fill('Selected through manual save');
+  await page.getByRole('button', { name: 'Save node' }).click();
+
+  await expect.poll(() => selected(page)).toEqual(['dosomething']);
+  await expect(page.locator('#node-editor input[name="name"]'))
+    .toHaveValue('Selected through manual save');
+  await expect(page.locator('#node-editor input[name="name"]')).toBeFocused();
+  await expect(page.evaluate(() => window.ravenroot.activeDocument().id)).resolves.toBe(activeDocument);
+  expect(await page.evaluate(() => ({ zoom: window.cy.zoom(), pan: window.cy.pan() })))
+    .toEqual(beforeViewport);
+});
+
 test('selection change flushes pending valid text and select/property removal commit immediately without duplicate listeners', async ({ page }) => {
   await openEditable(page);
   await selectOnly(page, 'dosomething');

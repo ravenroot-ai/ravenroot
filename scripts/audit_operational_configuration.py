@@ -133,7 +133,14 @@ DEPLOYMENT_ENVIRONMENT_CARRIER_PATHS = {
     }),
     "rawKubernetes": frozenset({"deploy/kubernetes/ravenroot.yaml"}),
 }
-LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES = frozenset({
+GRAPH_LIMIT_FAMILY_ID = "graph-execution-environment-v1"
+GRAPH_EXECUTION_LIMITS_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java")
+GRAPH_ML_LIMITS_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java")
+PAYLOAD_LIMITS_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java")
+GRAPH_LIMIT_TYPED_AUTHORITIES = frozenset({
     ("graph.execution.max-amplified-deliveries", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxAmplifiedDeliveries", "RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES"),
     ("graph.execution.max-cumulative-payload-bytes", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxCumulativePayloadBytes", "RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES"),
     ("graph.execution.max-fan-out", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxFanOut", "RAVENROOT_GRAPH_MAX_FAN_OUT"),
@@ -160,6 +167,88 @@ LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES = frozenset({
     ("graph.payload.max-text-length", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxTextLength", "RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH"),
     ("graph.payload.max-value-count", "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java#PayloadLimits", "maxValueCount", "RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT"),
 })
+
+GRAPH_LIMIT_SOURCE_CONTRACTS = (
+    # setting, target constructor, root component, environment symbol, helper, fallback, ceiling
+    ("graph.graphml.max-bytes", "GraphMlLimits", "graphMl", "MAX_GRAPHML_BYTES_VARIABLE",
+     "integer", "graphMl.maxBytes()", "GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES"),
+    ("graph.graphml.max-nodes", "GraphMlLimits", "graphMl", "MAX_NODES_VARIABLE",
+     "integer", "graphMl.maxNodes()", "GraphMlLimits.HARD_MAX_NODES"),
+    ("graph.graphml.max-edges", "GraphMlLimits", "graphMl", "MAX_EDGES_VARIABLE",
+     "integer", "graphMl.maxEdges()", "GraphMlLimits.HARD_MAX_EDGES"),
+    ("graph.graphml.max-properties", "GraphMlLimits", "graphMl", "MAX_PROPERTIES_VARIABLE",
+     "integer", "graphMl.maxProperties()", "GraphMlLimits.HARD_MAX_PROPERTIES"),
+    ("graph.graphml.max-depth", "GraphMlLimits", "graphMl", "MAX_GRAPHML_DEPTH_VARIABLE",
+     "integer", "graphMl.maxDepth()", "GraphMlLimits.HARD_MAX_DEPTH"),
+    ("graph.graphml.max-string-length", "GraphMlLimits", "graphMl",
+     "MAX_GRAPHML_STRING_LENGTH_VARIABLE", "integer", "graphMl.maxStringLength()",
+     "GraphMlLimits.HARD_MAX_STRING_LENGTH"),
+    ("graph.graphml.max-keys", "GraphMlLimits", "graphMl", "MAX_GRAPHML_KEYS_VARIABLE",
+     "integer", "graphMl.maxKeys()", "GraphMlLimits.HARD_MAX_KEYS"),
+    ("graph.graphml.max-elements", "GraphMlLimits", "graphMl", "MAX_GRAPHML_ELEMENTS_VARIABLE",
+     "integer", "graphMl.maxElements()", "GraphMlLimits.HARD_MAX_ELEMENTS"),
+    ("graph.graphml.max-attributes", "GraphMlLimits", "graphMl",
+     "MAX_GRAPHML_ATTRIBUTES_VARIABLE", "integer", "graphMl.maxAttributes()",
+     "GraphMlLimits.HARD_MAX_ATTRIBUTES"),
+    ("graph.graphml.max-namespace-declarations", "GraphMlLimits", "graphMl",
+     "MAX_GRAPHML_NAMESPACE_DECLARATIONS_VARIABLE", "integer",
+     "graphMl.maxNamespaceDeclarations()", "GraphMlLimits.HARD_MAX_NAMESPACE_DECLARATIONS"),
+    ("graph.payload.max-encoded-bytes", "PayloadLimits", "payload", "MAX_PAYLOAD_BYTES_VARIABLE",
+     "integer", "payload.maxEncodedBytes()", "PayloadLimits.HARD_MAX_ENCODED_BYTES"),
+    ("graph.payload.max-depth", "PayloadLimits", "payload", "MAX_PAYLOAD_DEPTH_VARIABLE",
+     "integer", "payload.maxDepth()", "PayloadLimits.HARD_MAX_DEPTH"),
+    ("graph.payload.max-collection-size", "PayloadLimits", "payload",
+     "MAX_PAYLOAD_COLLECTION_SIZE_VARIABLE", "integer", "payload.maxCollectionSize()",
+     "PayloadLimits.HARD_MAX_COLLECTION_SIZE"),
+    ("graph.payload.max-value-count", "PayloadLimits", "payload",
+     "MAX_PAYLOAD_VALUE_COUNT_VARIABLE", "integer", "payload.maxValueCount()",
+     "PayloadLimits.HARD_MAX_VALUE_COUNT"),
+    ("graph.payload.max-text-length", "PayloadLimits", "payload",
+     "MAX_PAYLOAD_TEXT_LENGTH_VARIABLE", "integer", "payload.maxTextLength()",
+     "PayloadLimits.HARD_MAX_TEXT_LENGTH"),
+    ("graph.payload.max-key-length", "PayloadLimits", "payload",
+     "MAX_PAYLOAD_KEY_LENGTH_VARIABLE", "integer", "payload.maxKeyLength()",
+     "PayloadLimits.HARD_MAX_KEY_LENGTH"),
+    ("graph.execution.max-fan-out", "GraphExecutionLimits", "maxFanOut",
+     "MAX_FAN_OUT_VARIABLE", "integer", "defaults.maxFanOut", "HARD_MAX_FAN_OUT"),
+    ("graph.execution.max-resident-actors", "GraphExecutionLimits", "maxResidentActors",
+     "MAX_RESIDENT_ACTORS_VARIABLE", "integer", "defaults.maxResidentActors",
+     "HARD_MAX_RESIDENT_ACTORS"),
+    ("graph.execution.max-live-actors-per-traversal", "GraphExecutionLimits",
+     "maxLiveActorsPerTraversal", "MAX_LIVE_ACTORS_VARIABLE", "integer",
+     "defaults.maxLiveActorsPerTraversal", "HARD_MAX_LIVE_ACTORS"),
+    ("graph.execution.max-in-flight-hops-per-traversal", "GraphExecutionLimits",
+     "maxInFlightHopsPerTraversal", "MAX_IN_FLIGHT_HOPS_VARIABLE", "integer",
+     "defaults.maxInFlightHopsPerTraversal", "HARD_MAX_IN_FLIGHT_HOPS"),
+    ("graph.execution.max-queued-admissions-per-node", "GraphExecutionLimits",
+     "maxQueuedAdmissionsPerNode", "MAX_QUEUED_ADMISSIONS_VARIABLE", "integer",
+     "defaults.maxQueuedAdmissionsPerNode", "HARD_MAX_QUEUED_ADMISSIONS"),
+    ("graph.execution.max-traversal-steps", "GraphExecutionLimits", "maxTraversalSteps",
+     "MAX_TRAVERSAL_STEPS_VARIABLE", "longInteger", "defaults.maxTraversalSteps",
+     "HARD_MAX_TRAVERSAL_STEPS"),
+    ("graph.execution.max-amplified-deliveries", "GraphExecutionLimits",
+     "maxAmplifiedDeliveries", "MAX_AMPLIFIED_DELIVERIES_VARIABLE", "longInteger",
+     "defaults.maxAmplifiedDeliveries", "HARD_MAX_AMPLIFIED_DELIVERIES"),
+    ("graph.execution.max-cumulative-payload-bytes", "GraphExecutionLimits",
+     "maxCumulativePayloadBytes", "MAX_CUMULATIVE_PAYLOAD_BYTES_VARIABLE", "longInteger",
+     "defaults.maxCumulativePayloadBytes", "HARD_MAX_CUMULATIVE_PAYLOAD_BYTES"),
+    ("graph.execution.max-recovery-deliveries-per-attempt", "GraphExecutionLimits",
+     "maxRecoveryDeliveriesPerAttempt", "MAX_RECOVERY_DELIVERIES_VARIABLE", "integer",
+     "defaults.maxRecoveryDeliveriesPerAttempt", "HARD_MAX_RECOVERY_DELIVERIES"),
+)
+GRAPH_LIMIT_AUTHORITY_BY_SETTING = {
+    setting: {"typedOwner": owner, "field": field, "environment": environment}
+    for setting, owner, field, environment in GRAPH_LIMIT_TYPED_AUTHORITIES
+}
+GRAPH_LIMIT_SOURCE_BY_SETTING = {
+    setting: {
+        "targetConstructor": target, "rootComponent": root_component,
+        "environmentSymbol": environment_symbol, "helper": helper,
+        "fallbackAccessor": fallback, "ceilingAccessor": ceiling,
+    }
+    for setting, target, root_component, environment_symbol, helper, fallback, ceiling
+    in GRAPH_LIMIT_SOURCE_CONTRACTS
+}
 
 
 @dataclass(frozen=True)
@@ -1797,38 +1886,303 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
     return errors
 
 
-def legacy_graph_environment_errors(setting: str, contract: dict[str, object],
-                                    setting_entries: list[dict[str, object]],
-                                    discovered: dict[str, Candidate]) -> list[str] | None:
-    bindings = contract.get("bindings", [])
-    environment = str(bindings[0]) if isinstance(bindings, list) and len(bindings) == 1 else ""
-    authority = (setting, str(contract.get("owner", "")), str(contract.get("field", "")), environment)
-    if authority not in LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES:
+def graph_limit_family_from_source(root: Path,
+                                   discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    """Derive the closed 25-setting GraphExecutionLimits binding family from source."""
+    if set(GRAPH_LIMIT_AUTHORITY_BY_SETTING) != set(GRAPH_LIMIT_SOURCE_BY_SETTING) \
+            or len(GRAPH_LIMIT_SOURCE_CONTRACTS) != 25:
         return None
-    coverage = contract.get("coverageEvidence")
-    if not isinstance(coverage, dict) or coverage.get("kind") != "graph-platform-carriers-v1":
-        return [f"{setting}: legacy graph binding exemption requires complete graph carrier evidence"]
-    source_path = str(contract["owner"]).rsplit("#", 1)[0]
-    expected_ids = {
-        candidate.id for candidate in discovered.values()
-        if candidate.kind == "environment-binding" and candidate.expression == environment
-        and candidate.path == source_path
+    source = (root / GRAPH_EXECUTION_LIMITS_PATH).read_text(encoding="utf-8")
+    graph_ml_source = (root / GRAPH_ML_LIMITS_PATH).read_text(encoding="utf-8")
+    payload_source = (root / PAYLOAD_LIMITS_PATH).read_text(encoding="utf-8")
+    root_components = java_record_components(source, "GraphExecutionLimits")
+    graph_ml_components = java_record_components(graph_ml_source, "GraphMlLimits")
+    payload_components = java_record_components(payload_source, "PayloadLimits")
+    if root_components != (
+            "graphMl", "payload", "maxFanOut", "maxResidentActors",
+            "maxLiveActorsPerTraversal", "maxInFlightHopsPerTraversal",
+            "maxQueuedAdmissionsPerNode", "maxTraversalSteps", "maxAmplifiedDeliveries",
+            "maxCumulativePayloadBytes", "maxRecoveryDeliveriesPerAttempt") \
+            or graph_ml_components != (
+                "maxBytes", "maxNodes", "maxEdges", "maxProperties", "maxDepth",
+                "maxStringLength", "maxKeys", "maxElements", "maxAttributes",
+                "maxNamespaceDeclarations") \
+            or payload_components != (
+                "maxEncodedBytes", "maxDepth", "maxCollectionSize", "maxValueCount",
+                "maxTextLength", "maxKeyLength"):
+        return None
+    if java_package(source) != "ai.ravenroot.core.runtime" \
+            or java_method_header(source, "GraphExecutionLimits", "fromEnvironment") != \
+            "public static GraphExecutionLimits fromEnvironment(Map<String, String> environment)" \
+            or any(not exact_import_identity(source, imported) for imported in (
+                "java.util.Map", "java.util.Objects", "ai.ravenroot.core.graph.GraphMlLimits",
+                "ai.ravenroot.api.payload.PayloadLimits",
+                "ai.ravenroot.api.persistence.GraphDefinitionStore",
+            )) \
+            or not java_has_no_simple_name_shadow(
+                source, "GraphExecutionLimits",
+                {"Map", "Objects", "GraphMlLimits", "PayloadLimits", "GraphDefinitionStore"}):
+        return None
+    java_lang_types = {"String", "Long", "NumberFormatException", "IllegalArgumentException"}
+    normal_imports = re.findall(
+        r"(?m)^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;",
+        strip_c_comments_and_literals(source),
+    )
+    if any(imported.rsplit(".", 1)[-1] in java_lang_types for imported in normal_imports) \
+            or not java_has_no_simple_name_shadow(
+                source, "GraphExecutionLimits", java_lang_types):
+        return None
+    factory_span = java_method_span(source, "GraphExecutionLimits", "fromEnvironment")
+    if factory_span is None:
+        return None
+    expected_factory = """
+        fromEnvironment(Map<String, String> environment) {
+            Objects.requireNonNull(environment, "environment");
+            GraphExecutionLimits defaults = DEFAULTS;
+            GraphMlLimits graphMl = defaults.graphMl;
+            graphMl = new GraphMlLimits(
+                    integer(environment, MAX_GRAPHML_BYTES_VARIABLE, graphMl.maxBytes(),
+                            GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES),
+                    integer(environment, MAX_NODES_VARIABLE, graphMl.maxNodes(), GraphMlLimits.HARD_MAX_NODES),
+                    integer(environment, MAX_EDGES_VARIABLE, graphMl.maxEdges(), GraphMlLimits.HARD_MAX_EDGES),
+                    integer(environment, MAX_PROPERTIES_VARIABLE, graphMl.maxProperties(),
+                            GraphMlLimits.HARD_MAX_PROPERTIES),
+                    integer(environment, MAX_GRAPHML_DEPTH_VARIABLE, graphMl.maxDepth(), GraphMlLimits.HARD_MAX_DEPTH),
+                    integer(environment, MAX_GRAPHML_STRING_LENGTH_VARIABLE, graphMl.maxStringLength(),
+                            GraphMlLimits.HARD_MAX_STRING_LENGTH),
+                    integer(environment, MAX_GRAPHML_KEYS_VARIABLE, graphMl.maxKeys(), GraphMlLimits.HARD_MAX_KEYS),
+                    integer(environment, MAX_GRAPHML_ELEMENTS_VARIABLE, graphMl.maxElements(),
+                            GraphMlLimits.HARD_MAX_ELEMENTS),
+                    integer(environment, MAX_GRAPHML_ATTRIBUTES_VARIABLE, graphMl.maxAttributes(),
+                            GraphMlLimits.HARD_MAX_ATTRIBUTES),
+                    integer(environment, MAX_GRAPHML_NAMESPACE_DECLARATIONS_VARIABLE,
+                            graphMl.maxNamespaceDeclarations(), GraphMlLimits.HARD_MAX_NAMESPACE_DECLARATIONS));
+            PayloadLimits payload = defaults.payload;
+            payload = new PayloadLimits(
+                    integer(environment, MAX_PAYLOAD_BYTES_VARIABLE, payload.maxEncodedBytes(),
+                            PayloadLimits.HARD_MAX_ENCODED_BYTES),
+                    integer(environment, MAX_PAYLOAD_DEPTH_VARIABLE, payload.maxDepth(), PayloadLimits.HARD_MAX_DEPTH),
+                    integer(environment, MAX_PAYLOAD_COLLECTION_SIZE_VARIABLE, payload.maxCollectionSize(),
+                            PayloadLimits.HARD_MAX_COLLECTION_SIZE),
+                    integer(environment, MAX_PAYLOAD_VALUE_COUNT_VARIABLE, payload.maxValueCount(),
+                            PayloadLimits.HARD_MAX_VALUE_COUNT),
+                    integer(environment, MAX_PAYLOAD_TEXT_LENGTH_VARIABLE, payload.maxTextLength(),
+                            PayloadLimits.HARD_MAX_TEXT_LENGTH),
+                    integer(environment, MAX_PAYLOAD_KEY_LENGTH_VARIABLE, payload.maxKeyLength(),
+                            PayloadLimits.HARD_MAX_KEY_LENGTH));
+            return new GraphExecutionLimits(graphMl, payload,
+                    integer(environment, MAX_FAN_OUT_VARIABLE, defaults.maxFanOut, HARD_MAX_FAN_OUT),
+                    integer(environment, MAX_RESIDENT_ACTORS_VARIABLE, defaults.maxResidentActors,
+                            HARD_MAX_RESIDENT_ACTORS),
+                    integer(environment, MAX_LIVE_ACTORS_VARIABLE, defaults.maxLiveActorsPerTraversal,
+                            HARD_MAX_LIVE_ACTORS),
+                    integer(environment, MAX_IN_FLIGHT_HOPS_VARIABLE, defaults.maxInFlightHopsPerTraversal,
+                            HARD_MAX_IN_FLIGHT_HOPS),
+                    integer(environment, MAX_QUEUED_ADMISSIONS_VARIABLE, defaults.maxQueuedAdmissionsPerNode,
+                            HARD_MAX_QUEUED_ADMISSIONS),
+                    longInteger(environment, MAX_TRAVERSAL_STEPS_VARIABLE, defaults.maxTraversalSteps,
+                            HARD_MAX_TRAVERSAL_STEPS),
+                    longInteger(environment, MAX_AMPLIFIED_DELIVERIES_VARIABLE, defaults.maxAmplifiedDeliveries,
+                            HARD_MAX_AMPLIFIED_DELIVERIES),
+                    longInteger(environment, MAX_CUMULATIVE_PAYLOAD_BYTES_VARIABLE,
+                            defaults.maxCumulativePayloadBytes, HARD_MAX_CUMULATIVE_PAYLOAD_BYTES),
+                    integer(environment, MAX_RECOVERY_DELIVERIES_VARIABLE,
+                            defaults.maxRecoveryDeliveriesPerAttempt, HARD_MAX_RECOVERY_DELIVERIES));
+        }
+    """
+    if normalized(strip_c_comments(source[slice(*factory_span)])) != normalized(expected_factory):
+        return None
+    factory_code = normalized(strip_c_comments_and_literals(source[slice(*factory_span)]))
+    required_composition = (
+        "Objects.requireNonNull(environment,              );",
+        "GraphExecutionLimits defaults = DEFAULTS;",
+        "GraphMlLimits graphMl = defaults.graphMl;",
+        "PayloadLimits payload = defaults.payload;",
+    )
+    # The string masker removes the requireNonNull label, but retains the structural call.
+    if any(normalized(value) not in factory_code for value in required_composition) \
+            or java_identifier_write_count(factory_code, "environment") != 0 \
+            or java_identifier_write_count(factory_code, "defaults") != 1 \
+            or java_identifier_write_count(factory_code, "graphMl") != 2 \
+            or java_identifier_write_count(factory_code, "payload") != 2:
+        return None
+    root_graph = java_constructor_component_call(
+        source, "GraphExecutionLimits", "fromEnvironment", "GraphExecutionLimits",
+        root_components, "graphMl")
+    root_payload = java_constructor_component_call(
+        source, "GraphExecutionLimits", "fromEnvironment", "GraphExecutionLimits",
+        root_components, "payload")
+    if root_graph is None or root_graph[0] != "graphMl" \
+            or root_payload is None or root_payload[0] != "payload":
+        return None
+
+    exact_helpers = {
+        "integer": (
+            "private static int integer(Map<String, String> environment, String name, int fallback, int ceiling)",
+            "integer(Map<String, String> environment, String name, int fallback, int ceiling) { "
+            "long value = longInteger(environment, name, fallback, ceiling); return (int) value; }",
+        ),
+        "longInteger": (
+            "private static long longInteger(Map<String, String> environment, String name, long fallback, long ceiling)",
+            "longInteger(Map<String, String> environment, String name, long fallback, long ceiling) { "
+            "String raw = environment.get(name); if (raw == null || raw.isBlank()) return fallback; "
+            "long value; try { value = Long.parseLong(raw.strip()); } catch (NumberFormatException invalid) "
+            "{ throw invalid(name, ceiling); } if (value < 1 || value > ceiling) throw invalid(name, ceiling); "
+            "return value; }",
+        ),
+        "invalid": (
+            "private static IllegalArgumentException invalid(String name, long ceiling)",
+            "invalid(String name, long ceiling) { return new IllegalArgumentException(name + "
+            "\" must be a whole number from 1 through \" + ceiling); }",
+        ),
     }
-    for field in ("composeCandidateIds", "helmTemplateCandidateIds",
-                  "helmSchemaEnvironmentCandidateIds", "rawKubernetesCandidateIds"):
-        identifiers = coverage.get(field, [])
-        if isinstance(identifiers, list):
-            expected_ids.update(str(identifier) for identifier in identifiers)
-    assigned_ids = {
-        str(entry["id"]) for entry in setting_entries
-        if entry.get("kind") == "environment-binding"
+    helper_digests: dict[str, str] = {}
+    for method, (header, body) in exact_helpers.items():
+        span = java_method_span(source, "GraphExecutionLimits", method)
+        if java_method_header(source, "GraphExecutionLimits", method) != header \
+                or span is None \
+                or normalized(strip_c_comments(source[slice(*span)])) != normalized(body):
+            return None
+        digest = java_method_digest(source, "GraphExecutionLimits", method)
+        if digest is None:
+            return None
+        helper_digests[method] = digest
+
+    target_components = {
+        "GraphMlLimits": graph_ml_components,
+        "PayloadLimits": payload_components,
+        "GraphExecutionLimits": root_components,
     }
-    if assigned_ids != expected_ids or any(
-            candidate_id not in discovered
-            or discovered[candidate_id].expression != environment
-            for candidate_id in expected_ids):
-        return [f"{setting}: legacy graph environment candidate set is incomplete or contains an alien candidate"]
-    return []
+    settings: list[dict[str, object]] = []
+    for setting, target, root_component, environment_symbol, helper, fallback, ceiling \
+            in GRAPH_LIMIT_SOURCE_CONTRACTS:
+        fixed = GRAPH_LIMIT_AUTHORITY_BY_SETTING[setting]
+        field = str(fixed["field"])
+        components = target_components[target]
+        call = java_constructor_component_call(
+            source, "GraphExecutionLimits", "fromEnvironment", target, components, field)
+        if call is None:
+            return None
+        argument, start, end = call
+        expected_argument = f"{helper}(environment, {environment_symbol}, {fallback}, {ceiling})"
+        if normalized(argument) != normalized(expected_argument):
+            return None
+        initializer = java_static_final_initializer(
+            source, "GraphExecutionLimits", environment_symbol)
+        environment = str(fixed["environment"])
+        if initializer is None or normalized(initializer[0]) != f'"{environment}"':
+            return None
+        type_span = java_type_span(source, "GraphExecutionLimits")
+        type_code = strip_c_comments_and_literals(source)[slice(*type_span)] \
+            if type_span is not None else ""
+        depths = java_brace_depths(type_code)
+        declarations = [match for match in re.finditer(
+            rf"\bpublic\s+static\s+final\s+String\s+{re.escape(environment_symbol)}\s*=", type_code,
+        ) if depths[match.start()] == 1]
+        environment_ids = candidate_ids_in_source_span(
+            GRAPH_EXECUTION_LIMITS_PATH, source, initializer[1], initializer[2],
+            "environment-binding", environment, discovered)
+        if len(declarations) != 1 or len(environment_ids) != 1 \
+                or java_identifier_write_count(factory_code, environment_symbol) != 0:
+            return None
+        root_index = root_components.index(root_component)
+        target_index = components.index(field)
+        settings.append({
+            "setting": setting, "typedOwner": fixed["typedOwner"], "field": field,
+            "sourceOwner": f"{GRAPH_EXECUTION_LIMITS_PATH.as_posix()}#GraphExecutionLimits",
+            "factoryMethod": "fromEnvironment", "rootComponent": root_component,
+            "rootComponentIndex": root_index, "targetConstructor": target,
+            "targetComponentIndex": target_index, "environmentSymbol": environment_symbol,
+            "environment": environment, "environmentCandidateId": environment_ids[0],
+            "helper": helper, "fallbackAccessor": fallback, "ceilingAccessor": ceiling,
+            "callDigest": hashlib.sha256(argument.encode("utf-8")).hexdigest(),
+        })
+    return {
+        "kind": "java-graph-environment-family-v1",
+        "sourceOwner": f"{GRAPH_EXECUTION_LIMITS_PATH.as_posix()}#GraphExecutionLimits",
+        "factoryMethod": "fromEnvironment",
+        "factoryBodyDigest": java_method_digest(source, "GraphExecutionLimits", "fromEnvironment"),
+        "helperBodyDigests": helper_digests,
+        "settings": settings,
+    }
+
+
+def graph_limit_authority_errors(root: Path, authorities: object,
+                                 entries: dict[str, dict[str, object]],
+                                 discovered: dict[str, Candidate]) -> list[str]:
+    """Verify the mandatory graph family across nested typed owners and exact carriers."""
+    expected_settings = set(GRAPH_LIMIT_AUTHORITY_BY_SETTING)
+    reviewed = {
+        str(entry.get("setting")) for entry in entries.values()
+        if entry.get("status") != "pending-review"
+        and str(entry.get("setting", "")) in expected_settings
+    }
+    if not reviewed:
+        return ([] if authorities in (None, {})
+                else ["graph limit authority exists without reviewed graph settings"])
+    errors: list[str] = []
+    if reviewed != expected_settings:
+        errors.append("reviewed graph settings do not equal the closed 25-setting family")
+    derived = graph_limit_family_from_source(root, discovered)
+    if derived is None:
+        return errors + ["GraphExecutionLimits environment source family has drifted"]
+    if not isinstance(authorities, dict) or set(authorities) != {GRAPH_LIMIT_FAMILY_ID} \
+            or authorities.get(GRAPH_LIMIT_FAMILY_ID) != derived:
+        errors.append("graph settings require the exact source-derived 25-setting family authority")
+    for spec in derived["settings"]:
+        setting = str(spec["setting"])
+        setting_entries = [entry for entry in entries.values() if entry.get("setting") == setting]
+        if not setting_entries:
+            errors.append(f"{setting}: graph family has no inventory rows")
+            continue
+        representative = setting_entries[0]
+        if representative.get("owner") != spec["typedOwner"] \
+                or representative.get("field") != spec["field"] \
+                or representative.get("bindings") != [spec["environment"]] \
+                or representative.get("bindingAuthority") is not None:
+            errors.append(f"{setting}: graph typed owner/field/environment metadata has drifted")
+        if current_source_owner(root, str(spec["typedOwner"])) is None \
+                or not current_source_field(root, str(spec["typedOwner"]), str(spec["field"])):
+            errors.append(f"{setting}: graph typed owner does not declare its exact component")
+        source_id = str(spec["environmentCandidateId"])
+        source_candidate = discovered.get(source_id)
+        if source_candidate is None or source_candidate.path != GRAPH_EXECUTION_LIMITS_PATH.as_posix() \
+                or source_candidate.kind != "environment-binding" \
+                or source_candidate.expression != spec["environment"] \
+                or entries.get(source_id, {}).get("setting") != setting:
+            errors.append(f"{setting}: graph source environment candidate is absent or assigned elsewhere")
+        source_ids = {
+            candidate.id for candidate in discovered.values()
+            if candidate.path == GRAPH_EXECUTION_LIMITS_PATH.as_posix()
+            and candidate.kind == "environment-binding"
+            and candidate.expression == spec["environment"]
+        }
+        if source_ids != {source_id}:
+            errors.append(f"{setting}: graph source environment candidate partition has drifted")
+        coverage = representative.get("coverageEvidence")
+        carrier_ids: set[str] = set()
+        if not isinstance(coverage, dict) \
+                or coverage.get("kind") != "graph-platform-carriers-v1":
+            errors.append(f"{setting}: graph family requires complete platform carrier evidence")
+        else:
+            for field in ("composeCandidateIds", "helmTemplateCandidateIds",
+                          "helmSchemaEnvironmentCandidateIds", "rawKubernetesCandidateIds"):
+                identifiers = coverage.get(field)
+                if not isinstance(identifiers, list):
+                    errors.append(f"{setting}: graph carrier evidence has no {field}")
+                    continue
+                carrier_ids.update(str(identifier) for identifier in identifiers)
+        assigned = {
+            str(entry["id"]) for entry in setting_entries
+            if entry.get("kind") == "environment-binding"
+        }
+        if assigned != {source_id} | carrier_ids or any(
+                identifier not in discovered
+                or discovered[identifier].expression != spec["environment"]
+                or entries.get(identifier, {}).get("setting") != setting
+                for identifier in carrier_ids):
+            errors.append(f"{setting}: graph environment candidates are not fully partitioned")
+    return errors
 
 
 def deployment_carrier_evidence_errors(setting: str, contract: dict[str, object],
@@ -2084,9 +2438,9 @@ def binding_authority_errors(root: Path, setting: str, contract: dict[str, objec
     if not environment_candidates:
         return ([] if contract.get("bindingAuthority") is None
                 else [f"{setting}: bindingAuthority exists without a binding candidate"])
-    legacy = legacy_graph_environment_errors(setting, contract, setting_entries, discovered)
-    if legacy is not None and contract.get("bindingAuthority") is None:
-        return legacy
+    if setting in GRAPH_LIMIT_AUTHORITY_BY_SETTING:
+        return ([] if contract.get("bindingAuthority") is None
+                else [f"{setting}: graph binding belongs to the closed graph family authority"])
     return environment_binding_authority_errors(
         root, setting, contract, setting_entries, entries, discovered, resolver_authorities,
     )
@@ -4186,6 +4540,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(assistant_limit_authority_errors(
         root, assistant_authorities, entries, discovered,
     ))
+    errors.extend(graph_limit_authority_errors(
+        root, document.get("graphLimitAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -4232,6 +4589,9 @@ def render_report(document: dict[str, object]) -> str:
     statuses = Counter(str(entry.get("status")) for entry in typed)
     classifications = Counter(str(entry.get("classification")) for entry in typed
                               if entry.get("classification") is not None)
+    retained_classifications = Counter(
+        str(entry.get("classification")) for entry in typed
+        if entry.get("status") == "retained" and entry.get("classification") is not None)
     surfaces = Counter(str(entry.get("surface")) for entry in typed)
     reviewed = len(typed) - statuses["pending-review"]
     operator_entries = [entry for entry in typed if entry.get("classification") == "operator-configurable"]
@@ -4289,6 +4649,7 @@ def render_report(document: dict[str, object]) -> str:
         f"| Duplicate authorities removed | {duplicates} |",
         f"| Retained security ceilings or defaults | {classifications['security-ceiling-or-default']} |",
         f"| Retained protocol or format invariants | {classifications['protocol-or-format-invariant']} |",
+        f"| Retained published contract descriptions | {retained_classifications['published-contract-description']} |",
         f"| Retained derived values | {classifications['derived']} |",
         f"| Test fixtures | {classifications['test-fixture']} |",
         f"| Intentionally deferred | {deferred} |", "",

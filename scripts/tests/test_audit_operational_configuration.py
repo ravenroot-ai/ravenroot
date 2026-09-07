@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from collections import Counter
 from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
@@ -1989,41 +1990,192 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     expression, expression.startswith("Duration."),
                 ))
 
-    def test_legacy_graph_exemption_rejects_an_alien_environment_candidate(self) -> None:
-        self.assertEqual(25, len(audit.LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES))
-        setting, owner, field, environment = next(iter(audit.LEGACY_GRAPH_ENVIRONMENT_AUTHORITIES))
-        source_path = owner.rsplit("#", 1)[0]
-        source = audit.Candidate(
-            id="oc-source", path=source_path, line=1, symbol=field,
-            kind="environment-binding", role="environment-binding", expression=environment,
-            expression_digest=audit.hashlib.sha256(environment.encode()).hexdigest(),
-            evidence=environment, evidence_digest=audit.hashlib.sha256(environment.encode()).hexdigest(),
-            surface="java",
-        )
-        alien = audit.Candidate(
-            id="oc-alien", path="ravenroot/example/Rate.java", line=1,
-            symbol="fromEnvironment", kind="environment-binding", role="environment-binding",
-            expression="RAVENROOT_RATELIMIT_ADDRESS_RPS",
-            expression_digest=audit.hashlib.sha256(b"alien").hexdigest(),
-            evidence="RAVENROOT_RATELIMIT_ADDRESS_RPS",
-            evidence_digest=audit.hashlib.sha256(b"alien").hexdigest(), surface="java",
-        )
-        contract = {
-            "owner": owner, "field": field, "bindings": [environment],
-            "coverageEvidence": {
-                "kind": "graph-platform-carriers-v1",
-                "composeCandidateIds": [], "helmTemplateCandidateIds": [],
-                "helmSchemaEnvironmentCandidateIds": [], "rawKubernetesCandidateIds": [],
-            },
+    def graph_limit_authority_fixture(self, root: Path):
+        paths = (audit.GRAPH_EXECUTION_LIMITS_PATH, audit.GRAPH_ML_LIMITS_PATH,
+                 audit.PAYLOAD_LIMITS_PATH)
+        pinned = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        for relative in paths:
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(subprocess.run(
+                ["git", "show", f"{pinned}:{relative.as_posix()}"], cwd=ROOT,
+                check=True, capture_output=True,
+            ).stdout)
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", *[path.as_posix() for path in paths]],
+                       cwd=root, check=True)
+
+        inventory = json.loads((ROOT / "scripts/operational-configuration-inventory.json").read_text())
+        records = inventory["evidenceRecords"]
+        graph_rows = [copy.deepcopy(entry) for entry in inventory["entries"]
+                      if entry.get("setting") in audit.GRAPH_LIMIT_AUTHORITY_BY_SETTING]
+        candidates = {
+            entry["id"]: audit.Candidate(
+                id=entry["id"], path=entry["path"], line=entry["line"],
+                symbol=entry["symbol"], kind=entry["kind"], role=entry["role"],
+                expression=entry["expression"], expression_digest=entry["expressionDigest"],
+                evidence=records[entry["evidenceDigest"]],
+                evidence_digest=entry["evidenceDigest"], surface=entry["surface"],
+            )
+            for entry in graph_rows
         }
-        entries = [
-            {"id": source.id, "kind": "environment-binding"},
-            {"id": alien.id, "kind": "environment-binding"},
-        ]
-        errors = audit.legacy_graph_environment_errors(
-            setting, contract, entries, {source.id: source, alien.id: alien},
+        entries = {entry["id"]: entry for entry in graph_rows}
+        authority = audit.graph_limit_family_from_source(root, candidates)
+        self.assertIsNotNone(authority)
+        return ({audit.GRAPH_LIMIT_FAMILY_ID: authority}, entries, candidates)
+
+    def graph_limit_errors(self, root: Path, authorities, entries, candidates):
+        return audit.graph_limit_authority_errors(root, authorities, entries, candidates)
+
+    def test_graph_environment_family_proves_all_25_cross_owner_bindings(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.graph_limit_authority_fixture(root)
+            authority = authorities[audit.GRAPH_LIMIT_FAMILY_ID]
+            self.assertEqual(25, len(authority["settings"]))
+            self.assertEqual(
+                {"GraphMlLimits": 10, "PayloadLimits": 6, "GraphExecutionLimits": 9},
+                dict(Counter(setting["targetConstructor"] for setting in authority["settings"])),
+            )
+            self.assertEqual([], self.graph_limit_errors(
+                root, authorities, entries, candidates))
+
+    def test_graph_environment_family_rejects_metadata_candidates_and_source_flow_mutations(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.graph_limit_authority_fixture(root)
+            authority = authorities[audit.GRAPH_LIMIT_FAMILY_ID]
+
+            for label, change in (
+                ("missing-family", lambda changed: changed.clear()),
+                ("missing-setting", lambda changed: changed[audit.GRAPH_LIMIT_FAMILY_ID][
+                    "settings"].pop()),
+                ("wrong-owner", lambda changed: changed[audit.GRAPH_LIMIT_FAMILY_ID][
+                    "settings"][0].update(typedOwner=audit.PAYLOAD_LIMITS_PATH.as_posix()
+                                          + "#PayloadLimits")),
+                ("same-valued-wrong-field", lambda changed: next(
+                    setting for setting in changed[audit.GRAPH_LIMIT_FAMILY_ID]["settings"]
+                    if setting["setting"] == "graph.graphml.max-nodes"
+                ).update(field="maxNamespaceDeclarations")),
+                ("wrong-environment", lambda changed: changed[audit.GRAPH_LIMIT_FAMILY_ID][
+                    "settings"][0].update(environment="RAVENROOT_GRAPH_MAX_NODES")),
+                ("wrong-component", lambda changed: changed[audit.GRAPH_LIMIT_FAMILY_ID][
+                    "settings"][0].update(targetComponentIndex=1)),
+                ("wrong-candidate", lambda changed: changed[audit.GRAPH_LIMIT_FAMILY_ID][
+                    "settings"][0].update(environmentCandidateId="oc-not-the-declaration")),
+            ):
+                with self.subTest(metadata=label):
+                    changed = copy.deepcopy(authorities)
+                    change(changed)
+                    self.assertTrue(self.graph_limit_errors(
+                        root, changed, entries, candidates), label)
+
+            first = authority["settings"][0]
+            same_environment = audit.Candidate(
+                id="oc-alien", path="ravenroot/example/Alien.java", line=1,
+                symbol="Alien", kind="environment-binding", role=first["environment"],
+                expression=first["environment"],
+                expression_digest=audit.hashlib.sha256(first["environment"].encode()).hexdigest(),
+                evidence=first["environment"],
+                evidence_digest=audit.hashlib.sha256(b"alien graph binding").hexdigest(),
+                surface="java",
+            )
+            alien_candidates = {**candidates, same_environment.id: same_environment}
+            alien_entries = copy.deepcopy(entries)
+            alien_entries[same_environment.id] = {
+                **same_environment.inventory_entry(), "status": "already-centralized",
+                "classification": "operator-configurable", "setting": first["setting"],
+            }
+            self.assertTrue(any("not fully partitioned" in error for error in
+                                self.graph_limit_errors(
+                                    root, authorities, alien_entries, alien_candidates)))
+
+            source_path = root / audit.GRAPH_EXECUTION_LIMITS_PATH
+            original = source_path.read_text(encoding="utf-8")
+            source_mutations = {
+                "wrong-fallback": original.replace(
+                    "graphMl.maxBytes(),\n                        GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES",
+                    "graphMl.maxNodes(),\n                        GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES",
+                    1),
+                "same-valued-wrong-fallback": original.replace(
+                    "MAX_NODES_VARIABLE, graphMl.maxNodes(), GraphMlLimits.HARD_MAX_NODES",
+                    "MAX_NODES_VARIABLE, graphMl.maxNamespaceDeclarations(), "
+                    "GraphMlLimits.HARD_MAX_NODES", 1),
+                "same-valued-wrong-ceiling": original.replace(
+                    "MAX_NODES_VARIABLE, graphMl.maxNodes(), GraphMlLimits.HARD_MAX_NODES",
+                    "MAX_NODES_VARIABLE, graphMl.maxNodes(), "
+                    "GraphMlLimits.HARD_MAX_NAMESPACE_DECLARATIONS", 1),
+                "missing-root-link": original.replace(
+                    "return new GraphExecutionLimits(graphMl, payload,",
+                    "return new GraphExecutionLimits(GraphMlLimits.DEFAULTS, payload,", 1),
+                "nested-constructor-is-unused": original.replace(
+                    "graphMl = new GraphMlLimits(",
+                    "graphMl = GraphMlLimits.DEFAULTS;\n"
+                    "        GraphMlLimits unusedGraphMl = new GraphMlLimits(", 1),
+                "root-constructor-is-unused": original.replace(
+                    "return new GraphExecutionLimits(graphMl, payload,",
+                    "GraphExecutionLimits unusedRoot = new GraphExecutionLimits(graphMl, payload,",
+                    1).replace(
+                        "defaults.maxRecoveryDeliveriesPerAttempt, HARD_MAX_RECOVERY_DELIVERIES));\n"
+                        "    }\n\n    private static int integer",
+                        "defaults.maxRecoveryDeliveriesPerAttempt, HARD_MAX_RECOVERY_DELIVERIES));\n"
+                        "        return DEFAULTS;\n"
+                        "    }\n\n    private static int integer",
+                        1),
+                "wrong-helper-result": original.replace("return (int) value;", "return 1;", 1),
+                "ignored-parsed-long": original.replace("return value;", "return fallback;", 1),
+                "raw-value-refusal": original.replace(
+                    "throw invalid(name, ceiling);",
+                    "throw new IllegalArgumentException(raw, invalid);", 1),
+                "wrong-environment-literal": original.replace(
+                    '"RAVENROOT_GRAPHML_MAX_BYTES"', '"RAVENROOT_GRAPH_MAX_NODES"', 1),
+                "nested-long-shadow": original.replace(
+                    "\n}\n", "\n    private static final class Long {\n"
+                    "        static long parseLong(String raw) { return 1; }\n"
+                    "    }\n}\n", 1),
+                "conflicting-long-import": original.replace(
+                    "import java.util.Map;", "import example.Long;\nimport java.util.Map;", 1),
+            }
+            for label, mutated in source_mutations.items():
+                with self.subTest(source=label):
+                    self.assertNotEqual(original, mutated)
+                    source_path.write_text(mutated, encoding="utf-8")
+                    changed = copy.deepcopy(authorities)
+                    changed_authority = changed[audit.GRAPH_LIMIT_FAMILY_ID]
+                    changed_authority["factoryBodyDigest"] = audit.java_method_digest(
+                        mutated, "GraphExecutionLimits", "fromEnvironment")
+                    changed_authority["helperBodyDigests"]["integer"] = audit.java_method_digest(
+                        mutated, "GraphExecutionLimits", "integer")
+                    errors = self.graph_limit_errors(root, changed, entries, candidates)
+                    self.assertTrue(any("source family has drifted" in error for error in errors),
+                                    (label, errors))
+            source_path.write_text(original, encoding="utf-8")
+
+    def test_report_counts_retained_published_contract_descriptions(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            _authority, entries, _candidates, _details = self.route_table_authority_fixture(root)
+            document = {"entries": list(entries.values()), "retiredEntries": [],
+                        "migrationHistory": []}
+            self.assertIn(
+                "| Retained published contract descriptions | 341 |",
+                audit.render_report(document),
+            )
+            deferred = copy.deepcopy(document)
+            published = next(entry for entry in deferred["entries"]
+                             if entry["classification"] == "published-contract-description")
+            published.update(status="deferred", followUp="#225")
+            self.assertIn(
+                "| Retained published contract descriptions | 340 |",
+                audit.render_report(deferred),
+            )
+        self.assertIn(
+            "| Retained published contract descriptions | 0 |",
+            audit.render_report({"entries": [], "retiredEntries": [], "migrationHistory": []}),
         )
-        self.assertTrue(any("alien candidate" in error for error in errors), errors)
 
     def test_new_named_operational_constant_is_rejected(self) -> None:
         with synthetic_repository() as location:

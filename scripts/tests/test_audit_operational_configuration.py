@@ -4535,6 +4535,171 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(audit.ui_text_catalog_authority_errors(
                 root, authorities, entries, candidates))
 
+    def helm_schema_authority_fixture(self, root: Path):
+        target = root / audit.HELM_SCHEMA_PATH
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((ROOT / audit.HELM_SCHEMA_PATH).read_bytes())
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", audit.HELM_SCHEMA_PATH.as_posix()], cwd=root, check=True)
+        candidate_list = audit.discover_paths(root, [audit.HELM_SCHEMA_PATH])
+        authority = audit.helm_schema_authority_from_source(root, candidate_list)
+        self.assertIsNotNone(authority)
+        entries = {candidate.id: candidate.inventory_entry() for candidate in candidate_list}
+        keyword_ids = set(authority["candidateIdsByRole"]["schema-keyword-spelling"])
+        for identifier in audit.HELM_SCHEMA_CLOSED_IDS:
+            entries[identifier].update(
+                status="retained",
+                classification="protocol-or-format-invariant",
+                retainedAuthority=audit.HELM_SCHEMA_CLOSED_FAMILY_ID,
+                rationale=(audit.HELM_SCHEMA_KEYWORD_RATIONALE if identifier in keyword_ids
+                           else audit.HELM_SCHEMA_TYPE_RATIONALE),
+            )
+        authorities = {audit.HELM_SCHEMA_CLOSED_FAMILY_ID: authority}
+        candidates = {candidate.id: candidate for candidate in candidate_list}
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": list(entries.values()),
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence for candidate in candidate_list
+            },
+            "retiredEntries": [],
+            "migrationHistory": [],
+            "helmSchemaAuthorities": authorities,
+        }
+        return authorities, entries, candidates, document
+
+    def test_helm_schema_authority_proves_exact_444_positions_without_claiming_operands(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates, document = self.helm_schema_authority_fixture(root)
+            authority = authorities[audit.HELM_SCHEMA_CLOSED_FAMILY_ID]
+            self.assertEqual(1067, len(candidates))
+            self.assertEqual(444, authority["candidateCount"])
+            self.assertEqual(
+                {"schema-keyword-spelling": 360,
+                 "schema-type-vocabulary-selection-frozen": 84},
+                {role: len(identifiers)
+                 for role, identifiers in authority["candidateIdsByRole"].items()},
+            )
+            self.assertEqual(623, sum(
+                entry["status"] == "pending-review" for entry in entries.values()))
+            self.assertEqual(audit.HELM_SCHEMA_REVIEWED_SPEC_SHA256,
+                             authority["positionSpecSha256"])
+            self.assertEqual([], audit.helm_schema_authority_errors(
+                root, authorities, entries, candidates))
+            self.assertEqual([], audit.inventory_errors(
+                root, document, tuple(candidates.values())))
+
+    def test_helm_schema_authority_rejects_exact_set_classification_and_position_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            authorities, entries, candidates, _ = self.helm_schema_authority_fixture(root)
+            family = audit.HELM_SCHEMA_CLOSED_FAMILY_ID
+            identifier = next(iter(audit.HELM_SCHEMA_CLOSED_IDS))
+
+            missing = copy.deepcopy(authorities)
+            missing[family]["candidateIdsByRole"]["schema-keyword-spelling"].pop()
+            self.assertTrue(audit.helm_schema_authority_errors(
+                root, missing, entries, candidates))
+            opted_out = copy.deepcopy(entries)
+            opted_out[identifier].pop("retainedAuthority")
+            self.assertTrue(audit.helm_schema_authority_errors(
+                root, authorities, opted_out, candidates))
+            wrong_class = copy.deepcopy(entries)
+            wrong_class[identifier]["classification"] = "derived"
+            self.assertTrue(audit.helm_schema_authority_errors(
+                root, authorities, wrong_class, candidates))
+            wrong_rationale = copy.deepcopy(entries)
+            wrong_rationale[identifier]["rationale"] += " changed"
+            self.assertTrue(audit.helm_schema_authority_errors(
+                root, authorities, wrong_rationale, candidates))
+            extra_claim = copy.deepcopy(entries)
+            supporting_id = next(identifier for identifier in candidates
+                                 if identifier not in audit.HELM_SCHEMA_CLOSED_IDS)
+            extra_claim[supporting_id].update(
+                status="retained",
+                classification="protocol-or-format-invariant",
+                retainedAuthority=family,
+                rationale=audit.HELM_SCHEMA_KEYWORD_RATIONALE,
+            )
+            self.assertTrue(any("missing or extra claimed rows" in error for error in
+                                audit.helm_schema_authority_errors(
+                                    root, authorities, extra_claim, candidates)))
+
+            path = root / audit.HELM_SCHEMA_PATH
+            original = path.read_text(encoding="utf-8")
+            moved_keyword = original.replace(
+                '"replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },',
+                '"replicaCount": {\n      "type": "integer", "minimum": 1, "maximum": 1\n    },',
+                1,
+            )
+            self.assertNotEqual(original, moved_keyword)
+            path.write_text(moved_keyword, encoding="utf-8")
+            refreshed = audit.discover_paths(root, [audit.HELM_SCHEMA_PATH])
+            self.assertIsNone(audit.helm_schema_authority_from_source(root, refreshed))
+
+            changed_type = original.replace('"type": "object"', '"type": "string"', 1)
+            self.assertNotEqual(original, changed_type)
+            path.write_text(changed_type, encoding="utf-8")
+            refreshed = audit.discover_paths(root, [audit.HELM_SCHEMA_PATH])
+            self.assertIsNone(audit.helm_schema_authority_from_source(root, refreshed))
+
+            malformed_members = {
+                "properties": ('"properties": {', '"properties": null, "ignoredProperties": {'),
+                "oneOf": ('"oneOf": [', '"oneOf": null, "ignoredOneOf": ['),
+                "items": ('"items": {', '"items": null, "ignoredItems": {'),
+            }
+            for label, (before, after) in malformed_members.items():
+                with self.subTest(malformed=label):
+                    malformed = original.replace(before, after, 1)
+                    self.assertNotEqual(original, malformed)
+                    path.write_text(malformed, encoding="utf-8")
+                    refreshed = audit.discover_paths(root, [audit.HELM_SCHEMA_PATH])
+                    self.assertIsNone(audit.helm_schema_authority_from_source(root, refreshed))
+
+    def test_helm_supporting_operands_remain_subject_to_inventory_drift_gates(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            _, _, candidates, document = self.helm_schema_authority_fixture(root)
+            path = root / audit.HELM_SCHEMA_PATH
+            original = path.read_text(encoding="utf-8")
+            mutations = {
+                "same-line minimum": (
+                    '"replicaCount": { "type": "integer", "minimum": 1, "maximum": 1 },',
+                    '"replicaCount": { "type": "integer", "minimum": 2, "maximum": 1 },',
+                ),
+                "reference redirect": (
+                    '"$ref": "#/definitions/graphBlank"',
+                    '"$ref": "#/definitions/humanTaskBlank"',
+                ),
+                "blank pattern": (
+                    '"graphBlank": { "type": "string", "pattern": "^',
+                    '"graphBlank": { "type": "string", "pattern": "^x',
+                ),
+                "required member": (
+                    '"required": ["repository", "tag", "digest", "pullPolicy"]',
+                    '"required": ["repositoryChanged", "tag", "digest", "pullPolicy"]',
+                ),
+                "environment leaf": (
+                    '"RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS"',
+                    '"RAVENROOT_EXECUTION_STORE_MAX_LEASE_TTL_SECONDS_CHANGED"',
+                ),
+            }
+            for label, (before, after) in mutations.items():
+                with self.subTest(label=label):
+                    changed = original.replace(before, after, 1)
+                    self.assertNotEqual(original, changed)
+                    path.write_text(changed, encoding="utf-8")
+                    refreshed = audit.discover_paths(root, [audit.HELM_SCHEMA_PATH])
+                    errors = audit.inventory_errors(root, document, refreshed)
+                    self.assertTrue(any(
+                        marker in error for error in errors for marker in (
+                            "unclassified operational candidate", "stale inventory metadata",
+                            "stale inventory entry", "Helm schema keyword/type positions",
+                        )
+                    ), errors)
+                    path.write_text(original, encoding="utf-8")
+
     def test_verification_script_fixture_authority_proves_exact_513_row_manifest(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

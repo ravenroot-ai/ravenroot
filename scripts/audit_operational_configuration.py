@@ -203,6 +203,476 @@ UI_TEXT_PROTOCOL_RATIONALE = (
     "Stable UI catalog lookup key or locale fallback atom is part of the closed text lookup format."
 )
 
+HELM_SCHEMA_CLOSED_FAMILY_ID = "helm-json-schema-keyword-and-type-vocabulary-v1"
+HELM_SCHEMA_PATH = Path("deploy/helm/ravenroot/values.schema.json")
+HELM_SCHEMA_REVIEWED_REVISION = "c356a76db83ca28d29b93e118e848a0e049e6147"
+HELM_SCHEMA_REVIEWED_SOURCE_SHA256 = (
+    "fdf22df3b0431837429ad66b536b3c7add37950080f0d9f553defcd8a0c085af"
+)
+HELM_SCHEMA_REVIEWED_SPEC_SHA256 = (
+    "4e88bfe5caafe72549bbd1cd03994a128edf728e852eb5b591aea753cb6a825d"
+)
+HELM_SCHEMA_KEYWORDS = frozenset({
+    "type", "minimum", "maximum", "oneOf", "$ref", "required", "enum", "pattern",
+    "minLength", "minItems",
+})
+HELM_SCHEMA_TYPE_VOCABULARY = frozenset({"object", "array", "string", "integer"})
+HELM_SCHEMA_CLOSED_IDS = frozenset({
+    "oc-005d262e99a349f9fed3",
+    "oc-00c22f9f6e830608b39d",
+    "oc-01b0fedf9c78137ba759",
+    "oc-01d9c3913aff25c37e4e",
+    "oc-020e28da91abe48cea5c",
+    "oc-031ead3eaac98c5fc3bb",
+    "oc-039055a3e1aa62a1a74e",
+    "oc-03ed74b2b68f5d6ee92a",
+    "oc-049b20d8350412e9c17d",
+    "oc-04ad878bdbdb414ba55b",
+    "oc-04ef83b3ffb1d985a193",
+    "oc-05bb0729aa1f7f1203c2",
+    "oc-077174e5d73fb916828e",
+    "oc-08dd81e0fb8e018e9cee",
+    "oc-095f8b370a3e7a357772",
+    "oc-0a42e45cd3949c8261c3",
+    "oc-0b73f99fbcd171823db6",
+    "oc-0bff50e9ea62f75aeb70",
+    "oc-0c3eb1d4c4017ab3bbb0",
+    "oc-0c8b324117cd1d1a87a6",
+    "oc-0d7c73f2e16371008564",
+    "oc-0eedd7d631f0c9780ebe",
+    "oc-1016b4847442919a9f27",
+    "oc-1252e1a07a37359f8206",
+    "oc-128bafb10a0964a71820",
+    "oc-152c613a3a8fab8231b5",
+    "oc-15c97a042ed498958650",
+    "oc-15e4edd63a86148fc2b7",
+    "oc-161b64c2b049621bf513",
+    "oc-166a7ad264d06d0cac61",
+    "oc-18524422f2f110513d7f",
+    "oc-193e5b5d409c2edc14e7",
+    "oc-198fbf7ca5076ea067af",
+    "oc-1a3dd607a43c9a6fc1c2",
+    "oc-1a62642ef6dd51b9be99",
+    "oc-1bf914ec657d6ba2e082",
+    "oc-1c693d338c00988f68ec",
+    "oc-1cc65baebdd7036e55bd",
+    "oc-1cf6c8d6ba6114127863",
+    "oc-1e8960f3fd10199d72e7",
+    "oc-1f18e295fb2814d50dfc",
+    "oc-20b4a92798e15a967ba0",
+    "oc-2130fbcd77f4c3fe4071",
+    "oc-22cc0f0447700d74a129",
+    "oc-22d343a44a57a51e9e63",
+    "oc-2452f8c401be462d8b10",
+    "oc-26a30147b4a341cd97c3",
+    "oc-26b597f6eadc38a3e09d",
+    "oc-27187178ceae2ed4251d",
+    "oc-28241b2da4de09f55dc8",
+    "oc-2a2544ec7c7d40a77352",
+    "oc-2a34adf6f2ef4fd7a454",
+    "oc-2a40e4b3d9edafe0b67b",
+    "oc-2acd68d49e7d57b7508c",
+    "oc-2b1ee7e6fa8648cdd3ec",
+    "oc-2c911880c68d2fce8cc8",
+    "oc-2cca3de935c941edc413",
+    "oc-2d03672b683978563b91",
+    "oc-2d2d5299b46008a1634c",
+    "oc-2db8e4434ae796a68a05",
+    "oc-2e85c815fb32a35729fd",
+    "oc-2e98baf2a34da37aa046",
+    "oc-2ed96391e0bafec34f12",
+    "oc-2f5a7cae2e87ddb618a8",
+    "oc-3020738a54d1014c8d7b",
+    "oc-30549b1e99dc10292d3c",
+    "oc-30df78063f137a06825f",
+    "oc-30ed9bf6fbe0609c7b4b",
+    "oc-31186b403650944288a6",
+    "oc-31d142043072dba081c6",
+    "oc-3217a82495ca615c75dd",
+    "oc-3323109b00985c217aec",
+    "oc-33388ea100f6b34a6177",
+    "oc-33748656bff6d322ed85",
+    "oc-34547fef5b593d6ab463",
+    "oc-3528ef0bf3b7fa3c2ae9",
+    "oc-3631f645e061383b1fe1",
+    "oc-364e04bba7822657b2b9",
+    "oc-37523fe8f85e08212531",
+    "oc-379496ead6d6928a71fe",
+    "oc-37bb70969eed74f5143e",
+    "oc-3847895f4336426236c0",
+    "oc-3874f3b422018841a48c",
+    "oc-38ca48666e022bbe8755",
+    "oc-3acb1759ccacf7aa3497",
+    "oc-3b13ac2cbda79ba11631",
+    "oc-3ba6103dbbcf8283192e",
+    "oc-3bde49b49644280ff550",
+    "oc-3bfcd57252b82438737d",
+    "oc-3c85531917465c7e1ae2",
+    "oc-3c98ef56025f9337c8d2",
+    "oc-3deeb93660d7064b340f",
+    "oc-3dfc86eb4ee3b5d51bc5",
+    "oc-3dfcbd16f7ee7648f599",
+    "oc-3e225992460a2f6b60df",
+    "oc-4057f048577da2328a60",
+    "oc-4082c427622bf86224b1",
+    "oc-422e44bfc51582197f29",
+    "oc-4239d41eb4687518a2c3",
+    "oc-42404732f92e60dfdce4",
+    "oc-429dbc64bea5897a5362",
+    "oc-42ae47d502feadafc85d",
+    "oc-433d3952899a37d2c454",
+    "oc-447f5fed915f78010191",
+    "oc-44ba9f5d6006a3db350c",
+    "oc-44cd6149899fdf3c61ee",
+    "oc-45004995268035ca0ecb",
+    "oc-45b9083d18a8a2158290",
+    "oc-46707882d8362a3badec",
+    "oc-46ef287b2fa4a928dfbb",
+    "oc-47922f85b26b647c427f",
+    "oc-491369ce2531749c2cfb",
+    "oc-496e6b006bd91be5104c",
+    "oc-499cf91995dcac655b8b",
+    "oc-49fba4c487895c2d92e1",
+    "oc-4afc10197afee35ca07b",
+    "oc-4bd721ed2d1424657927",
+    "oc-4be2fb6f52d5740194a0",
+    "oc-4c3bd90861afd03c64b1",
+    "oc-4c4a6606b7f5b230148a",
+    "oc-4d5c4f87100985c136b7",
+    "oc-4d6c9284fdaa12e5f257",
+    "oc-4e9b64ebed5b7a186ce2",
+    "oc-4ee0746187cab14caf05",
+    "oc-4f0320b08bd5b1124563",
+    "oc-4f0a85b71f82e09ea796",
+    "oc-4f43bd2c908c73a8ea9f",
+    "oc-502eb33be2737c17c1e7",
+    "oc-505d880adc41dbbacf7b",
+    "oc-506e64fb132137eba3cd",
+    "oc-512656983610ecbfef7b",
+    "oc-5171de7012c21068925a",
+    "oc-51e44c4df1102af00f5c",
+    "oc-52036caded17fa8eae88",
+    "oc-52807759f505e23376d6",
+    "oc-528657ce46d2a0ec4194",
+    "oc-5456afbecb8bf00587e3",
+    "oc-54adef26af329dee80db",
+    "oc-54f9f6bb889c0fc86e3b",
+    "oc-551b8faa3d7cedeb8dfa",
+    "oc-5586e107cf989c8fd917",
+    "oc-5622056d4409ee8063a2",
+    "oc-566794e0dd89158a32c0",
+    "oc-57aa8b5abec6aaf07a0b",
+    "oc-5968d0b3c7c3bf3865d8",
+    "oc-596f505c6c9d4e3e602a",
+    "oc-59daae45696732a1205d",
+    "oc-59fe8188512ef92b2942",
+    "oc-5a5a0025d9e70cccf179",
+    "oc-5a7f5d1d8c9a28f5aecb",
+    "oc-5acc9ba4db37400497c5",
+    "oc-5b54854d2e93adfcdbcd",
+    "oc-5bf9272376b8ab6b026c",
+    "oc-5cb83d53266174efebcc",
+    "oc-5d5f66d1692ce700d042",
+    "oc-5d7962c7de8fda6db92c",
+    "oc-5eac3140da87c6c25ff2",
+    "oc-5f7f759a61bdc5bd78c1",
+    "oc-6014eb8cbff12fb9f485",
+    "oc-61958019414b69027ed3",
+    "oc-627dc85485eac04359e4",
+    "oc-638ad4e089a8de722f99",
+    "oc-63cc754e53fa3eefd3f0",
+    "oc-647b5c1bb95fbee06575",
+    "oc-65e9250e7cd59c34f4b6",
+    "oc-68d966e44cbd84f1c0fe",
+    "oc-6a4ca67b1a29d5ba24fd",
+    "oc-6b1cd22c98505eb5970d",
+    "oc-6cca20618ac72a597d33",
+    "oc-6ced1e6e9e33779d8190",
+    "oc-6d4b645a574ffa372068",
+    "oc-6d5135580b4cff195b65",
+    "oc-6f330d852d7cbb912087",
+    "oc-6f8d880ce8954f0f14c5",
+    "oc-6fc2ebc11d73dd595a82",
+    "oc-716982ebe7b9be8dada1",
+    "oc-71c972c672a6da1670f7",
+    "oc-73033e96d582be4dbeb9",
+    "oc-730538cd2784e018ed30",
+    "oc-736271ca5a9ef4c5bf78",
+    "oc-739a776bc4866287cb76",
+    "oc-7661adac1c1c23b800cc",
+    "oc-76cb7481e3a1afdaa606",
+    "oc-77662deed80cd6da1ead",
+    "oc-7810f1dc277d37750672",
+    "oc-7856f72d393b3c9ab82e",
+    "oc-78730e87092644831935",
+    "oc-788a4be2a106e3b7b780",
+    "oc-78b27c5e22f8de0c26e2",
+    "oc-79b24c08988b2f6ebaeb",
+    "oc-79beca25802c9ddcdeb8",
+    "oc-79d4ea7b0ab673fc9e7d",
+    "oc-79e45c619de0c2c12c9e",
+    "oc-7a217196adbb98df980d",
+    "oc-7aa6d2602bbbd6ca6305",
+    "oc-7ac0549c5a67a593ad3c",
+    "oc-7b3d20fc7611bb948f04",
+    "oc-7b4dff1ba681c3b97577",
+    "oc-7bbf452a3fd4394e3ac8",
+    "oc-7c9222db214428927172",
+    "oc-7e97e07ff585769cf0ae",
+    "oc-7ebf65b7dcddb52bef3c",
+    "oc-8004ee61f171a9743efe",
+    "oc-8129f06600c617c1129c",
+    "oc-852b520801cb1427e807",
+    "oc-859d9b7fe9efd0e8990e",
+    "oc-85e4007da0deddbf9772",
+    "oc-870d04a158745403dc65",
+    "oc-87411de0ac91f68b24b3",
+    "oc-87479d4549c1db6ebf3e",
+    "oc-879dd163cb22396e0f20",
+    "oc-88407e9372f4c5426586",
+    "oc-8a2339a90e772a6f13e3",
+    "oc-8a40bf3a2bab089204c7",
+    "oc-8db8470b786cf1122be8",
+    "oc-8dd7b61548420d4fc707",
+    "oc-8dda0e2493e1a4a6b63d",
+    "oc-8e437da10d6cb6409db5",
+    "oc-8e5e76189f7b9e926dd3",
+    "oc-8ea623b59f81da36aa46",
+    "oc-8f2e1bb69e9295250224",
+    "oc-8faabf9257090256b82a",
+    "oc-916ee9828386ed9f88c6",
+    "oc-9175057082f1dc78c78e",
+    "oc-91f71536e5b56f9eb09e",
+    "oc-927a2e05f35d939bdda7",
+    "oc-930e16e8a1f6db5e22a7",
+    "oc-933b4bf41fd93d5461a0",
+    "oc-93905982dfc19946bacb",
+    "oc-93ab7dfbd619c25577c6",
+    "oc-93ae66d3450dd770d8b8",
+    "oc-93c9463f47e18d394b74",
+    "oc-940ed2df55f40e7c6be4",
+    "oc-9458548adbd8f5239c40",
+    "oc-945a3419669963484ef2",
+    "oc-9468b7fe1369c625994f",
+    "oc-94e1568755d067b136a8",
+    "oc-954ea1bfc6f3ef06703c",
+    "oc-95530901d79301c1521a",
+    "oc-95c2119ee61129139398",
+    "oc-960653da1f7b1966a252",
+    "oc-9640d4212084ebd54a1f",
+    "oc-9804971ed85f8fc6a435",
+    "oc-995782aa6dd75f7a12f5",
+    "oc-9a0c4cb68e3fa9bde2ae",
+    "oc-9a1cd2aeeca34f8f27cb",
+    "oc-9a5302b82f3a80106fc3",
+    "oc-9c5dfb0926b2a2d54f03",
+    "oc-9ce557d59316276902a2",
+    "oc-9e9923c25de0b2002c8b",
+    "oc-9ed2666fc0f4dd148cb6",
+    "oc-9eee228d1abd55d3209a",
+    "oc-9ff016253223c51ce864",
+    "oc-a0d198368cd5d3e40df9",
+    "oc-a121496e4e06bb686bbc",
+    "oc-a1446400a2a74f785412",
+    "oc-a19f76d0196e277d45bd",
+    "oc-a20d135f53c3780392a3",
+    "oc-a28d778dcda1d67156a6",
+    "oc-a2961f331b8653abf56a",
+    "oc-a4ea05a24147f563c7d8",
+    "oc-a5222af4aa7e3cd10009",
+    "oc-a5930ac8b1cbc38d514b",
+    "oc-a5ed67b0e9bf9307ea26",
+    "oc-a5f12d86b96ea189a0ca",
+    "oc-a645709442aa5bae9c9a",
+    "oc-a7156b331bb1ffd940fa",
+    "oc-a80c42f5a399ca406c8a",
+    "oc-a91142d37c3d897714ea",
+    "oc-a93fd244445bbb8fa284",
+    "oc-a94b6d75264dfebec8c9",
+    "oc-a97d15eb6f1a60db1469",
+    "oc-a9b004118e373bff95e4",
+    "oc-aa89abb5acc0000fad96",
+    "oc-aaa89b4feb5b6a5c87f9",
+    "oc-aaada88f540a7e62b410",
+    "oc-ab20dc6d4c023e48d4c1",
+    "oc-ab47a6248e2627059a6c",
+    "oc-ab94f01a1a6f66583729",
+    "oc-abb94e8bd6ce1630380f",
+    "oc-ac35e6cd345080536916",
+    "oc-ac70d8ae3337b731bef7",
+    "oc-ad16f6064eeeadfc8822",
+    "oc-ad20e7c429a9c505f571",
+    "oc-ad75ae49c4c5b24d787a",
+    "oc-ad9debe84107afd66ec1",
+    "oc-ae8145ef2f6f2854691f",
+    "oc-aea7a972dca135fd6089",
+    "oc-af30ca06e1f9fb1b7b76",
+    "oc-af30e29bbea3fac81727",
+    "oc-af372c96f0173b283548",
+    "oc-b0850ccbb0bff0d17612",
+    "oc-b0d3927fda40877b5218",
+    "oc-b0f3f1b49ab762aa9862",
+    "oc-b1b2ae6663453ff3d725",
+    "oc-b2174943836bc74ed9c7",
+    "oc-b32348c94bd2b1f4e66e",
+    "oc-b36642197a17897d4f05",
+    "oc-b37e0d1f762a59eb324a",
+    "oc-b41d5d9014f56b7284e1",
+    "oc-b49d01826f0c793706b9",
+    "oc-b4b5d48dd18ca164001e",
+    "oc-b4d5fcd11e13a211018f",
+    "oc-b567b06eda5fb8c59534",
+    "oc-b56b28d0481ea0f0a6a3",
+    "oc-b589853b95f7ba742664",
+    "oc-b5c5511be8b856c5efc8",
+    "oc-b693c59d341188a5ac38",
+    "oc-b6f5eae61239ad5bff1e",
+    "oc-b78267a8650bc8acf25e",
+    "oc-b7b43c5354caba560d97",
+    "oc-b8385995ea3ce2736dfe",
+    "oc-b8e64d56c9be94c73aee",
+    "oc-b99ee7a08fd85b166a62",
+    "oc-ba2fc586f7fb53c0622d",
+    "oc-ba5deb5e5e75260dadfe",
+    "oc-bac85fd68e8ab6b07af1",
+    "oc-bb6f057a0c4adb081bdd",
+    "oc-bbc78deecc478f30602e",
+    "oc-bbd3927d5ada46da5e03",
+    "oc-bc677458dfe6092421fe",
+    "oc-bc7e985990b54af5137b",
+    "oc-bc9d76add707ac1854ba",
+    "oc-bcad6d281df168bc3874",
+    "oc-bcd9c4f183b2ffc5f8fd",
+    "oc-bd207591f1d0dabd0d4e",
+    "oc-bf80e100afd4eaea27fc",
+    "oc-bff1b5d21f29ab35613d",
+    "oc-c0698b781978eb4ba495",
+    "oc-c0e636f680b46b943e84",
+    "oc-c198f608c474ee54511d",
+    "oc-c1e24ba0a2f88b3ca9db",
+    "oc-c24d75f1544b1bff8be4",
+    "oc-c29a0f9ba74e289fe924",
+    "oc-c2a1126a0e635062948a",
+    "oc-c31a69207444fd541be9",
+    "oc-c3215ef6c3a7a05fc74c",
+    "oc-c3717e169dd915f40bda",
+    "oc-c447b8f0fcf1539c0aaa",
+    "oc-c448ba5371ce63016b5f",
+    "oc-c4d7f0e311a805ae2626",
+    "oc-c51c6f7fef6b1b45254b",
+    "oc-c52cb8933be7965c2901",
+    "oc-c6d4cab110ea27ddef83",
+    "oc-c865590d347425e6abfc",
+    "oc-ca1ca886cd25dbd9a18b",
+    "oc-ca4a272f164c4c39524e",
+    "oc-cab1213917f9c64fcf77",
+    "oc-cb62732882dfa43b46fb",
+    "oc-cbc0697f006c5e07ead2",
+    "oc-cbc97c88bff4ca66b0ba",
+    "oc-cbcb0509fda414759466",
+    "oc-cbe053cd58eb30ffcc14",
+    "oc-cc2a814be4a79b9fdd8d",
+    "oc-cc564dbd7d60f1c979ac",
+    "oc-cd5e15f722b793345427",
+    "oc-ce1db7518d907ad6a437",
+    "oc-cfe3af34d1f343c4ce90",
+    "oc-d0a5f93a299c7fadaa4a",
+    "oc-d0bd6c610032a6cc008a",
+    "oc-d15ce383fd787255da9a",
+    "oc-d25d998242a8b97b1eb1",
+    "oc-d2f3645749d272cf7685",
+    "oc-d421d7ae392b4cd4d779",
+    "oc-d440f65010c6102e17bb",
+    "oc-d4c1af3b9c0b0735bbf0",
+    "oc-d5c402db7f7386eec6fa",
+    "oc-d5c7dcf9c55f79b75193",
+    "oc-d60de2a9fbf1f3b17e64",
+    "oc-d657891f6e1fa4a2b437",
+    "oc-d6614adc9995605ea79d",
+    "oc-d6b12a7e38989a2ca43c",
+    "oc-d6e9797c376ebea819ca",
+    "oc-d75a50db66d05a9ef2d5",
+    "oc-d7a60baa1e87dd172e05",
+    "oc-d821e6352f5ded8cb5ba",
+    "oc-d8f54d96e4ff364bfc0e",
+    "oc-d92e0de11c8d987056b1",
+    "oc-dbebd1be3404cd147a71",
+    "oc-dc2aed1d09e7ef99e583",
+    "oc-dc57cd828d22e0020e33",
+    "oc-dd96d402045e027c49b3",
+    "oc-dda093898bb0fe4cddb1",
+    "oc-decb555e34198855338f",
+    "oc-e05c5b574323e1300913",
+    "oc-e1eb0d0278c82c6710c2",
+    "oc-e27f71cbc54820d67801",
+    "oc-e299fec2cb108477bc77",
+    "oc-e350501d73e86e902286",
+    "oc-e3b3be9073823a848917",
+    "oc-e4a24526f9804c0f6007",
+    "oc-e4a53a690b69097246b6",
+    "oc-e50be5d06107c05a3720",
+    "oc-e515912a18c55222dfa2",
+    "oc-e5d99bcff26506fb9433",
+    "oc-e601a52eefc6800843d6",
+    "oc-e68c75b8d1dbfda79d84",
+    "oc-e6bda13a2698cca2b9df",
+    "oc-e7d5544ba5c8374b4510",
+    "oc-e8b361e82ee5e9da28b2",
+    "oc-e92a3a724ea6d78aac87",
+    "oc-e93e0c751f9f53c9dfdc",
+    "oc-e9b9a2cbb46eb45d72ad",
+    "oc-ea30df14cb449a51ea5f",
+    "oc-eb41cd534f819c4ede2d",
+    "oc-eb94b51f2e4103215a8e",
+    "oc-ecfd86203dc07ae3c192",
+    "oc-ed2f6eaa0c1cc30a5a62",
+    "oc-eedd6cfbae8d40ec1150",
+    "oc-ef05f5dc74a4e66daac3",
+    "oc-ef39078c2d97dc4ea4d8",
+    "oc-ef9920d1820a7f141f80",
+    "oc-effdd85d30556dc1e678",
+    "oc-f1e4019aebd8cf41bc17",
+    "oc-f242e648183331baaff6",
+    "oc-f275f259ee27a4304fa5",
+    "oc-f4224a643d014192d183",
+    "oc-f4400d7999dd5b092840",
+    "oc-f4497becdcc8df0f9250",
+    "oc-f54c5bdd66854c6b8a89",
+    "oc-f5601e9238968b9057bf",
+    "oc-f5b6ce5ebef7c0637cdf",
+    "oc-f605faf29e6b838fa2e5",
+    "oc-f65bcafac2044afc1488",
+    "oc-f694a591000d074ea307",
+    "oc-f6f8a7dfffc3f3ef809b",
+    "oc-f74a3981955dba987a0d",
+    "oc-f7e82d29bd10e3faf2ac",
+    "oc-f9da0dae771120fed986",
+    "oc-fa302cfbfef0d6b4dcf3",
+    "oc-fa66900dd02f9b169c89",
+    "oc-fa982e268f1a231d1b57",
+    "oc-faa2ef16136f93054d8d",
+    "oc-faddde6c20001bb92d7b",
+    "oc-fb97f77507d614421264",
+    "oc-fbc68ebe2f53ed4ee470",
+    "oc-fbe21ddbfe5ee637ccaa",
+    "oc-fc402950c7c4c604bbf8",
+    "oc-fc6800e4b61150a0d89d",
+    "oc-fca913b7bff9c240490f",
+    "oc-fd96d4ef78b2a2abe5ec",
+    "oc-fdbb78436f97fd2be63c",
+    "oc-ff24f5ce9570de4d1d7c",
+    "oc-ffd149c0cfa6ad0daec9",
+})
+HELM_SCHEMA_KEYWORD_RATIONALE = (
+    "This exact key is JSON Schema vocabulary at one reviewed schema-node position. "
+    "Its spelling is a format invariant; its operand and runtime authority remain independently "
+    "reviewed."
+)
+HELM_SCHEMA_TYPE_RATIONALE = (
+    "This exact /type value is frozen JSON Schema vocabulary at one reviewed schema-node position. "
+    "Changing the selected type changes the deployment contract and requires renewed review."
+)
+
 GITHUB_SCHEMA_FAMILY_ID = "github-versioned-action-payload-schemas-v1"
 GITHUB_SCHEMA_REVIEWED_REVISION = "681568e938aa59f8480e1fd28ed5fa87555559be"
 GITHUB_SCHEMA_PARTITION_SHA256 = "005495754796cae214b88e5556056c18bd0190da626df245945e93c8173b1564"
@@ -5845,6 +6315,213 @@ def github_schema_authority_from_source(
     }
 
 
+def helm_schema_position_rows(
+        root: Path, candidates: Iterable[Candidate]) -> list[dict[str, object]] | None:
+    """Map only the reviewed Helm keyword/type IDs to decoded JSON positions.
+
+    JSON decoding establishes member/value semantics. The lexical token stream is used only to
+    associate those decoded atoms with scanner line positions; this is deliberately not a JSON
+    Schema evaluator and grants no authority to keyword operands, references, or ENV carriers.
+    """
+    target = root / HELM_SCHEMA_PATH
+    if not target.is_file() or target.is_symlink():
+        return None
+    source = target.read_text(encoding="utf-8")
+    try:
+        document = strict_json_document(source)
+    except ValueError:
+        return None
+    if not isinstance(document, dict):
+        return None
+
+    atoms: list[tuple[object, str, str]] = []
+
+    def escaped_pointer_token(value: object) -> str:
+        return str(value).replace("~", "~0").replace("/", "~1")
+
+    def walk(value: object, pointer: str = "") -> None:
+        if isinstance(value, dict):
+            for key, child in value.items():
+                child_pointer = f"{pointer}/{escaped_pointer_token(key)}"
+                atoms.append((key, child_pointer, "key"))
+                walk(child, child_pointer)
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                walk(child, f"{pointer}/{index}")
+        else:
+            atoms.append((value, pointer, "value"))
+
+    walk(document)
+    tokens = list(re.finditer(
+        r'"(?:\\.|[^"\\])*"|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null',
+        source,
+    ))
+    if len(tokens) != len(atoms):
+        return None
+    locations: dict[tuple[int, str], list[dict[str, object]]] = {}
+    for token, (value, pointer, position) in zip(tokens, atoms):
+        try:
+            decoded = json.loads(token.group())
+        except json.JSONDecodeError:
+            return None
+        if decoded != value or type(decoded) is not type(value):
+            return None
+        line = source.count("\n", 0, token.start()) + 1
+        column = token.start() - source.rfind("\n", 0, token.start())
+        locations.setdefault((line, normalized(token.group())), []).append({
+            "pointer": pointer,
+            "position": position,
+            "value": value,
+        })
+
+    schema_nodes: set[str] = set()
+
+    def collect_schema_nodes(node: object, pointer: str = "") -> bool:
+        if not isinstance(node, dict):
+            return False
+        schema_nodes.add(pointer)
+        for member in ("properties", "definitions"):
+            if member not in node:
+                continue
+            children = node[member]
+            if not isinstance(children, dict):
+                return False
+            for name, child in children.items():
+                child_pointer = f"{pointer}/{member}/{escaped_pointer_token(name)}"
+                if not collect_schema_nodes(child, child_pointer):
+                    return False
+        if "oneOf" in node:
+            alternatives = node["oneOf"]
+            if not isinstance(alternatives, list):
+                return False
+            for index, child in enumerate(alternatives):
+                if not collect_schema_nodes(child, f"{pointer}/oneOf/{index}"):
+                    return False
+        if "items" in node:
+            if not isinstance(node["items"], dict) \
+                    or not collect_schema_nodes(node["items"], f"{pointer}/items"):
+                return False
+        return True
+
+    if not collect_schema_nodes(document):
+        return None
+
+    used: Counter[tuple[int, str]] = Counter()
+    rows: list[dict[str, object]] = []
+    seen_closed: set[str] = set()
+    for candidate in candidates:
+        if candidate.path != HELM_SCHEMA_PATH.as_posix() \
+                or candidate.kind != "configuration-scalar":
+            continue
+        key = (candidate.line, candidate.expression)
+        possible = locations.get(key, [])
+        index = used[key]
+        used[key] += 1
+        if index >= len(possible):
+            return None
+        if candidate.id not in HELM_SCHEMA_CLOSED_IDS:
+            continue
+        location = possible[index]
+        pointer = str(location["pointer"])
+        parent = pointer.rsplit("/", 1)[0]
+        value = location["value"]
+        if location["position"] == "key" and value in HELM_SCHEMA_KEYWORDS \
+                and parent in schema_nodes:
+            category = "schema-keyword-spelling"
+        elif location["position"] == "value" and pointer.endswith("/type") \
+                and parent in schema_nodes and value in HELM_SCHEMA_TYPE_VOCABULARY:
+            category = "schema-type-vocabulary-selection-frozen"
+        else:
+            return None
+        seen_closed.add(candidate.id)
+        rows.append({
+            "id": candidate.id,
+            "pointer": pointer,
+            "position": location["position"],
+            "value": value,
+            "kind": candidate.kind,
+            "role": candidate.role,
+            "expression": candidate.expression,
+            "expressionDigest": candidate.expression_digest,
+            "evidenceDigest": candidate.evidence_digest,
+            "category": category,
+        })
+    if seen_closed != HELM_SCHEMA_CLOSED_IDS or len(rows) != len(HELM_SCHEMA_CLOSED_IDS):
+        return None
+    rows.sort(key=lambda item: str(item["id"]))
+    return rows
+
+
+def helm_schema_authority_from_source(
+        root: Path, candidates: Iterable[Candidate]) -> dict[str, object] | None:
+    """Build the exact 360-keyword/84-type Helm schema position authority."""
+    rows = helm_schema_position_rows(root, candidates)
+    if rows is None:
+        return None
+    payload = [[row[field] for field in (
+        "id", "pointer", "position", "value", "kind", "role", "expression",
+        "expressionDigest", "evidenceDigest", "category",
+    )] for row in rows]
+    position_digest = hashlib.sha256(json.dumps(
+        payload, separators=(",", ":"), ensure_ascii=False,
+    ).encode("utf-8")).hexdigest()
+    by_category = {
+        category: sorted(str(row["id"]) for row in rows if row["category"] == category)
+        for category in (
+            "schema-keyword-spelling", "schema-type-vocabulary-selection-frozen",
+        )
+    }
+    if position_digest != HELM_SCHEMA_REVIEWED_SPEC_SHA256 \
+            or len(by_category["schema-keyword-spelling"]) != 360 \
+            or len(by_category["schema-type-vocabulary-selection-frozen"]) != 84:
+        return None
+    return {
+        "kind": HELM_SCHEMA_CLOSED_FAMILY_ID,
+        "sourceRevision": HELM_SCHEMA_REVIEWED_REVISION,
+        "sourcePath": HELM_SCHEMA_PATH.as_posix(),
+        "reviewedSourceSha256": HELM_SCHEMA_REVIEWED_SOURCE_SHA256,
+        "positionSpecSha256": position_digest,
+        "candidateIdsByRole": by_category,
+        "keywordVocabulary": sorted(HELM_SCHEMA_KEYWORDS),
+        "typeVocabulary": sorted(HELM_SCHEMA_TYPE_VOCABULARY),
+        "candidateCount": len(rows),
+        "semanticRetirementCredit": 0,
+        "duplicateAuthorityCredit": 0,
+    }
+
+
+def helm_schema_authority_errors(
+        root: Path, authorities: object, entries: dict[str, dict[str, object]],
+        discovered: dict[str, Candidate]) -> list[str]:
+    """Validate the opt-in closed Helm family without blessing adjacent operands."""
+    claimed = {identifier for identifier, entry in entries.items()
+               if entry.get("retainedAuthority") == HELM_SCHEMA_CLOSED_FAMILY_ID}
+    if authorities is None and not claimed:
+        return []
+    family_candidates = tuple(candidate for candidate in discovered.values()
+                              if candidate.path == HELM_SCHEMA_PATH.as_posix())
+    expected = helm_schema_authority_from_source(root, family_candidates)
+    if expected is None:
+        return ["Helm schema keyword/type positions or candidate identity have drifted"]
+    if not isinstance(authorities, dict) or set(authorities) != {HELM_SCHEMA_CLOSED_FAMILY_ID} \
+            or authorities.get(HELM_SCHEMA_CLOSED_FAMILY_ID) != expected:
+        return ["Helm schema requires the exact checker-owned 360-keyword/84-type authority"]
+    errors: list[str] = []
+    keyword_ids = set(expected["candidateIdsByRole"]["schema-keyword-spelling"])
+    for identifier in HELM_SCHEMA_CLOSED_IDS:
+        rationale = (HELM_SCHEMA_KEYWORD_RATIONALE if identifier in keyword_ids
+                     else HELM_SCHEMA_TYPE_RATIONALE)
+        entry = entries.get(identifier, {})
+        if entry.get("status") != "retained" \
+                or entry.get("classification") != "protocol-or-format-invariant" \
+                or entry.get("retainedAuthority") != HELM_SCHEMA_CLOSED_FAMILY_ID \
+                or entry.get("rationale") != rationale:
+            errors.append(f"{identifier}: Helm schema row lost its exact retained authority")
+    if claimed != HELM_SCHEMA_CLOSED_IDS:
+        errors.append("Helm schema authority has missing or extra claimed rows")
+    return errors
+
+
 def github_schema_partition_digest(entries: dict[str, dict[str, object]],
                                    identifiers: set[str]) -> str:
     reviewed = sorted((identifier, entries.get(identifier, {}).get("classification"),
@@ -6479,6 +7156,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     ))
     errors.extend(ui_text_catalog_authority_errors(
         root, document.get("uiTextAuthorities"), entries, discovered,
+    ))
+    errors.extend(helm_schema_authority_errors(
+        root, document.get("helmSchemaAuthorities"), entries, discovered,
     ))
     errors.extend(github_schema_authority_errors(
         root, document.get("githubSchemaAuthorities"), entries, discovered,

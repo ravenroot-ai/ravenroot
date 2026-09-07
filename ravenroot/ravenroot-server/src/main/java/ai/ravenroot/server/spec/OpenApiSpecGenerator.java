@@ -57,7 +57,9 @@ public final class OpenApiSpecGenerator {
         json.append("    \"securitySchemes\": {\n");
         json.append("      \"bearerAuth\": {\"type\": \"http\", \"scheme\": \"bearer\"}\n");
         json.append("    },\n");
-        json.append(humanTaskSchemas());
+        String existingSchemas = humanTaskSchemas();
+        json.append(existingSchemas, 0, existingSchemas.lastIndexOf("\n    }"));
+        json.append(",\n").append(executionEventSchemas()).append("    }\n");
         json.append("  }\n");
         json.append("}\n");
         return json.toString();
@@ -190,6 +192,37 @@ public final class OpenApiSpecGenerator {
     }
 
     private static String successResponse(RouteDescriptor route, String method, int status) {
+        if ("/v1/events".equals(route.path()) && "GET".equals(method) && status == 200) {
+            return "          \"200\": {\"description\":\"UTF-8 Server-Sent Events text, not a JSON document or JSON array. Parse blank"
+                     + "-line-delimited frames first; only event: execution has ExecutionStreamEvent JSON data. Keepalive comments dis"
+                     + "patch no event. Named stream-truncated and stream-overrun controls terminate observation and require reconcili"
+                     + "ation. The x-ravenroot-sse-events extension maps event names to decoded data schemas; ordinary OpenAPI tools m"
+                     + "ay ignore it.\",\"headers\":{\"X-Ravenroot-Event-Source\":{\"description\":\"Must equal every execution payload source"
+                     + ".\",\"schema\":{\"type\":\"string\",\"enum\":[\"RING\",\"DURABLE\"]}},\"X-Ravenroot-Event-Continuity\":{\"description\":\"RING i"
+                     + "s PROCESS_LOCAL and loses continuity on restart; DURABLE is DURABLE within the authenticated tenant journal.\","
+                     + "\"schema\":{\"type\":\"string\",\"enum\":[\"PROCESS_LOCAL\",\"DURABLE\"]}},\"X-Ravenroot-Event-Schema-Version\":{\"descriptio"
+                     + "n\":\"Execution data schema version; named controls and comments are separate shapes.\",\"schema\":{\"type\":\"integer"
+                     + "\",\"enum\":[1]}}},\"content\":{\"text/event-stream\":{\"schema\":{\"type\":\"string\"},\"x-ravenroot-sse-events\":{\"executio"
+                     + "n\":{\"dataSchema\":{\"$ref\":\"#/components/schemas/ExecutionStreamEvent\"}},\"stream-truncated\":{\"dataSchema\":{\"$ref"
+                     + "\":\"#/components/schemas/EventStreamTruncated\"}},\"stream-overrun\":{\"dataSchema\":{\"$ref\":\"#/components/schemas/E"
+                     + "ventStreamOverrun\"}}},\"examples\":{\"ring\":{\"summary\":\"RING execution frame followed by a keepalive comment\",\"va"
+                     + "lue\":\"id: 7\\nevent: execution\\ndata: {\\\"schemaVersion\\\":1,\\\"occurredAt\\\":\\\"2026-01-01T00:00:00Z\\\",\\\"graphVersi"
+                     + "on\\\":\\\"graph-v1\\\",\\\"processInstanceId\\\":\\\"10000000-0000-0000-0000-000000000001\\\",\\\"traversalId\\\":\\\"20000000-00"
+                     + "00-0000-0000-000000000002\\\",\\\"invocationId\\\":null,\\\"attemptId\\\":null,\\\"nodeId\\\":null,\\\"edgeId\\\":null,\\\"source\\"
+                     + "\":\\\"RING\\\",\\\"id\\\":\\\"7\\\",\\\"eventType\\\":\\\"EXECUTION_STARTED\\\",\\\"sequence\\\":7,\\\"engineId\\\":\\\"pekko\\\",\\\"executionI"
+                     + "d\\\":\\\"20000000-0000-0000-0000-000000000002\\\",\\\"type\\\":\\\"EXECUTION_STARTED\\\",\\\"activeInstances\\\":0,\\\"inFlightAr"
+                     + "rivals\\\":0,\\\"fallback\\\":false,\\\"description\\\":\\\"Execution started.\\\",\\\"publicReason\\\":null,\\\"message\\\":null,\\\""
+                     + "messageRedacted\\\":false,\\\"messageTruncated\\\":false,\\\"processingDuration\\\":null}\\n\\n: keepalive\\n\\n\"},\"durable\""
+                     + ":{\"summary\":\"DURABLE execution frame\",\"value\":\"id: 12\\nevent: execution\\ndata: {\\\"schemaVersion\\\":1,\\\"occurred"
+                     + "At\\\":\\\"2026-01-01T00:00:00Z\\\",\\\"graphVersion\\\":\\\"graph-v1\\\",\\\"processInstanceId\\\":\\\"10000000-0000-0000-0000-00"
+                     + "0000000001\\\",\\\"traversalId\\\":\\\"20000000-0000-0000-0000-000000000002\\\",\\\"invocationId\\\":null,\\\"attemptId\\\":null"
+                     + ",\\\"nodeId\\\":null,\\\"edgeId\\\":null,\\\"source\\\":\\\"DURABLE\\\",\\\"id\\\":\\\"12\\\",\\\"eventId\\\":\\\"30000000-0000-0000-0000-00"
+                     + "0000000003\\\",\\\"journalOffset\\\":12,\\\"streamSequence\\\":1,\\\"eventType\\\":\\\"EXECUTION_STARTED\\\",\\\"description\\\":\\\"E"
+                     + "xecution started.\\\",\\\"causationId\\\":null,\\\"handlerId\\\":null}\\n\\n\"},\"truncated\":{\"summary\":\"Terminal retained-h"
+                     + "istory gap; reconcile before resuming\",\"value\":\"event: stream-truncated\\ndata: {\\\"code\\\":\\\"STREAM_RETENTION_EX"
+                     + "CEEDED\\\",\\\"retainedFrom\\\":10,\\\"resumeFrom\\\":9}\\n\\n\"},\"overrun\":{\"summary\":\"Terminal slow-consumer control\",\"va"
+                     + "lue\":\"id: 7\\nevent: stream-overrun\\ndata: {\\\"code\\\":\\\"STREAM_CONSUMER_TOO_SLOW\\\",\\\"resumeAfter\\\":7}\\n\\n\"}}}}}";
+        }
         String schema = null;
         if ("/v1/human-tasks".equals(route.path()) && "GET".equals(method)) {
             schema = "HumanTaskInboxPage";
@@ -203,6 +236,72 @@ public final class OpenApiSpecGenerator {
         return "          \"" + status + "\": {\"description\": \"success\""
                 + (schema == null ? "}" : ", \"content\": {\"application/json\": "
                         + "{\"schema\": {\"$ref\": \"#/components/schemas/" + schema + "\"}}}}");
+    }
+
+    /** JSON data schemas for named SSE frames; unknown future members remain permitted. */
+    private static String executionEventSchemas() {
+        return "      \"ExecutionStreamEventBase\": {\"type\":\"object\",\"description\":\"Version 1 JSON data of an execution SSE fram"
+                 + "e, not the whole SSE response. Compare id only within the authenticated tenant and source; RING also requires "
+                 + "the same process-local continuity domain. Unknown fields and event classifiers are allowed. A conflicting type"
+                 + " alias is invalid. IDs and aliases require semantic equality checks outside OpenAPI 3.0.3.\",\"required\":[\"schem"
+                 + "aVersion\",\"source\",\"id\",\"eventType\",\"occurredAt\",\"processInstanceId\",\"traversalId\"],\"additionalProperties\":tru"
+                 + "e,\"properties\":{\"schemaVersion\":{\"type\":\"integer\",\"enum\":[1]},\"source\":{\"type\":\"string\",\"enum\":[\"RING\",\"DURABL"
+                 + "E\"]},\"id\":{\"type\":\"string\",\"pattern\":\"^(0|-?[1-9][0-9]*)$\",\"maxLength\":20,\"description\":\"Canonical signed deci"
+                 + "mal long string equal to the SSE id and native cursor. Not a globally unique event UUID. Use exact integer ari"
+                 + "thmetic; never compare against a rounded floating-point cursor.\"},\"eventType\":{\"type\":\"string\",\"minLength\":1,\""
+                 + "description\":\"Canonical classifier. Unknown values remain readable.\"},\"occurredAt\":{\"type\":\"string\",\"descripti"
+                 + "on\":\"Producer occurrence time in Java Instant text form, including supported extended years. Diagnostic time, "
+                 + "not an ordering axis.\"},\"processInstanceId\":{\"type\":\"string\",\"format\":\"uuid\"},\"traversalId\":{\"type\":\"string\",\""
+                 + "format\":\"uuid\"},\"graphVersion\":{\"type\":\"string\"},\"description\":{\"type\":\"string\"},\"invocationId\":{\"type\":\"strin"
+                 + "g\",\"format\":\"uuid\",\"nullable\":true},\"attemptId\":{\"type\":\"string\",\"format\":\"uuid\",\"nullable\":true},\"nodeId\":{\"t"
+                 + "ype\":\"string\",\"nullable\":true},\"edgeId\":{\"type\":\"string\",\"description\":\"Stable edge identity; unchanged 8192 U"
+                 + "TF-8 byte limit and shared traversal wire budget.\",\"nullable\":true},\"type\":{\"type\":\"string\",\"deprecated\":true,"
+                 + "\"description\":\"Readers accept this compatibility alias on either source when equal to eventType. RING writers retain it; DURABLE writers need not emit it. No removal date is scheduled.\"}}},\n      \"ExecutionStreamEvent\": {\"oneOf\":[{\"$ref\":\"#/components/schemas/RingExecutionStrea"
+                 + "mEvent\"},{\"$ref\":\"#/components/schemas/DurableExecutionStreamEvent\"}],\"discriminator\":{\"propertyName\":\"source\""
+                 + ",\"mapping\":{\"RING\":\"#/components/schemas/RingExecutionStreamEvent\",\"DURABLE\":\"#/components/schemas/DurableExec"
+                 + "utionStreamEvent\"}}},\n      \"RingExecutionStreamEvent\": {\"allOf\":[{\"$ref\":\"#/components/schemas/ExecutionStrea"
+                 + "mEventBase\"},{\"type\":\"object\",\"required\":[\"sequence\",\"engineId\",\"executionId\",\"type\",\"activeInstances\",\"inFlig"
+                 + "htArrivals\",\"fallback\",\"publicReason\",\"message\",\"messageRedacted\",\"messageTruncated\",\"processingDuration\"],\"ad"
+                 + "ditionalProperties\":true,\"properties\":{\"source\":{\"type\":\"string\",\"enum\":[\"RING\"]},\"sequence\":{\"type\":\"integer\""
+                 + ",\"format\":\"int64\"},\"engineId\":{\"type\":\"string\"},\"executionId\":{\"type\":\"string\",\"format\":\"uuid\",\"description\":\""
+                 + "Legacy traversalId alias; values must agree.\"},\"activeInstances\":{\"type\":\"integer\",\"minimum\":0},\"inFlightArriv"
+                 + "als\":{\"type\":\"integer\",\"minimum\":0},\"fallback\":{\"type\":\"boolean\"},\"publicReason\":{\"type\":\"string\",\"maxLength\":"
+                 + "64,\"pattern\":\"^[A-Za-z0-9._:-]+$\",\"nullable\":true},\"message\":{\"type\":\"string\",\"description\":\"Already-safe boun"
+                 + "ded author message, not raw exception detail.\",\"nullable\":true},\"messageRedacted\":{\"type\":\"boolean\"},\"messageT"
+                 + "runcated\":{\"type\":\"boolean\"},\"output\":{\"description\":\"Optional bounded, targeted-redacted built-in log output."
+                 + " Absent is not an empty output.\"},\"outputRedacted\":{\"type\":\"boolean\"},\"outputTruncated\":{\"type\":\"boolean\"},\"pr"
+                 + "ocessingDuration\":{\"type\":\"number\",\"minimum\":0,\"description\":\"Measured seconds; null means not measured, never"
+                 + " zero by substitution.\",\"nullable\":true}},\"not\":{\"anyOf\":[{\"required\":[\"journalOffset\"]},{\"required\":[\"streamS"
+                 + "equence\"]},{\"required\":[\"eventId\"]},{\"required\":[\"causationId\"]},{\"required\":[\"handlerId\"]}]}}],\"example\":{\"sc"
+                 + "hemaVersion\":1,\"occurredAt\":\"2026-01-01T00:00:00Z\",\"graphVersion\":\"graph-v1\",\"processInstanceId\":\"10000000-000"
+                 + "0-0000-0000-000000000001\",\"traversalId\":\"20000000-0000-0000-0000-000000000002\",\"invocationId\":null,\"attemptId\""
+                 + ":null,\"nodeId\":null,\"edgeId\":null,\"source\":\"RING\",\"id\":\"7\",\"eventType\":\"EXECUTION_STARTED\",\"sequence\":7,\"engin"
+                 + "eId\":\"pekko\",\"executionId\":\"20000000-0000-0000-0000-000000000002\",\"type\":\"EXECUTION_STARTED\",\"activeInstances\""
+                 + ":0,\"inFlightArrivals\":0,\"fallback\":false,\"description\":\"Execution started.\",\"publicReason\":null,\"message\":null"
+                 + ",\"messageRedacted\":false,\"messageTruncated\":false,\"processingDuration\":null}},\n      \"DurableExecutionStreamEv"
+                 + "ent\": {\"allOf\":[{\"$ref\":\"#/components/schemas/ExecutionStreamEventBase\"},{\"type\":\"object\",\"required\":[\"eventId"
+                 + "\",\"journalOffset\",\"streamSequence\",\"causationId\",\"handlerId\"],\"additionalProperties\":true,\"properties\":{\"sourc"
+                 + "e\":{\"type\":\"string\",\"enum\":[\"DURABLE\"]},\"id\":{\"type\":\"string\",\"pattern\":\"^[1-9][0-9]*$\",\"maxLength\":19},\"event"
+                 + "Id\":{\"type\":\"string\",\"format\":\"uuid\",\"description\":\"Persisted journal deduplication identity, distinct from cu"
+                 + "rsor id; causationId refers to this UUID space.\"},\"journalOffset\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\""
+                 + ":1,\"description\":\"Tenant-local durable order and SSE resume cursor.\"},\"streamSequence\":{\"type\":\"integer\",\"form"
+                 + "at\":\"int64\",\"minimum\":1,\"description\":\"Order within the process instance, not the tenant resume cursor.\"},\"cau"
+                 + "sationId\":{\"type\":\"string\",\"format\":\"uuid\",\"description\":\"Journal event that caused this one; null when the ca"
+                 + "use lies outside the journal.\",\"nullable\":true},\"handlerId\":{\"type\":\"string\",\"format\":\"uuid\",\"nullable\":true}}"
+                 + ",\"not\":{\"anyOf\":[{\"required\":[\"sequence\"]},{\"required\":[\"engineId\"]},{\"required\":[\"executionId\"]},{\"required\":"
+                 + "[\"activeInstances\"]},{\"required\":[\"inFlightArrivals\"]},{\"required\":[\"fallback\"]},{\"required\":[\"publicReason\"]}"
+                 + ",{\"required\":[\"message\"]},{\"required\":[\"messageRedacted\"]},{\"required\":[\"messageTruncated\"]},{\"required\":[\"out"
+                 + "put\"]},{\"required\":[\"outputRedacted\"]},{\"required\":[\"outputTruncated\"]},{\"required\":[\"processingDuration\"]}]}}"
+                 + "],\"example\":{\"schemaVersion\":1,\"occurredAt\":\"2026-01-01T00:00:00Z\",\"graphVersion\":\"graph-v1\",\"processInstanceI"
+                 + "d\":\"10000000-0000-0000-0000-000000000001\",\"traversalId\":\"20000000-0000-0000-0000-000000000002\",\"invocationId\":"
+                 + "null,\"attemptId\":null,\"nodeId\":null,\"edgeId\":null,\"source\":\"DURABLE\",\"id\":\"12\",\"eventId\":\"30000000-0000-0000-0"
+                 + "000-000000000003\",\"journalOffset\":12,\"streamSequence\":1,\"eventType\":\"EXECUTION_STARTED\",\"description\":\"Executi"
+                 + "on started.\",\"causationId\":null,\"handlerId\":null}},\n      \"EventStreamTruncated\": {\"type\":\"object\",\"required\":"
+                 + "[\"code\",\"retainedFrom\",\"resumeFrom\"],\"additionalProperties\":true,\"properties\":{\"code\":{\"type\":\"string\",\"enum\":"
+                 + "[\"STREAM_RETENTION_EXCEEDED\"]},\"retainedFrom\":{\"type\":\"integer\",\"format\":\"int64\",\"minimum\":1},\"resumeFrom\":{\"t"
+                 + "ype\":\"integer\",\"format\":\"int64\",\"minimum\":0}}},\n      \"EventStreamOverrun\": {\"type\":\"object\",\"required\":[\"code"
+                 + "\",\"resumeAfter\"],\"additionalProperties\":true,\"properties\":{\"code\":{\"type\":\"string\",\"enum\":[\"STREAM_CONSUMER_TO"
+                 + "O_SLOW\"]},\"resumeAfter\":{\"type\":\"integer\",\"format\":\"int64\"}}}\n";
     }
 
     private static String humanTaskSchemas() {

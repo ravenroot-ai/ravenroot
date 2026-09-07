@@ -270,15 +270,23 @@ export class RavenrootRuntimeClient {
         buffer = buffer.slice(boundary + 2);
         if (frame.length > this.maxFrameBytes) throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
         const parsed = parseEventFrame(frame);
-        if (parsed.id !== undefined && !parsed.id.includes('\0')) this.lastEventId = parsed.id;
         if (parsed.retry !== undefined) {
           reconnectDelay = Math.min(MAX_RETRY_DELAY_MS, Math.max(MIN_RETRY_DELAY_MS, parsed.retry));
         }
-        if (parsed.type === 'execution' && parsed.data) {
+        if (parsed.type === 'execution' && /^data(?::|$)/m.test(frame)) {
           try {
-            onEvent(normalizeRuntimeEvent(JSON.parse(parsed.data)));
-          } catch (error) {
-            onConnectionChange('error', `Invalid execution event: ${error.message}`);
+            const event = normalizeRuntimeEvent(JSON.parse(parsed.data));
+            if (Object.hasOwn(event, 'schemaVersion')) {
+              executionEventCursor(parsed.id);
+              if (parsed.id !== event.id) throw new Error('Execution event identity mismatch');
+            }
+            await onEvent(event);
+            if (signal.aborted) return reconnectDelay;
+            // Resume only after delivery accepts this execution, never across a rejected frame.
+            if (parsed.id !== undefined && !parsed.id.includes('\0')) this.lastEventId = parsed.id;
+          } catch {
+            try { await reader.cancel?.(); } catch { /* Preserve the classified stream failure. */ }
+            throw new Error('Invalid or undelivered execution event');
           }
         }
       }
@@ -804,15 +812,13 @@ export class RavenrootRuntimeClient {
   }
 }
 
-// `/v1/events` may replay the narrow durable projection (`eventType`, `traversalId`) or deliver the
-// established live projection (`type`, `executionId`). Everything above this transport boundary
-// consumes one canonical shape. Reject contradictory aliases instead of silently routing an event
-// to the wrong document; traversalId is the caller-facing execution id by contract.
+// Versioned SSE data and legacy unversioned projections share the UI's type/executionId aliases.
+// Validate the declared wire variant before adding those UI aliases; unknown members survive.
 export function normalizeRuntimeEvent(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new Error('execution event must be an object');
   }
-  const type = value.type ?? value.eventType;
+  const type = value.eventType ?? value.type;
   const executionId = value.executionId ?? value.traversalId;
   if (value.type != null && value.eventType != null && value.type !== value.eventType) {
     throw new Error('type and eventType disagree');
@@ -825,7 +831,79 @@ export function normalizeRuntimeEvent(value) {
   if (typeof executionId !== 'string' || !executionId) {
     throw new Error('execution event traversal id is missing');
   }
+  if (Object.hasOwn(value, 'schemaVersion')) validateVersionedRuntimeEvent(value);
   return { ...value, type, executionId };
+}
+
+const EVENT_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const LIVE_EVENT_FIELDS = [
+  'sequence', 'engineId', 'executionId', 'activeInstances', 'inFlightArrivals', 'fallback',
+  'publicReason', 'message', 'messageRedacted', 'messageTruncated', 'output',
+  'outputRedacted', 'outputTruncated', 'processingDuration',
+];
+const DURABLE_EVENT_FIELDS = ['journalOffset', 'streamSequence', 'eventId', 'causationId', 'handlerId'];
+
+function validateVersionedRuntimeEvent(value) {
+  const invalid = () => { throw new Error('execution event is not a valid schema version 1 envelope'); };
+  const text = field => typeof value[field] === 'string' && value[field].length > 0;
+  const uuid = field => typeof value[field] === 'string' && EVENT_UUID.test(value[field]);
+  const nullableUuid = field => value[field] === null || uuid(field);
+  if (value.schemaVersion !== 1) throw new Error('unsupported execution event schema version');
+  if (value.source !== 'RING' && value.source !== 'DURABLE') {
+    throw new Error('unsupported execution event source');
+  }
+  if (!text('eventType') || !text('occurredAt') || !uuid('processInstanceId') || !uuid('traversalId')) invalid();
+  if (Object.hasOwn(value, 'type') && typeof value.type !== 'string') invalid();
+  // Instant's extended-year text is valid server data; Date.parse would narrow that contract.
+  const id = executionEventCursor(value.id);
+  const forbidden = value.source === 'RING' ? DURABLE_EVENT_FIELDS : LIVE_EVENT_FIELDS;
+  if (forbidden.some(field => Object.hasOwn(value, field))) {
+    throw new Error('execution event contains fields from the other source');
+  }
+  for (const field of ['graphVersion', 'description']) {
+    if (Object.hasOwn(value, field) && typeof value[field] !== 'string') invalid();
+  }
+  for (const field of ['invocationId', 'attemptId']) {
+    if (Object.hasOwn(value, field) && !nullableUuid(field)) invalid();
+  }
+  for (const field of ['nodeId', 'edgeId']) {
+    if (Object.hasOwn(value, field) && value[field] !== null && typeof value[field] !== 'string') invalid();
+  }
+  const nativeCursor = value.source === 'RING' ? value.sequence : value.journalOffset;
+  // JSON.parse rounds unsafe native numbers. This checks their representable value only; the
+  // bounded decimal id remains the exact identity. Adjacent unsafe integers cannot be distinguished
+  // after parsing, so never reconstruct an exact cursor from the compatibility number.
+  if (!Number.isInteger(nativeCursor) || nativeCursor !== Number(id)) invalid();
+  if (value.source === 'DURABLE') {
+    if (id < 1n || !uuid('eventId') || !nullableUuid('causationId') || !nullableUuid('handlerId')
+        || !Number.isInteger(value.streamSequence) || value.streamSequence < 1
+        || value.streamSequence > Number(9223372036854775807n)) invalid();
+    return;
+  }
+  if (typeof value.engineId !== 'string' || !uuid('executionId') || value.type !== value.eventType
+      || !Number.isInteger(value.activeInstances) || value.activeInstances < 0
+      || !Number.isInteger(value.inFlightArrivals) || value.inFlightArrivals < 0
+      || typeof value.fallback !== 'boolean'
+      || !(value.publicReason === null || (typeof value.publicReason === 'string'
+          && value.publicReason.length <= 64 && /^[A-Za-z0-9._:-]+$/.test(value.publicReason)))
+      || !(value.message === null || typeof value.message === 'string')
+      || typeof value.messageRedacted !== 'boolean' || typeof value.messageTruncated !== 'boolean'
+      || !(value.processingDuration === null || (typeof value.processingDuration === 'number'
+          && Number.isFinite(value.processingDuration) && value.processingDuration >= 0))) invalid();
+  for (const field of ['outputRedacted', 'outputTruncated']) {
+    if (Object.hasOwn(value, field) && typeof value[field] !== 'boolean') invalid();
+  }
+}
+
+function executionEventCursor(value) {
+  if (typeof value !== 'string' || value.length > 20 || !/^(0|-?[1-9][0-9]*)$/.test(value)) {
+    throw new Error('execution event id must be a canonical signed-long decimal string');
+  }
+  const id = BigInt(value);
+  if (id < -9223372036854775808n || id > 9223372036854775807n) {
+    throw new Error('execution event id is outside the signed-long range');
+  }
+  return id;
 }
 
 /**

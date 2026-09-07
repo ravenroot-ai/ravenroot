@@ -1,6 +1,7 @@
 package ai.ravenroot.persistence.sqlite;
 
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.ExecutionStorePolicy;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -78,71 +79,30 @@ public record SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTi
      * unrun one, so they are stated here rather than discovered.</p>
      */
     public static SqliteStoreConfig defaults() {
-        return new SqliteStoreConfig(SynchronousMode.FULL, Duration.ofSeconds(5), Duration.ofMinutes(5),
-                1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100, Duration.ofDays(7),
-                Duration.ofDays(7));
+        return new SqliteStoreConfig(SynchronousMode.FULL, Duration.ofSeconds(5), ExecutionStorePolicy.DEFAULTS);
+    }
+
+    /** Composes adapter connection settings with the shared execution-store policy. */
+    public SqliteStoreConfig(SynchronousMode synchronousMode, Duration busyTimeout, ExecutionStorePolicy policy) {
+        this(synchronousMode, busyTimeout, policy.maxLeaseTtl(), policy.maxPayloadBytes(), policy.maxClockSkew(),
+                policy.journalRetention(), policy.maxInventoryPageSize(), policy.terminalRetention(),
+                policy.executionResultRetention());
     }
 
     public SqliteStoreConfig {
         Objects.requireNonNull(synchronousMode, "synchronousMode");
         Objects.requireNonNull(busyTimeout, "busyTimeout");
-        Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");
-        Objects.requireNonNull(maxClockSkew, "maxClockSkew");
         if (busyTimeout.isNegative()) {
             throw new IllegalArgumentException("busyTimeout cannot be negative");
         }
-        if (maxLeaseTtl.isZero() || maxLeaseTtl.isNegative()) {
-            throw new IllegalArgumentException("maxLeaseTtl must be positive");
-        }
-        if (maxPayloadBytes < 1) {
-            throw new IllegalArgumentException("maxPayloadBytes must be positive");
-        }
-        if (maxClockSkew.isNegative()) {
-            throw new IllegalArgumentException("maxClockSkew cannot be negative");
-        }
-        Objects.requireNonNull(journalRetention, "journalRetention");
-        if (journalRetention.isZero() || journalRetention.isNegative()) {
-            throw new IllegalArgumentException("journalRetention must be positive");
-        }
-        if (maxInventoryPageSize < 1) {
-            throw new IllegalArgumentException("maxInventoryPageSize must be positive");
-        }
-        Objects.requireNonNull(terminalRetention, "terminalRetention");
-        if (terminalRetention.isZero() || terminalRetention.isNegative()) {
-            throw new IllegalArgumentException("terminalRetention must be positive");
-        }
-        if (terminalRetention.compareTo(journalRetention) < 0) {
-            // A terminal instance pruned while its own events are still readable would leave the
-            // journal naming a process instance the inventory can no longer describe, and a consumer
-            // replaying those events would resolve every one of them to "never existed". The
-            // inventory row is the cheaper of the two to keep, so it outlives the events rather than
-            // the other way round.
-            throw new IllegalArgumentException("terminalRetention " + terminalRetention
-                    + " cannot be shorter than journalRetention " + journalRetention
-                    + ": events would outlive the instance they name");
-        }
-        Objects.requireNonNull(executionResultRetention, "executionResultRetention");
-        if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
-            throw new IllegalArgumentException("executionResultRetention must be positive");
-        }
-        if (terminalRetention.compareTo(executionResultRetention) < 0) {
-            // Same rule as the journal window above, in the same direction, and for the same reason:
-            // no retained record may name a record that has already been purged. A result carries the
-            // process instance and traversal it belongs to, so a result surviving its instance would
-            // name a row the inventory can no longer describe. The instance row is the cheaper of the
-            // two to keep -- it is a handful of columns, while a result carries a payload -- so it
-            // outlives the result rather than the other way round.
-            //
-            // The schema makes the violation unreachable anyway: execution_result cascades from
-            // process_instance, so purging an instance takes its results with it. That is exactly why
-            // the check is here rather than left implicit. Without it a longer result window would be
-            // accepted and then silently not honoured, and an operator who configured thirty days of
-            // results behind seven days of instances would discover the real number during an
-            // investigation.
-            throw new IllegalArgumentException("terminalRetention " + terminalRetention
-                    + " cannot be shorter than executionResultRetention " + executionResultRetention
-                    + ": results would outlive the instance they name");
-        }
+        new ExecutionStorePolicy(maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                maxInventoryPageSize, terminalRetention, executionResultRetention);
+    }
+
+    /** Returns the shared semantic policy without the SQLite connection settings. */
+    public ExecutionStorePolicy executionStorePolicy() {
+        return new ExecutionStorePolicy(maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                maxInventoryPageSize, terminalRetention, executionResultRetention);
     }
 
     public SqliteStoreConfig withSynchronousMode(SynchronousMode mode) {

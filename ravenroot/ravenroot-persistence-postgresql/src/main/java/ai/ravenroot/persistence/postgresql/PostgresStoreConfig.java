@@ -1,6 +1,7 @@
 package ai.ravenroot.persistence.postgresql;
 
 import ai.ravenroot.api.persistence.StoreCapability;
+import ai.ravenroot.api.persistence.ExecutionStorePolicy;
 
 import java.time.Duration;
 import java.util.Objects;
@@ -13,6 +14,10 @@ import java.util.Objects;
  * through the {@link javax.sql.DataSource} it is handed. This record carries only what changes the
  * adapter's <em>declared semantics</em>, so that everything an operator can turn is visibly
  * connected to a capability or to a bound the port publishes.</p>
+ *
+ * <p>Terminal retention must cover both journal and execution-result retention, as in the other
+ * adapters. A longer result window is rejected: purging its process instance cascades to the result
+ * row and could not honor that window.</p>
  *
  * @param lockTimeout          how long a statement waits for a row lock held by another transaction
  *                             before failing. This is what turns contention between two hosts into a
@@ -70,18 +75,20 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
      */
     public static PostgresStoreConfig defaults() {
         return new PostgresStoreConfig(Duration.ofSeconds(5), Duration.ofSeconds(30), 3,
-                Duration.ofMinutes(5), 1024 * 1024, Duration.ofSeconds(5), Duration.ofHours(24), 100,
-                Duration.ofDays(7), Duration.ofDays(7));
+                ExecutionStorePolicy.DEFAULTS);
+    }
+
+    /** Composes PostgreSQL contention settings with the shared execution-store policy. */
+    public PostgresStoreConfig(Duration lockTimeout, Duration statementTimeout, int serializationRetries,
+                               ExecutionStorePolicy policy) {
+        this(lockTimeout, statementTimeout, serializationRetries, policy.maxLeaseTtl(), policy.maxPayloadBytes(),
+                policy.maxClockSkew(), policy.journalRetention(), policy.maxInventoryPageSize(),
+                policy.terminalRetention(), policy.executionResultRetention());
     }
 
     public PostgresStoreConfig {
         Objects.requireNonNull(lockTimeout, "lockTimeout");
         Objects.requireNonNull(statementTimeout, "statementTimeout");
-        Objects.requireNonNull(maxLeaseTtl, "maxLeaseTtl");
-        Objects.requireNonNull(maxClockSkew, "maxClockSkew");
-        Objects.requireNonNull(journalRetention, "journalRetention");
-        Objects.requireNonNull(terminalRetention, "terminalRetention");
-        Objects.requireNonNull(executionResultRetention, "executionResultRetention");
         if (lockTimeout.isZero() || lockTimeout.isNegative()) {
             // Zero means "wait forever" to PostgreSQL, which is the one value this adapter cannot
             // accept: a worker blocked on a row a lost holder still locks would never reach the
@@ -101,35 +108,13 @@ public record PostgresStoreConfig(Duration lockTimeout, Duration statementTimeou
         if (serializationRetries < 0) {
             throw new IllegalArgumentException("serializationRetries cannot be negative");
         }
-        if (maxLeaseTtl.isZero() || maxLeaseTtl.isNegative()) {
-            throw new IllegalArgumentException("maxLeaseTtl must be positive");
-        }
-        if (maxPayloadBytes < 1) {
-            throw new IllegalArgumentException("maxPayloadBytes must be positive");
-        }
-        if (maxClockSkew.isNegative()) {
-            throw new IllegalArgumentException("maxClockSkew cannot be negative");
-        }
-        if (journalRetention.isZero() || journalRetention.isNegative()) {
-            throw new IllegalArgumentException("journalRetention must be positive");
-        }
-        if (maxInventoryPageSize < 1) {
-            throw new IllegalArgumentException("maxInventoryPageSize must be positive");
-        }
-        if (terminalRetention.isZero() || terminalRetention.isNegative()) {
-            throw new IllegalArgumentException("terminalRetention must be positive");
-        }
-        if (terminalRetention.compareTo(journalRetention) < 0) {
-            // A terminal instance pruned while its own events are still readable would leave the
-            // journal naming a process instance the inventory can no longer describe, and a consumer
-            // replaying those events would resolve every one of them to "never existed". The
-            // inventory row is the cheaper of the two to keep, so it outlives the events rather than
-            // the other way round.
-            throw new IllegalArgumentException("terminalRetention " + terminalRetention
-                    + " cannot be shorter than journalRetention " + journalRetention);
-        }
-        if (executionResultRetention.isZero() || executionResultRetention.isNegative()) {
-            throw new IllegalArgumentException("executionResultRetention must be positive");
-        }
+        new ExecutionStorePolicy(maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                maxInventoryPageSize, terminalRetention, executionResultRetention);
+    }
+
+    /** Returns the shared semantic policy without PostgreSQL contention settings. */
+    public ExecutionStorePolicy executionStorePolicy() {
+        return new ExecutionStorePolicy(maxLeaseTtl, maxPayloadBytes, maxClockSkew, journalRetention,
+                maxInventoryPageSize, terminalRetention, executionResultRetention);
     }
 }

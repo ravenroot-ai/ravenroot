@@ -2433,6 +2433,45 @@ ROUTE_BOUND_PATHS = {
     "oc-af3a93f860fc52c46a00": "/v1/events/recent",
     "oc-e29595d4bc323f7da368": "/v1/events/recent",
 }
+ASSISTANT_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
+ASSISTANT_CONFIGURATION_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/assistant/AssistantConfigurationTest.java")
+ASSISTANT_SERVICE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantService.java")
+ASSISTANT_SERVICE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/assistant/AssistantGraphProposalTest.java")
+ASSISTANT_PLATFORM_TEST_PATH = Path("scripts/tests/test_assistant_platform_configuration.sh")
+ASSISTANT_LIMIT_FAMILY_ID = "assistant-operational-limits-v1"
+ASSISTANT_LIMIT_COMPONENTS = (
+    "enabled", "providerId", "endpoint", "model", "credential", "egressPolicy", "timeout",
+    "maxOutputTokens", "maxToolIterations", "credentialSource", "allowLocalHttp",
+)
+ASSISTANT_LIMIT_SETTINGS = (
+    {
+        "setting": "assistant.max-output-tokens", "component": "maxOutputTokens",
+        "componentIndex": 7, "environmentSymbol": "MAX_OUTPUT_TOKENS_VARIABLE",
+        "environment": "RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS",
+        "defaultSymbol": "DEFAULT_MAX_OUTPUT_TOKENS", "defaultValue": 16_000,
+        "helmField": "maxOutputTokens",
+    },
+    {
+        "setting": "assistant.max-tool-iterations", "component": "maxToolIterations",
+        "componentIndex": 8, "environmentSymbol": "MAX_TOOL_ITERATIONS_VARIABLE",
+        "environment": "RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS",
+        "defaultSymbol": "DEFAULT_MAX_TOOL_ITERATIONS", "defaultValue": 8,
+        "helmField": "maxToolIterations",
+    },
+)
+ASSISTANT_CARRIER_PATHS = {
+    "compose": frozenset({"compose.yaml"}),
+    "deploymentExamples": frozenset({"docs/examples/assistant/compose.override.yaml"}),
+    "helm": frozenset({
+        "deploy/helm/ravenroot/values.yaml", "deploy/helm/ravenroot/values.schema.json",
+        "deploy/helm/ravenroot/templates/deployment.yaml",
+    }),
+    "rawKubernetes": frozenset({"deploy/kubernetes/ravenroot.yaml"}),
+}
 
 
 def java_source_candidates(relative: Path, source: str) -> tuple[tuple[int, Candidate], ...]:
@@ -3180,6 +3219,623 @@ def route_table_authority_errors(root: Path, authorities: object,
     return errors
 
 
+def assistant_limit_binding_call(source: str, component: str) -> tuple[str, int, int] | None:
+    call = java_constructor_component_call(
+        source, "AssistantConfiguration", "fromEnvironment", "AssistantConfiguration",
+        ASSISTANT_LIMIT_COMPONENTS, component,
+    )
+    return call
+
+
+def java_identifier_write_count(code: str, identifier: str) -> int:
+    """Count direct/compound writes in one already masked Java span."""
+    name = re.escape(identifier)
+    writes = re.findall(
+        rf"\b{name}\s*(?:>>>=|>>=|<<=|=(?!=)|[+\-*/%&|^]=|\+\+|--)"
+        rf"|(?:\+\+|--)\s*\b{name}\b",
+        code,
+    )
+    return len(writes)
+
+
+def assistant_limit_source_specs(source: str) -> list[dict[str, object]] | None:
+    """Derive the checker-owned two symbol-bound AssistantConfiguration components."""
+    if java_package(source) != "ai.ravenroot.server.assistant" \
+            or java_record_components(source, "AssistantConfiguration") != ASSISTANT_LIMIT_COMPONENTS \
+            or java_method_header(source, "AssistantConfiguration", "fromEnvironment") != \
+            "public static AssistantConfiguration fromEnvironment(Map<String, String> environment)" \
+            or not exact_import_identity(source, "java.util.Map") \
+            or not java_has_no_simple_name_shadow(
+                source, "AssistantConfiguration", {"Map"}):
+        return None
+    factory_span = java_method_span(source, "AssistantConfiguration", "fromEnvironment")
+    factory_code = strip_c_comments_and_literals(source[slice(*factory_span)] if factory_span else "")
+    if len(re.findall(r"\bboundedPositiveInteger\s*\(", factory_code)) != 2 \
+            or len(re.findall(
+                r"\bMap\s*<\s*String\s*,\s*String\s*>\s+env\s*=\s*"
+                r"environment\s*==\s*null\s*\?\s*Map\.of\s*\(\s*\)\s*:\s*environment\s*;",
+                factory_code,
+            )) != 1:
+        return None
+    protected_symbols = {
+        str(setting[key]) for setting in ASSISTANT_LIMIT_SETTINGS
+        for key in ("environmentSymbol", "defaultSymbol")
+    }
+    if java_identifier_write_count(factory_code, "env") != 1 \
+            or java_identifier_write_count(factory_code, "environment") != 0 \
+            or any(java_identifier_write_count(factory_code, symbol) != 0
+                   for symbol in protected_symbols):
+        return None
+    result: list[dict[str, object]] = []
+    for expected in ASSISTANT_LIMIT_SETTINGS:
+        call = assistant_limit_binding_call(source, str(expected["component"]))
+        if call is None:
+            return None
+        argument, start, end = call
+        pattern = re.fullmatch(
+            r"boundedPositiveInteger\(env\.get\(([A-Za-z_$][\w$]*)\),\s*"
+            r"([A-Za-z_$][\w$]*),\s*([A-Za-z_$][\w$]*)\)", argument,
+        )
+        if pattern is None or pattern.group(1) != pattern.group(2):
+            return None
+        env_symbol, default_symbol = pattern.group(1), pattern.group(3)
+        env_initializer = java_static_final_initializer(source, "AssistantConfiguration", env_symbol)
+        default_initializer = java_static_final_initializer(
+            source, "AssistantConfiguration", default_symbol)
+        type_span = java_type_span(source, "AssistantConfiguration")
+        type_code = strip_c_comments_and_literals(source)[slice(*type_span)] \
+            if type_span is not None else ""
+        type_depths = java_brace_depths(type_code)
+        env_declarations = [match for match in re.finditer(
+            rf"\bpublic\s+static\s+final\s+String\s+{re.escape(env_symbol)}\s*=", type_code,
+        ) if type_depths[match.start()] == 1]
+        if env_initializer is None or default_initializer is None \
+                or len(env_declarations) != 1 \
+                or not re.fullmatch(rf'"{re.escape(str(expected["environment"]))}"', env_initializer[0]) \
+                or public_static_final_int_expression(
+                    source, "AssistantConfiguration", default_symbol) is None:
+            return None
+        default_value = java_int_expression_value(default_initializer[0], lambda _token: None)
+        derived = dict(expected)
+        derived.update({
+            "call": argument, "callStart": start, "callEnd": end,
+            "environmentSymbol": env_symbol, "environmentSpan": env_initializer[1:],
+            "defaultSymbol": default_symbol, "defaultExpression": default_initializer[0],
+            "defaultSpan": default_initializer[1:], "defaultValue": default_value,
+        })
+        if any(derived[key] != expected[key] for key in (
+                "environmentSymbol", "defaultSymbol", "defaultValue")):
+            return None
+        result.append(derived)
+    return result
+
+
+def assistant_limit_carrier_errors(root: Path, spec: dict[str, object], evidence: object,
+                                   entries: dict[str, dict[str, object]],
+                                   discovered: dict[str, Candidate]) -> tuple[list[str], set[str]]:
+    required = {"environment", "expectedCandidateIds"}
+    setting = str(spec["setting"])
+    if not isinstance(evidence, dict) or set(evidence) != required \
+            or evidence.get("environment") != spec["environment"]:
+        return ([f"{setting}: assistant carrier evidence has an unsupported shape"], set())
+    groups = evidence["expectedCandidateIds"]
+    if not isinstance(groups, dict) or set(groups) != set(ASSISTANT_CARRIER_PATHS):
+        return ([f"{setting}: assistant carrier evidence must include every checker-owned group"], set())
+    errors: list[str] = []
+    accounted: set[str] = set()
+    environment = str(spec["environment"])
+    for group, paths in ASSISTANT_CARRIER_PATHS.items():
+        actual = sorted(candidate.id for candidate in discovered.values()
+                        if candidate.path in paths and candidate.kind == "environment-binding"
+                        and candidate.expression == environment)
+        if groups.get(group) != actual:
+            errors.append(f"{setting}: assistant {group} candidate set has drifted")
+        accounted.update(actual)
+        if any(entries.get(identifier, {}).get("setting") != setting for identifier in actual):
+            errors.append(f"{setting}: assistant carrier candidate is absent or assigned elsewhere")
+
+    helm_field = str(spec["helmField"])
+    maximum = int(spec["defaultValue"])
+    values_source = (root / "deploy/helm/ravenroot/values.yaml").read_text(encoding="utf-8")
+    if yaml_scalar_at_path(values_source, f"assistant.{helm_field}") != '""':
+        errors.append(f"{setting}: Helm value must be an explicit blank default")
+    try:
+        schema = json.loads((root / "deploy/helm/ravenroot/values.schema.json").read_text(
+            encoding="utf-8"))
+        assistant = schema["properties"]["assistant"]
+        leaf = assistant["properties"][helm_field]
+        branches = leaf["oneOf"]
+        if not isinstance(branches, list) or len(branches) != 2:
+            raise ValueError("unsupported assistant schema branch set")
+        integer = next(item for item in branches if item.get("type") == "integer")
+        reference = next(item for item in branches if "$ref" in item)
+        resolved_reference = resolved_json_schema_value(schema, reference)
+        expected_reference = {
+            "$ref": "#/definitions/graphBlank",
+            "resolved": {
+                "type": "string",
+                "pattern": "^[\t-\r\x1c- \u1680\u2000-\u2006\u2008-\u200a"
+                           "\u2028-\u2029\u205f\u3000]*$",
+            },
+        }
+        if set(leaf) != {"x-ravenroot-environment", "oneOf"} \
+                or branches != [integer, reference] \
+                or helm_field not in assistant["required"] \
+                or leaf.get("x-ravenroot-environment") != environment \
+                or integer != {"type": "integer", "minimum": 1, "maximum": maximum} \
+                or resolved_reference != expected_reference:
+            errors.append(f"{setting}: Helm schema binding/range/blank reference has drifted")
+    except (KeyError, TypeError, ValueError, StopIteration, json.JSONDecodeError):
+        errors.append(f"{setting}: Helm schema binding/range/blank reference is unsupported")
+    template = (root / "deploy/helm/ravenroot/templates/deployment.yaml").read_text(encoding="utf-8")
+    expected_template = (f"- name: {environment}\n"
+                         f"              value: {{{{ include \"ravenroot.graphLimitValue\" "
+                         f".Values.assistant.{helm_field} }}}}")
+    if template.count(expected_template) != 1:
+        errors.append(f"{setting}: Helm template environment-to-value mapping has drifted")
+    raw = (root / "deploy/kubernetes/ravenroot.yaml").read_text(encoding="utf-8")
+    if len(re.findall(
+            rf"(?m)^\s*- name:\s*{re.escape(environment)}\s*$\n\s*value:\s*\"\"\s*$", raw)) != 1:
+        errors.append(f"{setting}: raw Kubernetes blank carrier has drifted")
+    for relative in (Path("compose.yaml"), Path("docs/examples/assistant/compose.override.yaml")):
+        text = (root / relative).read_text(encoding="utf-8")
+        if text.count(f"{environment}: ${{{environment}:-}}") != 1:
+            errors.append(f"{setting}: {relative.as_posix()} blank forwarding has drifted")
+    return errors, accounted
+
+
+def assistant_limit_conversion_errors(root: Path, spec: dict[str, object], conversion: object) \
+        -> list[str]:
+    required = {
+        "kind", "issue", "beforeRevision", "afterRevision", "path", "ownerType", "method",
+        "constructorType", "component", "componentIndex", "beforeArgument", "afterArgument",
+        "environmentSymbol", "environment", "defaultSymbol",
+    }
+    setting = str(spec["setting"])
+    if not isinstance(conversion, dict) or set(conversion) != required \
+            or conversion.get("kind") != "java-constructor-binding-conversion-v1":
+        return [f"{setting}: assistant conversion authority has an unsupported shape"]
+    path = ASSISTANT_CONFIGURATION_PATH.as_posix()
+    errors: list[str] = []
+    transition, before_source, after_source = revision_transition_errors(
+        root, setting, conversion, path=path, symbol="AssistantConfiguration", label="conversion")
+    errors.extend(transition)
+    before = str(conversion["beforeRevision"])
+    after = str(conversion["afterRevision"])
+    if commit_exists(root, before) and commit_exists(root, after):
+        parent = subprocess.run(
+            ["git", "rev-parse", f"{after}^"], cwd=root, capture_output=True, text=True)
+        if parent.returncode != 0 or parent.stdout.strip() != before:
+            errors.append(f"{setting}: assistant conversion revisions must be direct parent/child")
+    metadata = {
+        "path": path, "ownerType": "AssistantConfiguration", "method": "fromEnvironment",
+        "constructorType": "AssistantConfiguration", "component": spec["component"],
+        "componentIndex": spec["componentIndex"], "environmentSymbol": spec["environmentSymbol"],
+        "environment": spec["environment"], "defaultSymbol": spec["defaultSymbol"],
+    }
+    if any(conversion.get(key) != value for key, value in metadata.items()):
+        errors.append(f"{setting}: assistant conversion metadata does not match its source family")
+    if before_source is not None and after_source is not None:
+        before_call = assistant_limit_binding_call(before_source, str(spec["component"]))
+        after_call = assistant_limit_binding_call(after_source, str(spec["component"]))
+        expected_before = str(spec["defaultSymbol"])
+        expected_after = (
+            f"boundedPositiveInteger(env.get({spec['environmentSymbol']}), "
+            f"{spec['environmentSymbol']}, {spec['defaultSymbol']})")
+        if before_call is None or before_call[0] != expected_before \
+                or conversion.get("beforeArgument") != expected_before \
+                or after_call is None or after_call[0] != expected_after \
+                or conversion.get("afterArgument") != expected_after:
+            errors.append(f"{setting}: assistant conversion constructor arguments have drifted")
+        before_env = java_static_final_initializer(
+            before_source, "AssistantConfiguration", str(spec["environmentSymbol"]))
+        after_env = java_static_final_initializer(
+            after_source, "AssistantConfiguration", str(spec["environmentSymbol"]))
+        before_default = java_static_final_initializer(
+            before_source, "AssistantConfiguration", str(spec["defaultSymbol"]))
+        after_default = java_static_final_initializer(
+            after_source, "AssistantConfiguration", str(spec["defaultSymbol"]))
+        if before_env is not None or after_env is None \
+                or after_env[0] != f'"{spec["environment"]}"' \
+                or before_default is None or after_default is None \
+                or before_default[0] != after_default[0]:
+            errors.append(f"{setting}: assistant conversion declaration/default transition has drifted")
+    return errors
+
+
+def assistant_limit_resolver_errors(root: Path, resolver: object) -> list[str]:
+    required = {
+        "kind", "path", "type", "factoryMethod", "factoryBodyDigest", "integerMethod",
+        "integerBodyDigest", "dependencyBodyDigests", "testPath", "testType", "testBodyDigests",
+        "testHelperBodyDigests",
+    }
+    if not isinstance(resolver, dict) or set(resolver) != required \
+            or resolver.get("kind") != "java-symbol-bounded-positive-integer-resolver-v1":
+        return ["assistant operational limits require one exact resolver authority"]
+    errors: list[str] = []
+    path = ASSISTANT_CONFIGURATION_PATH
+    test_path = ASSISTANT_CONFIGURATION_TEST_PATH
+    if resolver.get("path") != path.as_posix() or resolver.get("type") != "AssistantConfiguration" \
+            or resolver.get("factoryMethod") != "fromEnvironment" \
+            or resolver.get("integerMethod") != "boundedPositiveInteger":
+        errors.append("assistant resolver source identity has drifted")
+    source = (root / path).read_text(encoding="utf-8")
+    if resolver.get("factoryBodyDigest") != java_method_digest(
+            source, "AssistantConfiguration", "fromEnvironment") \
+            or resolver.get("integerBodyDigest") != java_method_digest(
+                source, "AssistantConfiguration", "boundedPositiveInteger"):
+        errors.append("assistant resolver factory/helper digest has drifted")
+    dependencies = resolver.get("dependencyBodyDigests")
+    expected_dependencies = {
+        method: java_method_digest(source, "AssistantConfiguration", method)
+        for method in ("trimmed", "boundedIntegerRefusal")
+    }
+    integer_span = java_method_span(source, "AssistantConfiguration", "boundedPositiveInteger")
+    integer_code = normalized(strip_c_comments(
+        source[slice(*integer_span)] if integer_span else ""))
+    expected_integer_code = normalized("""
+        boundedPositiveInteger(String value, String variable, int defaultAndMaximum) {
+            String normalized = trimmed(value);
+            if (normalized == null) { return defaultAndMaximum; }
+            int parsed;
+            try { parsed = Integer.parseInt(normalized); }
+            catch (NumberFormatException invalid) {
+                throw boundedIntegerRefusal(variable, defaultAndMaximum);
+            }
+            if (parsed < 1 || parsed > defaultAndMaximum) {
+                throw boundedIntegerRefusal(variable, defaultAndMaximum);
+            }
+            return parsed;
+        }
+    """)
+    if dependencies != expected_dependencies \
+            or java_method_header(source, "AssistantConfiguration", "boundedPositiveInteger") != \
+            "private static int boundedPositiveInteger(String value, String variable, int defaultAndMaximum)" \
+            or integer_code != expected_integer_code:
+        errors.append("assistant resolver helper closure/contract has drifted")
+    trimmed_span = java_method_span(source, "AssistantConfiguration", "trimmed")
+    trimmed_code = normalized(strip_c_comments(
+        source[slice(*trimmed_span)] if trimmed_span else ""))
+    refusal = java_direct_return_expression(
+        source, "AssistantConfiguration", "boundedIntegerRefusal")
+    expected_trimmed_code = normalized("""
+        trimmed(String value) {
+            if (value == null) { return null; }
+            String stripped = value.strip();
+            return stripped.isEmpty() ? null : stripped;
+        }
+    """)
+    normal_imports = re.findall(
+        r"(?m)^\s*import\s+(?!static\s)([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;",
+        strip_c_comments_and_literals(source),
+    )
+    java_lang_names = {"Integer", "NumberFormatException", "IllegalArgumentException"}
+    if trimmed_code != expected_trimmed_code \
+            or java_method_header(source, "AssistantConfiguration", "trimmed") != \
+            "private static String trimmed(String value)" \
+            or refusal is None \
+            or refusal != normalized(
+                'new IllegalArgumentException(variable + " must be a whole number from 1 to " + maximum)') \
+            or java_method_header(source, "AssistantConfiguration", "boundedIntegerRefusal") != \
+            "private static IllegalArgumentException boundedIntegerRefusal(String variable, int maximum)" \
+            or any(item.rsplit(".", 1)[-1] in java_lang_names for item in normal_imports) \
+            or not java_has_no_simple_name_shadow(
+                source, "AssistantConfiguration", java_lang_names):
+        errors.append("assistant resolver blank/refusal dependency structure has drifted")
+    if resolver.get("testPath") != test_path.as_posix() \
+            or resolver.get("testType") != "AssistantConfigurationTest":
+        errors.append("assistant resolver test identity has drifted")
+        return errors
+    test_source = (root / test_path).read_text(encoding="utf-8")
+    roles = (
+        "assistantOperationalLimitsDefaultAndTightenIndependently",
+        "invalidAssistantOperationalLimitsAreCauseFreeAndDoNotEchoValues",
+        "compactConstructorKeepsItsCompatibilityFallbacks",
+    )
+    recorded = resolver.get("testBodyDigests")
+    helper_recorded = resolver.get("testHelperBodyDigests")
+    if not isinstance(recorded, dict) or set(recorded) != set(roles) \
+            or not java_test_type_is_directly_runnable(test_source, "AssistantConfigurationTest") \
+            or not exact_import_identity(test_source, "org.junit.jupiter.api.Test") \
+            or not java_has_exact_junit_assertions(
+                test_source, "AssistantConfigurationTest",
+                {"assertEquals", "assertFalse", "assertNull", "assertThrows", "assertTrue"}):
+        errors.append("assistant resolver runnable test authority is incomplete")
+    for method in roles:
+        if java_method_header(test_source, "AssistantConfigurationTest", method) != f"void {method}()" \
+                or java_method_annotations(test_source, "AssistantConfigurationTest", method) != ("@Test",) \
+                or not isinstance(recorded, dict) \
+                or recorded.get(method) != java_method_digest(
+                    test_source, "AssistantConfigurationTest", method):
+            errors.append(f"assistant resolver test role {method} has drifted")
+    default_span = java_method_span(
+        test_source, "AssistantConfigurationTest",
+        "assistantOperationalLimitsDefaultAndTightenIndependently")
+    default_code = normalized(strip_c_comments_and_literals(
+        test_source[slice(*default_span)] if default_span else ""))
+    required_default_clauses = (
+        "AssistantConfiguration.fromEnvironment(Map.of())",
+        "AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS",
+        "defaults.maxOutputTokens()",
+        "AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS",
+        "defaults.maxToolIterations()",
+        "for (String blank : new String[]",
+        "blankConfiguration.maxOutputTokens()",
+        "blankConfiguration.maxToolIterations()",
+        "outputOnly.maxOutputTokens()", "outputOnly.maxToolIterations()",
+        "iterationsOnly.maxOutputTokens()", "iterationsOnly.maxToolIterations()",
+        "maxima.maxOutputTokens()", "maxima.maxToolIterations()",
+    )
+    invalid_span = java_method_span(
+        test_source, "AssistantConfigurationTest",
+        "invalidAssistantOperationalLimitsAreCauseFreeAndDoNotEchoValues")
+    invalid_code = normalized(strip_c_comments_and_literals(
+        test_source[slice(*invalid_span)] if invalid_span else ""))
+    if any(normalized(clause) not in default_code for clause in required_default_clauses) \
+            or invalid_code.count("assertInvalidLimit(") != 2 \
+            or "AssistantConfiguration.MAX_OUTPUT_TOKENS_VARIABLE" not in invalid_code \
+            or "AssistantConfiguration.MAX_TOOL_ITERATIONS_VARIABLE" not in invalid_code \
+            or "AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS" not in invalid_code \
+            or "AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS" not in invalid_code:
+        errors.append("assistant resolver runnable test clauses have drifted")
+    helper_method = "assertInvalidLimit"
+    helper_span = java_method_span(test_source, "AssistantConfigurationTest", helper_method)
+    helper_code = normalized(strip_c_comments_and_literals(
+        test_source[slice(*helper_span)] if helper_span else ""))
+    if helper_recorded != {helper_method: java_method_digest(
+            test_source, "AssistantConfigurationTest", helper_method)} \
+            or java_method_header(test_source, "AssistantConfigurationTest", helper_method) != \
+            "private static void assertInvalidLimit(String variable, int maximum, String... invalidValues)" \
+            or any(expression not in helper_code for expression in (
+                "for (String invalid : invalidValues)",
+                "AssistantConfiguration.fromEnvironment(Map.of(variable, invalid))",
+                "variable + + maximum", "failure.getCause()", "failure.getMessage().contains(",
+            )):
+        errors.append("assistant resolver invalid-value test helper closure has drifted")
+    return errors
+
+
+def assistant_limit_consumer_errors(root: Path, consumer: object) -> list[str]:
+    required = {"path", "type", "method", "bodyDigest", "testPath", "testType", "testBodyDigest"}
+    if not isinstance(consumer, dict) or set(consumer) != required:
+        return ["assistant operational limits require exact live consumer evidence"]
+    errors: list[str] = []
+    source = (root / ASSISTANT_SERVICE_PATH).read_text(encoding="utf-8")
+    if consumer.get("path") != ASSISTANT_SERVICE_PATH.as_posix() \
+            or consumer.get("type") != "AssistantService" or consumer.get("method") != "send" \
+            or consumer.get("bodyDigest") != java_method_digest(source, "AssistantService", "send") \
+            or not exact_import_identity(
+                source, "ai.ravenroot.server.assistant.provider.AssistantProvider") \
+            or not java_has_no_simple_name_shadow(
+                source, "AssistantService", {"AssistantProvider"}):
+        errors.append("assistant live consumer source identity/digest has drifted")
+    span = java_method_span(source, "AssistantService", "send")
+    actual = source[slice(*span)] if span else ""
+    code = strip_c_comments_and_literals(actual)
+    loops = list(re.finditer(
+        r"for\s*\(\s*int\s+iteration\s*=\s*0\s*;\s*iteration\s*<\s*"
+        r"configuration\.maxToolIterations\s*\(\s*\)\s*;\s*iteration\+\+\s*\)\s*\{", code))
+    if len(loops) != 1:
+        errors.append("assistant live consumer has no exact active configured provider loop")
+    else:
+        opening = code.find("{", loops[0].start())
+        closing = matching_delimiter(code, opening, "{", "}")
+        loop_actual = actual[opening + 1:closing] if closing is not None else ""
+        loop_code = code[opening + 1:closing] if closing is not None else ""
+        calls = list(re.finditer(r"\bturnProvider\.complete\s*\(", loop_code))
+        if len(calls) != 1:
+            errors.append("assistant live consumer provider call is not uniquely inside the configured loop")
+        else:
+            call_open = loop_code.find("(", calls[0].start())
+            complete = split_java_arguments(loop_actual, loop_code, call_open)
+            request = complete[0][0][0] if complete is not None and len(complete[0]) == 1 else ""
+            request_code = strip_c_comments_and_literals(request)
+            request_match = re.match(r"\s*new\s+AssistantProvider\.Request\s*\(", request_code)
+            request_args = (split_java_arguments(
+                request, request_code, request_code.find("(", request_match.start()))
+                if request_match is not None else None)
+            if request_args is None or len(request_args[0]) != 5 \
+                    or request_args[0][4][0] != "configuration.maxOutputTokens()":
+                errors.append("assistant live consumer output limit is not the exact provider request argument")
+    if span is None or not java_span_uses_only_simple_receiver(source, span, "configuration"):
+        errors.append("assistant live consumer configuration receiver is shadowed or unsupported")
+    if normalized("AssistantProvider turnProvider = providerFor(context.subject());") not in \
+            normalized(code) or code.count("AssistantProvider turnProvider") != 1:
+        errors.append("assistant live consumer provider selection has drifted")
+
+    test_source = (root / ASSISTANT_SERVICE_TEST_PATH).read_text(encoding="utf-8")
+    test_type = "AssistantGraphProposalTest"
+    method = "configuredOperationalLimitsReachEveryRequestAndStopTheProviderLoop"
+    if consumer.get("testPath") != ASSISTANT_SERVICE_TEST_PATH.as_posix() \
+            or consumer.get("testType") != test_type \
+            or consumer.get("testBodyDigest") != java_method_digest(test_source, test_type, method) \
+            or not java_test_type_is_directly_runnable(test_source, test_type) \
+            or not exact_import_identity(test_source, "org.junit.jupiter.api.Test") \
+            or not java_has_exact_junit_assertions(
+                test_source, test_type, {"assertEquals", "assertInstanceOf", "assertTrue"}) \
+            or java_method_header(test_source, test_type, method) != f"void {method}()" \
+            or java_method_annotations(test_source, test_type, method) != ("@Test",) \
+            or not same_package_type_identity(
+                test_source, test_type,
+                "ai.ravenroot.server.assistant.AssistantHarness") \
+            or not same_package_type_identity(
+                test_source, test_type,
+                "ai.ravenroot.server.assistant.AssistantOutcome"):
+        errors.append("assistant live consumer runnable test authority has drifted")
+    test_span = java_method_span(test_source, test_type, method)
+    test_code = normalized(strip_c_comments_and_literals(
+        test_source[slice(*test_span)] if test_span else ""))
+    for expression in (
+        "readyConfiguration(17, 2)", "callingTool", "answering",
+        "AssistantOutcome.Reason.TOOL_LOOP_EXHAUSTED", "assertEquals(2, provider.callCount())",
+        "assertEquals(2, provider.received().size())", "request.maxTokens() == 17",
+    ):
+        if normalized(expression) not in test_code:
+            errors.append(f"assistant live consumer test lost {expression}")
+    if test_code.count("callingTool(") != 2 or test_code.count("answering(") != 1:
+        errors.append("assistant live consumer test lost its two-call/third-sentinel structure")
+    chain = re.compile(
+        r"new\s+AssistantHarness\.ScriptedProviderView\s*\(\s*\)\s*"
+        r"\.callingTool\s*\([^)]*\)\s*\.callingTool\s*\([^)]*\)\s*"
+        r"\.answering\s*\([^)]*\)", re.S)
+    if len(chain.findall(strip_c_comments(test_source[slice(*test_span)] if test_span else ""))) != 1:
+        errors.append("assistant live consumer test lost its ordered provider script")
+    return errors
+
+
+def assistant_limit_compatibility_errors(root: Path, compatibility: object) -> list[str]:
+    required = {"constructorBodyDigest", "testBodyDigest"}
+    if not isinstance(compatibility, dict) or set(compatibility) != required:
+        return ["assistant operational limits require exact compact-constructor compatibility evidence"]
+    source = (root / ASSISTANT_CONFIGURATION_PATH).read_text(encoding="utf-8")
+    span = java_compact_constructor_span(source, "AssistantConfiguration")
+    constructor = normalized(strip_c_comments_and_literals(source[slice(*span)] if span else ""))
+    errors: list[str] = []
+    if compatibility.get("constructorBodyDigest") != java_span_digest(source, span) \
+            or java_identifier_write_count(constructor, "maxOutputTokens") != 1 \
+            or java_identifier_write_count(constructor, "maxToolIterations") != 1 \
+            or constructor.count(normalized(
+                "maxOutputTokens = maxOutputTokens > 0 ? maxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS;")) != 1 \
+            or constructor.count(normalized(
+                "maxToolIterations = maxToolIterations > 0 ? maxToolIterations : DEFAULT_MAX_TOOL_ITERATIONS;")) != 1:
+        errors.append("assistant compact-constructor field-specific compatibility has drifted")
+    test_source = (root / ASSISTANT_CONFIGURATION_TEST_PATH).read_text(encoding="utf-8")
+    method = "compactConstructorKeepsItsCompatibilityFallbacks"
+    test_span = java_method_span(test_source, "AssistantConfigurationTest", method)
+    test_code = normalized(strip_c_comments_and_literals(
+        test_source[slice(*test_span)] if test_span else ""))
+    required_test_clauses = (
+        "new AssistantConfiguration(true, null, null, null, null, OutboundHttpPolicy.disabled(), Duration.ZERO, 0, -1)",
+        "AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS",
+        "configuration.maxOutputTokens()",
+        "AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS",
+        "configuration.maxToolIterations()",
+        "AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS + 1",
+        "positiveValues.maxOutputTokens()",
+        "AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS + 1",
+        "positiveValues.maxToolIterations()",
+    )
+    if compatibility.get("testBodyDigest") != java_method_digest(
+            test_source, "AssistantConfigurationTest", method) \
+            or any(normalized(clause) not in test_code for clause in required_test_clauses):
+        errors.append("assistant compact-constructor compatibility test has drifted")
+    return errors
+
+
+def assistant_limit_authority_errors(root: Path, authorities: object,
+                                     entries: dict[str, dict[str, object]],
+                                     discovered: dict[str, Candidate]) -> list[str]:
+    """Verify the closed two-setting assistant limit family before public classification."""
+    source_owner = f"{ASSISTANT_CONFIGURATION_PATH.as_posix()}#AssistantConfiguration"
+    if current_source_owner(root, source_owner) is None:
+        return [] if authorities in (None, {}) else ["assistant limit authority exists without its source family"]
+    source = (root / ASSISTANT_CONFIGURATION_PATH).read_text(encoding="utf-8")
+    derived = assistant_limit_source_specs(source)
+    if derived is None:
+        return ["AssistantConfiguration operational-limit source family has drifted"]
+    if not isinstance(authorities, dict) or set(authorities) != {ASSISTANT_LIMIT_FAMILY_ID}:
+        return ["AssistantConfiguration operational limits require one closed family authority"]
+    authority = authorities[ASSISTANT_LIMIT_FAMILY_ID]
+    required = {
+        "kind", "settings", "resolverAuthority", "conversionAuthorities", "carrierEvidence",
+        "consumerAuthority", "compatibilityAuthority", "platformTestDigest",
+    }
+    if not isinstance(authority, dict) or set(authority) != required \
+            or authority.get("kind") != "assistant-symbol-operational-limits-v1":
+        return ["assistant operational-limit family authority has an unsupported shape"]
+    errors: list[str] = []
+    settings = authority["settings"]
+    if not isinstance(settings, list) or len(settings) != 2:
+        return ["assistant operational-limit authority must contain exactly two settings"]
+    contracts = {str(item.get("setting")): item for item in settings if isinstance(item, dict)}
+    if set(contracts) != {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}:
+        return ["assistant operational-limit setting family is incomplete"]
+    conversions = authority["conversionAuthorities"]
+    carriers = authority["carrierEvidence"]
+    if not isinstance(conversions, dict) or set(conversions) != set(contracts) \
+            or not isinstance(carriers, dict) or set(carriers) != set(contracts):
+        errors.append("assistant conversion/carrier authorities must cover both settings")
+    for spec in derived:
+        setting = str(spec["setting"])
+        contract = contracts[setting]
+        if set(contract) != {"setting", "bindingAuthority", "defaultAuthority"}:
+            errors.append(f"{setting}: assistant setting authority has an unsupported shape")
+            continue
+        binding = contract["bindingAuthority"]
+        default = contract["defaultAuthority"]
+        binding_keys = {
+            "kind", "sourceOwner", "method", "constructorType", "component", "componentIndex",
+            "helper", "environmentSymbol", "environment", "environmentCandidateId",
+            "declarationCandidateIds", "callDigest", "resolverAuthority",
+        }
+        default_keys = {
+            "kind", "owner", "field", "componentIndex", "constant", "sourceExpression",
+            "candidateIds", "evaluatedDefault",
+        }
+        if not isinstance(binding, dict) or set(binding) != binding_keys \
+                or binding.get("kind") != "java-symbol-environment-constructor-v1" \
+                or not isinstance(default, dict) or set(default) != default_keys \
+                or default.get("kind") != "java-static-final-int-default-v1":
+            errors.append(f"{setting}: assistant binding/default authority has an unsupported shape")
+            continue
+        expected_binding = {
+            "sourceOwner": source_owner, "method": "fromEnvironment",
+            "constructorType": "AssistantConfiguration", "component": spec["component"],
+            "componentIndex": spec["componentIndex"], "helper": "boundedPositiveInteger",
+            "environmentSymbol": spec["environmentSymbol"], "environment": spec["environment"],
+            "resolverAuthority": "assistant-bounded-positive-integer-v1",
+        }
+        expected_default = {
+            "owner": source_owner, "field": spec["component"],
+            "componentIndex": spec["componentIndex"], "constant": spec["defaultSymbol"],
+            "sourceExpression": spec["defaultExpression"], "evaluatedDefault": spec["defaultValue"],
+        }
+        if contract.get("setting") != setting \
+                or any(binding.get(key) != value for key, value in expected_binding.items()) \
+                or any(default.get(key) != value for key, value in expected_default.items()) \
+                or binding.get("callDigest") != hashlib.sha256(
+                    str(spec["call"]).encode("utf-8")).hexdigest():
+            errors.append(f"{setting}: assistant symbol binding/default metadata has drifted")
+        env_ids = candidate_ids_in_source_span(
+            ASSISTANT_CONFIGURATION_PATH, source, *spec["environmentSpan"],
+            "environment-binding", str(spec["environment"]), discovered)
+        declaration_ids = sorted(
+            candidate.id for candidate in discovered.values()
+            if candidate.path == ASSISTANT_CONFIGURATION_PATH.as_posix()
+            and spec["environmentSpan"][0] <= next(
+                (offset for offset, item in java_source_candidates(ASSISTANT_CONFIGURATION_PATH, source)
+                 if item.id == candidate.id), -1) < spec["environmentSpan"][1]
+        )
+        default_ids = candidate_ids_in_source_span(
+            ASSISTANT_CONFIGURATION_PATH, source, *spec["defaultSpan"],
+            "fixed-declaration", str(spec["defaultSymbol"]), discovered)
+        if binding.get("environmentCandidateId") not in env_ids or env_ids != [
+                binding.get("environmentCandidateId")]:
+            errors.append(f"{setting}: assistant environment declaration binding has drifted")
+        if binding.get("declarationCandidateIds") != declaration_ids \
+                or default.get("candidateIds") != default_ids:
+            errors.append(f"{setting}: assistant declaration/default candidate partition has drifted")
+        carrier_errors, carrier_ids = assistant_limit_carrier_errors(
+            root, spec, carriers.get(setting) if isinstance(carriers, dict) else None,
+            entries, discovered)
+        errors.extend(carrier_errors)
+        assigned = set(declaration_ids) | set(default_ids) | carrier_ids
+        if any(entries.get(identifier, {}).get("setting") != setting for identifier in assigned):
+            errors.append(f"{setting}: assistant proof candidates are absent or assigned elsewhere")
+        errors.extend(assistant_limit_conversion_errors(
+            root, spec, conversions.get(setting) if isinstance(conversions, dict) else None))
+    errors.extend(assistant_limit_resolver_errors(root, authority["resolverAuthority"]))
+    errors.extend(assistant_limit_consumer_errors(root, authority["consumerAuthority"]))
+    errors.extend(assistant_limit_compatibility_errors(root, authority["compatibilityAuthority"]))
+    platform = (root / ASSISTANT_PLATFORM_TEST_PATH).read_text(encoding="utf-8")
+    if authority["platformTestDigest"] != hashlib.sha256(platform.encode("utf-8")).hexdigest() \
+            or any(platform.count(
+                f"{spec['environment']} {spec['component']} {spec['defaultSymbol']} "
+                f"assistant.{spec['helmField']}") != 1 for spec in ASSISTANT_LIMIT_SETTINGS):
+        errors.append("assistant platform carrier test source evidence has drifted")
+    return errors
+
+
 def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...]) -> list[str]:
     errors: list[str] = []
     raw_entries = document["entries"]
@@ -3392,6 +4048,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
         errors.extend(resolver_authority_errors(root, resolver_authorities))
     errors.extend(route_table_authority_errors(
         root, document.get("routeTableAuthorities"), entries, discovered,
+    ))
+    errors.extend(assistant_limit_authority_errors(
+        root, document.get("assistantLimitAuthorities"), entries, discovered,
     ))
 
     tracked_paths = set(tracked_files(root))

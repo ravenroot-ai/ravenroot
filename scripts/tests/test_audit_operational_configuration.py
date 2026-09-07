@@ -618,6 +618,593 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             self.assertTrue(any("published-contract-description requires the closed RouteTable authority"
                                 in error for error in errors), errors)
 
+    def assistant_limit_authority_fixture(self, root: Path):
+        paths = (
+            audit.ASSISTANT_CONFIGURATION_PATH, audit.ASSISTANT_CONFIGURATION_TEST_PATH,
+            audit.ASSISTANT_SERVICE_PATH, audit.ASSISTANT_SERVICE_TEST_PATH,
+            audit.ASSISTANT_PLATFORM_TEST_PATH, Path("compose.yaml"),
+            Path("docs/examples/assistant/compose.override.yaml"),
+            Path("deploy/helm/ravenroot/values.yaml"),
+            Path("deploy/helm/ravenroot/values.schema.json"),
+            Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+            Path("deploy/kubernetes/ravenroot.yaml"),
+        )
+        before_source = subprocess.run(
+            ["git", "show", "e60a099ebbd900e38f3bb004564d8f5125a887c4:"
+             + audit.ASSISTANT_CONFIGURATION_PATH.as_posix()],
+            cwd=ROOT, check=True, capture_output=True, text=True,
+        ).stdout
+        for relative in paths:
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        (root / audit.ASSISTANT_CONFIGURATION_PATH).write_text(before_source, encoding="utf-8")
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", "."], cwd=root, check=True)
+        subprocess.run([
+            "git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+            "commit", "-qm", "before assistant bindings",
+        ], cwd=root, check=True)
+        before_revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+            capture_output=True, text=True).stdout.strip()
+        current_source = (ROOT / audit.ASSISTANT_CONFIGURATION_PATH).read_text(encoding="utf-8")
+        (root / audit.ASSISTANT_CONFIGURATION_PATH).write_text(current_source, encoding="utf-8")
+        subprocess.run(["git", "add", audit.ASSISTANT_CONFIGURATION_PATH.as_posix()],
+                       cwd=root, check=True)
+        subprocess.run([
+            "git", "-c", "user.name=Audit Test", "-c", "user.email=audit@example.invalid",
+            "commit", "-qm", "add assistant bindings",
+        ], cwd=root, check=True)
+        after_revision = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=root, check=True,
+            capture_output=True, text=True).stdout.strip()
+
+        candidates = {candidate.id: candidate for candidate in audit.discover(root)}
+        specs = audit.assistant_limit_source_specs(current_source)
+        self.assertIsNotNone(specs)
+        source_rows = audit.java_source_candidates(audit.ASSISTANT_CONFIGURATION_PATH, current_source)
+        entries = {}
+        setting_authorities = []
+        conversions = {}
+        carriers = {}
+        for spec in specs:
+            setting = spec["setting"]
+            declaration_ids = sorted(
+                candidate.id for offset, candidate in source_rows
+                if spec["environmentSpan"][0] <= offset < spec["environmentSpan"][1])
+            environment_ids = [
+                candidate.id for offset, candidate in source_rows
+                if spec["environmentSpan"][0] <= offset < spec["environmentSpan"][1]
+                and candidate.kind == "environment-binding"
+                and candidate.expression == spec["environment"]
+            ]
+            default_ids = [
+                candidate.id for offset, candidate in source_rows
+                if spec["defaultSpan"][0] <= offset < spec["defaultSpan"][1]
+                and candidate.kind == "fixed-declaration"
+                and candidate.role == spec["defaultSymbol"]
+            ]
+            carrier_ids = {
+                group: sorted(candidate.id for candidate in candidates.values()
+                              if candidate.path in paths_for_group
+                              and candidate.kind == "environment-binding"
+                              and candidate.expression == spec["environment"])
+                for group, paths_for_group in audit.ASSISTANT_CARRIER_PATHS.items()
+            }
+            assigned = set(declaration_ids) | set(default_ids) | {
+                identifier for identifiers in carrier_ids.values() for identifier in identifiers}
+            for identifier in assigned:
+                entry = candidates[identifier].inventory_entry()
+                entry.update(setting=setting, status="converted", classification="operator-configurable")
+                entries[identifier] = entry
+            setting_authorities.append({
+                "setting": setting,
+                "bindingAuthority": {
+                    "kind": "java-symbol-environment-constructor-v1",
+                    "sourceOwner": (audit.ASSISTANT_CONFIGURATION_PATH.as_posix()
+                                    + "#AssistantConfiguration"),
+                    "method": "fromEnvironment", "constructorType": "AssistantConfiguration",
+                    "component": spec["component"], "componentIndex": spec["componentIndex"],
+                    "helper": "boundedPositiveInteger",
+                    "environmentSymbol": spec["environmentSymbol"],
+                    "environment": spec["environment"],
+                    "environmentCandidateId": environment_ids[0],
+                    "declarationCandidateIds": declaration_ids,
+                    "callDigest": audit.hashlib.sha256(spec["call"].encode("utf-8")).hexdigest(),
+                    "resolverAuthority": "assistant-bounded-positive-integer-v1",
+                },
+                "defaultAuthority": {
+                    "kind": "java-static-final-int-default-v1",
+                    "owner": (audit.ASSISTANT_CONFIGURATION_PATH.as_posix()
+                              + "#AssistantConfiguration"),
+                    "field": spec["component"], "componentIndex": spec["componentIndex"],
+                    "constant": spec["defaultSymbol"],
+                    "sourceExpression": spec["defaultExpression"],
+                    "candidateIds": default_ids, "evaluatedDefault": spec["defaultValue"],
+                },
+            })
+            conversions[setting] = {
+                "kind": "java-constructor-binding-conversion-v1", "issue": "#225",
+                "beforeRevision": before_revision, "afterRevision": after_revision,
+                "path": audit.ASSISTANT_CONFIGURATION_PATH.as_posix(),
+                "ownerType": "AssistantConfiguration", "method": "fromEnvironment",
+                "constructorType": "AssistantConfiguration", "component": spec["component"],
+                "componentIndex": spec["componentIndex"],
+                "beforeArgument": spec["defaultSymbol"], "afterArgument": spec["call"],
+                "environmentSymbol": spec["environmentSymbol"],
+                "environment": spec["environment"], "defaultSymbol": spec["defaultSymbol"],
+            }
+            carriers[setting] = {
+                "environment": spec["environment"], "expectedCandidateIds": carrier_ids,
+            }
+
+        config_test = (root / audit.ASSISTANT_CONFIGURATION_TEST_PATH).read_text(encoding="utf-8")
+        service = (root / audit.ASSISTANT_SERVICE_PATH).read_text(encoding="utf-8")
+        service_test = (root / audit.ASSISTANT_SERVICE_TEST_PATH).read_text(encoding="utf-8")
+        resolver_roles = (
+            "assistantOperationalLimitsDefaultAndTightenIndependently",
+            "invalidAssistantOperationalLimitsAreCauseFreeAndDoNotEchoValues",
+            "compactConstructorKeepsItsCompatibilityFallbacks",
+        )
+        authority = {
+            "kind": "assistant-symbol-operational-limits-v1",
+            "settings": setting_authorities,
+            "resolverAuthority": {
+                "kind": "java-symbol-bounded-positive-integer-resolver-v1",
+                "path": audit.ASSISTANT_CONFIGURATION_PATH.as_posix(),
+                "type": "AssistantConfiguration", "factoryMethod": "fromEnvironment",
+                "factoryBodyDigest": audit.java_method_digest(
+                    current_source, "AssistantConfiguration", "fromEnvironment"),
+                "integerMethod": "boundedPositiveInteger",
+                "integerBodyDigest": audit.java_method_digest(
+                    current_source, "AssistantConfiguration", "boundedPositiveInteger"),
+                "dependencyBodyDigests": {
+                    method: audit.java_method_digest(current_source, "AssistantConfiguration", method)
+                    for method in ("trimmed", "boundedIntegerRefusal")
+                },
+                "testPath": audit.ASSISTANT_CONFIGURATION_TEST_PATH.as_posix(),
+                "testType": "AssistantConfigurationTest",
+                "testBodyDigests": {
+                    method: audit.java_method_digest(config_test, "AssistantConfigurationTest", method)
+                    for method in resolver_roles
+                },
+                "testHelperBodyDigests": {
+                    "assertInvalidLimit": audit.java_method_digest(
+                        config_test, "AssistantConfigurationTest", "assertInvalidLimit"),
+                },
+            },
+            "conversionAuthorities": conversions,
+            "carrierEvidence": carriers,
+            "consumerAuthority": {
+                "path": audit.ASSISTANT_SERVICE_PATH.as_posix(), "type": "AssistantService",
+                "method": "send", "bodyDigest": audit.java_method_digest(
+                    service, "AssistantService", "send"),
+                "testPath": audit.ASSISTANT_SERVICE_TEST_PATH.as_posix(),
+                "testType": "AssistantGraphProposalTest",
+                "testBodyDigest": audit.java_method_digest(
+                    service_test, "AssistantGraphProposalTest",
+                    "configuredOperationalLimitsReachEveryRequestAndStopTheProviderLoop"),
+            },
+            "compatibilityAuthority": {
+                "constructorBodyDigest": audit.java_span_digest(
+                    current_source,
+                    audit.java_compact_constructor_span(current_source, "AssistantConfiguration")),
+                "testBodyDigest": audit.java_method_digest(
+                    config_test, "AssistantConfigurationTest",
+                    "compactConstructorKeepsItsCompatibilityFallbacks"),
+            },
+            "platformTestDigest": audit.hashlib.sha256(
+                (root / audit.ASSISTANT_PLATFORM_TEST_PATH).read_bytes()).hexdigest(),
+        }
+        return {audit.ASSISTANT_LIMIT_FAMILY_ID: authority}, entries, candidates
+
+    def assistant_limit_errors(self, root: Path, authorities, entries, candidates):
+        return audit.assistant_limit_authority_errors(root, authorities, entries, candidates)
+
+    def test_assistant_two_limit_authority_proves_bindings_defaults_history_and_consumers(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
+            self.assertEqual([], self.assistant_limit_errors(root, authorities, entries, candidates))
+            authority = authorities[audit.ASSISTANT_LIMIT_FAMILY_ID]
+            self.assertEqual(2, len(authority["settings"]))
+            self.assertEqual({
+                "assistant.max-output-tokens", "assistant.max-tool-iterations",
+            }, {item["setting"] for item in authority["settings"]})
+
+    def test_assistant_two_limit_authority_rejects_metadata_resolver_and_history_deletions(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
+            self.assertTrue(self.assistant_limit_errors(root, None, entries, candidates))
+
+            missing = copy.deepcopy(authorities)
+            missing[audit.ASSISTANT_LIMIT_FAMILY_ID]["settings"].pop()
+            self.assertTrue(any("exactly two settings" in error
+                                for error in self.assistant_limit_errors(
+                                    root, missing, entries, candidates)))
+
+            unknown = copy.deepcopy(authorities)
+            unknown[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"]["kind"] = "alien"
+            self.assertTrue(any("exact resolver authority" in error
+                                for error in self.assistant_limit_errors(
+                                    root, unknown, entries, candidates)))
+
+            missing_binding = copy.deepcopy(authorities)
+            missing_binding[audit.ASSISTANT_LIMIT_FAMILY_ID]["settings"][0].pop(
+                "bindingAuthority")
+            self.assertTrue(any("unsupported shape" in error
+                                for error in self.assistant_limit_errors(
+                                    root, missing_binding, entries, candidates)))
+
+            unknown_binding = copy.deepcopy(authorities)
+            unknown_binding[audit.ASSISTANT_LIMIT_FAMILY_ID]["settings"][0][
+                "bindingAuthority"]["kind"] = "alien"
+            self.assertTrue(any("binding/default authority" in error
+                                for error in self.assistant_limit_errors(
+                                    root, unknown_binding, entries, candidates)))
+
+            deleted_dependency = copy.deepcopy(authorities)
+            deleted_dependency[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"][
+                "dependencyBodyDigests"].pop("trimmed")
+            self.assertTrue(any("helper closure" in error
+                                for error in self.assistant_limit_errors(
+                                    root, deleted_dependency, entries, candidates)))
+
+            wrong_history = copy.deepcopy(authorities)
+            conversion = wrong_history[audit.ASSISTANT_LIMIT_FAMILY_ID]["conversionAuthorities"][
+                "assistant.max-output-tokens"]
+            conversion["beforeArgument"] = "DEFAULT_MAX_TOOL_ITERATIONS"
+            self.assertTrue(any("constructor arguments" in error
+                                for error in self.assistant_limit_errors(
+                                    root, wrong_history, entries, candidates)))
+
+            config_path = root / audit.ASSISTANT_CONFIGURATION_PATH
+            config = config_path.read_text(encoding="utf-8")
+            config_path.write_text(config.replace("value.strip()", "value.trim()", 1),
+                                   encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_source = config_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"][
+                "dependencyBodyDigests"]["trimmed"] = audit.java_method_digest(
+                    changed_source, "AssistantConfiguration", "trimmed")
+            self.assertTrue(any("blank/refusal dependency structure" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            ignored_parsed_value = config.replace(
+                "        return parsed;\n    }\n\n"
+                "    private static IllegalArgumentException boundedIntegerRefusal",
+                "        return 1;\n    }\n\n"
+                "    private static IllegalArgumentException boundedIntegerRefusal", 1)
+            self.assertNotEqual(config, ignored_parsed_value)
+            config_path.write_text(ignored_parsed_value, encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"]["integerBodyDigest"] = \
+                audit.java_method_digest(
+                    ignored_parsed_value, "AssistantConfiguration", "boundedPositiveInteger")
+            self.assertTrue(any("helper closure/contract" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            refusal_with_cause = config.replace(
+                'new IllegalArgumentException(variable + " must be a whole number from 1 to " + maximum)',
+                'new IllegalArgumentException(variable + " must be a whole number from 1 to " + maximum, '
+                'new RuntimeException(variable))', 1)
+            config_path.write_text(refusal_with_cause, encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"][
+                "dependencyBodyDigests"]["boundedIntegerRefusal"] = audit.java_method_digest(
+                    refusal_with_cause, "AssistantConfiguration", "boundedIntegerRefusal")
+            self.assertTrue(any("blank/refusal dependency structure" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            foreign_integer = config.replace(
+                "import java.util.Map;", "import java.util.Map;\nimport example.Integer;", 1)
+            config_path.write_text(foreign_integer, encoding="utf-8")
+            self.assertTrue(any("blank/refusal dependency structure" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            config_path.write_text(config.replace(
+                "public static final String MAX_OUTPUT_TOKENS_VARIABLE",
+                "private static final String MAX_OUTPUT_TOKENS_VARIABLE", 1),
+                encoding="utf-8")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            local_environment_symbol = config.replace(
+                "        Map<String, String> env = environment == null ? Map.of() : environment;",
+                "        String MAX_OUTPUT_TOKENS_VARIABLE = \"shadow\";\n"
+                "        Map<String, String> env = environment == null ? Map.of() : environment;", 1)
+            config_path.write_text(local_environment_symbol, encoding="utf-8")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            local_default_symbol = config.replace(
+                "        Map<String, String> env = environment == null ? Map.of() : environment;",
+                "        int DEFAULT_MAX_OUTPUT_TOKENS = 8;\n"
+                "        Map<String, String> env = environment == null ? Map.of() : environment;", 1)
+            config_path.write_text(local_default_symbol, encoding="utf-8")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            reassigned_environment = config.replace(
+                "        return new AssistantConfiguration(enabled, providerId, endpoint, model, credential, egress,",
+                "        env = Map.of();\n"
+                "        return new AssistantConfiguration(enabled, providerId, endpoint, model, credential, egress,",
+                1,
+            )
+            config_path.write_text(reassigned_environment, encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"]["factoryBodyDigest"] = \
+                audit.java_method_digest(
+                    reassigned_environment, "AssistantConfiguration", "fromEnvironment")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            multi_declarator_shadow = config.replace(
+                "        Map<String, String> env = environment == null ? Map.of() : environment;",
+                "        Map<String, String> env = environment == null ? Map.of() : environment;\n"
+                "        int unused = 0, DEFAULT_MAX_OUTPUT_TOKENS = 1;", 1)
+            config_path.write_text(multi_declarator_shadow, encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"]["factoryBodyDigest"] = \
+                audit.java_method_digest(
+                    multi_declarator_shadow, "AssistantConfiguration", "fromEnvironment")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            config_path.write_text(config.replace(
+                "Map<String, String> env = environment == null ? Map.of() : environment;",
+                "Map<String, String> env = Map.of();", 1), encoding="utf-8")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            extra_binding = config.replace(
+                "seconds(trimmed(env.get(TIMEOUT_VARIABLE)))",
+                "Duration.ofSeconds(boundedPositiveInteger(env.get(MAX_OUTPUT_TOKENS_VARIABLE), "
+                "MAX_OUTPUT_TOKENS_VARIABLE, DEFAULT_MAX_OUTPUT_TOKENS))",
+                1,
+            )
+            self.assertNotEqual(config, extra_binding)
+            config_path.write_text(extra_binding, encoding="utf-8")
+            self.assertTrue(any("source family has drifted" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            config_path.write_text(config, encoding="utf-8")
+
+            test_path = root / audit.ASSISTANT_CONFIGURATION_TEST_PATH
+            test_source = test_path.read_text(encoding="utf-8")
+            test_path.write_text(test_source.replace(
+                "    @Test\n    void assistantOperationalLimitsDefaultAndTightenIndependently",
+                "    void assistantOperationalLimitsDefaultAndTightenIndependently", 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_test = test_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"]["testBodyDigests"][
+                "assistantOperationalLimitsDefaultAndTightenIndependently"] = \
+                audit.java_method_digest(
+                    changed_test, "AssistantConfigurationTest",
+                    "assistantOperationalLimitsDefaultAndTightenIndependently")
+            self.assertTrue(any("test role" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            test_path.write_text(test_source.replace(
+                "        var defaults = AssistantConfiguration.fromEnvironment(Map.of());\n", "", 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_test = test_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["resolverAuthority"]["testBodyDigests"][
+                "assistantOperationalLimitsDefaultAndTightenIndependently"] = \
+                audit.java_method_digest(
+                    changed_test, "AssistantConfigurationTest",
+                    "assistantOperationalLimitsDefaultAndTightenIndependently")
+            self.assertTrue(any("runnable test clauses" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+
+    def test_assistant_two_limit_authority_rejects_carrier_consumer_and_compatibility_drift(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.assistant_limit_authority_fixture(root)
+            authority = authorities[audit.ASSISTANT_LIMIT_FAMILY_ID]
+
+            missing_carrier = copy.deepcopy(authorities)
+            missing_carrier[audit.ASSISTANT_LIMIT_FAMILY_ID]["carrierEvidence"][
+                "assistant.max-output-tokens"]["expectedCandidateIds"].pop("rawKubernetes")
+            self.assertTrue(any("every checker-owned group" in error
+                                for error in self.assistant_limit_errors(
+                                    root, missing_carrier, entries, candidates)))
+
+            schema_path = root / "deploy/helm/ravenroot/values.schema.json"
+            schema_source = schema_path.read_text(encoding="utf-8")
+            schema_path.write_text(schema_source.replace(
+                '"maximum": 16000', '"maximum": 15999', 1), encoding="utf-8")
+            self.assertTrue(any("schema binding/range/blank" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            schema_path.write_text(schema_source, encoding="utf-8")
+
+            schema = json.loads(schema_source)
+            schema["properties"]["assistant"]["properties"]["maxOutputTokens"]["oneOf"].append(
+                {"type": "integer"})
+            schema_path.write_text(json.dumps(schema), encoding="utf-8")
+            self.assertTrue(any("schema binding/range/blank" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, entries, candidates)))
+            schema_path.write_text(schema_source, encoding="utf-8")
+
+            missing_assignment = copy.deepcopy(entries)
+            candidate_id = authority["settings"][0]["bindingAuthority"][
+                "environmentCandidateId"]
+            missing_assignment[candidate_id]["setting"] = "assistant.max-tool-iterations"
+            self.assertTrue(any("assigned elsewhere" in error
+                                for error in self.assistant_limit_errors(
+                                    root, authorities, missing_assignment, candidates)))
+
+            service_path = root / audit.ASSISTANT_SERVICE_PATH
+            service = service_path.read_text(encoding="utf-8")
+            service_path.write_text(service.replace(
+                "configuration.maxOutputTokens()", "configuration.maxToolIterations()", 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_source = service_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["consumerAuthority"]["bodyDigest"] = \
+                audit.java_method_digest(changed_source, "AssistantService", "send")
+            self.assertTrue(any("exact provider request argument" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            service_path.write_text(service, encoding="utf-8")
+
+            service_path.write_text(service.replace(
+                "AssistantProvider turnProvider = providerFor(context.subject());",
+                "AssistantProvider turnProvider = provider;", 1), encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_source = service_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["consumerAuthority"]["bodyDigest"] = \
+                audit.java_method_digest(changed_source, "AssistantService", "send")
+            self.assertTrue(any("provider selection" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            service_path.write_text(service, encoding="utf-8")
+
+            service_path.write_text(service.replace(
+                "configuration.maxToolIterations()", "configuration.maxOutputTokens()", 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_source = service_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["consumerAuthority"]["bodyDigest"] = \
+                audit.java_method_digest(changed_source, "AssistantService", "send")
+            self.assertTrue(any("active configured provider loop" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            service_path.write_text(service, encoding="utf-8")
+
+            service_test_path = root / audit.ASSISTANT_SERVICE_TEST_PATH
+            service_test = service_test_path.read_text(encoding="utf-8")
+            service_test_path.write_text(service_test.replace(
+                '.answering("a third provider call must never happen")',
+                '.callingTool("a third provider call must never happen")', 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_test = service_test_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["consumerAuthority"]["testBodyDigest"] = \
+                audit.java_method_digest(
+                    changed_test, "AssistantGraphProposalTest",
+                    "configuredOperationalLimitsReachEveryRequestAndStopTheProviderLoop")
+            self.assertTrue(any("third-sentinel structure" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            service_test_path.write_text(service_test, encoding="utf-8")
+
+            reordered = service_test.replace(
+                '.callingTool("unknown-read-one")\n'
+                '                    .callingTool("unknown-read-two")\n'
+                '                    .answering("a third provider call must never happen")',
+                '.answering("a third provider call must never happen")\n'
+                '                    .callingTool("unknown-read-one")\n'
+                '                    .callingTool("unknown-read-two")', 1)
+            self.assertNotEqual(service_test, reordered)
+            service_test_path.write_text(reordered, encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_test = service_test_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["consumerAuthority"]["testBodyDigest"] = \
+                audit.java_method_digest(
+                    changed_test, "AssistantGraphProposalTest",
+                    "configuredOperationalLimitsReachEveryRequestAndStopTheProviderLoop")
+            self.assertTrue(any("ordered provider script" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+            service_test_path.write_text(service_test, encoding="utf-8")
+
+            config_path = root / audit.ASSISTANT_CONFIGURATION_PATH
+            config = config_path.read_text(encoding="utf-8")
+            config_path.write_text(config.replace(
+                "maxOutputTokens > 0 ? maxOutputTokens : DEFAULT_MAX_OUTPUT_TOKENS",
+                "maxOutputTokens > 0 ? maxOutputTokens : DEFAULT_MAX_TOOL_ITERATIONS", 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_config = config_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["compatibilityAuthority"][
+                "constructorBodyDigest"] = audit.java_span_digest(
+                    changed_config,
+                    audit.java_compact_constructor_span(changed_config, "AssistantConfiguration"))
+            self.assertTrue(any("field-specific compatibility" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+
+            appended_write = config.replace(
+                "        maxToolIterations = maxToolIterations > 0 ? maxToolIterations : "
+                "DEFAULT_MAX_TOOL_ITERATIONS;",
+                "        maxToolIterations = maxToolIterations > 0 ? maxToolIterations : "
+                "DEFAULT_MAX_TOOL_ITERATIONS;\n"
+                "        maxOutputTokens = 1;", 1)
+            config_path.write_text(appended_write, encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["compatibilityAuthority"][
+                "constructorBodyDigest"] = audit.java_span_digest(
+                    appended_write,
+                    audit.java_compact_constructor_span(
+                        appended_write, "AssistantConfiguration"))
+            self.assertTrue(any("field-specific compatibility" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+
+            for shift_assignment in ("<<=", ">>=", ">>>="):
+                shifted = config.replace(
+                    "        maxToolIterations = maxToolIterations > 0 ? maxToolIterations : "
+                    "DEFAULT_MAX_TOOL_ITERATIONS;",
+                    "        maxToolIterations = maxToolIterations > 0 ? maxToolIterations : "
+                    "DEFAULT_MAX_TOOL_ITERATIONS;\n"
+                    f"        maxOutputTokens {shift_assignment} 1;", 1)
+                config_path.write_text(shifted, encoding="utf-8")
+                changed = copy.deepcopy(authorities)
+                changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["compatibilityAuthority"][
+                    "constructorBodyDigest"] = audit.java_span_digest(
+                        shifted,
+                        audit.java_compact_constructor_span(
+                            shifted, "AssistantConfiguration"))
+                self.assertTrue(any("field-specific compatibility" in error
+                                    for error in self.assistant_limit_errors(
+                                        root, changed, entries, candidates)), shift_assignment)
+
+            config_path.write_text(config, encoding="utf-8")
+            config_test_path = root / audit.ASSISTANT_CONFIGURATION_TEST_PATH
+            config_test = config_test_path.read_text(encoding="utf-8")
+            config_test_path.write_text(config_test.replace(
+                "        assertEquals(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS + 1,\n"
+                "                positiveValues.maxOutputTokens(), "
+                '"direct positive values remain API-compatible");\n', "", 1),
+                encoding="utf-8")
+            changed = copy.deepcopy(authorities)
+            changed_test = config_test_path.read_text(encoding="utf-8")
+            changed[audit.ASSISTANT_LIMIT_FAMILY_ID]["compatibilityAuthority"]["testBodyDigest"] = \
+                audit.java_method_digest(
+                    changed_test, "AssistantConfigurationTest",
+                    "compactConstructorKeepsItsCompatibilityFallbacks")
+            self.assertTrue(any("compatibility test" in error
+                                for error in self.assistant_limit_errors(
+                                    root, changed, entries, candidates)))
+
     def environment_authority_fixture(self, root: Path):
         source_path = root / "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java"
         source_path.write_text(

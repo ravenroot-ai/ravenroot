@@ -10651,6 +10651,7 @@ async function connectRuntime(atBoot = false) {
     }
     return { client: connectedClient, configuration: null, error };
   });
+  const connectedConfigurationRequest = runtimeConfigurationRequest;
   setRuntimeConnectionState(atBoot ? 'connecting' : 'reconnecting',
     atBoot ? 'Connecting to the service — the access token is kept in memory only'
       : 'Connecting with an in-memory bearer token');
@@ -10662,7 +10663,7 @@ async function connectRuntime(atBoot = false) {
       if (status === 'connected') void configureHumanTasks();
     });
     connectedClient.nodeTypes().then(async catalog => {
-      await runtimeConfigurationRequest;
+      await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = catalog;
@@ -10671,7 +10672,9 @@ async function connectRuntime(atBoot = false) {
       nodeCatalogPending = false;
       renderNodeCatalog();
       workspace.documents.forEach(scheduleProgramGraphReadiness);
-    }).catch(error => {
+    }).catch(async error => {
+      if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient) return;
+      await connectedConfigurationRequest;
       if (runtimeClient !== connectedClient || workspaceAuthority.client !== connectedClient
           || workspaceAuthority.state !== 'ready') return;
       nodeTypeCatalog = [];

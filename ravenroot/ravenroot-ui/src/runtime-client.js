@@ -270,15 +270,23 @@ export class RavenrootRuntimeClient {
         buffer = buffer.slice(boundary + 2);
         if (frame.length > this.maxFrameBytes) throw new Error(`SSE frame exceeds ${this.maxFrameBytes} bytes`);
         const parsed = parseEventFrame(frame);
-        if (parsed.id !== undefined && !parsed.id.includes('\0')) this.lastEventId = parsed.id;
         if (parsed.retry !== undefined) {
           reconnectDelay = Math.min(MAX_RETRY_DELAY_MS, Math.max(MIN_RETRY_DELAY_MS, parsed.retry));
         }
-        if (parsed.type === 'execution' && parsed.data) {
+        if (parsed.type === 'execution' && /^data(?::|$)/m.test(frame)) {
           try {
-            onEvent(normalizeRuntimeEvent(JSON.parse(parsed.data)));
-          } catch (error) {
-            onConnectionChange('error', `Invalid execution event: ${error.message}`);
+            const event = normalizeRuntimeEvent(JSON.parse(parsed.data));
+            if (Object.hasOwn(event, 'schemaVersion')) {
+              executionEventCursor(parsed.id);
+              if (parsed.id !== event.id) throw new Error('Execution event identity mismatch');
+            }
+            await onEvent(event);
+            if (signal.aborted) return reconnectDelay;
+            // Resume only after delivery accepts this execution, never across a rejected frame.
+            if (parsed.id !== undefined && !parsed.id.includes('\0')) this.lastEventId = parsed.id;
+          } catch {
+            try { await reader.cancel?.(); } catch { /* Preserve the classified stream failure. */ }
+            throw new Error('Invalid or undelivered execution event');
           }
         }
       }

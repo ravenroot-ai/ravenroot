@@ -148,6 +148,7 @@ listings. `--help` and `help` print usage.
 | `node-types` | Effective running catalog; use it to verify enabled bundles. |
 | `inspect FILE` | Read and inspect local GraphML without executing it. |
 | `validate FILE` | Validate the local GraphML profile; runs locally even with `--server`. |
+| `events decode` | Decode a captured execution SSE body from standard input into JSON lines; runs locally without a backend or credentials. |
 | `run FILE [PAYLOAD]` | Submit Run and print process, traversal, execution, graph-version, and execution-policy identifiers. |
 | `result EXECUTION-ID` | Read live or durable terminal evidence and qualified failure/cancellation fields. |
 | `live` | List process-local non-terminal executions. |
@@ -167,6 +168,14 @@ listings. `--help` and `help` print usage.
 | `backup DIRECTORY` | Create an offline recovery bundle from configured durable stores. |
 | `verify DIRECTORY` | Verify a bundle using only its contents. |
 | `restore DIRECTORY` | Restore configured durable stores from a verified bundle. |
+
+`ravenroot events decode < capture.sse` reads local standard input, starts no engine, contacts no
+server and resolves no credentials; global `--server` and `--token-file` options are ignored by this
+command. Each output line is a JSON object with `event`, `id` and `data`; exact decimal execution IDs
+remain strings. Complete input returns 0, malformed or incomplete input and I/O failures return 1,
+argument misuse returns 2, and `stream-truncated` or `stream-overrun` is emitted before returning 3.
+Diagnostics go to standard error without raw input. See [Decoding execution streams](../integrator-guide/application-http.md)
+for framing limits, legacy compatibility and control-frame semantics.
 
 `embed-registration show`, `embed-registration provision`, and `embed-registration revoke` operate a
 local registration store and never use `--server`. All take `--store-dir`, `--tenant`, and

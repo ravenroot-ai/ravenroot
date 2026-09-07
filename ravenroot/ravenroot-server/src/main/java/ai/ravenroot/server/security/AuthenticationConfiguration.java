@@ -61,8 +61,8 @@ public record AuthenticationConfiguration(InetSocketAddress bindAddress, Request
             return "disabled";
         }
         throw new IllegalArgumentException("RAVENROOT_AUTH_MODE must be set explicitly when the server "
-                + "does not bind to a loopback address (bind address: " + bind.getHostAddress() + "). "
-                + "Set RAVENROOT_AUTH_MODE=oidc with its issuer, audience and JWKS URI for a "
+                + "does not bind to a loopback address. Set RAVENROOT_AUTH_MODE=oidc with its issuer, "
+                + "audience and JWKS URI for a "
                 + "network-facing deployment, or bind to 127.0.0.1 to evaluate Ravenroot locally.");
     }
 

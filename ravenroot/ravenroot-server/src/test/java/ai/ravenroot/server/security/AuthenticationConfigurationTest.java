@@ -1,10 +1,16 @@
 package ai.ravenroot.server.security;
 
+import com.sun.net.httpserver.Headers;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Stream;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -77,6 +83,8 @@ class AuthenticationConfigurationTest {
                         "RAVENROOT_BIND_ADDRESS", "0.0.0.0"), 8080));
         assertTrue(error.getMessage().contains("RAVENROOT_AUTH_MODE"),
                 "the refusal must name the variable to set, was: " + error.getMessage());
+        assertTrue(!error.getMessage().contains("0.0.0.0"));
+        assertNull(error.getCause());
     }
 
     /**
@@ -178,17 +186,30 @@ class AuthenticationConfigurationTest {
 
     @Test
     void localAuthenticationTokenIsNeverTrimmed() {
-        String rawToken = " 012345678901234567890123456789 ";
-        var configuration = AuthenticationConfiguration.fromEnvironment(Map.of(
+        String token = "01234567890123456789012345678901";
+        var ordinary = AuthenticationConfiguration.fromEnvironment(Map.of(
                 "RAVENROOT_AUTH_MODE", "local-token",
-                "RAVENROOT_AUTH_LOCAL_TOKEN", rawToken), 8080);
-        assertEquals("local-token", configuration.mode());
+                "RAVENROOT_AUTH_LOCAL_TOKEN", token), 8080);
+        assertDoesNotThrow(() -> ordinary.authenticator().authenticate(bearer(token)));
+
+        var padded = AuthenticationConfiguration.fromEnvironment(Map.of(
+                "RAVENROOT_AUTH_MODE", "local-token",
+                "RAVENROOT_AUTH_LOCAL_TOKEN", " " + token + " "), 8080);
+        assertThrows(AuthenticationException.class,
+                () -> padded.authenticator().authenticate(bearer(token)),
+                "trimming the configured credential would make this presentation authenticate");
     }
 
-    @Test
-    void oidcModeFailsFastWhenTrustConfigurationIsIncomplete() {
-        assertThrows(IllegalArgumentException.class,
-                () -> AuthenticationConfiguration.fromEnvironment(Map.of("RAVENROOT_AUTH_MODE", "oidc"), 8080));
+    @ParameterizedTest
+    @MethodSource("requiredAuthenticationFields")
+    void authenticationModesFailFastForEachAbsentOrBlankRequiredField(String mode, String name) {
+        Map<String, String> absent = mode.equals("oidc") ? oidcEnvironment() : localTokenEnvironment();
+        absent.remove(name);
+        assertRequiredFieldFailure(absent, name);
+
+        Map<String, String> blank = mode.equals("oidc") ? oidcEnvironment() : localTokenEnvironment();
+        blank.put(name, " \t ");
+        assertRequiredFieldFailure(blank, name);
     }
 
     @Test
@@ -210,6 +231,33 @@ class AuthenticationConfigurationTest {
         environment.put("RAVENROOT_AUTH_AUDIENCE", "ravenroot");
         environment.put("RAVENROOT_AUTH_JWKS_URI", "https://issuer.example/jwks");
         return environment;
+    }
+
+    private static Map<String, String> localTokenEnvironment() {
+        return new HashMap<>(Map.of(
+                "RAVENROOT_AUTH_MODE", "local-token",
+                "RAVENROOT_AUTH_LOCAL_TOKEN", "01234567890123456789012345678901"));
+    }
+
+    private static Stream<Arguments> requiredAuthenticationFields() {
+        return Stream.of(
+                Arguments.of("oidc", "RAVENROOT_AUTH_ISSUER"),
+                Arguments.of("oidc", "RAVENROOT_AUTH_AUDIENCE"),
+                Arguments.of("oidc", "RAVENROOT_AUTH_JWKS_URI"),
+                Arguments.of("local-token", "RAVENROOT_AUTH_LOCAL_TOKEN"));
+    }
+
+    private static Headers bearer(String token) {
+        var headers = new Headers();
+        headers.set("Authorization", "Bearer " + token);
+        return headers;
+    }
+
+    private static void assertRequiredFieldFailure(Map<String, String> environment, String name) {
+        var failure = assertThrows(IllegalArgumentException.class,
+                () -> AuthenticationConfiguration.fromEnvironment(environment, 8080));
+        assertEquals(name + " is required", failure.getMessage());
+        assertNull(failure.getCause());
     }
 
     private static void assertSanitizedNumericFailure(String name, String value) {

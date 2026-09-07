@@ -21,8 +21,16 @@ public record GraphMlLimits(
         int maxAttributes,
         int maxNamespaceDeclarations) {
 
-    /** Safety ceiling applied to every supported GraphML admission configuration. */
+    /** Safety ceilings applied to every supported GraphML admission configuration. */
     public static final int HARD_MAX_NODES = 1_000_000;
+    public static final int HARD_MAX_EDGES = 5_000_000;
+    public static final int HARD_MAX_PROPERTIES = 10_000_000;
+    public static final int HARD_MAX_DEPTH = 1_024;
+    public static final int HARD_MAX_STRING_LENGTH = 64 * 1024 * 1024;
+    public static final int HARD_MAX_KEYS = 100_000;
+    public static final int HARD_MAX_ELEMENTS = 10_000_000;
+    public static final int HARD_MAX_ATTRIBUTES = 20_000_000;
+    public static final int HARD_MAX_NAMESPACE_DECLARATIONS = 1_000_000;
 
     public static final GraphMlLimits DEFAULTS = new GraphMlLimits(
             GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,
@@ -49,11 +57,11 @@ public record GraphMlLimits(
             throw new IllegalArgumentException("GraphML limits must all be positive");
         }
         if (maxBytes > GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES
-                || maxNodes > HARD_MAX_NODES || maxEdges > 5_000_000
-                || maxProperties > 10_000_000 || maxDepth > 1_024
-                || maxStringLength > 64 * 1024 * 1024 || maxKeys > 100_000
-                || maxElements > 10_000_000 || maxAttributes > 20_000_000
-                || maxNamespaceDeclarations > 1_000_000) {
+                || maxNodes > HARD_MAX_NODES || maxEdges > HARD_MAX_EDGES
+                || maxProperties > HARD_MAX_PROPERTIES || maxDepth > HARD_MAX_DEPTH
+                || maxStringLength > HARD_MAX_STRING_LENGTH || maxKeys > HARD_MAX_KEYS
+                || maxElements > HARD_MAX_ELEMENTS || maxAttributes > HARD_MAX_ATTRIBUTES
+                || maxNamespaceDeclarations > HARD_MAX_NAMESPACE_DECLARATIONS) {
             throw new IllegalArgumentException("GraphML limits exceed the supported safety ceiling");
         }
     }

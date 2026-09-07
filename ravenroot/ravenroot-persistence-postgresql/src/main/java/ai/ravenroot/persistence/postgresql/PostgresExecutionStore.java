@@ -5,13 +5,27 @@ import ai.ravenroot.api.application.ProcessInstance;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
 import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.execution.NodeCommand;
+import ai.ravenroot.api.payload.PayloadKind;
 import ai.ravenroot.api.payload.PayloadLimits;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
+import ai.ravenroot.api.persistence.AgentAuthorityControl;
+import ai.ravenroot.api.persistence.AgentAuthorityControlState;
+import ai.ravenroot.api.persistence.AgentAuthorityState;
+import ai.ravenroot.api.persistence.AgentBudgetOperation;
+import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.DurableHandler;
+import ai.ravenroot.api.persistence.DurableHumanTask;
+import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.EventDigest;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionOrigin;
+import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
+import ai.ravenroot.api.persistence.ExecutionPauseStatus;
+import ai.ravenroot.api.persistence.ExecutionPauseTransition;
 import ai.ravenroot.api.persistence.ExecutionResultNodes;
 import ai.ravenroot.api.persistence.ExecutionResultPayload;
 import ai.ravenroot.api.persistence.ExecutionStore;
@@ -19,7 +33,33 @@ import ai.ravenroot.api.persistence.ExecutionStoreException;
 import ai.ravenroot.api.persistence.ExecutionStoreFailure;
 import ai.ravenroot.api.persistence.ExecutionTransition;
 import ai.ravenroot.api.persistence.GraphVersionPin;
+import ai.ravenroot.api.persistence.HandlerAuthorization;
+import ai.ravenroot.api.persistence.HandlerPayloadSchema;
+import ai.ravenroot.api.persistence.HandlerRegistration;
+import ai.ravenroot.api.persistence.HandlerStatus;
+import ai.ravenroot.api.persistence.HandlerTransition;
+import ai.ravenroot.api.persistence.HumanTaskAttentionAuthorization;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskAttentionCursor;
+import ai.ravenroot.api.persistence.HumanTaskAttentionItem;
+import ai.ravenroot.api.persistence.HumanTaskAttentionLocator;
+import ai.ravenroot.api.persistence.HumanTaskAttentionPage;
+import ai.ravenroot.api.persistence.HumanTaskAttentionQuery;
+import ai.ravenroot.api.persistence.HumanTaskCommentRequirement;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationAction;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationLimits;
+import ai.ravenroot.api.persistence.HumanTaskConfirmationPresentation;
+import ai.ravenroot.api.persistence.HumanTaskExecutionLimits;
+import ai.ravenroot.api.persistence.HumanTaskMetadata;
+import ai.ravenroot.api.persistence.HumanTaskNodeAttentionCounts;
+import ai.ravenroot.api.persistence.HumanTaskPage;
 import ai.ravenroot.api.persistence.HumanTaskPolicy;
+import ai.ravenroot.api.persistence.HumanTaskQuery;
+import ai.ravenroot.api.persistence.HumanTaskReentryMapping;
+import ai.ravenroot.api.persistence.HumanTaskRegistration;
+import ai.ravenroot.api.persistence.HumanTaskResponseSchema;
+import ai.ravenroot.api.persistence.HumanTaskStatus;
+import ai.ravenroot.api.persistence.HumanTaskTransition;
 import ai.ravenroot.api.persistence.IdempotencyRecord;
 import ai.ravenroot.api.persistence.IdempotencyWrite;
 import ai.ravenroot.api.persistence.InventoryCursor;
@@ -37,13 +77,19 @@ import ai.ravenroot.api.persistence.RevisionExpectation;
 import ai.ravenroot.api.persistence.StoreCapability;
 import ai.ravenroot.api.persistence.StoredProcessInstance;
 import ai.ravenroot.api.persistence.TimerSchedule;
+import ai.ravenroot.api.persistence.ToolApprovalRegistration;
+import ai.ravenroot.api.persistence.ToolApprovalStatus;
+import ai.ravenroot.api.persistence.ToolApprovalTransition;
 import ai.ravenroot.api.persistence.TraversalInventoryEntry;
+import ai.ravenroot.api.security.PrincipalType;
+import ai.ravenroot.api.security.SecurityContext;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Savepoint;
 import java.sql.Types;
 import java.time.Clock;
 import java.time.DateTimeException;
@@ -52,10 +98,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.EnumMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -103,17 +151,32 @@ import java.util.concurrent.atomic.AtomicLong;
  *   {@link StoreCapability#JOURNAL_COMPACTION}, {@link StoreCapability#PROCESS_INVENTORY},
  *   {@link StoreCapability#INVENTORY_RETENTION} and {@link StoreCapability#EXECUTION_RESULTS} — all
  *   implemented here against the same rows the lifecycle writes.</li>
+ *   <li>{@link StoreCapability#DURABLE_HANDLERS}, {@link StoreCapability#TOOL_APPROVALS},
+ *   {@link StoreCapability#HUMAN_TASKS}, {@link StoreCapability#HUMAN_TASK_CONFIRMATIONS},
+ *   {@link StoreCapability#EXECUTION_PAUSES} and {@link StoreCapability#AGENT_AUTHORITY_BUDGETS} —
+ *   the six continuation facilities, each written inside the <em>same</em> transaction as the
+ *   aggregate transitions beside it. That atomicity is the whole content of these capabilities: a
+ *   store that committed a wait without the handler recording what it is waiting for, or a
+ *   resolution without the traversal it authorizes, would leave a process that no host can
+ *   continue.</li>
  * </ul>
  *
- * <p>{@link StoreCapability#DURABLE_HANDLERS}, {@link StoreCapability#TOOL_APPROVALS},
- * {@link StoreCapability#HUMAN_TASKS}, {@link StoreCapability#HUMAN_TASK_CONFIRMATIONS},
- * {@link StoreCapability#EXECUTION_PAUSES} and {@link StoreCapability#AGENT_AUTHORITY_BUDGETS} are
- * <strong>not</strong> declared, so the port's own defaults report
- * {@link ExecutionStoreFailure.CapabilityNotSupported} for them and the conformance suite skips their
- * assertions <em>visibly</em>. Their tables exist all the same, so the work that implements them is
- * additive rather than a migration applied to a live deployment. A batch that carries one of those
- * registrations is refused with the same classified failure rather than silently dropped: accepting it
- * and writing nothing would tell a caller its handler was registered when nothing was.</p>
+ * <h2>Uniqueness is decided by the database, not by looking first</h2>
+ * <p>Four of those facilities carry a uniqueness rule that spans a whole tenant rather than one
+ * instance: a handler's correlation and deduplication keys, a human task's, and a traversal's live
+ * hold. Those are the only rules here that two <em>different</em> instances can contend for, so the
+ * {@code process_instance} row lock that serializes everything else does not cover them. Checking and
+ * then inserting would be the lost update this adapter exists to prevent, with the specific outcome
+ * that two live handlers end up under one correlation key and a trigger's target becomes whichever
+ * one the planner returned.</p>
+ *
+ * <p>So the partial unique indexes decide the winner, and the insert is issued inside a savepoint: a
+ * collision rolls back to it, the row that won is then read, and the caller is told which rule it hit
+ * — an exact repeat is the no-op a retried wait depends on, and anything else is the classified
+ * refusal. A bare insert would be correct about who wins and useless about why, because the
+ * transaction is aborted at the point the truthful answer would have to be read; and
+ * {@code ON CONFLICT DO NOTHING} would not be reliable here, since inferring a <em>partial</em> index
+ * as an arbiter is not something a statement without a conflict target can be relied on to do.</p>
  *
  * <h2>The store is its own clock authority</h2>
  * <p>Every temporal predicate is evaluated against the injected {@link Clock}, read once per operation
@@ -160,7 +223,130 @@ public final class PostgresExecutionStore implements ExecutionStore {
             // to repair and no rebuild that could invent work.
             StoreCapability.PROCESS_INVENTORY,
             StoreCapability.INVENTORY_RETENTION,
-            StoreCapability.EXECUTION_RESULTS);
+            StoreCapability.EXECUTION_RESULTS,
+            // The six continuation facilities. They are declared together because they are one
+            // mechanism seen from six angles -- a durable decision record, written with the
+            // transitions it belongs to -- and because the batch that carries them carries them
+            // together: a human task's resolution is a handler transition, a human task transition
+            // and a re-entry traversal in one commit, so declaring a subset would let a caller
+            // assemble a batch that is half accepted and half refused.
+            StoreCapability.DURABLE_HANDLERS,
+            StoreCapability.TOOL_APPROVALS,
+            StoreCapability.HUMAN_TASKS,
+            StoreCapability.HUMAN_TASK_CONFIRMATIONS,
+            StoreCapability.EXECUTION_PAUSES,
+            StoreCapability.AGENT_AUTHORITY_BUDGETS);
+
+    /**
+     * The one projection every handler read uses, aliased so a correlated subquery cannot silently
+     * bind an unqualified column to its own table instead of to this one.
+     */
+    private static final String HANDLER_COLUMNS = "SELECT h.* FROM execution_handler h";
+
+    private static final String TOOL_APPROVAL_COLUMNS = "SELECT a.* FROM tool_approval a";
+
+    private static final String EXECUTION_PAUSE_COLUMNS = "SELECT p.* FROM execution_pause p";
+
+    private static final String HUMAN_TASK_COLUMNS = "SELECT t.* FROM human_task t";
+
+    /**
+     * The bounded attention projection, and deliberately not {@code t.*}.
+     *
+     * <p>An attention row is shown to a caller who has been authorized for one <em>action</em>, not
+     * for the task. Selecting every column and then choosing what to return would put the response
+     * schema, the continuation bytes, the requester's identity and the decision comment in this
+     * process's memory one field access away from a projection that must not carry them. Naming the
+     * columns makes the omission the query's, where a reviewer can see it.</p>
+     *
+     * <p>The join to {@code process_instance} is on the graph pin as well as the identity, because a
+     * task is only actionable in the deployment context it was pinned to; a task whose instance has
+     * been re-pinned is not an attention row for the old context and must not be counted as one.</p>
+     */
+    private static final String HUMAN_TASK_ATTENTION_COLUMNS =
+            "SELECT t.process_instance_id, t.task_id, t.traversal_id, t.node_id, t.generation, "
+                    + "t.status, t.graph_version_pin, t.created_at_epoch_second, t.created_at_nano, "
+                    + "t.expires_at_epoch_second, t.expires_at_nano, t.escalate_at_epoch_second, "
+                    + "t.escalate_at_nano, t.required_roles, t.required_scopes, "
+                    + "t.requester_request_id, t.requester_subject, t.requester_principal_type, "
+                    + "t.requester_issuer, t.confirmation_version, t.confirmation_prompt, "
+                    + "t.confirmation_comment_requirement, t.confirmation_actions, "
+                    + "t.confirmation_resolve_label, t.confirmation_deny_label, "
+                    + "t.confirmation_cancel_label, t.confirmation_max_prompt_bytes, "
+                    + "t.confirmation_max_action_label_bytes, t.confirmation_max_comment_bytes, "
+                    + "p.deployment_id AS attention_deployment_id "
+                    + "FROM human_task t JOIN process_instance p ON p.tenant_id = t.tenant_id "
+                    + "AND p.process_instance_id = t.process_instance_id "
+                    + "AND p.graph_version_pin = t.graph_version_pin ";
+
+    /**
+     * {@code ('WAITING', 'ESCALATED')} and {@code ('RESOLVED', 'DENIED', 'EXPIRED')}, derived from
+     * {@link HandlerStatus#terminal()} rather than written out as SQL text.
+     *
+     * <p>Restating the split as a literal in every query is how two adapters come to disagree without
+     * anything failing: a sixth, non-terminal status would be enforced by the port's own
+     * {@code terminal()} check and quietly ignored by a hand-written {@code IN} list here, so
+     * correlation-key uniqueness would hold on one store and not the other. Deriving it means adding
+     * a status changes every query at once.</p>
+     *
+     * <p>{@link PostgresSchema}'s migration cannot use these — a migration's text is history and must
+     * never be rewritten — so the partial index there spells the literal out, and this adapter's
+     * schema test pins the shipped literal against these derived lists, so a new status fails the
+     * build rather than silently making the shipped index wrong.</p>
+     */
+    static final String LIVE_HANDLER_STATUSES = handlerStatusList(false);
+
+    /** The terminal counterpart of {@link #LIVE_HANDLER_STATUSES}. */
+    static final String TERMINAL_HANDLER_STATUSES = handlerStatusList(true);
+
+    /**
+     * The live human-task statuses, derived for exactly the reason the handler lists are derived.
+     *
+     * <p>{@link HumanTaskStatus#terminal()} partitions the enum the same way
+     * {@link HandlerStatus#terminal()} does, so this is derived from it rather than written out. A
+     * hand-written list is not a shortcut here, it is a second definition of liveness that nothing
+     * keeps in step: a new non-terminal status would be honoured by the port's own {@code terminal()}
+     * and silently ignored by the list, so correlation-key uniqueness would stop covering it, and the
+     * attention query and the live lookups would stop returning it — all without failing anything.</p>
+     *
+     * <p>{@link PostgresSchema}'s migration cannot use this — a migration's text is history and must
+     * never be rewritten — so the partial index there spells the literal out, and the schema test pins
+     * the shipped literal against this derived list, so a new status fails the build rather than
+     * quietly making the shipped index wrong.</p>
+     */
+    static final String LIVE_HUMAN_TASK_STATUSES = humanTaskStatusList(false);
+
+    /**
+     * The live execution-pause status, derived for the same reason.
+     *
+     * <p>{@link ExecutionPauseStatus#terminal()} leaves exactly one live status today, so this list
+     * has one member and looks like a constant. It is derived anyway: a single-valued list is the
+     * easiest one to write out by hand and the easiest to leave behind when a second live status
+     * arrives.</p>
+     */
+    static final String LIVE_EXECUTION_PAUSE_STATUSES = executionPauseStatusList(false);
+
+    private static String handlerStatusList(boolean terminal) {
+        return statusList(Arrays.stream(HandlerStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(Enum::name));
+    }
+
+    private static String humanTaskStatusList(boolean terminal) {
+        return statusList(Arrays.stream(HumanTaskStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(Enum::name));
+    }
+
+    private static String executionPauseStatusList(boolean terminal) {
+        return statusList(Arrays.stream(ExecutionPauseStatus.values())
+                .filter(status -> status.terminal() == terminal)
+                .map(Enum::name));
+    }
+
+    private static String statusList(java.util.stream.Stream<String> names) {
+        return names.map(name -> "'" + name + "'")
+                .collect(java.util.stream.Collectors.joining(", ", "(", ")"));
+    }
 
     /**
      * The columns every inventory row needs, plus the two aggregate counts and the lease, in one
@@ -336,11 +522,26 @@ public final class PostgresExecutionStore implements ExecutionStore {
             // the pool, let alone a transaction opened. A rejection that needed a round trip would make
             // a caller bug cost the same as a write.
             requireNoFencingTokenUnderNotPresent(batch);
-            requireOnlyDeclaredFacilities(batch);
             batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
             batch.idempotency().ifPresent(write -> {
                 requireWithinPayloadLimit(write.requestFingerprint());
                 requireWithinPayloadLimit(write.outcomeRef());
+            });
+            // A handler outcome is checked here only when it is NOT a human task's resolution. A
+            // human task pins its own response capacity when it is registered, and that capacity can
+            // legitimately exceed this build's general execution-payload setting -- so the check that
+            // applies to it needs the stored task, which needs a connection. It is made inside the
+            // transaction instead, by requireHandlerOutcomeWithinLimit.
+            batch.handlerTransitions().forEach(transition -> {
+                if (!isHumanTaskResolution(batch, transition)) {
+                    requireWithinPayloadLimit(transition.outcomePayload());
+                }
+            });
+            batch.toolApprovalsToRegister().forEach(registration -> {
+                requireWithinPayloadLimit(OpaquePayload.of(registration.canonicalArguments(),
+                        "application/json"));
+                requireWithinPayloadLimit(OpaquePayload.of(registration.continuation(),
+                        "application/vnd.ravenroot.tool-continuation"));
             });
             requireEnvelopesMatchBatch(batch);
             return write(batch.key(), connection -> applyLocked(connection, batch));
@@ -423,6 +624,22 @@ public final class PostgresExecutionStore implements ExecutionStore {
         }
         AggregateStorage.write(connection, key, folded);
         writeTimers(connection, key, batch);
+        // After the aggregate, because a registration may name an invocation this batch created and a
+        // terminal transition must name a traversal this batch added; both are validated against the
+        // post-fold aggregate that is already in `folded`. A rejection here rolls the whole
+        // transaction back, which is what makes a wait -- and a re-entry -- atomic with the
+        // transitions beside it.
+        //
+        // The order among the five is the single-host adapter's, and one dependency is real rather
+        // than stylistic: a handler transition that resolves a human task reads that task's pinned
+        // response capacity, so handlers are folded before the task rows are rewritten and read the
+        // capacity the task was registered with rather than one this batch is in the middle of
+        // changing.
+        writeHandlers(connection, key, batch, folded, revision);
+        writeToolApprovals(connection, key, batch, folded, pin, revision, now);
+        writeAgentAuthorityBudget(connection, key, batch, folded, now);
+        writeExecutionPauses(connection, key, batch, folded, pin, revision);
+        writeHumanTasks(connection, key, batch, folded, pin, revision, now);
         IdempotencyWrite idempotency = batch.idempotency().orElse(null);
         if (idempotency != null) {
             writeIdempotencyRecord(connection, key, idempotency, revision, now);
@@ -616,7 +833,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     }
                     List<ScheduledAttempt> attempts = claimableAttempts(connection, candidate.key(), now);
                     List<TimerSchedule> timers = claimableTimers(connection, candidate.key(), now);
-                    if (attempts.isEmpty() && timers.isEmpty()) {
+                    List<DurableHandler> triggers = claimableTriggers(connection, candidate.key(), now);
+                    if (attempts.isEmpty() && timers.isEmpty() && triggers.isEmpty()) {
                         continue;
                     }
                     LeaseHandle lease = issueLease(connection, candidate.key(), candidate.fencingToken(),
@@ -633,6 +851,13 @@ public final class PostgresExecutionStore implements ExecutionStore {
                             break;
                         }
                         claimed.add(claimTimer(connection, candidate.key(), timer, lease, now, leaseTtl));
+                    }
+                    for (DurableHandler handler : triggers) {
+                        if (claimed.size() >= limit) {
+                            break;
+                        }
+                        claimed.add(claimTrigger(connection, candidate.key(), handler, lease, now,
+                                leaseTtl));
                     }
                 }
                 return List.copyOf(claimed);
@@ -1559,32 +1784,6 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 .count();
     }
 
-    /**
-     * Refuses a batch carrying a facility this build does not declare.
-     *
-     * <p>Silently ignoring the registration would be the worse half of the port's asymmetric
-     * enforcement: the caller would be told its batch committed, and the handler, approval, task, hold
-     * or budget it asked for would not exist anywhere. The tables for all of them are already in the
-     * schema, so implementing them later changes this method and nothing else.</p>
-     */
-    private static void requireOnlyDeclaredFacilities(ExecutionBatch batch) {
-        refuseUnless(batch.handlersToRegister().isEmpty() && batch.handlerTransitions().isEmpty(),
-                StoreCapability.DURABLE_HANDLERS);
-        refuseUnless(batch.toolApprovalsToRegister().isEmpty()
-                && batch.toolApprovalTransitions().isEmpty(), StoreCapability.TOOL_APPROVALS);
-        refuseUnless(batch.humanTasksToRegister().isEmpty() && batch.humanTaskTransitions().isEmpty(),
-                StoreCapability.HUMAN_TASKS);
-        refuseUnless(batch.executionPausesToRegister().isEmpty()
-                && batch.executionPauseTransitions().isEmpty(), StoreCapability.EXECUTION_PAUSES);
-        refuseUnless(batch.agentBudgetOperations().isEmpty(), StoreCapability.AGENT_AUTHORITY_BUDGETS);
-    }
-
-    private static void refuseUnless(boolean absent, StoreCapability capability) {
-        if (!absent) {
-            throw failure(new ExecutionStoreFailure.CapabilityNotSupported(capability));
-        }
-    }
-
     // ---------------------------------------------------------------- row access
 
     /**
@@ -2053,9 +2252,15 @@ public final class PostgresExecutionStore implements ExecutionStore {
      *
      * <p>The ordering is by identifier so the set is deterministic and so two workers acquire locks in
      * the same order — which, with {@code SKIP LOCKED}, means they cannot build a cycle between them.</p>
+     *
+     * <p>{@code includeNonTimerWork} distinguishes the general sweep from
+     * {@link #claimDueTimers(String, String, int, Duration)}, which promises timers and only timers. It
+     * is one flag rather than two because attempts and handler triggers are excluded together and for
+     * the same reason: a caller that asked for due timers and was handed an attempt dispatch or a
+     * handler trigger would have to pattern-match the answer to the question it did not ask.</p>
      */
     private List<Candidate> lockClaimable(Connection connection, String tenantId, String workerId,
-                                          Instant now, int limit, boolean includeAttempts)
+                                          Instant now, int limit, boolean includeNonTimerWork)
             throws SQLException {
         String attemptArm = "EXISTS (SELECT 1 FROM attempt a "
                 + "WHERE a.tenant_id = p.tenant_id AND a.process_instance_id = p.process_instance_id "
@@ -2073,6 +2278,19 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = t.tenant_id "
                 + "AND c.process_instance_id = t.process_instance_id AND c.work_item_id = t.timer_id "
                 + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + "))";
+        // A handler becomes work when it settles, never before: a waiting handler is state, and an
+        // instance that offers a trigger for it would hand a claimant a traversal nothing has
+        // authorized it to resume. There is no temporal predicate at all here -- the trigger is due
+        // because a decision was recorded, not because a deadline passed -- which is why this arm
+        // takes one instant bind where the timer arm takes two.
+        String handlerArm = "EXISTS (SELECT 1 FROM execution_handler h "
+                + "WHERE h.tenant_id = p.tenant_id AND h.process_instance_id = p.process_instance_id "
+                + "AND h.status IN " + TERMINAL_HANDLER_STATUSES + " "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = h.tenant_id "
+                + "AND k.process_instance_id = h.process_instance_id AND k.work_item_id = h.handler_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = h.tenant_id "
+                + "AND c.process_instance_id = h.process_instance_id AND c.work_item_id = h.handler_id "
+                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + "))";
 
         String sql = "SELECT p.process_instance_id, p.fencing_token FROM process_instance p "
                 + "WHERE p.tenant_id = ? "
@@ -2082,7 +2300,8 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 + "AND NOT EXISTS (SELECT 1 FROM lease l WHERE l.tenant_id = p.tenant_id "
                 + "AND l.process_instance_id = p.process_instance_id AND l.worker_id <> ? "
                 + "AND " + StoredInstant.strictlyAfter("l.expires_at") + ") AND ("
-                + (includeAttempts ? attemptArm + " OR " : "") + timerArm + ") "
+                + (includeNonTimerWork ? attemptArm + " OR " : "") + timerArm
+                + (includeNonTimerWork ? " OR " + handlerArm : "") + ") "
                 + "ORDER BY p.process_instance_id LIMIT ? FOR UPDATE OF p SKIP LOCKED";
 
         var candidates = new ArrayList<Candidate>();
@@ -2091,11 +2310,14 @@ public final class PostgresExecutionStore implements ExecutionStore {
             statement.setString(index++, tenantId);
             statement.setString(index++, workerId);
             index = StoredInstant.bindComparison(statement, index, now);
-            if (includeAttempts) {
+            if (includeNonTimerWork) {
                 index = StoredInstant.bindComparison(statement, index, now);
             }
             index = StoredInstant.bindComparison(statement, index, now);
             index = StoredInstant.bindComparison(statement, index, now);
+            if (includeNonTimerWork) {
+                index = StoredInstant.bindComparison(statement, index, now);
+            }
             statement.setInt(index, limit);
             try (ResultSet rows = statement.executeQuery()) {
                 while (rows.next()) {
@@ -2252,10 +2474,11 @@ public final class PostgresExecutionStore implements ExecutionStore {
      * Leaving it would keep a permanently acknowledged ghost in the way of nothing, but would also let
      * the table grow without bound across a long-lived instance.</p>
      *
-     * <p>The handler arm is present even though this build registers no handlers. Handler identities are
-     * work-item identities too, and a terminal handler is retained rather than deleted, so its
-     * acknowledgement must be retained with it; omitting the arm now would leave a defect waiting for
-     * the change that starts writing those rows.</p>
+     * <p>The handler arm is load-bearing rather than symmetric. A handler identity <em>is</em> a
+     * work-item identity — a trigger is claimed and acknowledged under it — and a terminal handler is
+     * retained rather than deleted, so its acknowledgement has to be retained with it. Without the arm
+     * the very next unrelated write to the instance would delete the acknowledgement of a trigger that
+     * was already handled, and the claim loop would offer it again, forever.</p>
      */
     private void dropAcknowledgementsForRescheduledWork(Connection connection, ExecutionKey key)
             throws SQLException {
@@ -2864,6 +3087,2026 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         + " but the batch writes to " + batch.key().processInstanceId()));
             }
         }
+    }
+
+    // ---------------------------------------------------------------- durable handlers
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> loadHandler(ExecutionKey key, UUID handlerId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(handlerId, "handlerId");
+            // One statement, so readOnly rather than readConsistent: there is no second read whose
+            // snapshot could disagree with this one.
+            return read(key, connection -> {
+                // An absent instance and an absent handler answer the same way. Distinguishing them
+                // would let a probe learn that a process instance exists in a tenant it cannot read.
+                DurableHandler stored = readHandler(connection, key, handlerId);
+                return Optional.ofNullable(stored);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableHandler>> findHandler(String tenantId, String handlerName,
+                                                                 String correlationKey) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            HandlerRegistration.requireBoundedKey(handlerName, "handlerName");
+            HandlerRegistration.requireBoundedKey(correlationKey, "correlationKey");
+            return read(null, connection ->
+                    Optional.ofNullable(liveHandler(connection, tenantId, handlerName, correlationKey)));
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableHandler>> handlers(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return read(key, connection -> {
+                var found = new ArrayList<DurableHandler>();
+                try (PreparedStatement statement = connection.prepareStatement(
+                        HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                                + "ORDER BY h.position, h.handler_id")) {
+                    statement.setString(1, key.tenantId());
+                    StoredUuid.bind(statement, 2, key.processInstanceId());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            found.add(readHandler(rows, key, null));
+                        }
+                    }
+                }
+                return List.copyOf(found);
+            });
+        });
+    }
+
+    /** Folds this batch's registrations and handler transitions, inside the enclosing transaction. */
+    private void writeHandlers(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                               ProcessInstance folded, long revision) throws SQLException {
+        for (HandlerRegistration registration : batch.handlersToRegister()) {
+            registerHandler(connection, key, folded, registration, revision);
+        }
+        for (HandlerTransition transition : batch.handlerTransitions()) {
+            transitionHandler(connection, key, batch, folded, transition, revision);
+        }
+    }
+
+    /**
+     * Registers one handler, letting the partial unique indexes decide who owns a contested key.
+     *
+     * <p>The lookups run first and answer the ordinary cases exactly: a retried wait re-sends the
+     * identical registration and must be a no-op, a <em>different</em> handler under the same
+     * deduplication key is a caller bug, and a live correlation key held by somebody else is
+     * {@link ExecutionStoreFailure.HandlerCorrelationTaken}. They also see registrations made earlier
+     * in this same batch, because a transaction reads its own writes — which is the property that
+     * makes two registrations sharing a key inside one batch refuse each other rather than both
+     * commit.</p>
+     *
+     * <p>What the lookups cannot see is a competing transaction that has not committed yet, and the
+     * correlation and deduplication keys are tenant-wide, so the competitor is very often a different
+     * process instance whose row lock this transaction does not hold. The insert therefore stands as
+     * the decision: it waits for the competitor, and if the competitor committed first the index
+     * raises the violation and this rolls back to the savepoint and asks the lookups again — which now
+     * see the winner and produce the same answer they would have produced had it been there all
+     * along.</p>
+     */
+    private void registerHandler(Connection connection, ExecutionKey key, ProcessInstance folded,
+                                 HandlerRegistration registration, long revision) throws SQLException {
+        requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                "handler " + registration.handlerId());
+        if (handlerAlreadyRegistered(connection, key, registration)) {
+            return;
+        }
+        DurableHandler handler = DurableHandler.waiting(key, registration, revision);
+        if (insertApplied(connection,
+                () -> insertHandler(connection, handler, nextHandlerPosition(connection, key)))) {
+            return;
+        }
+        if (handlerAlreadyRegistered(connection, key, registration)) {
+            return;
+        }
+        // Unreachable in principle and stated rather than assumed: a unique violation is raised only
+        // against a COMMITTED row, because an uncommitted conflict makes the insert wait instead. A
+        // row that is not there after the violation would mean the index and the table disagree.
+        throw failure(ExecutionStoreFailure.invalid("handler " + registration.handlerId()
+                + " collided with a uniqueness rule whose winning row cannot be read back"));
+    }
+
+    /**
+     * Whether this exact registration is already stored, refusing every collision that is not it.
+     *
+     * <p>Called twice per registration — once before the insert and once after a lost race — and the
+     * second call is why it is a method rather than inline: the classification a caller is owed must
+     * not depend on whether the collision was seen by a read or by an index.</p>
+     */
+    private boolean handlerAlreadyRegistered(Connection connection, ExecutionKey key,
+                                             HandlerRegistration registration) throws SQLException {
+        DurableHandler byDeduplication = handlerByDeduplicationKey(connection, key.tenantId(),
+                registration.deduplicationKey());
+        if (byDeduplication != null) {
+            // A retried wait re-sends the identical batch and must be a no-op. A DIFFERENT
+            // registration under the same key is a caller bug, and answering it as a success would
+            // silently discard a handler somebody asked for.
+            if (!byDeduplication.matches(registration)) {
+                throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                        + registration.deduplicationKey() + " already registers handler "
+                        + byDeduplication.handlerId() + ", which is not the handler being registered"));
+            }
+            return true;
+        }
+        DurableHandler contender = liveHandler(connection, key.tenantId(), registration.name(),
+                registration.correlationKey());
+        if (contender != null && !contender.handlerId().equals(registration.handlerId())) {
+            throw failure(new ExecutionStoreFailure.HandlerCorrelationTaken(registration.name(),
+                    registration.correlationKey()));
+        }
+        DurableHandler existing = readHandler(connection, key, registration.handlerId());
+        if (existing != null) {
+            throw failure(ExecutionStoreFailure.invalid("handler " + registration.handlerId()
+                    + " is already registered under a different deduplication key"));
+        }
+        return false;
+    }
+
+    private void transitionHandler(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                   ProcessInstance folded, HandlerTransition transition, long revision)
+            throws SQLException {
+        DurableHandler current = readHandler(connection, key, transition.handlerId());
+        if (current == null) {
+            // InvalidRequest rather than NotFound: NotFound names a process instance, and the
+            // instance is present -- it is the handler inside it that this batch invented.
+            throw failure(ExecutionStoreFailure.invalid("unknown handler " + transition.handlerId()));
+        }
+        // A redelivered escalation timer must not be able to turn an escalation into a failure.
+        // Every other repeat is a duplicate and is refused.
+        if (transition.next() == HandlerStatus.ESCALATED && current.status() == HandlerStatus.ESCALATED) {
+            return;
+        }
+        if (!current.status().canTransitionTo(transition.next())) {
+            throw failure(new ExecutionStoreFailure.HandlerNotResolvable(current.handlerId(),
+                    current.status(), transition.next()));
+        }
+        requireHandlerOutcomeWithinLimit(connection, key, batch, transition);
+        if (transition.next().resumesProcess()) {
+            requireBatchCreatedTraversal(batch, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+            requireTraversalExists(folded, transition.resumeTraversalId(),
+                    "handler " + current.handlerId() + " resume");
+        }
+        if (transition.next() == HandlerStatus.RESOLVED) {
+            // Only a resolution supplies the body the handler was declared to be waiting for. A
+            // denial carries a refusal reason, which is a different shape by nature.
+            Optional<String> refusal = current.payloadSchema().rejectionOf(transition.outcomePayload());
+            if (refusal.isPresent()) {
+                throw failure(ExecutionStoreFailure.invalid("handler " + current.handlerId()
+                        + " payload was refused: " + refusal.get()));
+            }
+        }
+        updateHandler(connection, current.apply(transition, revision), current.status());
+    }
+
+    private void insertHandler(Connection connection, DurableHandler handler, int position)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_handler (tenant_id, process_instance_id, handler_id, position, "
+                        + "name, traversal_id, invocation_id, correlation_key, deduplication_key, "
+                        + "schema_content_type, schema_ref, schema_max_bytes, required_roles, "
+                        + "required_scopes, status, resume_traversal_id, actor, outcome_content_type, "
+                        + "outcome_bytes, revision) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, handler.key().tenantId());
+            StoredUuid.bind(statement, 2, handler.key().processInstanceId());
+            StoredUuid.bind(statement, 3, handler.handlerId());
+            statement.setInt(4, position);
+            statement.setString(5, handler.name());
+            StoredUuid.bind(statement, 6, handler.traversalId());
+            StoredUuid.bind(statement, 7, handler.invocationId());
+            statement.setString(8, handler.correlationKey());
+            statement.setString(9, handler.deduplicationKey());
+            statement.setString(10, handler.payloadSchema().contentType());
+            statement.setString(11, handler.payloadSchema().schemaRef());
+            statement.setInt(12, handler.payloadSchema().maxBytes());
+            statement.setString(13, joinTokens(handler.authorization().requiredRoles()));
+            statement.setString(14, joinTokens(handler.authorization().requiredScopes()));
+            statement.setString(15, handler.status().name());
+            bindNullableUuid(statement, 16, handler.resumeTraversalId());
+            statement.setString(17, handler.actor());
+            statement.setString(18, handler.outcomePayload().contentType());
+            statement.setBytes(19, handler.outcomePayload().bytes());
+            statement.setLong(20, handler.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    /**
+     * Applies a settled handler, with the status the decision was made on in the {@code WHERE}.
+     *
+     * <p>The predicate is not decoration. Everything a batch writes about one instance is serialized
+     * by that instance's own row lock, so today no concurrent writer can move this row between the
+     * read above and this update — but the guard costs one comparison and makes the statement true on
+     * its own terms, so a future change that narrowed the lock would fail the transition rather than
+     * silently overwrite whichever decision lost.</p>
+     */
+    private void updateHandler(Connection connection, DurableHandler handler, HandlerStatus expected)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE execution_handler SET status = ?, resume_traversal_id = ?, actor = ?, "
+                        + "outcome_content_type = ?, outcome_bytes = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND handler_id = ? "
+                        + "AND status = ?")) {
+            statement.setString(1, handler.status().name());
+            bindNullableUuid(statement, 2, handler.resumeTraversalId());
+            statement.setString(3, handler.actor());
+            statement.setString(4, handler.outcomePayload().contentType());
+            statement.setBytes(5, handler.outcomePayload().bytes());
+            statement.setLong(6, handler.revision());
+            statement.setString(7, handler.key().tenantId());
+            StoredUuid.bind(statement, 8, handler.key().processInstanceId());
+            StoredUuid.bind(statement, 9, handler.handlerId());
+            statement.setString(10, expected.name());
+            if (statement.executeUpdate() != 1) {
+                throw failure(new ExecutionStoreFailure.HandlerNotResolvable(handler.handlerId(),
+                        expected, handler.status()));
+            }
+        }
+    }
+
+    private int nextHandlerPosition(Connection connection, ExecutionKey key) throws SQLException {
+        // Safe to derive from a read because every handler of one instance is written under that
+        // instance's row lock, so no second writer can allocate the same position. It is a display
+        // order rather than an identity in any case -- handlers() breaks ties on the identifier, so a
+        // duplicate would cost determinism rather than correctness.
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM execution_handler "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableHandler readHandler(Connection connection, ExecutionKey key, UUID handlerId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(HANDLER_COLUMNS
+                + " WHERE h.tenant_id = ? AND h.process_instance_id = ? AND h.handler_id = ?")) {
+            bindItem(statement, key, handlerId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows, key, handlerId) : null;
+            }
+        }
+    }
+
+    private DurableHandler liveHandler(Connection connection, String tenantId, String handlerName,
+                                       String correlationKey) throws SQLException {
+        // The partial unique index makes this at most one row, so the answer does not depend on
+        // ordering. A LIMIT here would have hidden a violated invariant behind an arbitrary winner.
+        try (PreparedStatement statement = connection.prepareStatement(HANDLER_COLUMNS
+                + " WHERE h.tenant_id = ? AND h.name = ? AND h.correlation_key = ? "
+                + "AND h.status IN " + LIVE_HANDLER_STATUSES)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, handlerName);
+            statement.setString(3, correlationKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows, null, null) : null;
+            }
+        }
+    }
+
+    private DurableHandler handlerByDeduplicationKey(Connection connection, String tenantId,
+                                                     String deduplicationKey) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(HANDLER_COLUMNS
+                + " WHERE h.tenant_id = ? AND h.deduplication_key = ?")) {
+            statement.setString(1, tenantId);
+            statement.setString(2, deduplicationKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHandler(rows, null, null) : null;
+            }
+        }
+    }
+
+    /**
+     * Reconstructs a stored handler through its canonical constructor.
+     *
+     * <p>A row that no longer satisfies the record's invariants — a resuming status with no resume
+     * traversal, an unknown status name written by a newer binary — surfaces as
+     * {@link ExecutionStoreFailure.Corrupted} rather than escaping into the runtime, matching how the
+     * aggregate itself is revalidated on the way out.</p>
+     */
+    private static DurableHandler readHandler(ResultSet rows, ExecutionKey expectedKey,
+                                              UUID expectedHandlerId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "execution_handler", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "execution_handler", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            UUID handlerId = expectedHandlerId == null
+                    ? StoredUuid.required(rows, "execution_handler", "handler_id", key)
+                    : StoredUuid.requiredMatching(rows, "execution_handler", "handler_id", key,
+                            expectedHandlerId);
+            return new DurableHandler(handlerId, key, rows.getString("name"),
+                    StoredUuid.required(rows, "execution_handler", "traversal_id", key),
+                    StoredUuid.required(rows, "execution_handler", "invocation_id", key),
+                    rows.getString("correlation_key"), rows.getString("deduplication_key"),
+                    new HandlerPayloadSchema(rows.getString("schema_content_type"),
+                            rows.getString("schema_ref"), rows.getInt("schema_max_bytes")),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    HandlerStatus.valueOf(rows.getString("status")),
+                    StoredUuid.optional(rows, "execution_handler", "resume_traversal_id"),
+                    rows.getString("actor"),
+                    OpaquePayload.of(rows.getBytes("outcome_bytes"),
+                            rows.getString("outcome_content_type")),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    /**
+     * The settled handlers of one instance that have a trigger nobody has taken or acknowledged.
+     *
+     * <p>Terminal only, and that is the whole eligibility rule: a handler becomes claimable work at
+     * the moment a decision is recorded against it, and a waiting one offers nothing. There is no
+     * temporal predicate, so unlike a timer this is not "due" — it is outstanding.</p>
+     */
+    private List<DurableHandler> claimableTriggers(Connection connection, ExecutionKey key, Instant now)
+            throws SQLException {
+        String sql = HANDLER_COLUMNS + " WHERE h.tenant_id = ? AND h.process_instance_id = ? "
+                + "AND h.status IN " + TERMINAL_HANDLER_STATUSES + " "
+                + "AND NOT EXISTS (SELECT 1 FROM work_acknowledgement k WHERE k.tenant_id = h.tenant_id "
+                + "AND k.process_instance_id = h.process_instance_id AND k.work_item_id = h.handler_id) "
+                + "AND NOT EXISTS (SELECT 1 FROM work_claim c WHERE c.tenant_id = h.tenant_id "
+                + "AND c.process_instance_id = h.process_instance_id AND c.work_item_id = h.handler_id "
+                + "AND " + StoredInstant.strictlyAfter("c.visible_again_at") + ") "
+                + "ORDER BY h.position, h.handler_id";
+        var ready = new ArrayList<DurableHandler>();
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            StoredInstant.bindComparison(statement, 3, now);
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    ready.add(readHandler(rows, key, null));
+                }
+            }
+        }
+        return ready;
+    }
+
+    private PendingWork.HandlerTrigger claimTrigger(Connection connection, ExecutionKey key,
+                                                    DurableHandler handler, LeaseHandle lease,
+                                                    Instant now, Duration leaseTtl) throws SQLException {
+        int delivery = registerClaim(connection, key, handler.handlerId(), now, leaseTtl);
+        // The RE-ENTRY traversal, never the one that was waiting: the claimant runs the traversal the
+        // resolution authorized, and the waiting traversal's own history stays closed.
+        //
+        // The invocation is ABSENT, not the waiting one. Pairing a new traversal with an invocation
+        // that lives under the old one produces a pair no lookup resolves -- a claimant asking the
+        // re-entry traversal for that invocation gets null -- and it is the invocation the wait is
+        // over for, so naming it would also read as work still to do. The claimant creates the
+        // re-entry invocation itself; the waiting one stays reachable through the handler, whose id
+        // is this item's own workItemId.
+        return new PendingWork.HandlerTrigger(key, handler.handlerId(), handler.resumeTraversalId(),
+                null, handler.name(), handler.outcomePayload(), lease.fencingToken(),
+                lease.expiresAt(), delivery);
+    }
+
+    // ---------------------------------------------------------------- durable tool approvals
+
+    @Override
+    public CompletionStage<Optional<DurableToolApproval>> loadToolApproval(ExecutionKey key,
+                                                                           UUID approvalId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(approvalId, "approvalId");
+            return read(key, connection ->
+                    Optional.ofNullable(readToolApproval(connection, key, approvalId)));
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableToolApproval>> toolApprovals(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return read(key, connection -> {
+                var approvals = new ArrayList<DurableToolApproval>();
+                try (PreparedStatement statement = connection.prepareStatement(TOOL_APPROVAL_COLUMNS
+                        + " WHERE a.tenant_id = ? AND a.process_instance_id = ? "
+                        + "ORDER BY a.position, a.approval_id")) {
+                    statement.setString(1, key.tenantId());
+                    StoredUuid.bind(statement, 2, key.processInstanceId());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            approvals.add(readToolApproval(rows, key, null));
+                        }
+                    }
+                }
+                return List.copyOf(approvals);
+            });
+        });
+    }
+
+    /**
+     * Folds this batch's approval registrations and decisions.
+     *
+     * <p>An approval is identified by an id the caller chose, and its uniqueness is the primary key of
+     * one instance, so there is no tenant-wide rule here and no savepoint: the instance's own row lock
+     * already serializes every writer that could collide.</p>
+     */
+    private void writeToolApprovals(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                    ProcessInstance folded, GraphVersionPin pin, long revision,
+                                    Instant now) throws SQLException {
+        for (ToolApprovalRegistration registration : batch.toolApprovalsToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "tool approval " + registration.approvalId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval identity or graph pin does not match its execution"));
+            }
+            if (!now.isBefore(registration.expiresAt())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "tool approval expiry must be after store time"));
+            }
+            DurableToolApproval existing = readToolApproval(connection, key, registration.approvalId());
+            if (existing != null) {
+                if (!existing.request().sameRequest(registration)) {
+                    throw failure(ExecutionStoreFailure.invalid("tool approval "
+                            + registration.approvalId()
+                            + " is already registered with a different request"));
+                }
+                continue;
+            }
+            insertToolApproval(connection, DurableToolApproval.pending(key, registration, revision),
+                    nextToolApprovalPosition(connection, key));
+        }
+        for (ToolApprovalTransition transition : batch.toolApprovalTransitions()) {
+            DurableToolApproval current = readToolApproval(connection, key, transition.approvalId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown tool approval "
+                        + transition.approvalId()));
+            }
+            if (current.alreadyApplied(transition)) {
+                continue;
+            }
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), transition.next()));
+            }
+            // The store is the only authority that may expire an approval, and the only authority
+            // that may refuse one as late. Both comparisons are against the injected clock read once
+            // for this batch: a caller that decided a moment ago and a caller replaying an hour later
+            // must get the same answer as the instant the store is reasoning about.
+            if (transition.next() == ToolApprovalStatus.EXPIRED
+                    && now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            if ((transition.next() == ToolApprovalStatus.APPROVED
+                    || transition.next() == ToolApprovalStatus.DENIED
+                    || transition.next() == ToolApprovalStatus.CONSUMED)
+                    && !now.isBefore(current.request().expiresAt())) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        current.request().approvalId(), current.status(), ToolApprovalStatus.EXPIRED));
+            }
+            updateToolApproval(connection, current.apply(transition, revision), current.status());
+        }
+    }
+
+    private void insertToolApproval(Connection connection, DurableToolApproval approval, int position)
+            throws SQLException {
+        ToolApprovalRegistration request = approval.request();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO tool_approval (tenant_id, process_instance_id, approval_id, position, "
+                        + "traversal_id, invocation_id, attempt_id, call_id, node_id, tool, "
+                        + "canonical_arguments, arguments_digest, requester_request_id, "
+                        + "requester_subject, requester_principal_type, requester_issuer, "
+                        + "graph_version_pin, policy_version, expires_at_epoch_second, "
+                        + "expires_at_nano, required_roles, required_scopes, requester_may_approve, "
+                        + "continuation_version, continuation, continuation_digest, status, actor, "
+                        + "revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        + "?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")) {
+            statement.setString(1, approval.key().tenantId());
+            StoredUuid.bind(statement, 2, approval.key().processInstanceId());
+            StoredUuid.bind(statement, 3, request.approvalId());
+            statement.setInt(4, position);
+            StoredUuid.bind(statement, 5, request.traversalId());
+            StoredUuid.bind(statement, 6, request.invocationId());
+            StoredUuid.bind(statement, 7, request.attemptId());
+            StoredUuid.bind(statement, 8, request.callId());
+            statement.setString(9, request.nodeId());
+            statement.setString(10, request.tool());
+            statement.setBytes(11, request.canonicalArguments());
+            statement.setString(12, request.argumentsDigest());
+            statement.setString(13, request.requester().requestId());
+            statement.setString(14, request.requester().subject());
+            statement.setString(15, request.requester().principalType().name());
+            statement.setString(16, request.requester().issuer());
+            statement.setString(17, request.graphVersionPin().reference());
+            statement.setString(18, request.policyVersion());
+            StoredInstant.bindValue(statement, 19, request.expiresAt());
+            statement.setString(21, joinTokens(request.approverRequirements().requiredRoles()));
+            statement.setString(22, joinTokens(request.approverRequirements().requiredScopes()));
+            // A real BOOLEAN column rather than the single-host adapter's integer, because
+            // PostgreSQL has the type and a column that can only hold what it means cannot be
+            // written with a two as a third state.
+            statement.setBoolean(23, request.requesterMayApprove());
+            statement.setInt(24, request.continuationVersion());
+            statement.setBytes(25, request.continuation());
+            statement.setString(26, request.continuationDigest());
+            statement.setString(27, approval.status().name());
+            statement.setString(28, approval.actor());
+            statement.setLong(29, approval.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateToolApproval(Connection connection, DurableToolApproval approval,
+                                    ToolApprovalStatus expected) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE tool_approval SET status = ?, actor = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND approval_id = ? "
+                        + "AND status = ?")) {
+            statement.setString(1, approval.status().name());
+            statement.setString(2, approval.actor());
+            statement.setLong(3, approval.revision());
+            statement.setString(4, approval.key().tenantId());
+            StoredUuid.bind(statement, 5, approval.key().processInstanceId());
+            StoredUuid.bind(statement, 6, approval.request().approvalId());
+            statement.setString(7, expected.name());
+            if (statement.executeUpdate() != 1) {
+                throw failure(new ExecutionStoreFailure.ToolApprovalNotResolvable(
+                        approval.request().approvalId(), expected, approval.status()));
+            }
+        }
+    }
+
+    private int nextToolApprovalPosition(Connection connection, ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM tool_approval "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableToolApproval readToolApproval(Connection connection, ExecutionKey key, UUID approvalId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(TOOL_APPROVAL_COLUMNS
+                + " WHERE a.tenant_id = ? AND a.process_instance_id = ? AND a.approval_id = ?")) {
+            bindItem(statement, key, approvalId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readToolApproval(rows, key, approvalId) : null;
+            }
+        }
+    }
+
+    private static DurableToolApproval readToolApproval(ResultSet rows, ExecutionKey expectedKey,
+                                                        UUID expectedApprovalId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "tool_approval", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "tool_approval", "process_instance_id", expectedKey,
+                        expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            UUID approvalId = expectedApprovalId == null
+                    ? StoredUuid.required(rows, "tool_approval", "approval_id", key)
+                    : StoredUuid.requiredMatching(rows, "tool_approval", "approval_id", key,
+                            expectedApprovalId);
+            var request = new ToolApprovalRegistration(approvalId,
+                    StoredUuid.required(rows, "tool_approval", "traversal_id", key),
+                    StoredUuid.required(rows, "tool_approval", "invocation_id", key),
+                    StoredUuid.required(rows, "tool_approval", "attempt_id", key),
+                    StoredUuid.required(rows, "tool_approval", "call_id", key),
+                    rows.getString("node_id"), rows.getString("tool"),
+                    rows.getBytes("canonical_arguments"), rows.getString("arguments_digest"),
+                    new SecurityContext(rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            PrincipalType.valueOf(rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    rows.getString("policy_version"), StoredInstant.read(rows, "expires_at"),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    rows.getBoolean("requester_may_approve"), rows.getInt("continuation_version"),
+                    rows.getBytes("continuation"), rows.getString("continuation_digest"));
+            return new DurableToolApproval(key, request,
+                    ToolApprovalStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- agent authority and budgets
+
+    @Override
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(
+            ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return read(key, connection -> readAgentAuthorityBudget(connection, key, false));
+        });
+    }
+
+    @Override
+    public CompletionStage<AgentAuthorityControl> loadAgentAuthorityControl() {
+        return async(() -> read(null, connection -> readAgentAuthorityControl(connection, null)));
+    }
+
+    /**
+     * Advances the store-global control state from the exact snapshot the caller decided on.
+     *
+     * <h2>The lock order, which is the whole of why this is safe</h2>
+     * <p>Two writers touch both the control row and the budget rows: this transition, which kills
+     * every root of the epoch it is leaving, and {@code apply}, which validates a budget operation
+     * against the epoch in force. Taken in opposite orders they deadlock, and worse, taken with no
+     * lock at all they interleave — an {@code apply} that read {@code ACTIVE} at epoch 7 could commit
+     * a hold after this transition had already swept epoch 7's roots, and the hold would survive a
+     * kill that was supposed to have revoked it.</p>
+     *
+     * <p>So the order is fixed here and matched in {@link #writeAgentAuthorityBudget}: <strong>the
+     * control row first, the budget rows second</strong>. This transition takes it {@code FOR UPDATE};
+     * a batch takes it {@code FOR SHARE}, which lets any number of concurrent batches validate against
+     * the same epoch and blocks only against a transition that is changing it. A batch therefore
+     * either completes before the sweep begins or waits for it and then reads the new epoch, and
+     * neither can hold a budget row while waiting for the control row.</p>
+     *
+     * <p>The {@code UPDATE} still carries the expected state and epoch in its {@code WHERE} even
+     * though the row is already locked. The lock makes the check redundant against another database
+     * client; the predicate makes the statement true on its own, which is what a reader has to be able
+     * to verify without reconstructing the locking argument above.</p>
+     */
+    @Override
+    public CompletionStage<AgentAuthorityControl> transitionAgentAuthorityControl(
+            AgentAuthorityControlState expectedState, long expectedEpoch,
+            AgentAuthorityControlState targetState) {
+        return async(() -> {
+            Objects.requireNonNull(expectedState, "expectedState");
+            Objects.requireNonNull(targetState, "targetState");
+            return write(null, connection -> {
+                AgentAuthorityControl current = readAgentAuthorityControl(connection, "FOR UPDATE");
+                if (current.state() != expectedState || current.epoch() != expectedEpoch) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control expectation is stale"));
+                }
+                long nextEpoch;
+                try {
+                    nextEpoch = Math.addExact(expectedEpoch, 1);
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority control epoch is exhausted"));
+                }
+                // One instant for the whole transition, threaded rather than read twice. Two reads
+                // would stamp the killed budgets and the control row with different instants, and
+                // although the skew runs in the harmless direction, every other path in this adapter
+                // carries one clock reading through a batch and a lone exception is the kind of
+                // inconsistency that later gets copied rather than questioned.
+                Instant now = clock.instant();
+                long releasedTeamActive = targetState == AgentAuthorityControlState.KILLED
+                        ? killAgentAuthorityBudgets(connection, expectedEpoch, now) : 0L;
+                AgentAuthorityControl next;
+                try {
+                    next = new AgentAuthorityControl(targetState, nextEpoch, now,
+                            Math.addExact(current.teamActiveReleased(), releasedTeamActive));
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority release aggregate is exhausted"));
+                }
+                try (PreparedStatement statement = connection.prepareStatement(
+                        "UPDATE agent_authority_control SET state = ?, epoch = ?, "
+                                + "changed_at_epoch_second = ?, changed_at_nano = ?, "
+                                + "team_active_released = ? "
+                                + "WHERE singleton AND state = ? AND epoch = ?")) {
+                    statement.setString(1, next.state().name());
+                    statement.setLong(2, next.epoch());
+                    StoredInstant.bindValue(statement, 3, next.changedAt());
+                    statement.setLong(5, next.teamActiveReleased());
+                    statement.setString(6, expectedState.name());
+                    statement.setLong(7, expectedEpoch);
+                    if (statement.executeUpdate() != 1) {
+                        throw failure(ExecutionStoreFailure.invalid(
+                                "agent authority control expectation is stale"));
+                    }
+                }
+                return next;
+            });
+        });
+    }
+
+    /**
+     * Reads the singleton control row, optionally locking it for the rest of the transaction.
+     *
+     * <p>{@code lockClause} is {@code null} for a plain read, {@code "FOR SHARE"} for a batch that
+     * will decide something against this epoch, and {@code "FOR UPDATE"} for the transition that
+     * changes it. It is a string rather than a boolean because there are genuinely three answers and a
+     * boolean would have forced the third caller to pass the wrong one of two.</p>
+     */
+    private AgentAuthorityControl readAgentAuthorityControl(Connection connection, String lockClause)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT state, epoch, changed_at_epoch_second, changed_at_nano, team_active_released "
+                        + "FROM agent_authority_control WHERE singleton"
+                        + (lockClause == null ? "" : " " + lockClause));
+             ResultSet rows = statement.executeQuery()) {
+            if (!rows.next()) {
+                // Seeded by the migration, so an absent row is a schema that is not this build's
+                // rather than a state a caller could have produced. Unavailable rather than
+                // Corrupted, because there is no ExecutionKey to name and nothing tenant-scoped is
+                // damaged.
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is unavailable"));
+            }
+            try {
+                return new AgentAuthorityControl(
+                        AgentAuthorityControlState.valueOf(rows.getString("state")),
+                        rows.getLong("epoch"), StoredInstant.read(rows, "changed_at"),
+                        rows.getLong("team_active_released"));
+            } catch (IllegalArgumentException | IllegalStateException invalid) {
+                throw failure(new ExecutionStoreFailure.Unavailable(
+                        "agent authority control is invalid"));
+            }
+        }
+    }
+
+    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(Connection connection,
+                                                                           ExecutionKey key,
+                                                                           boolean forUpdate)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT aggregate FROM agent_authority_budget "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?"
+                        + (forUpdate ? " FOR UPDATE" : ""))) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                if (!rows.next()) {
+                    return Optional.empty();
+                }
+                try {
+                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes("aggregate")));
+                } catch (RuntimeException corrupted) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+            }
+        }
+    }
+
+    /**
+     * Revokes every root still active at {@code expectedEpoch}, and reports the team slots released.
+     *
+     * <p>{@code FOR UPDATE} on the scan, ordered by identity, is what makes this a sweep rather than a
+     * race. Each row is read, folded and rewritten, so without the lock a batch committing between
+     * the read and the write would have its own update replaced by this one — the lost update, with
+     * the specific consequence that a hold taken during the kill survives it. The ordering matters
+     * because two sweeps of the same set must acquire in the same sequence; they cannot both be
+     * running today, since both hold the control row exclusively first, and the order costs nothing
+     * to keep true.</p>
+     */
+    private long killAgentAuthorityBudgets(Connection connection, long expectedEpoch, Instant now)
+            throws SQLException {
+        var replacements = new ArrayList<BudgetReplacement>();
+        long releasedTeamActive = 0L;
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT tenant_id, process_instance_id, aggregate FROM agent_authority_budget "
+                        + "ORDER BY tenant_id, process_instance_id FOR UPDATE");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                String tenantId = rows.getString("tenant_id");
+                var key = new ExecutionKey(tenantId, StoredUuid.required(rows,
+                        "agent_authority_budget", "process_instance_id", tenantId));
+                DurableAgentAuthorityBudget budget;
+                try {
+                    budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes("aggregate"));
+                } catch (RuntimeException invalid) {
+                    throw failure(new ExecutionStoreFailure.Corrupted(key,
+                            "agent authority aggregate is invalid"));
+                }
+                if (budget.state() != AgentAuthorityState.ACTIVE
+                        || budget.controlEpoch() != expectedEpoch) {
+                    continue;
+                }
+                DurableAgentAuthorityBudget killed;
+                try {
+                    killed = AgentAuthorityBudgetFold.apply(key, budget,
+                            new AgentBudgetOperation.KillRoot(expectedEpoch), now);
+                } catch (IllegalArgumentException | IllegalStateException invalid) {
+                    // Wrapped for the same reason the batch path wraps it, and not because this call
+                    // is expected to reject: only budgets already filtered to ACTIVE at the expected
+                    // epoch reach here, and a kill accepts those. What the wrap buys is that a fold
+                    // rule this sweep has not anticipated arrives as a classified store failure rather
+                    // than as a raw argument exception escaping the port, which is the one outcome the
+                    // port forbids regardless of how it was reached.
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
+                try {
+                    releasedTeamActive = Math.addExact(releasedTeamActive,
+                            budget.reserved().teamActive() - killed.reserved().teamActive());
+                } catch (ArithmeticException overflow) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "agent authority release aggregate is exhausted"));
+                }
+                replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
+            }
+        }
+        try (PreparedStatement update = connection.prepareStatement(
+                "UPDATE agent_authority_budget SET aggregate = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            for (BudgetReplacement replacement : replacements) {
+                update.setBytes(1, replacement.aggregate());
+                update.setString(2, replacement.key().tenantId());
+                StoredUuid.bind(update, 3, replacement.key().processInstanceId());
+                update.addBatch();
+            }
+            update.executeBatch();
+        }
+        return releasedTeamActive;
+    }
+
+    /** One killed ledger, held until the scan's cursor is closed and the rows can be rewritten. */
+    private record BudgetReplacement(ExecutionKey key, byte[] aggregate) {
+    }
+
+    /**
+     * Folds this batch's budget operations into the instance's ledger.
+     *
+     * <p>The read is {@code FOR UPDATE} and the control row is taken {@code FOR SHARE} first, in that
+     * order — see {@link #transitionAgentAuthorityControl} for why the order is the one that cannot
+     * deadlock. Neither lock is taken at all when the batch carries no budget operation, which is the
+     * overwhelming majority of batches: a facility nobody in this batch used must not put a lock in
+     * the way of one that did.</p>
+     */
+    private void writeAgentAuthorityBudget(Connection connection, ExecutionKey key,
+                                           ExecutionBatch batch, ProcessInstance folded, Instant now)
+            throws SQLException {
+        if (batch.agentBudgetOperations().isEmpty()) {
+            return;
+        }
+        AgentAuthorityControl control = readAgentAuthorityControl(connection, "FOR SHARE");
+        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(connection, key, true)
+                .orElse(null);
+        for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+            requireAgentAuthorityControl(operation, control);
+            if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
+                requireGrantBindingMatchesFold(folded, register);
+            }
+            try {
+                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+            } catch (IllegalArgumentException | IllegalStateException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+        }
+        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        if (encoded.length > config.maxPayloadBytes()) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length,
+                    config.maxPayloadBytes()));
+        }
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO agent_authority_budget (tenant_id, process_instance_id, aggregate) "
+                        + "VALUES (?, ?, ?) ON CONFLICT (tenant_id, process_instance_id) "
+                        + "DO UPDATE SET aggregate = EXCLUDED.aggregate")) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            statement.setBytes(3, encoded);
+            statement.executeUpdate();
+        }
+    }
+
+    /**
+     * Requires a new grant to name the invocation the post-fold aggregate actually has.
+     *
+     * <p>A grant's authority is bounded by where it sits in the causal graph, so a binding that names
+     * a different node or a different set of causal parents than the invocation carries would be
+     * authority derived from a shape the execution does not have.</p>
+     */
+    private static void requireGrantBindingMatchesFold(ProcessInstance folded,
+                                                       AgentBudgetOperation.RegisterGrant register) {
+        var invocation = folded == null ? null : folded.traversals().values().stream()
+                .flatMap(traversal -> traversal.invocations().values().stream())
+                .filter(candidate -> candidate.invocationId().equals(register.binding().invocationId()))
+                .findFirst().orElse(null);
+        if (invocation == null || !invocation.nodeId().equals(register.binding().nodeId())
+                || !invocation.parentInvocationIds()
+                        .equals(register.binding().causalParentInvocationIds())) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "agent grant binding does not name the post-fold invocation"));
+        }
+    }
+
+    /**
+     * Refuses an operation issued under an epoch that is no longer in force.
+     *
+     * <p>Only the four operations that <em>extend</em> authority carry an epoch. Cancelling,
+     * exhausting, settling and reporting a breach do not, because they only ever remove authority and
+     * refusing one because the epoch moved would leave authority outstanding that a caller was trying
+     * to give back.</p>
+     */
+    private static void requireAgentAuthorityControl(AgentBudgetOperation operation,
+                                                     AgentAuthorityControl control) {
+        Long expected = switch (operation) {
+            case AgentBudgetOperation.RegisterRoot register -> register.controlEpoch();
+            case AgentBudgetOperation.RegisterGrant register -> register.controlEpoch();
+            case AgentBudgetOperation.Hold hold -> hold.controlEpoch();
+            case AgentBudgetOperation.Dispatch dispatch -> dispatch.controlEpoch();
+            default -> null;
+        };
+        if (expected != null && (control.state() != AgentAuthorityControlState.ACTIVE
+                || control.epoch() != expected)) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "agent authority control is not active for this epoch"));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable execution pauses
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> loadExecutionPause(ExecutionKey key,
+                                                                               UUID pauseId) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            Objects.requireNonNull(pauseId, "pauseId");
+            return read(key, connection ->
+                    Optional.ofNullable(readExecutionPause(connection, key, pauseId)));
+        });
+    }
+
+    @Override
+    public CompletionStage<List<DurableExecutionPause>> executionPauses(ExecutionKey key) {
+        return async(() -> {
+            Objects.requireNonNull(key, "key");
+            return read(key, connection -> {
+                var pauses = new ArrayList<DurableExecutionPause>();
+                try (PreparedStatement statement = connection.prepareStatement(EXECUTION_PAUSE_COLUMNS
+                        + " WHERE p.tenant_id = ? AND p.process_instance_id = ? "
+                        + "ORDER BY p.position, p.pause_id")) {
+                    statement.setString(1, key.tenantId());
+                    StoredUuid.bind(statement, 2, key.processInstanceId());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            pauses.add(readExecutionPause(rows, key, null));
+                        }
+                    }
+                }
+                return List.copyOf(pauses);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<DurableExecutionPause>> findHeldExecutionPause(String tenantId,
+                                                                                    UUID traversalId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(traversalId, "traversalId");
+            return read(null, connection ->
+                    Optional.ofNullable(readHeldExecutionPause(connection, tenantId, traversalId)));
+        });
+    }
+
+    private void writeExecutionPauses(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                      ProcessInstance folded, GraphVersionPin pin, long revision)
+            throws SQLException {
+        for (ExecutionPauseRegistration registration : batch.executionPausesToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.afterInvocationId(),
+                    "execution pause " + registration.pauseId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "execution pause identity or graph pin does not match its execution"));
+            }
+            if (pauseAlreadyRegistered(connection, key, registration)) {
+                continue;
+            }
+            DurableExecutionPause pause = DurableExecutionPause.held(key, registration, revision);
+            if (insertApplied(connection, () -> insertExecutionPause(connection, pause,
+                    nextExecutionPausePosition(connection, key)))) {
+                continue;
+            }
+            if (pauseAlreadyRegistered(connection, key, registration)) {
+                continue;
+            }
+            throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                    + " collided with a uniqueness rule whose winning row cannot be read back"));
+        }
+        for (ExecutionPauseTransition transition : batch.executionPauseTransitions()) {
+            DurableExecutionPause current = readExecutionPause(connection, key, transition.pauseId());
+            if (current == null) {
+                throw failure(ExecutionStoreFailure.invalid("unknown execution pause "
+                        + transition.pauseId()));
+            }
+            if (current.alreadyApplied(transition)) {
+                continue;
+            }
+            if (!current.status().canTransitionTo(transition.next())) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        current.request().pauseId(), current.status(), transition.next()));
+            }
+            updateExecutionPause(connection, current.apply(transition, revision), current.status());
+        }
+    }
+
+    /**
+     * Whether this exact hold is already committed, refusing every other collision.
+     *
+     * <p>The traversal's live hold is checked here rather than left to the partial unique index, so
+     * the caller is told which hold already owns the traversal instead of reading a constraint name.
+     * The index still decides the contested case — see {@link #registerHandler} for why the lookup
+     * cannot be the decision — and this is then asked again to name the winner.</p>
+     */
+    private boolean pauseAlreadyRegistered(Connection connection, ExecutionKey key,
+                                           ExecutionPauseRegistration registration) throws SQLException {
+        DurableExecutionPause existing = readExecutionPause(connection, key, registration.pauseId());
+        if (existing != null) {
+            if (!existing.request().equals(registration)) {
+                throw failure(ExecutionStoreFailure.invalid("execution pause " + registration.pauseId()
+                        + " is already committed with a different hold"));
+            }
+            return true;
+        }
+        DurableExecutionPause held = readHeldExecutionPause(connection, key.tenantId(),
+                registration.traversalId());
+        if (held != null) {
+            throw failure(ExecutionStoreFailure.invalid("traversal " + registration.traversalId()
+                    + " is already held by " + held.request().pauseId()));
+        }
+        return false;
+    }
+
+    private void insertExecutionPause(Connection connection, DurableExecutionPause pause, int position)
+            throws SQLException {
+        ExecutionPauseRegistration request = pause.request();
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO execution_pause (tenant_id, process_instance_id, pause_id, position, "
+                        + "traversal_id, after_invocation_id, node_id, command_directive, "
+                        + "command_name, requester_request_id, requester_subject, "
+                        + "requester_principal_type, requester_issuer, graph_version_pin, "
+                        + "continuation_version, continuation, continuation_digest, status, actor, "
+                        + "revision) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+                        + "?)")) {
+            statement.setString(1, pause.key().tenantId());
+            StoredUuid.bind(statement, 2, pause.key().processInstanceId());
+            StoredUuid.bind(statement, 3, request.pauseId());
+            statement.setInt(4, position);
+            StoredUuid.bind(statement, 5, request.traversalId());
+            StoredUuid.bind(statement, 6, request.afterInvocationId());
+            statement.setString(7, request.nodeId());
+            statement.setString(8, request.commandDirective());
+            statement.setString(9, request.commandName());
+            statement.setString(10, request.requester().requestId());
+            statement.setString(11, request.requester().subject());
+            statement.setString(12, request.requester().principalType().name());
+            statement.setString(13, request.requester().issuer());
+            statement.setString(14, request.graphVersionPin().reference());
+            statement.setInt(15, request.continuationVersion());
+            statement.setBytes(16, request.continuation());
+            statement.setString(17, request.continuationDigest());
+            statement.setString(18, pause.status().name());
+            statement.setString(19, pause.actor());
+            statement.setLong(20, pause.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    private void updateExecutionPause(Connection connection, DurableExecutionPause pause,
+                                      ExecutionPauseStatus expected) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE execution_pause SET status = ?, actor = ?, revision = ? "
+                        + "WHERE tenant_id = ? AND process_instance_id = ? AND pause_id = ? "
+                        + "AND status = ?")) {
+            statement.setString(1, pause.status().name());
+            statement.setString(2, pause.actor());
+            statement.setLong(3, pause.revision());
+            statement.setString(4, pause.key().tenantId());
+            StoredUuid.bind(statement, 5, pause.key().processInstanceId());
+            StoredUuid.bind(statement, 6, pause.request().pauseId());
+            statement.setString(7, expected.name());
+            if (statement.executeUpdate() != 1) {
+                throw failure(new ExecutionStoreFailure.ExecutionPauseNotResolvable(
+                        pause.request().pauseId(), expected, pause.status()));
+            }
+        }
+    }
+
+    private int nextExecutionPausePosition(Connection connection, ExecutionKey key) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT COALESCE(MAX(position), -1) + 1 FROM execution_pause "
+                        + "WHERE tenant_id = ? AND process_instance_id = ?")) {
+            statement.setString(1, key.tenantId());
+            StoredUuid.bind(statement, 2, key.processInstanceId());
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getInt(1) : 0;
+            }
+        }
+    }
+
+    private DurableExecutionPause readExecutionPause(Connection connection, ExecutionKey key,
+                                                     UUID pauseId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(EXECUTION_PAUSE_COLUMNS
+                + " WHERE p.tenant_id = ? AND p.process_instance_id = ? AND p.pause_id = ?")) {
+            bindItem(statement, key, pauseId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readExecutionPause(rows, key, pauseId) : null;
+            }
+        }
+    }
+
+    private DurableExecutionPause readHeldExecutionPause(Connection connection, String tenantId,
+                                                         UUID traversalId) throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(EXECUTION_PAUSE_COLUMNS
+                + " WHERE p.tenant_id = ? AND p.traversal_id = ? AND p.status IN "
+                + LIVE_EXECUTION_PAUSE_STATUSES)) {
+            statement.setString(1, tenantId);
+            StoredUuid.bind(statement, 2, traversalId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readExecutionPause(rows, null, null) : null;
+            }
+        }
+    }
+
+    private static DurableExecutionPause readExecutionPause(ResultSet rows, ExecutionKey expectedKey,
+                                                            UUID expectedPauseId) throws SQLException {
+        String tenantId = rows.getString("tenant_id");
+        UUID processInstanceId = expectedKey == null
+                ? StoredUuid.required(rows, "execution_pause", "process_instance_id", tenantId)
+                : StoredUuid.requiredMatching(rows, "execution_pause", "process_instance_id",
+                        expectedKey, expectedKey.processInstanceId());
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            UUID pauseId = expectedPauseId == null
+                    ? StoredUuid.required(rows, "execution_pause", "pause_id", key)
+                    : StoredUuid.requiredMatching(rows, "execution_pause", "pause_id", key,
+                            expectedPauseId);
+            var request = new ExecutionPauseRegistration(pauseId,
+                    StoredUuid.required(rows, "execution_pause", "traversal_id", key),
+                    StoredUuid.required(rows, "execution_pause", "after_invocation_id", key),
+                    rows.getString("node_id"), rows.getString("command_directive"),
+                    rows.getString("command_name"),
+                    new SecurityContext(rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            PrincipalType.valueOf(rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"));
+            return new DurableExecutionPause(key, request,
+                    ExecutionPauseStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getLong("revision"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- durable human tasks
+
+    @Override
+    public CompletionStage<Optional<DurableHumanTask>> loadHumanTask(String tenantId, UUID taskId) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(taskId, "taskId");
+            return read(null, connection ->
+                    Optional.ofNullable(readHumanTask(connection, tenantId, taskId)));
+        });
+    }
+
+    /**
+     * One bounded, deterministic page of a tenant's inbox.
+     *
+     * <p>{@code readFolded} rather than {@code read}, because this is two statements — the cursor is
+     * validated against the tenant before the page is read — and under {@code READ COMMITTED} each of
+     * them would otherwise take its own snapshot. A cursor validated against one snapshot and paged
+     * against a later one can skip a row that was inserted between them, which is precisely the
+     * failure a stable cursor exists to rule out.</p>
+     *
+     * <p>The page is read one row wider than the caller asked for. That extra row is the entire
+     * evidence for whether a next cursor exists, and computing it any other way — a second
+     * {@code COUNT}, or issuing a cursor unconditionally — either costs another scan or hands the
+     * caller a cursor that resolves to nothing.</p>
+     */
+    @Override
+    public CompletionStage<HumanTaskPage> listHumanTasks(String tenantId, HumanTaskQuery query) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            if (query.limit() < 1 || query.limit() > maxHumanTaskPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human-task page limit must be between 1 and " + maxHumanTaskPageSize()));
+            }
+            return readFolded(null, connection -> {
+                if (query.cursor().isPresent()
+                        && readHumanTask(connection, tenantId, query.cursor().orElseThrow()) == null) {
+                    throw failure(ExecutionStoreFailure.invalid(
+                            "human-task cursor does not belong to this tenant"));
+                }
+                List<HumanTaskStatus> admitted = Arrays.stream(HumanTaskStatus.values())
+                        .filter(query::admits).toList();
+                if (admitted.isEmpty()) {
+                    return new HumanTaskPage(List.of(), Optional.empty());
+                }
+                var matching = new ArrayList<DurableHumanTask>();
+                // The status filter is in the WHERE rather than applied after the fact, so a page of
+                // outstanding tasks is a page of outstanding tasks: filtering in Java would let
+                // terminal rows consume the limit and return a short page that looks like the end of
+                // the inbox.
+                String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ?"
+                        + (query.cursor().isPresent() ? " AND t.task_id > ?" : "")
+                        + " AND t.status IN (" + admitted.stream().map(ignored -> "?")
+                                .collect(java.util.stream.Collectors.joining(",")) + ")"
+                        // Ordered by the native uuid, which PostgreSQL compares as unsigned bytes --
+                        // the same order as the canonical text form, so a cursor issued by this
+                        // adapter means the same boundary as one issued by any other.
+                        + " ORDER BY t.task_id LIMIT ?";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    int parameter = 1;
+                    statement.setString(parameter++, tenantId);
+                    if (query.cursor().isPresent()) {
+                        StoredUuid.bind(statement, parameter++, query.cursor().orElseThrow());
+                    }
+                    for (HumanTaskStatus status : admitted) {
+                        statement.setString(parameter++, status.name());
+                    }
+                    statement.setInt(parameter, query.limit() + 1);
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            matching.add(readHumanTask(rows, tenantId, null));
+                        }
+                    }
+                }
+                int end = Math.min(query.limit(), matching.size());
+                List<DurableHumanTask> page = List.copyOf(matching.subList(0, end));
+                Optional<UUID> next = matching.size() > end
+                        ? Optional.of(page.getLast().request().taskId()) : Optional.empty();
+                return new HumanTaskPage(page, next);
+            });
+        });
+    }
+
+    /**
+     * One authorized attention page, with counts that are authoritative for the caller who asked.
+     *
+     * <p><b>Every row is authorized before it is counted.</b> The projection is built first and a
+     * caller with no available action on a row gets {@code null} back, which removes the row from the
+     * page <em>and</em> from every count including the per-node breakdown. Counting first and
+     * filtering afterwards would turn the counts into an existence oracle: a caller who may not see a
+     * task would still learn how many there are, which is most of what the task's existence
+     * discloses.</p>
+     *
+     * <p>Ordering, counting and paging are one pass over one statement rather than a count query plus
+     * a page query. Two statements would each take their own snapshot under {@code READ COMMITTED},
+     * so the counts could describe a set the page is not drawn from — and no isolation level makes
+     * two statements agree with an authorization decision that happens in this process between
+     * them.</p>
+     */
+    @Override
+    public CompletionStage<HumanTaskAttentionPage> listHumanTaskAttention(
+            String tenantId, HumanTaskAttentionQuery query,
+            HumanTaskAttentionAuthorization authorization) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(query, "query");
+            Objects.requireNonNull(authorization, "authorization");
+            if (query.limit() > maxHumanTaskAttentionPageSize()) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human-task page limit must be between 1 and "
+                                + maxHumanTaskAttentionPageSize()));
+            }
+            HumanTaskAttentionCursor.Boundary boundary;
+            try {
+                // The cursor is resolved from itself and from the scope it was issued for, never by
+                // looking up the task that produced it: that task may have settled, and a boundary
+                // that stopped existing would silently restart the paging.
+                boundary = query.cursor()
+                        .map(cursor -> cursor.boundary(tenantId, query, authorization)).orElse(null);
+            } catch (IllegalArgumentException invalid) {
+                throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+            }
+            return read(null, connection -> {
+                StringBuilder sql = new StringBuilder(HUMAN_TASK_ATTENTION_COLUMNS
+                        + "WHERE t.tenant_id = ? AND t.graph_version_pin = ? "
+                        + "AND t.status IN " + LIVE_HUMAN_TASK_STATUSES + " "
+                        + "AND t.confirmation_version > 0");
+                query.deploymentId().ifPresent(ignored -> sql.append(" AND p.deployment_id = ?"));
+                query.processInstanceId().ifPresent(ignored ->
+                        sql.append(" AND t.process_instance_id = ?"));
+                query.traversalId().ifPresent(ignored -> sql.append(" AND t.traversal_id = ?"));
+                query.nodeId().ifPresent(ignored -> sql.append(" AND t.node_id = ?"));
+                query.taskId().ifPresent(ignored -> sql.append(" AND t.task_id = ?"));
+                query.generation().ifPresent(ignored -> sql.append(" AND t.generation = ?"));
+                sql.append(" ORDER BY t.created_at_epoch_second, t.created_at_nano, t.task_id");
+
+                long pending = 0;
+                long escalated = 0;
+                var nodeCounts = new TreeMap<String, long[]>();
+                var pageRows = new ArrayList<HumanTaskAttentionItem>(query.limit() + 1);
+                try (PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+                    int parameter = 1;
+                    statement.setString(parameter++, tenantId);
+                    statement.setString(parameter++, query.graphVersion());
+                    if (query.deploymentId().isPresent()) {
+                        statement.setString(parameter++, query.deploymentId().orElseThrow());
+                    }
+                    if (query.processInstanceId().isPresent()) {
+                        StoredUuid.bind(statement, parameter++, query.processInstanceId().orElseThrow());
+                    }
+                    if (query.traversalId().isPresent()) {
+                        StoredUuid.bind(statement, parameter++, query.traversalId().orElseThrow());
+                    }
+                    if (query.nodeId().isPresent()) {
+                        statement.setString(parameter++, query.nodeId().orElseThrow());
+                    }
+                    if (query.taskId().isPresent()) {
+                        StoredUuid.bind(statement, parameter++, query.taskId().orElseThrow());
+                    }
+                    if (query.generation().isPresent()) {
+                        statement.setLong(parameter, query.generation().orElseThrow());
+                    }
+                    try (ResultSet rows = statement.executeQuery()) {
+                        while (rows.next()) {
+                            HumanTaskAttentionItem item = readHumanTaskAttentionItem(rows, tenantId,
+                                    authorization);
+                            if (item == null) {
+                                continue;
+                            }
+                            pending++;
+                            if (item.status() == HumanTaskStatus.ESCALATED) {
+                                escalated++;
+                            }
+                            // A query that selected one node already IS the breakdown, so producing
+                            // a single-entry map would repeat the page's own answer as if it were an
+                            // aggregate over the graph.
+                            if (query.nodeId().isEmpty()) {
+                                long[] node = nodeCounts.get(item.nodeId());
+                                if (node == null) {
+                                    if (nodeCounts.size() == maxHumanTaskAttentionNodeCounts()) {
+                                        // Refused rather than truncated: a breakdown missing nodes
+                                        // nobody named is a wrong answer that reads as a complete
+                                        // one, and the caller cannot tell which nodes are absent.
+                                        throw failure(
+                                                new ExecutionStoreFailure.HumanTaskAttentionTooLarge(
+                                                        nodeCounts.size() + 1L,
+                                                        maxHumanTaskAttentionNodeCounts()));
+                                    }
+                                    node = new long[2];
+                                    nodeCounts.put(item.nodeId(), node);
+                                }
+                                node[0]++;
+                                if (item.status() == HumanTaskStatus.ESCALATED) {
+                                    node[1]++;
+                                }
+                            }
+                            if ((boundary == null || after(item, boundary))
+                                    && pageRows.size() <= query.limit()) {
+                                pageRows.add(item);
+                            }
+                        }
+                    }
+                }
+                int end = Math.min(query.limit(), pageRows.size());
+                List<HumanTaskAttentionItem> page = List.copyOf(pageRows.subList(0, end));
+                Optional<HumanTaskAttentionCursor> next = pageRows.size() > end
+                        ? Optional.of(HumanTaskAttentionCursor.issue(tenantId, query, authorization,
+                                page.getLast().createdAt(), page.getLast().taskId()))
+                        : Optional.empty();
+                List<HumanTaskNodeAttentionCounts> perNode = nodeCounts.entrySet().stream()
+                        .map(entry -> new HumanTaskNodeAttentionCounts(entry.getKey(),
+                                entry.getValue()[0], entry.getValue()[1]))
+                        .toList();
+                return new HumanTaskAttentionPage(page, next,
+                        new HumanTaskAttentionCounts(pending, escalated), perNode);
+            });
+        });
+    }
+
+    @Override
+    public CompletionStage<Optional<HumanTaskAttentionItem>> findHumanTaskAttention(
+            String tenantId, HumanTaskAttentionLocator locator,
+            HumanTaskAttentionAuthorization authorization) {
+        return async(() -> {
+            requireTenantId(tenantId);
+            Objects.requireNonNull(locator, "locator");
+            Objects.requireNonNull(authorization, "authorization");
+            return read(null, connection -> {
+                // Absent, terminal, stale-generation and unauthorized all answer empty. Every one of
+                // them is a reason the caller has no action, and telling them apart would make this
+                // recovery path a task-existence oracle for anyone holding a guessed identity.
+                String sql = HUMAN_TASK_ATTENTION_COLUMNS
+                        + "WHERE t.tenant_id = ? AND t.task_id = ? AND t.generation = ? "
+                        + "AND t.status IN " + LIVE_HUMAN_TASK_STATUSES + " "
+                        + "AND t.confirmation_version > 0";
+                try (PreparedStatement statement = connection.prepareStatement(sql)) {
+                    statement.setString(1, tenantId);
+                    StoredUuid.bind(statement, 2, locator.taskId());
+                    statement.setLong(3, locator.generation());
+                    try (ResultSet rows = statement.executeQuery()) {
+                        if (!rows.next()) {
+                            return Optional.empty();
+                        }
+                        return Optional.ofNullable(
+                                readHumanTaskAttentionItem(rows, tenantId, authorization));
+                    }
+                }
+            });
+        });
+    }
+
+    /**
+     * Whether this row is strictly past the cursor's boundary in the page's own order.
+     *
+     * <p>The identifier is compared as text rather than through {@link UUID#compareTo}, which orders
+     * by two <em>signed</em> longs and therefore disagrees with both the canonical string form and
+     * PostgreSQL's own unsigned-byte {@code uuid} ordering. Using it here would make the tie-break
+     * disagree with the {@code ORDER BY} that produced the rows, and a page would skip or repeat
+     * whichever identifiers straddle the sign boundary.</p>
+     */
+    private static boolean after(HumanTaskAttentionItem item,
+                                 HumanTaskAttentionCursor.Boundary boundary) {
+        int time = item.createdAt().compareTo(boundary.createdAt());
+        return time > 0
+                || time == 0 && item.taskId().toString().compareTo(boundary.taskId().toString()) > 0;
+    }
+
+    /**
+     * Reads only the bounded columns needed to authorize and construct an attention row.
+     *
+     * <p>A {@code null} result means the caller has no currently available action and must learn
+     * neither the row nor its count.</p>
+     */
+    private static HumanTaskAttentionItem readHumanTaskAttentionItem(
+            ResultSet rows, String tenantId, HumanTaskAttentionAuthorization authorization)
+            throws SQLException {
+        UUID processInstanceId = StoredUuid.required(rows, "human_task", "process_instance_id",
+                tenantId);
+        var key = new ExecutionKey(tenantId, processInstanceId);
+        try {
+            var requirements = new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                    splitTokens(rows.getString("required_scopes")));
+            String requesterActor = new SecurityContext(rows.getString("requester_request_id"),
+                    tenantId, rows.getString("requester_subject"),
+                    PrincipalType.valueOf(rows.getString("requester_principal_type")),
+                    rows.getString("requester_issuer")).qualifiedIdentity();
+            List<HumanTaskConfirmationAction> pinnedActions =
+                    splitConfirmationActions(rows.getString("confirmation_actions"));
+            List<HumanTaskConfirmationAction> actions = authorization.permittedActions(requirements,
+                    requesterActor, pinnedActions);
+            if (actions.isEmpty()) {
+                return null;
+            }
+            var presentation = new HumanTaskConfirmationPresentation(
+                    rows.getInt("confirmation_version"), rows.getString("confirmation_prompt"),
+                    HumanTaskCommentRequirement.valueOf(
+                            rows.getString("confirmation_comment_requirement")),
+                    pinnedActions, rows.getString("confirmation_resolve_label"),
+                    rows.getString("confirmation_deny_label"),
+                    rows.getString("confirmation_cancel_label"));
+            Instant escalation = nullableInstant(rows, "escalate_at");
+            return new HumanTaskAttentionItem(
+                    StoredUuid.required(rows, "human_task", "task_id", key), rows.getLong("generation"),
+                    HumanTaskStatus.valueOf(rows.getString("status")),
+                    rows.getString("graph_version_pin"),
+                    Optional.ofNullable(rows.getString("attention_deployment_id")), processInstanceId,
+                    StoredUuid.required(rows, "human_task", "traversal_id", key),
+                    rows.getString("node_id"), StoredInstant.read(rows, "created_at"),
+                    StoredInstant.read(rows, "expires_at"), Optional.ofNullable(escalation),
+                    presentation, rows.getInt("confirmation_max_prompt_bytes"),
+                    rows.getInt("confirmation_max_action_label_bytes"),
+                    rows.getInt("confirmation_max_comment_bytes"), actions);
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    private void writeHumanTasks(Connection connection, ExecutionKey key, ExecutionBatch batch,
+                                 ProcessInstance folded, GraphVersionPin pin, long revision,
+                                 Instant now) throws SQLException {
+        for (HumanTaskRegistration registration : batch.humanTasksToRegister()) {
+            requireInvocationExists(folded, registration.traversalId(), registration.invocationId(),
+                    "human task " + registration.taskId());
+            requireAttemptExists(folded, registration.traversalId(), registration.invocationId(),
+                    registration.attemptId(), "human task " + registration.taskId());
+            if (!key.tenantId().equals(registration.requester().tenantId())
+                    || !pin.equals(registration.graphVersionPin())) {
+                throw failure(ExecutionStoreFailure.invalid(
+                        "human task identity or graph pin does not match its execution"));
+            }
+            // The deduplication answer comes BEFORE the admission rules, and the order is
+            // load-bearing: a task admitted under one policy must stay replayable after the policy
+            // tightens, or a retried registration would start failing for a task that is already
+            // stored and perfectly valid.
+            if (humanTaskDeduplicated(connection, key, registration)) {
+                continue;
+            }
+            requireAdmissibleHumanTask(registration, now);
+            requireHumanTaskIdentityFree(connection, key, registration);
+            DurableHumanTask task = DurableHumanTask.waiting(key, registration, revision, now);
+            if (insertApplied(connection, () -> insertHumanTask(connection, task))) {
+                continue;
+            }
+            if (humanTaskDeduplicated(connection, key, registration)) {
+                continue;
+            }
+            requireHumanTaskIdentityFree(connection, key, registration);
+            throw failure(ExecutionStoreFailure.invalid("human task " + registration.taskId()
+                    + " collided with a uniqueness rule whose winning row cannot be read back"));
+        }
+        for (HumanTaskTransition transition : batch.humanTaskTransitions()) {
+            transitionHumanTask(connection, key, transition, revision, now);
+        }
+    }
+
+    /** Whether this exact task is already stored under its deduplication key. */
+    private boolean humanTaskDeduplicated(Connection connection, ExecutionKey key,
+                                          HumanTaskRegistration registration) throws SQLException {
+        DurableHumanTask deduplicated = readHumanTaskBy(connection, key.tenantId(),
+                "deduplication_key", registration.deduplicationKey(), false);
+        if (deduplicated == null) {
+            return false;
+        }
+        if (!deduplicated.request().sameRequest(registration)) {
+            throw failure(ExecutionStoreFailure.invalid("deduplication key "
+                    + registration.deduplicationKey()
+                    + " already registers a different human task"));
+        }
+        return true;
+    }
+
+    /**
+     * The admission rules a <em>new</em> task must satisfy, all decided against the store's clock.
+     *
+     * <p>The clock matters more here than anywhere else on this port: a task's expiry and escalation
+     * are the two instants a person is racing, and a caller that computed them against its own clock
+     * would register a task that is already expired on the store that has to honour it.</p>
+     */
+    private void requireAdmissibleHumanTask(HumanTaskRegistration registration, Instant now) {
+        try {
+            humanTaskPolicy.requireNewRegistration(registration, now);
+        } catch (IllegalArgumentException refused) {
+            throw failure(ExecutionStoreFailure.invalid(refused.getMessage()));
+        }
+        if (registration.responseSchema().maxBytes() > maxHumanTaskResponsePayloadBytes()) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(
+                    registration.responseSchema().maxBytes(), maxHumanTaskResponsePayloadBytes()));
+        }
+        if (!now.isBefore(registration.expiresAt())) {
+            throw failure(ExecutionStoreFailure.invalid("human task expiry must be after store time"));
+        }
+        if (registration.escalateAt().isPresent()
+                && !now.isBefore(registration.escalateAt().orElseThrow())) {
+            throw failure(ExecutionStoreFailure.invalid(
+                    "human task escalation must be after store time"));
+        }
+    }
+
+    /** Refuses a task identity or a live correlation key that something else already owns. */
+    private void requireHumanTaskIdentityFree(Connection connection, ExecutionKey key,
+                                              HumanTaskRegistration registration) throws SQLException {
+        if (readHumanTask(connection, key.tenantId(), registration.taskId()) != null) {
+            throw failure(ExecutionStoreFailure.invalid("human task " + registration.taskId()
+                    + " is already registered under a different deduplication key"));
+        }
+        if (readHumanTaskBy(connection, key.tenantId(), "correlation_key",
+                registration.correlationKey(), true) != null) {
+            throw failure(ExecutionStoreFailure.invalid("correlation key "
+                    + registration.correlationKey() + " already identifies a live human task"));
+        }
+    }
+
+    private void transitionHumanTask(Connection connection, ExecutionKey key,
+                                     HumanTaskTransition transition, long revision, Instant now)
+            throws SQLException {
+        DurableHumanTask current = readHumanTask(connection, key.tenantId(), transition.taskId());
+        if (current == null || !current.key().equals(key)) {
+            throw failure(ExecutionStoreFailure.invalid("unknown human task " + transition.taskId()));
+        }
+        if (current.alreadyApplied(transition)) {
+            return;
+        }
+        if (transition.expectedGeneration() != current.generation()
+                || !current.status().canTransitionTo(transition.next())) {
+            throw humanTaskConflict(current, transition);
+        }
+        if (transition.next() == HumanTaskStatus.EXPIRED
+                && now.isBefore(current.request().expiresAt())) {
+            throw humanTaskConflict(current, transition);
+        }
+        if (transition.next() == HumanTaskStatus.ESCALATED
+                && (current.request().escalateAt().isEmpty()
+                || now.isBefore(current.request().escalateAt().orElseThrow())
+                || !now.isBefore(current.request().expiresAt()))) {
+            throw humanTaskConflict(current, transition);
+        }
+        // Past the deadline, expiry is the ONLY transition left. Reporting the requested one as
+        // unresolvable while naming EXPIRED tells the caller both that its decision was refused and
+        // what the task has actually become, which is what a client has to know to stop retrying.
+        if (transition.next() != HumanTaskStatus.EXPIRED
+                && !now.isBefore(current.request().expiresAt())) {
+            throw failure(new ExecutionStoreFailure.HumanTaskNotResolvable(current.request().taskId(),
+                    current.status(), HumanTaskStatus.EXPIRED, transition.expectedGeneration(),
+                    current.generation()));
+        }
+        updateHumanTask(connection, current.apply(transition, revision), current.status(),
+                current.generation());
+    }
+
+    private ExecutionStoreException humanTaskConflict(DurableHumanTask current,
+                                                      HumanTaskTransition transition) {
+        return failure(new ExecutionStoreFailure.HumanTaskNotResolvable(current.request().taskId(),
+                current.status(), transition.next(), transition.expectedGeneration(),
+                current.generation()));
+    }
+
+    private void insertHumanTask(Connection connection, DurableHumanTask task) throws SQLException {
+        HumanTaskRegistration request = task.request();
+        String columns = "tenant_id, process_instance_id, task_id, traversal_id, invocation_id, "
+                + "attempt_id, node_id, correlation_key, deduplication_key, title, description, "
+                + "response_content_type, response_schema, response_schema_version, response_kind, "
+                + "response_max_bytes, required_roles, required_scopes, requester_request_id, "
+                + "requester_subject, requester_principal_type, requester_issuer, graph_version_pin, "
+                + "escalate_at_epoch_second, escalate_at_nano, expires_at_epoch_second, "
+                + "expires_at_nano, resolved_outcome, denied_outcome, expired_outcome, "
+                + "cancelled_outcome, decision_body_max_bytes, response_max_depth, "
+                + "response_max_collection_size, response_max_value_count, response_max_text_length, "
+                + "response_max_key_length, write_attempts, continuation_version, continuation, "
+                + "continuation_digest, confirmation_version, confirmation_prompt, "
+                + "confirmation_comment_requirement, confirmation_actions, "
+                + "confirmation_resolve_label, confirmation_deny_label, confirmation_cancel_label, "
+                + "confirmation_max_prompt_bytes, confirmation_max_action_label_bytes, "
+                + "confirmation_max_comment_bytes, created_at_epoch_second, created_at_nano, status, "
+                + "actor, decision_comment, generation, revision";
+        try (PreparedStatement statement = connection.prepareStatement(
+                "INSERT INTO human_task (" + columns + ") VALUES (" + "?, ".repeat(57) + "?)")) {
+            int index = 1;
+            statement.setString(index++, task.key().tenantId());
+            StoredUuid.bind(statement, index++, task.key().processInstanceId());
+            StoredUuid.bind(statement, index++, request.taskId());
+            StoredUuid.bind(statement, index++, request.traversalId());
+            StoredUuid.bind(statement, index++, request.invocationId());
+            StoredUuid.bind(statement, index++, request.attemptId());
+            statement.setString(index++, request.nodeId());
+            statement.setString(index++, request.correlationKey());
+            statement.setString(index++, request.deduplicationKey());
+            statement.setString(index++, request.metadata().title());
+            statement.setString(index++, request.metadata().description());
+            statement.setString(index++, request.responseSchema().contentType());
+            statement.setString(index++, request.responseSchema().schema());
+            statement.setString(index++, request.responseSchema().schemaVersion());
+            statement.setString(index++, request.responseSchema().kind().name());
+            statement.setInt(index++, request.responseSchema().maxBytes());
+            statement.setString(index++, joinTokens(request.responderRequirements().requiredRoles()));
+            statement.setString(index++, joinTokens(request.responderRequirements().requiredScopes()));
+            statement.setString(index++, request.requester().requestId());
+            statement.setString(index++, request.requester().subject());
+            statement.setString(index++, request.requester().principalType().name());
+            statement.setString(index++, request.requester().issuer());
+            statement.setString(index++, request.graphVersionPin().reference());
+            if (request.escalateAt().isPresent()) {
+                index = StoredInstant.bindValue(statement, index, request.escalateAt().orElseThrow());
+            } else {
+                // Both halves NULL together, and the type is named because the column pair is read
+                // back through wasNull() on the seconds: a zero written for "no escalation" would
+                // read as an escalation the store passed long ago.
+                statement.setNull(index++, Types.BIGINT);
+                statement.setNull(index++, Types.INTEGER);
+            }
+            index = StoredInstant.bindValue(statement, index, request.expiresAt());
+            statement.setString(index++, request.reentryMapping().resolvedOutcome());
+            statement.setString(index++, request.reentryMapping().deniedOutcome());
+            statement.setString(index++, request.reentryMapping().expiredOutcome());
+            statement.setString(index++, request.reentryMapping().cancelledOutcome());
+            statement.setInt(index++, request.executionLimits().decisionBodyMaxBytes());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxDepth());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxCollectionSize());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxValueCount());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxTextLength());
+            statement.setInt(index++, request.executionLimits().responsePayload().maxKeyLength());
+            statement.setInt(index++, request.executionLimits().writeAttempts());
+            statement.setInt(index++, request.continuationVersion());
+            statement.setBytes(index++, request.continuation());
+            statement.setString(index++, request.continuationDigest());
+            HumanTaskConfirmationPresentation presentation = request.confirmationPresentation();
+            statement.setInt(index++, presentation.version());
+            statement.setString(index++, presentation.prompt());
+            statement.setString(index++, presentation.commentRequirement().name());
+            statement.setString(index++, joinConfirmationActions(presentation.actions()));
+            statement.setString(index++, presentation.resolveLabel());
+            statement.setString(index++, presentation.denyLabel());
+            statement.setString(index++, presentation.cancelLabel());
+            HumanTaskConfirmationLimits confirmationLimits = request.confirmationLimits();
+            statement.setInt(index++, confirmationLimits.maxPromptUtf8Bytes());
+            statement.setInt(index++, confirmationLimits.maxActionLabelUtf8Bytes());
+            statement.setInt(index++, confirmationLimits.maxCommentUtf8Bytes());
+            index = StoredInstant.bindValue(statement, index, task.createdAt());
+            statement.setString(index++, task.status().name());
+            statement.setString(index++, task.actor());
+            statement.setString(index++, task.decisionComment());
+            statement.setLong(index++, task.generation());
+            statement.setLong(index, task.revision());
+            statement.executeUpdate();
+        }
+    }
+
+    /**
+     * Applies a decision, with the status <em>and</em> the generation it was made on in the
+     * {@code WHERE}.
+     *
+     * <p>The generation is the fence a human decision is made against — it is what a client holds
+     * between rendering a task and submitting an answer — so putting it in the predicate makes the
+     * statement itself refuse a decision taken against a version of the task that has since
+     * moved.</p>
+     */
+    private void updateHumanTask(Connection connection, DurableHumanTask task,
+                                 HumanTaskStatus expectedStatus, long expectedGeneration)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(
+                "UPDATE human_task SET status = ?, actor = ?, decision_comment = ?, generation = ?, "
+                        + "revision = ? WHERE tenant_id = ? AND task_id = ? AND status = ? "
+                        + "AND generation = ?")) {
+            statement.setString(1, task.status().name());
+            statement.setString(2, task.actor());
+            statement.setString(3, task.decisionComment());
+            statement.setLong(4, task.generation());
+            statement.setLong(5, task.revision());
+            statement.setString(6, task.key().tenantId());
+            StoredUuid.bind(statement, 7, task.request().taskId());
+            statement.setString(8, expectedStatus.name());
+            statement.setLong(9, expectedGeneration);
+            if (statement.executeUpdate() != 1) {
+                throw failure(new ExecutionStoreFailure.HumanTaskNotResolvable(
+                        task.request().taskId(), expectedStatus, task.status(), expectedGeneration,
+                        task.generation()));
+            }
+        }
+    }
+
+    private DurableHumanTask readHumanTask(Connection connection, String tenantId, UUID taskId)
+            throws SQLException {
+        try (PreparedStatement statement = connection.prepareStatement(HUMAN_TASK_COLUMNS
+                + " WHERE t.tenant_id = ? AND t.task_id = ?")) {
+            statement.setString(1, tenantId);
+            StoredUuid.bind(statement, 2, taskId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHumanTask(rows, tenantId, taskId) : null;
+            }
+        }
+    }
+
+    private DurableHumanTask readHumanTaskBy(Connection connection, String tenantId, String column,
+                                             String value, boolean liveOnly) throws SQLException {
+        // The column name is interpolated and the VALUE is bound. That is safe here and only here:
+        // both callers pass a literal from this file, and no value a caller controls reaches the
+        // statement text. Binding a column name is not possible in SQL, and building the predicate
+        // any other way would mean two near-identical methods.
+        String sql = HUMAN_TASK_COLUMNS + " WHERE t.tenant_id = ? AND t." + column + " = ?"
+                + (liveOnly ? " AND t.status IN " + LIVE_HUMAN_TASK_STATUSES : "");
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, tenantId);
+            statement.setString(2, value);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? readHumanTask(rows, tenantId, null) : null;
+            }
+        }
+    }
+
+    private static DurableHumanTask readHumanTask(ResultSet rows, String expectedTenantId,
+                                                  UUID expectedTaskId) throws SQLException {
+        String tenantId = expectedTenantId == null ? rows.getString("tenant_id") : expectedTenantId;
+        var key = new ExecutionKey(tenantId,
+                StoredUuid.required(rows, "human_task", "process_instance_id", tenantId));
+        try {
+            Instant escalateAt = nullableInstant(rows, "escalate_at");
+            UUID taskId = expectedTaskId == null
+                    ? StoredUuid.required(rows, "human_task", "task_id", key)
+                    : StoredUuid.requiredMatching(rows, "human_task", "task_id", key, expectedTaskId);
+            var request = new HumanTaskRegistration(taskId,
+                    StoredUuid.required(rows, "human_task", "traversal_id", key),
+                    StoredUuid.required(rows, "human_task", "invocation_id", key),
+                    StoredUuid.required(rows, "human_task", "attempt_id", key),
+                    rows.getString("node_id"), rows.getString("correlation_key"),
+                    rows.getString("deduplication_key"),
+                    new HumanTaskMetadata(rows.getString("title"), rows.getString("description")),
+                    new HumanTaskResponseSchema(rows.getString("response_content_type"),
+                            rows.getString("response_schema"),
+                            rows.getString("response_schema_version"),
+                            PayloadKind.valueOf(rows.getString("response_kind")),
+                            rows.getInt("response_max_bytes")),
+                    new HandlerAuthorization(splitTokens(rows.getString("required_roles")),
+                            splitTokens(rows.getString("required_scopes"))),
+                    new SecurityContext(rows.getString("requester_request_id"), key.tenantId(),
+                            rows.getString("requester_subject"),
+                            PrincipalType.valueOf(rows.getString("requester_principal_type")),
+                            rows.getString("requester_issuer")),
+                    new GraphVersionPin(rows.getString("graph_version_pin")),
+                    Optional.ofNullable(escalateAt), StoredInstant.read(rows, "expires_at"),
+                    new HumanTaskReentryMapping(rows.getString("resolved_outcome"),
+                            rows.getString("denied_outcome"), rows.getString("expired_outcome"),
+                            rows.getString("cancelled_outcome")),
+                    new HumanTaskExecutionLimits(new PayloadLimits(rows.getInt("response_max_bytes"),
+                            rows.getInt("response_max_depth"),
+                            rows.getInt("response_max_collection_size"),
+                            rows.getInt("response_max_value_count"),
+                            rows.getInt("response_max_text_length"),
+                            rows.getInt("response_max_key_length")),
+                            rows.getInt("decision_body_max_bytes"), rows.getInt("write_attempts")),
+                    rows.getInt("continuation_version"), rows.getBytes("continuation"),
+                    rows.getString("continuation_digest"),
+                    new HumanTaskConfirmationPresentation(rows.getInt("confirmation_version"),
+                            rows.getString("confirmation_prompt"),
+                            HumanTaskCommentRequirement.valueOf(
+                                    rows.getString("confirmation_comment_requirement")),
+                            splitConfirmationActions(rows.getString("confirmation_actions")),
+                            rows.getString("confirmation_resolve_label"),
+                            rows.getString("confirmation_deny_label"),
+                            rows.getString("confirmation_cancel_label")),
+                    new HumanTaskConfirmationLimits(rows.getInt("confirmation_max_prompt_bytes"),
+                            rows.getInt("confirmation_max_action_label_bytes"),
+                            rows.getInt("confirmation_max_comment_bytes")));
+            return new DurableHumanTask(key, request,
+                    HumanTaskStatus.valueOf(rows.getString("status")), rows.getString("actor"),
+                    rows.getString("decision_comment"), rows.getLong("generation"),
+                    rows.getLong("revision"), StoredInstant.read(rows, "created_at"));
+        } catch (IllegalArgumentException | IllegalStateException corrupted) {
+            throw failure(new ExecutionStoreFailure.Corrupted(key, corrupted.getMessage()));
+        }
+    }
+
+    // ---------------------------------------------------------------- continuation helpers
+
+    /**
+     * Runs one insert that a uniqueness rule may refuse, and reports whether it was applied.
+     *
+     * <p>The savepoint is what makes the refusal survivable. PostgreSQL aborts the whole transaction
+     * on a constraint violation, so a bare insert would take the batch down at exactly the point
+     * where the store still has to read the winning row in order to say <em>which</em> rule was hit
+     * and whether the collision was an exact repeat. Rolling back to a savepoint discards the failed
+     * statement and nothing else, leaving every write this batch has already made intact.</p>
+     *
+     * <p>A unique violation always names a <strong>committed</strong> conflicting row: an uncommitted
+     * one makes the insert wait instead, and it then either succeeds because the competitor rolled
+     * back, or fails because the competitor committed. That is the property the callers rely on when
+     * they re-read after a {@code false} — the row they are about to describe is certainly there.</p>
+     *
+     * <p>Every other {@link SQLException} propagates untouched, including a serialization failure,
+     * which {@link Transactions} has to see in order to retry the transaction.</p>
+     */
+    private static boolean insertApplied(Connection connection, Insert insert) throws SQLException {
+        Savepoint savepoint = connection.setSavepoint();
+        try {
+            insert.run();
+            connection.releaseSavepoint(savepoint);
+            return true;
+        } catch (SQLException failed) {
+            if (!SqlStates.isUniqueViolation(failed)) {
+                throw failed;
+            }
+            connection.rollback(savepoint);
+            connection.releaseSavepoint(savepoint);
+            return false;
+        }
+    }
+
+    /** One insert, run inside a savepoint by {@link #insertApplied}. */
+    @FunctionalInterface
+    private interface Insert {
+        void run() throws SQLException;
+    }
+
+    /**
+     * Enforces the handler outcome's size against the right ceiling, which is not always this
+     * adapter's.
+     *
+     * <p>A human task pins its own response capacity when it is registered, and that capacity may
+     * legitimately exceed the deployment's general execution-payload setting — the pinned value is
+     * the one the task must remain resolvable under, whatever the configuration has become since. So
+     * a resolution that is <em>this batch's</em> resolution of a human task is measured against the
+     * stored task, and everything else against the adapter's own limit.</p>
+     */
+    private void requireHandlerOutcomeWithinLimit(Connection connection, ExecutionKey key,
+                                                  ExecutionBatch batch, HandlerTransition transition)
+            throws SQLException {
+        OpaquePayload payload = transition.outcomePayload();
+        if (payload.size() <= config.maxPayloadBytes()) {
+            return;
+        }
+        if (!isHumanTaskResolution(batch, transition)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        DurableHumanTask task = readHumanTask(connection, key.tenantId(), transition.handlerId());
+        if (task == null || !task.key().equals(key)) {
+            requireWithinPayloadLimit(payload);
+            return;
+        }
+        int pinned = task.request().executionLimits().responsePayload().maxEncodedBytes();
+        if (payload.size() > pinned) {
+            throw failure(new ExecutionStoreFailure.PayloadTooLarge(payload.size(), pinned));
+        }
+    }
+
+    /**
+     * Whether this handler transition is the handler half of a human task's resolution in this batch.
+     *
+     * <p>Decided from the batch rather than from storage, and matched on the identifier the two halves
+     * share: a human task is resolved by one commit that carries both a task transition and the
+     * handler transition that re-enters the process, and only that pairing earns the task's pinned
+     * response capacity.</p>
+     */
+    private static boolean isHumanTaskResolution(ExecutionBatch batch, HandlerTransition transition) {
+        if (!(transition instanceof HandlerTransition.Resolved)) {
+            return false;
+        }
+        return batch.humanTaskTransitions().stream()
+                .anyMatch(candidate -> candidate instanceof HumanTaskTransition.Resolved
+                        && candidate.taskId().equals(transition.handlerId()));
+    }
+
+    private static void requireTraversalExists(ProcessInstance folded, UUID traversalId, String what) {
+        if (folded == null || !folded.traversals().containsKey(traversalId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    private static void requireInvocationExists(ProcessInstance folded, UUID traversalId,
+                                                UUID invocationId, String what) {
+        requireTraversalExists(folded, traversalId, what);
+        if (!folded.traversals().get(traversalId).invocations().containsKey(invocationId)) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names invocation " + invocationId
+                    + ", which traversal " + traversalId + " does not contain"));
+        }
+    }
+
+    private static void requireAttemptExists(ProcessInstance folded, UUID traversalId,
+                                             UUID invocationId, UUID attemptId, String what) {
+        var traversal = folded == null ? null : folded.traversals().get(traversalId);
+        var invocation = traversal == null ? null : traversal.invocations().get(invocationId);
+        if (invocation == null || invocation.attempts().stream()
+                .noneMatch(attempt -> attempt.attemptId().equals(attemptId))) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names attempt " + attemptId
+                    + ", which this batch neither found nor created"));
+        }
+    }
+
+    /**
+     * Requires that {@code traversalId} is a traversal <em>this batch created</em>.
+     *
+     * <p>Existence in the post-fold aggregate is not enough. A terminal handler transition naming a
+     * traversal that was already there — the very traversal that was waiting, for instance — would
+     * commit, and the trigger the store then offers would point a claimant at a traversal still in
+     * {@code WAITING} that nothing authorized it to resume. The re-entry point has to be created by
+     * the same batch that authorizes it, which is the whole of "the resolution and the traversal it
+     * authorizes commit together or neither does".</p>
+     */
+    private static void requireBatchCreatedTraversal(ExecutionBatch batch, UUID traversalId,
+                                                     String what) {
+        boolean created = batch.transitions().stream()
+                .anyMatch(transition -> transition instanceof ExecutionTransition.TraversalAdded added
+                        && added.traversal().traversalId().equals(traversalId));
+        if (!created) {
+            throw failure(ExecutionStoreFailure.invalid(what + " names traversal " + traversalId
+                    + ", which this batch did not create"));
+        }
+    }
+
+    /**
+     * Newline-delimited, which is unambiguous because {@link HandlerAuthorization} rejects a token
+     * carrying a control character. An escaping scheme invented here would be one every other adapter
+     * would have to reproduce exactly.
+     */
+    private static String joinTokens(Set<String> tokens) {
+        return String.join("\n", tokens);
+    }
+
+    private static Set<String> splitTokens(String stored) {
+        if (stored == null || stored.isEmpty()) {
+            return Set.of();
+        }
+        // -1 keeps trailing empty fields, so a round trip is exact rather than quietly shortened. The
+        // insertion order is kept because the authorization record compares as a set but reads better
+        // in a diagnosis in the order it was written.
+        return new LinkedHashSet<>(List.of(stored.split("\n", -1)));
+    }
+
+    /**
+     * Comma-delimited, and order-preserving because the order <em>is</em> content: the actions are
+     * shown to a person in the sequence the graph author chose, and a set would lose it.
+     */
+    private static String joinConfirmationActions(List<HumanTaskConfirmationAction> actions) {
+        return actions.stream().map(Enum::name).collect(java.util.stream.Collectors.joining(","));
+    }
+
+    private static List<HumanTaskConfirmationAction> splitConfirmationActions(String stored) {
+        if (stored == null || stored.isEmpty()) {
+            return List.of();
+        }
+        return Arrays.stream(stored.split(",")).map(HumanTaskConfirmationAction::valueOf).toList();
     }
 
     // ---------------------------------------------------------------- request guards

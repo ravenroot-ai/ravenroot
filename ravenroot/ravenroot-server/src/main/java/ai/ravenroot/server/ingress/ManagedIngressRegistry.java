@@ -13,6 +13,7 @@ import ai.ravenroot.api.ingress.IngressRouteOwner;
 import ai.ravenroot.api.ingress.IngressRouteAuthority;
 import ai.ravenroot.api.ingress.ManagedIngress;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
+import ai.ravenroot.server.HttpRequestContext;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
@@ -70,6 +71,7 @@ public final class ManagedIngressRegistry implements ManagedIngress, AutoCloseab
     private final Map<String, Long> retiredGeneration = new HashMap<>();
     private HttpServer server;
     private Function<HttpHandler, HttpHandler> protectedContext;
+    private Function<HttpRequestContext.Handler, HttpHandler> contextualProtectedContext;
     private boolean closed;
 
     private ManagedIngressRegistry(Map<String, IngressAuthorityDeclaration> declarations,
@@ -152,6 +154,15 @@ public final class ManagedIngressRegistry implements ManagedIngress, AutoCloseab
         this.protectedContext = Objects.requireNonNull(protectedContext, "protectedContext");
     }
 
+    /** Composition-root bind that carries server request identity without an exchange registry. */
+    public synchronized void bindContextual(
+            HttpServer server,
+            Function<HttpRequestContext.Handler, HttpHandler> protectedContext) {
+        if (this.server != null || closed) throw new IllegalStateException("ingress registry cannot bind");
+        this.server = Objects.requireNonNull(server, "server");
+        this.contextualProtectedContext = Objects.requireNonNull(protectedContext, "protectedContext");
+    }
+
     @Override public IngressRouteAuthority authorityFor(IngressRouteOwner owner) {
         Objects.requireNonNull(owner, "trustedOwner");
         return new IngressRouteAuthority() {
@@ -194,7 +205,10 @@ public final class ManagedIngressRegistry implements ManagedIngress, AutoCloseab
         Lease lease = new Lease(path, routeId, owner, authority,
                 projectionPolicies.get(owner.packageId()), methods, handler, descendants);
         // createContext is the commit point. State is not changed until it succeeded.
-        server.createContext(path, protectedContext.apply(lease));
+        HttpHandler registered = contextualProtectedContext == null
+                ? protectedContext.apply(lease)
+                : contextualProtectedContext.apply(lease::handle);
+        server.createContext(path, registered);
         leases.put(path, lease);
         return lease;
     }
@@ -520,6 +534,15 @@ public final class ManagedIngressRegistry implements ManagedIngress, AutoCloseab
         }
 
         @Override public void handle(HttpExchange exchange) throws IOException {
+            handle(exchange, () -> ai.ravenroot.server.AuthenticatedPrincipalAttribute.require(exchange));
+        }
+
+        private void handle(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+            handle(exchange, requestContext::requirePrincipal);
+        }
+
+        private void handle(HttpExchange exchange,
+                            java.util.function.Supplier<AuthenticatedPrincipal> principal) throws IOException {
             // The window opens when the exchange arrives, not when the handler is invoked. Projection
             // and admission used to sit outside it, so a request could spend its budget before the
             // clock that governs it had started. One instant now governs admission, the bounded body
@@ -560,14 +583,15 @@ public final class ManagedIngressRegistry implements ManagedIngress, AutoCloseab
                 requireLive(deadline);
                 byte[] body = bounded(exchange.getRequestBody(), authority.maxRequestBytes(), deadline, unit);
                 unit.fence();
-                AuthenticatedPrincipal principal = ai.ravenroot.server.AuthenticatedPrincipalAttribute.require(exchange);
-                if (!principal.tenantId().equals(owner.tenantId()) || !principal.scopes().containsAll(authority.requiredScopes())) {
+                AuthenticatedPrincipal caller = principal.get();
+                if (!caller.tenantId().equals(owner.tenantId())
+                        || !caller.scopes().containsAll(authority.requiredScopes())) {
                     unit.settle(403); return;
                 }
                 unit.fence();
                 requireLive(deadline);
-                IngressRequest request = new IngressRequest(new IngressPrincipal(principal.tenantId(),
-                        principal.subject(), principal.issuer(), principal.type().name()),
+                IngressRequest request = new IngressRequest(new IngressPrincipal(caller.tenantId(),
+                        caller.subject(), caller.issuer(), caller.type().name()),
                         exchange.getRequestMethod(), projection.relativePath(), projection.query(),
                         projection.headers(), body);
                 IngressResponse response = invoke(request,

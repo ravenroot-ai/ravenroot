@@ -14,6 +14,14 @@ Use the complete [command-line tools reference](../reference/command-line-tools.
 module README and are published with `python3 scripts/publish_bundle_reference.py`; check mode is a
 required drift gate.
 
+## Tests that need a database
+
+The shared PostgreSQL adapter's conformance suite starts a real PostgreSQL server in a container, so
+running `ravenroot-persistence-postgresql` needs a working Docker daemon. The container is started by
+the test code rather than by a workflow, so a developer and continuous integration provision it the
+same way, and an absent daemon fails the run rather than silently skipping the assertions the adapter
+exists to prove.
+
 ## Boundary
 
 A change is complete when its machine contract, executable test, and user-facing English documentation agree. Build success alone does not establish compatibility.

@@ -4,11 +4,11 @@ import ai.ravenroot.server.security.AuthenticatedPrincipal;
 import com.sun.net.httpserver.HttpExchange;
 
 /**
- * Per-exchange authenticated-principal registry for later authorization and audit layers without
- * coupling the core to HTTP. Call {@link #install(HttpExchange, AuthenticatedPrincipal)} once at
- * the authentication boundary and {@link #clear(HttpExchange)} when that request finishes; callers
- * obtain it only through {@link #require(HttpExchange)} or {@link #find(HttpExchange)}. The JDK
- * exchange attribute map belongs to an {@code HttpContext}, so it is deliberately not used here.
+ * Compatibility registry for direct exchange-only handlers composed outside {@link RavenrootServer}.
+ * Call {@link #install(HttpExchange, AuthenticatedPrincipal)} once at that handler's authentication
+ * boundary and {@link #clear(HttpExchange)} when the request finishes. Ravenroot's own route wrappers
+ * pass an immutable {@link HttpRequestContext} explicitly and do not use this registry. The JDK
+ * exchange attribute map belongs to an {@code HttpContext}, so this adapter deliberately does not use it.
  */
 public final class AuthenticatedPrincipalAttribute {
     public static final String NAME = AuthenticatedPrincipal.class.getName();

@@ -60,6 +60,58 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: pekko
+            # Empty graph-limit values select the Java typed defaults. Kustomize overlays may
+            # replace individual values with quoted positive integers within the documented bounds.
+            - name: RAVENROOT_GRAPHML_MAX_BYTES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_NODES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_EDGES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PROPERTIES
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_DEPTH
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_STRING_LENGTH
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_KEYS
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_ELEMENTS
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_ATTRIBUTES
+              value: ""
+            - name: RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_FAN_OUT
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES
+              value: ""
+            - name: RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT
+              value: ""
             # A local SQLite store is a single-pod durability mode. The main database and its WAL
             # sidecars share this RWO PVC with the audit trail; neither may fall back to read-only
             # image layers or the tmpfs below.

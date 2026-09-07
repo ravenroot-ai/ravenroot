@@ -47,6 +47,58 @@ spec:
               value: "0.0.0.0"
             - name: RAVENROOT_ENGINE
               value: {{ .Values.engine | quote }}
+            # Empty graph-limit values select the Java typed defaults at startup. Explicit Helm
+            # integers are rendered as quoted environment strings after schema validation.
+            - name: RAVENROOT_GRAPHML_MAX_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxBytes }}
+            - name: RAVENROOT_GRAPH_MAX_NODES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxNodes }}
+            - name: RAVENROOT_GRAPH_MAX_EDGES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxEdges }}
+            - name: RAVENROOT_GRAPH_MAX_PROPERTIES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxProperties }}
+            - name: RAVENROOT_GRAPHML_MAX_DEPTH
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxDepth }}
+            - name: RAVENROOT_GRAPHML_MAX_STRING_LENGTH
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxStringLength }}
+            - name: RAVENROOT_GRAPHML_MAX_KEYS
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxKeys }}
+            - name: RAVENROOT_GRAPHML_MAX_ELEMENTS
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxElements }}
+            - name: RAVENROOT_GRAPHML_MAX_ATTRIBUTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxAttributes }}
+            - name: RAVENROOT_GRAPHML_MAX_NAMESPACE_DECLARATIONS
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.graphMl.maxNamespaceDeclarations }}
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.payload.maxEncodedBytes }}
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_DEPTH
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.payload.maxDepth }}
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_COLLECTION_SIZE
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.payload.maxCollectionSize }}
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_VALUE_COUNT
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.payload.maxValueCount }}
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_TEXT_LENGTH
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.payload.maxTextLength }}
+            - name: RAVENROOT_GRAPH_MAX_PAYLOAD_KEY_LENGTH
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.payload.maxKeyLength }}
+            - name: RAVENROOT_GRAPH_MAX_FAN_OUT
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxFanOut }}
+            - name: RAVENROOT_GRAPH_MAX_RESIDENT_ACTORS
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxResidentActors }}
+            - name: RAVENROOT_GRAPH_MAX_LIVE_ACTORS_PER_TRAVERSAL
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxLiveActorsPerTraversal }}
+            - name: RAVENROOT_GRAPH_MAX_IN_FLIGHT_HOPS
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxInFlightHopsPerTraversal }}
+            - name: RAVENROOT_GRAPH_MAX_QUEUED_ADMISSIONS_PER_NODE
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxQueuedAdmissionsPerNode }}
+            - name: RAVENROOT_GRAPH_MAX_TRAVERSAL_STEPS
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxTraversalSteps }}
+            - name: RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxAmplifiedDeliveries }}
+            - name: RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxCumulativePayloadBytes }}
+            - name: RAVENROOT_GRAPH_MAX_RECOVERY_DELIVERIES_PER_ATTEMPT
+              value: {{ include "ravenroot.graphLimitValue" .Values.graph.execution.maxRecoveryDeliveriesPerAttempt }}
             - name: RAVENROOT_HUMAN_TASK_DEFAULT_RESPONSE_BYTES
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultResponseBytes }}
             - name: RAVENROOT_HUMAN_TASK_MAX_RESPONSE_BYTES

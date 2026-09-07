@@ -22,6 +22,39 @@ auth:
 
 engine: pekko
 
+# Graph admission and execution policy. Empty values are intentional: they are rendered into the
+# pod and resolved by GraphExecutionLimits, which owns the numerical defaults and safety ceilings.
+# Use YAML integers for configured values; the template converts them to environment strings.
+graph:
+  graphMl:
+    maxBytes: ""
+    maxNodes: ""
+    maxEdges: ""
+    maxProperties: ""
+    maxDepth: ""
+    maxStringLength: ""
+    maxKeys: ""
+    maxElements: ""
+    maxAttributes: ""
+    maxNamespaceDeclarations: ""
+  payload:
+    maxEncodedBytes: ""
+    maxDepth: ""
+    maxCollectionSize: ""
+    maxValueCount: ""
+    maxTextLength: ""
+    maxKeyLength: ""
+  execution:
+    maxFanOut: ""
+    maxResidentActors: ""
+    maxLiveActorsPerTraversal: ""
+    maxInFlightHopsPerTraversal: ""
+    maxQueuedAdmissionsPerNode: ""
+    maxTraversalSteps: ""
+    maxAmplifiedDeliveries: ""
+    maxCumulativePayloadBytes: ""
+    maxRecoveryDeliveriesPerAttempt: ""
+
 # Human Task operational policy. These values become environment variables in the pod and are read
 # once at startup. An explicit empty or whitespace-only string is also valid: the server resolves it
 # to the documented default, which is useful when an overlay intentionally removes an inherited value.

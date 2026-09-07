@@ -18,6 +18,9 @@ public final class AgentAuthorityBudgetConfiguration {
     private static final Pattern SCOPE_TOKEN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]*");
     private static final int MAX_ENVIRONMENT_TOKEN_LENGTH = 128;
     private static final int MAX_SCOPES = 256;
+    private static final String AUTHORITY_SCOPES = "RAVENROOT_AGENT_AUTHORITY_SCOPES";
+    private static final String EFFECTIVE_AUTHORITY_LIMIT =
+            "authorityScopes must contain at most 256 effective root scope tokens";
 
     private AgentAuthorityBudgetConfiguration() { }
 
@@ -38,14 +41,23 @@ public final class AgentAuthorityBudgetConfiguration {
                 positive(environment, "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH", 8),
                 positive(environment, "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", 64),
                 positive(environment, "RAVENROOT_AGENT_MAX_TEAM_ACTIVE", 16));
-        return new AgentAuthorityBudgetPolicy(runtime, BOOT_EPOCHS.nextLong(Long.MAX_VALUE), policy,
-                rateCard, currency, Duration.ofSeconds(lifetime), maxima,
-                positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000),
-                positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000),
-                nonNegative(environment, "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", 10),
-                nonNegative(environment, "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", 30),
-                tokens(environment, "RAVENROOT_AGENT_DATA_SCOPES", Set.of()),
-                tokens(environment, "RAVENROOT_AGENT_AUTHORITY_SCOPES", Set.of("runtime:delegate")));
+        Set<String> dataScopes = tokens(environment, "RAVENROOT_AGENT_DATA_SCOPES", Set.of());
+        Set<String> authorityScopes = tokens(environment, AUTHORITY_SCOPES, Set.of("runtime:delegate"));
+        try {
+            return new AgentAuthorityBudgetPolicy(runtime, BOOT_EPOCHS.nextLong(Long.MAX_VALUE), policy,
+                    rateCard, currency, Duration.ofSeconds(lifetime), maxima,
+                    positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000),
+                    positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000),
+                    nonNegative(environment, "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", 10),
+                    nonNegative(environment, "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", 30),
+                    dataScopes, authorityScopes);
+        } catch (IllegalArgumentException invalid) {
+            if (EFFECTIVE_AUTHORITY_LIMIT.equals(invalid.getMessage())) {
+                throw new IllegalArgumentException(
+                        AUTHORITY_SCOPES + " must contain at most 256 effective root scope tokens");
+            }
+            throw invalid;
+        }
     }
 
     private static long positive(Map<String, String> environment, String name, long fallback) {

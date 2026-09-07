@@ -22,6 +22,7 @@ public record AgentAuthorityBudgetPolicy(String runtimeInstanceId, long bootEpoc
     private static final int MAX_IDENTITY_LENGTH = 128;
     private static final int MAX_SCOPE_LENGTH = 256;
     private static final int MAX_SCOPES = 256;
+    static final String INTERNAL_ROOT_SCOPE = "runtime:root";
 
     public AgentAuthorityBudgetPolicy {
         identity("runtimeInstanceId", runtimeInstanceId);
@@ -35,7 +36,7 @@ public record AgentAuthorityBudgetPolicy(String runtimeInstanceId, long bootEpoc
             throw new IllegalArgumentException("agent authority budget policy is invalid");
         }
         dataScopes = scopes("dataScopes", dataScopes);
-        authorityScopes = scopes("authorityScopes", authorityScopes);
+        authorityScopes = authorityScopes(authorityScopes);
     }
 
     private static void identity(String name, String value) {
@@ -55,5 +56,14 @@ public record AgentAuthorityBudgetPolicy(String runtimeInstanceId, long bootEpoc
             }
         }
         return Set.copyOf(values);
+    }
+
+    private static Set<String> authorityScopes(Set<String> values) {
+        Set<String> validated = scopes("authorityScopes", values);
+        if (validated.size() == MAX_SCOPES && !validated.contains(INTERNAL_ROOT_SCOPE)) {
+            throw new IllegalArgumentException(
+                    "authorityScopes must contain at most 256 effective root scope tokens");
+        }
+        return validated;
     }
 }

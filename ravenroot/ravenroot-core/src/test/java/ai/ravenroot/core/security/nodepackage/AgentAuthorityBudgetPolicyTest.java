@@ -83,6 +83,29 @@ class AgentAuthorityBudgetPolicyTest {
     }
 
     @Test
+    void authorityScopeLimitIncludesTheInternalRootScope() {
+        Set<String> externalMaximum = IntStream.range(0, 255)
+                .mapToObj(index -> "authority/" + index)
+                .collect(Collectors.toUnmodifiableSet());
+        assertEquals(255, policy("runtime-a", "policy-v1", "rate-v1",
+                Set.of(), externalMaximum).authorityScopes().size());
+
+        Set<String> missingRoot = IntStream.range(0, 256)
+                .mapToObj(index -> "authority/" + index)
+                .collect(Collectors.toUnmodifiableSet());
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> policy("runtime-a", "policy-v1", "rate-v1", Set.of(), missingRoot));
+        assertEquals("authorityScopes must contain at most 256 effective root scope tokens",
+                failure.getMessage());
+        assertNull(failure.getCause());
+
+        var includingRoot = new HashSet<>(externalMaximum);
+        includingRoot.add(AgentAuthorityBudgetPolicy.INTERNAL_ROOT_SCOPE);
+        assertEquals(256, policy("runtime-a", "policy-v1", "rate-v1",
+                Set.of(), includingRoot).authorityScopes().size());
+    }
+
+    @Test
     void nullScopeElementsAreRejectedBeforeImmutableCopying() {
         var data = new HashSet<String>();
         data.add(null);

@@ -164,6 +164,28 @@ class AgentAuthorityBudgetConfigurationTest {
         assertNull(failure.getCause());
     }
 
+    @Test
+    void environmentAuthorityScopeLimitIncludesTheInternalRootScope() {
+        String name = "RAVENROOT_AGENT_AUTHORITY_SCOPES";
+        String externalMaximum = IntStream.range(0, 255)
+                .mapToObj(index -> "authority/" + index)
+                .collect(Collectors.joining(","));
+        assertEquals(255, AgentAuthorityBudgetConfiguration.fromEnvironment(
+                Map.of(name, externalMaximum)).authorityScopes().size());
+
+        String missingRoot = externalMaximum + ",authority/255";
+        IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                () -> AgentAuthorityBudgetConfiguration.fromEnvironment(Map.of(name, missingRoot)));
+        assertEquals(name + " must contain at most 256 effective root scope tokens",
+                failure.getMessage());
+        assertNull(failure.getCause());
+        assertTrue(!failure.getMessage().contains("authority/255"));
+
+        String includingRoot = externalMaximum + ",runtime:root";
+        assertEquals(256, AgentAuthorityBudgetConfiguration.fromEnvironment(
+                Map.of(name, includingRoot)).authorityScopes().size());
+    }
+
     private static void assertSameConfiguredValues(AgentAuthorityBudgetPolicy expected,
                                                    AgentAuthorityBudgetPolicy actual) {
         assertEquals(expected.runtimeInstanceId(), actual.runtimeInstanceId());

@@ -422,6 +422,25 @@ class AgentAuthorityBudgetServiceTest {
     }
 
     @Test
+    void durableRootConstructionPreservesTheEffectiveAuthorityScopeBoundary() throws Exception {
+        var authorityScopes = new LinkedHashSet<String>();
+        for (int index = 0; index < 255; index++) {
+            authorityScopes.add("authority/" + index);
+        }
+        authorityScopes.add(AgentAuthorityBudgetPolicy.INTERNAL_ROOT_SCOPE);
+        AgentAuthorityBudgetPolicy boundary = new AgentAuthorityBudgetPolicy("runtime-a", 1,
+                "policy-v1", "rate-v1", "USD", Duration.ofHours(1), maxima(), 100, 20, 1, 3,
+                Set.of("data-a"), authorityScopes);
+
+        try (Fixture fixture = new Fixture(boundary, AgentBudgetTelemetry.discarding())) {
+            AgentResourceSession session = fixture.budgets.admit(fixture.message, resources());
+            assertEquals(Set.copyOf(authorityScopes), fixture.budget().root().authorityScopes());
+            assertEquals(256, fixture.budget().root().authorityScopes().size());
+            session.complete();
+        }
+    }
+
+    @Test
     void approvalReentryDispatchesAndReusesTheExactHeldToolReservation() throws Exception {
         try (Fixture fixture = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
             var approvalService = new ToolApprovalService(fixture.store, CLOCK, fixture.budgets);

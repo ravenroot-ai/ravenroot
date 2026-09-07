@@ -11,6 +11,8 @@ import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetSnapshot;
+import ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot;
 import ai.ravenroot.api.persistence.ExecutionResultPayload;
 import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
@@ -316,8 +318,28 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
+        return applyInternal(batch, null);
+    }
+
+    @Override
+    public CompletionStage<StoredProcessInstance> applyWithPinnedAgentAuthorityRoot(
+            ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot) {
+        if (pinnedRoot == null) return java.util.concurrent.CompletableFuture.failedFuture(
+                failure(ExecutionStoreFailure.invalid("pinned root is required")));
+        return applyInternal(batch, pinnedRoot);
+    }
+
+    private CompletionStage<StoredProcessInstance> applyInternal(ExecutionBatch batch,
+                                                                 PinnedAgentAuthorityRoot pinnedRoot) {
         return complete(() -> {
             Objects.requireNonNull(batch, "batch");
+            if (pinnedRoot != null) {
+                try {
+                    AgentAuthorityBudgetFold.requirePinnedRegistrationBatch(batch, pinnedRoot);
+                } catch (IllegalArgumentException invalid) {
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
+            }
             // Decidable from the request alone, so it happens before the monitor is even entered.
             requireNoFencingTokenUnderNotPresent(batch);
             batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
@@ -363,6 +385,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 // A recorded, matching replay is answered from the record and never re-applied.
                 var replay = replayOf(batch, existing);
                 if (replay != null) {
+                    requirePinnedReplay(existing == null ? null : existing.agentBudget, pinnedRoot);
                     return replay;
                 }
 
@@ -423,7 +446,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         : new LinkedHashMap<>(existing.approvals);
                 applyToolApprovalWrites(key, batch, folded, pin, approvals, revision, now);
 
-                DurableAgentAuthorityBudget agentBudget = existing == null ? null : existing.agentBudget;
+                AgentAuthorityBudgetSnapshot agentBudget = existing == null ? null : existing.agentBudget;
                 for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
                     requireAgentAuthorityControl(operation);
                     if (operation instanceof AgentBudgetOperation.RegisterGrant register) {
@@ -440,7 +463,9 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                         }
                     }
                     try {
-                        agentBudget = AgentAuthorityBudgetFold.apply(key, agentBudget, operation, now);
+                        agentBudget = pinnedRoot != null && operation instanceof AgentBudgetOperation.RegisterRoot register
+                                ? AgentAuthorityBudgetFold.registerPinnedRoot(key, agentBudget, register, pinnedRoot, now)
+                                : AgentAuthorityBudgetFold.applySnapshot(key, agentBudget, operation, now);
                     } catch (IllegalArgumentException | IllegalStateException invalid) {
                         throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
                     }
@@ -497,6 +522,11 @@ public final class InMemoryExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return loadAgentAuthorityBudgetSnapshot(key).thenApply(value -> value.map(AgentAuthorityBudgetSnapshot::budget));
+    }
+
+    @Override
+    public CompletionStage<Optional<AgentAuthorityBudgetSnapshot>> loadAgentAuthorityBudgetSnapshot(ExecutionKey key) {
         return complete(() -> {
             Objects.requireNonNull(key, "key");
             synchronized (monitor) {
@@ -532,14 +562,14 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                     long releasedTeamActive = 0;
                     for (Entry entry : instances.values()) {
                         if (entry.agentBudget != null
-                                && entry.agentBudget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
-                                && entry.agentBudget.controlEpoch() == expectedEpoch) {
-                            long before = entry.agentBudget.reserved().teamActive();
-                            entry.agentBudget = AgentAuthorityBudgetFold.apply(entry.agentBudget.key(),
+                                && entry.agentBudget.budget().state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                                && entry.agentBudget.budget().controlEpoch() == expectedEpoch) {
+                            long before = entry.agentBudget.budget().reserved().teamActive();
+                            entry.agentBudget = AgentAuthorityBudgetFold.applySnapshot(entry.agentBudget.budget().key(),
                                     entry.agentBudget, new AgentBudgetOperation.KillRoot(expectedEpoch),
                                     clock.instant());
                             releasedTeamActive = Math.addExact(releasedTeamActive,
-                                    before - entry.agentBudget.reserved().teamActive());
+                                    before - entry.agentBudget.budget().reserved().teamActive());
                         }
                     }
                     agentAuthorityControl = new AgentAuthorityControl(targetState,
@@ -553,6 +583,15 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                 return agentAuthorityControl;
             }
         });
+    }
+
+    private static void requirePinnedReplay(AgentAuthorityBudgetSnapshot snapshot, PinnedAgentAuthorityRoot pinnedRoot) {
+        if (pinnedRoot == null) return;
+        try {
+            AgentAuthorityBudgetFold.requirePinnedRoot(snapshot, pinnedRoot);
+        } catch (IllegalStateException invalid) {
+            throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+        }
     }
 
     private void requireAgentAuthorityControl(AgentBudgetOperation operation) {
@@ -2803,7 +2842,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
         private final Map<UUID, DurableHandler> handlers;
         /** Registration order, retained for deterministic operator inspection. */
         private final Map<UUID, DurableToolApproval> approvals;
-        private DurableAgentAuthorityBudget agentBudget;
+        private AgentAuthorityBudgetSnapshot agentBudget;
         /** First-class human tasks retained in registration order within this instance. */
         private final Map<UUID, DurableHumanTask> humanTasks;
         /** Operator holds retained in commit order within this instance. */
@@ -2820,7 +2859,7 @@ public final class InMemoryExecutionStore implements ExecutionStore {
                       Instant updatedAt, long fencingToken, LeaseHandle lease, Map<UUID, TimerSchedule> timers,
                       Map<UUID, DurableHandler> handlers,
                       Map<UUID, DurableToolApproval> approvals,
-                      DurableAgentAuthorityBudget agentBudget,
+                      AgentAuthorityBudgetSnapshot agentBudget,
                       Map<UUID, DurableHumanTask> humanTasks,
                       Map<UUID, DurableExecutionPause> executionPauses,
                       Map<UUID, WorkClaim> workClaims, Set<UUID> acknowledged, Instant createdAt,

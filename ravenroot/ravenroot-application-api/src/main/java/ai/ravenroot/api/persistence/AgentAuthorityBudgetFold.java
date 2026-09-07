@@ -15,6 +15,78 @@ import java.util.UUID;
 public final class AgentAuthorityBudgetFold {
     private AgentAuthorityBudgetFold() { }
 
+    /** Validates the narrowly scoped atomic pinned-registration batch before any write. */
+    public static void requirePinnedRegistrationBatch(ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot) {
+        Objects.requireNonNull(batch, "batch");
+        Objects.requireNonNull(pinnedRoot, "pinnedRoot");
+        int roots = 0;
+        for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
+            if (operation instanceof AgentBudgetOperation.ResetRoot
+                    || operation instanceof AgentBudgetOperation.RebootRoot) {
+                throw new IllegalArgumentException("pinned registration cannot replace an agent root");
+            }
+            if (operation instanceof AgentBudgetOperation.RegisterRoot register) {
+                roots++;
+                if (!register.root().equals(pinnedRoot.root())) {
+                    throw new IllegalArgumentException("pinned registration root does not match its operation");
+                }
+            }
+        }
+        if (roots != 1) throw new IllegalArgumentException("pinned registration requires exactly one root operation");
+    }
+
+    /** Requires exact persisted evidence, including when an adapter returns an idempotent replay. */
+    public static void requirePinnedRoot(AgentAuthorityBudgetSnapshot current, PinnedAgentAuthorityRoot pinnedRoot) {
+        Objects.requireNonNull(pinnedRoot, "pinnedRoot");
+        if (current == null || !current.pinnedRoot().filter(pinnedRoot::equals).isPresent()) {
+            throw new IllegalStateException("agent authority root and fingerprints are immutable");
+        }
+    }
+
+    /** Registers root and provenance together; an existing unverified root cannot acquire pins. */
+    public static AgentAuthorityBudgetSnapshot registerPinnedRoot(ExecutionKey key,
+            AgentAuthorityBudgetSnapshot current, AgentBudgetOperation.RegisterRoot operation,
+            PinnedAgentAuthorityRoot pinnedRoot, Instant storeNow) {
+        Objects.requireNonNull(pinnedRoot, "pinnedRoot");
+        if (!operation.root().equals(pinnedRoot.root())) {
+            throw new IllegalArgumentException("pinned registration root does not match its operation");
+        }
+        if (current != null) requirePinnedRoot(current, pinnedRoot);
+        DurableAgentAuthorityBudget next = apply(key, current == null ? null : current.budget(), operation, storeNow);
+        return AgentAuthorityBudgetSnapshot.pinned(next, pinnedRoot);
+    }
+
+    /**
+     * Folds the existing operation vocabulary without losing provenance during ordinary cleanup.
+     * Explicit reset replaces the root without evidence; compatible reboot retains and rebinds it.
+     */
+    public static AgentAuthorityBudgetSnapshot applySnapshot(ExecutionKey key,
+            AgentAuthorityBudgetSnapshot current, AgentBudgetOperation operation, Instant storeNow) {
+        DurableAgentAuthorityBudget next = apply(key, current == null ? null : current.budget(), operation, storeNow);
+        if (current == null || current.pinnedRoot().isEmpty() || operation instanceof AgentBudgetOperation.ResetRoot) {
+            return AgentAuthorityBudgetSnapshot.legacy(next);
+        }
+        PinnedAgentAuthorityRoot pin = current.pinnedRoot().orElseThrow();
+        if (operation instanceof AgentBudgetOperation.RebootRoot) {
+            if (!samePinnedConfiguration(current.budget().root(), next.root())) {
+                return AgentAuthorityBudgetSnapshot.legacy(next);
+            }
+            pin = new PinnedAgentAuthorityRoot(next.root(), pin.policyFingerprint(), pin.rateCardFingerprint());
+        }
+        return AgentAuthorityBudgetSnapshot.pinned(next, pin);
+    }
+
+    private static boolean samePinnedConfiguration(AgentAuthorityRootRegistration before,
+                                                   AgentAuthorityRootRegistration after) {
+        return before.runtimeInstanceId().equals(after.runtimeInstanceId())
+                && before.policyVersion().equals(after.policyVersion())
+                && before.rateCardVersion().equals(after.rateCardVersion())
+                && before.currency().equals(after.currency())
+                && before.maxima().equals(after.maxima())
+                && before.dataScopes().equals(after.dataScopes())
+                && before.authorityScopes().equals(after.authorityScopes());
+    }
+
     /**
      * Applies one validated operation to an immutable budget snapshot.
      *

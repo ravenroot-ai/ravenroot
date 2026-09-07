@@ -1,5 +1,7 @@
 package ai.ravenroot.persistence.sqlite;
 
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetSnapshot;
+import ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot;
 import ai.ravenroot.api.persistence.AgentAuthorityBinding;
 import ai.ravenroot.api.persistence.AgentAuthorityGrantRegistration;
 import ai.ravenroot.api.persistence.AgentAuthorityRootRegistration;
@@ -35,11 +37,21 @@ final class AgentAuthorityBudgetCodec {
     private AgentAuthorityBudgetCodec() { }
 
     static byte[] write(DurableAgentAuthorityBudget aggregate) {
+        return writeSnapshot(AgentAuthorityBudgetSnapshot.legacy(aggregate));
+    }
+
+    static byte[] writeSnapshot(AgentAuthorityBudgetSnapshot snapshot) {
+        DurableAgentAuthorityBudget aggregate = snapshot.budget();
         try {
             var bytes = new ByteArrayOutputStream();
             var out = new DataOutputStream(bytes);
-            out.writeInt(VERSION);
+            out.writeInt(snapshot.pinnedRoot().isPresent() ? 2 : VERSION);
             root(out, aggregate.root());
+            if (snapshot.pinnedRoot().isPresent()) {
+                PinnedAgentAuthorityRoot pinned = snapshot.pinnedRoot().orElseThrow();
+                text(out, pinned.policyFingerprint());
+                text(out, pinned.rateCardFingerprint());
+            }
             text(out, aggregate.state().name());
             out.writeLong(aggregate.controlEpoch());
             vector(out, aggregate.spent()); vector(out, aggregate.reserved());
@@ -61,10 +73,17 @@ final class AgentAuthorityBudgetCodec {
     }
 
     static DurableAgentAuthorityBudget read(ExecutionKey key, byte[] encoded) {
+        return readSnapshot(key, encoded).budget();
+    }
+
+    static AgentAuthorityBudgetSnapshot readSnapshot(ExecutionKey key, byte[] encoded) {
         try {
             var in = new DataInputStream(new ByteArrayInputStream(encoded));
-            if (in.readInt() != VERSION) throw new IllegalArgumentException("unknown agent authority version");
+            int version = in.readInt();
+            if (version != VERSION && version != 2) throw new IllegalArgumentException("unknown agent authority version");
             AgentAuthorityRootRegistration root = root(in);
+            PinnedAgentAuthorityRoot pinned = version == 2
+                    ? new PinnedAgentAuthorityRoot(root, text(in), text(in)) : null;
             AgentAuthorityState state = AgentAuthorityState.valueOf(text(in));
             long controlEpoch = in.readLong();
             AgentBudgetVector spent = vector(in), reserved = vector(in);
@@ -85,7 +104,9 @@ final class AgentAuthorityBudgetCodec {
                 }
             }
             if (in.read() != -1) throw new IllegalArgumentException("trailing agent authority bytes");
-            return new DurableAgentAuthorityBudget(key, root, state, controlEpoch, spent, reserved, grants, reservations);
+            var budget = new DurableAgentAuthorityBudget(key, root, state, controlEpoch, spent, reserved, grants, reservations);
+            return pinned == null ? AgentAuthorityBudgetSnapshot.legacy(budget)
+                    : AgentAuthorityBudgetSnapshot.pinned(budget, pinned);
         } catch (IOException | RuntimeException invalid) {
             throw new IllegalArgumentException("invalid stored agent authority", invalid);
         }

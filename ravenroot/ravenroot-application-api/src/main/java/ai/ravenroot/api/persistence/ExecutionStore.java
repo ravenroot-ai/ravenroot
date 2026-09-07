@@ -476,6 +476,30 @@ public interface ExecutionStore extends AutoCloseable {
     }
 
     /**
+     * Loads accounting and explicit policy provenance in one snapshot. Existing custom adapters
+     * default to the historical unverified projection; current configuration is never a backfill.
+     */
+    default CompletionStage<Optional<AgentAuthorityBudgetSnapshot>> loadAgentAuthorityBudgetSnapshot(
+            ExecutionKey key) {
+        return loadAgentAuthorityBudget(key).thenApply(value -> value.map(AgentAuthorityBudgetSnapshot::legacy));
+    }
+
+    /**
+     * Atomically applies a batch and its explicit pinned root. The batch must contain exactly one
+     * matching RegisterRoot and no ResetRoot or RebootRoot. An existing root must already have exactly
+     * these pins; this entry cannot upgrade historical authority. All ordinary fencing, replay,
+     * revision, payload and transactional rules still apply.
+     *
+     * <p>Custom adapters must implement this entry explicitly. The default refuses without invoking
+     * the legacy apply method, which otherwise could report success while silently dropping pins.</p>
+     */
+    default CompletionStage<StoredProcessInstance> applyWithPinnedAgentAuthorityRoot(
+            ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot) {
+        return java.util.concurrent.CompletableFuture.failedFuture(new ExecutionStoreException(
+                ExecutionStoreFailure.invalid("policy-pinned agent root registration is not supported")));
+    }
+
+    /**
      * Reads the store-global agent-authority control epoch.
      *
      * @return current durable control state

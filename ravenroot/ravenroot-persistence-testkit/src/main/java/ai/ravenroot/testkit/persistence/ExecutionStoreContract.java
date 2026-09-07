@@ -13,6 +13,8 @@ import ai.ravenroot.api.application.TraversalStatus;
 import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.DurableHandler;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetSnapshot;
+import ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot;
 import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.ExecutionResultNodes;
@@ -2788,6 +2790,166 @@ public abstract class ExecutionStoreContract {
         assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, refused);
     }
 
+    @Test
+    final void agentPinnedRootGrantAndEventCommitTogetherAndRollBackTogether() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        var fixture = pinnedAgentFixture();
+        var snapshot = snapshot(fixture.key());
+        assertEquals(1, snapshot.budget().grants().size());
+        assertEquals(budget(fixture.key()), snapshot.budget());
+        assertEquals(1, await(store().readJournal(fixture.key().tenantId(), 0, 10)).size());
+        assertEquals(snapshot.budget().root(), snapshot.pinnedRoot().orElseThrow().root());
+
+        var key = newKey(); var traversal = UUID.randomUUID();
+        var before = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+        var root = root(key, 7, largeBudget());
+        var grantId = UUID.randomUUID();
+        var invalid = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(before.revision()))
+                .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
+                .publish(event(key, traversal, "MUST_ROLL_BACK"))
+                .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root, 0))
+                .applyAgentBudget(new AgentBudgetOperation.RegisterGrant(
+                        new AgentAuthorityGrantRegistration(grantId, null, Set.of(), 1, Set.of(), Set.of(),
+                                largeBudget(), clock().instant().plusSeconds(1)),
+                        new AgentAuthorityBinding(grantId, "missing-invocation", UUID.randomUUID(), Set.of()), 7, 0))
+                .build();
+        int journalBefore = await(store().readJournal(key.tenantId(), 0, 10)).size();
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                failureOf(() -> await(store().applyWithPinnedAgentAuthorityRoot(invalid, pinnedRoot(root)))));
+        assertEquals(before, await(store().load(key)));
+        assertTrue(await(store().loadAgentAuthorityBudgetSnapshot(key)).isEmpty());
+        assertEquals(journalBefore, await(store().readJournal(key.tenantId(), 0, 10)).size());
+    }
+
+    @Test
+    final void agentPinnedRegistrationRejectsMalformedBatchesAndLegacyBackfillAtomically() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        var fixture = pinnedAgentFixture(); var before = await(store().load(fixture.key()));
+        var snapshot = snapshot(fixture.key()); var root = snapshot.budget().root();
+        var register = new AgentBudgetOperation.RegisterRoot(root, 0);
+        for (var operations : List.of(List.of(register, register),
+                List.of(new AgentBudgetOperation.CancelRoot()),
+                List.of(register, new AgentBudgetOperation.ResetRoot(root, 0)),
+                List.of(register, new AgentBudgetOperation.RebootRoot(root, 0)))) {
+            var builder = ExecutionBatch.to(fixture.key()).expecting(RevisionExpectation.exactly(before.revision()));
+            operations.forEach(builder::applyAgentBudget);
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                    store().applyWithPinnedAgentAuthorityRoot(builder.build(), pinnedRoot(root)))));
+            assertEquals(before, await(store().load(fixture.key())));
+            assertEquals(snapshot, snapshot(fixture.key()));
+        }
+        var exact = ExecutionBatch.to(fixture.key()).expecting(RevisionExpectation.exactly(before.revision()))
+                .applyAgentBudget(register).build();
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().applyWithPinnedAgentAuthorityRoot(exact,
+                        new PinnedAgentAuthorityRoot(root, "c".repeat(64), "b".repeat(64))))));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().applyWithPinnedAgentAuthorityRoot(exact, pinnedRoot(root(fixture.key(), 8, largeBudget()))))));
+        assertEquals(before, await(store().load(fixture.key())));
+        await(store().applyWithPinnedAgentAuthorityRoot(exact, pinnedRoot(root)));
+        assertEquals(snapshot, snapshot(fixture.key()));
+        applyBudget(fixture.key(), register); // old API's identical root must not erase the pins
+        assertEquals(snapshot, snapshot(fixture.key()));
+
+        var legacy = agentBudgetFixture(largeBudget(), 0); var legacyRoot = budget(legacy.key()).root();
+        var legacyBefore = await(store().load(legacy.key()));
+        assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                store().applyWithPinnedAgentAuthorityRoot(ExecutionBatch.to(legacy.key())
+                        .expecting(RevisionExpectation.exactly(legacyBefore.revision()))
+                        .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(legacyRoot, 0)).build(), pinnedRoot(legacyRoot)))));
+        assertEquals(legacyBefore, await(store().load(legacy.key())));
+        assertTrue(snapshot(legacy.key()).pinnedRoot().isEmpty());
+    }
+
+    @Test
+    final void agentPinnedReplayRequiresExactStoredProofWithoutBackfill() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        for (boolean pinned : new boolean[] {false, true}) {
+            var key = newKey(); var traversal = UUID.randomUUID();
+            var before = await(store().apply(creationBatch(key, traversal, "graph-v1")));
+            var root = root(key, 7, largeBudget()); var pin = pinnedRoot(root);
+            var batch = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(before.revision()))
+                    .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root, 0))
+                    .recordIdempotency(new IdempotencyWrite("agent-pin-" + key.processInstanceId(),
+                            fingerprint("request"), fingerprint("outcome"), Duration.ofMinutes(1), clock().instant()))
+                    .build();
+            var applied = await(pinned ? store().applyWithPinnedAgentAuthorityRoot(batch, pin) : store().apply(batch));
+            var snapshot = snapshot(key);
+            if (pinned) {
+                assertEquals(applied, await(store().applyWithPinnedAgentAuthorityRoot(batch, pin)));
+            } else {
+                assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class,
+                        failureOf(() -> await(store().applyWithPinnedAgentAuthorityRoot(batch, pin))));
+            }
+            assertInstanceOf(ExecutionStoreFailure.InvalidRequest.class, failureOf(() -> await(
+                    store().applyWithPinnedAgentAuthorityRoot(batch,
+                            new PinnedAgentAuthorityRoot(root, "c".repeat(64), "b".repeat(64))))));
+            assertEquals(applied, await(store().load(key)));
+            assertEquals(snapshot, snapshot(key));
+        }
+    }
+
+    @Test
+    final void agentPinnedCleanupGlobalKillAndReopenKeepTheirOriginalProof() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        var fixture = pinnedAgentFixture(); var pin = snapshot(fixture.key()).pinnedRoot();
+        var requested = new AgentBudgetVector(1, 2, 3, 4, 5, 0, 0, 0, 0);
+        var released = hold(fixture, fixture.grantIds().getFirst(), 1, requested);
+        applyBudget(fixture.key(), new AgentBudgetOperation.Release(released.reservationId()));
+        assertEquals(pin, snapshot(fixture.key()).pinnedRoot());
+        var settled = hold(fixture, fixture.grantIds().getFirst(), 2, requested);
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(settled.reservationId(), 7, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.Settle(settled.reservationId(), requested));
+        assertEquals(pin, snapshot(fixture.key()).pinnedRoot());
+        var unknown = hold(fixture, fixture.grantIds().getFirst(), 3, requested);
+        applyBudget(fixture.key(), new AgentBudgetOperation.Dispatch(unknown.reservationId(), 7, 0));
+        applyBudget(fixture.key(), new AgentBudgetOperation.MarkIndeterminate(unknown.reservationId()));
+        assertEquals(pin, snapshot(fixture.key()).pinnedRoot());
+        await(store().transitionAgentAuthorityControl(AgentAuthorityControlState.ACTIVE, 0, AgentAuthorityControlState.KILLED));
+        var killed = snapshot(fixture.key());
+        assertEquals(pin, killed.pinnedRoot());
+        assertEquals(AgentAuthorityState.KILLED, killed.budget().state());
+        await(store().transitionAgentAuthorityControl(AgentAuthorityControlState.KILLED, 1, AgentAuthorityControlState.ACTIVE));
+        assertEquals(killed, snapshot(fixture.key()), "global reset does not revive or rewrite the root");
+        if (store().supports(StoreCapability.DURABLE)) {
+            reopen();
+            assertEquals(killed, snapshot(fixture.key()));
+        }
+    }
+
+    @Test
+    final void agentPinnedLowLevelReplacementPersistsTheAcceptedProofDisposition() {
+        assumeCapability(StoreCapability.AGENT_AUTHORITY_BUDGETS);
+        var fixture = agentBudgetFixture(largeBudget(), 0, largeBudget(), 200, true);
+        var root = budget(fixture.key()).root(); var original = snapshot(fixture.key()).pinnedRoot().orElseThrow();
+        var rebootedRoot = new AgentAuthorityRootRegistration(root.runtimeInstanceId(), 8, root.security(),
+                root.policyVersion(), root.rateCardVersion(), root.absoluteDeadline().minusSeconds(1),
+                root.dataScopes(), root.authorityScopes(), root.maxima(), root.currency());
+        applyBudget(fixture.key(), new AgentBudgetOperation.RebootRoot(rebootedRoot, 0));
+        assertEquals(new PinnedAgentAuthorityRoot(rebootedRoot, original.policyFingerprint(), original.rateCardFingerprint()),
+                snapshot(fixture.key()).pinnedRoot().orElseThrow());
+        applyBudget(fixture.key(), new AgentBudgetOperation.KillRoot(1));
+        applyBudget(fixture.key(), new AgentBudgetOperation.ResetRoot(root, 2));
+        assertTrue(snapshot(fixture.key()).pinnedRoot().isEmpty());
+        assertEquals(3, budget(fixture.key()).controlEpoch());
+        if (store().supports(StoreCapability.DURABLE)) {
+            reopen();
+            assertTrue(snapshot(fixture.key()).pinnedRoot().isEmpty());
+        }
+    }
+
+    private AgentBudgetFixture pinnedAgentFixture() {
+        return agentBudgetFixture(largeBudget(), 1, largeBudget(), 200, true);
+    }
+
+    private AgentAuthorityBudgetSnapshot snapshot(ExecutionKey key) {
+        return await(store().loadAgentAuthorityBudgetSnapshot(key)).orElseThrow();
+    }
+
+    private static PinnedAgentAuthorityRoot pinnedRoot(AgentAuthorityRootRegistration root) {
+        return new PinnedAgentAuthorityRoot(root, "a".repeat(64), "b".repeat(64));
+    }
+
     private Object racingHold(AgentBudgetFixture fixture, UUID grantId, long revision,
                               CountDownLatch ready, CountDownLatch start, long ordinal) {
         ready.countDown();
@@ -2820,13 +2982,19 @@ public abstract class ExecutionStoreContract {
 
     private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants,
                                                   AgentBudgetVector grantCeiling, long maximumTotalTokens) {
+        return agentBudgetFixture(maxima, topLevelGrants, grantCeiling, maximumTotalTokens, false);
+    }
+
+    private AgentBudgetFixture agentBudgetFixture(AgentBudgetVector maxima, int topLevelGrants,
+            AgentBudgetVector grantCeiling, long maximumTotalTokens, boolean pinned) {
         ExecutionKey key = newKey();
         UUID traversalId = UUID.randomUUID();
         StoredProcessInstance created = await(store().apply(creationBatch(key, traversalId, "graph-v1")));
+        var root = root(key, 7, maxima);
         var builder = ExecutionBatch.to(key).expecting(RevisionExpectation.exactly(created.revision()))
                 .apply(new ExecutionTransition.ProcessTransitioned(ProcessInstanceStatus.RUNNING))
                 .apply(new ExecutionTransition.TraversalTransitioned(traversalId, TraversalStatus.RUNNING))
-                .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root(key, 7, maxima), 0));
+                .applyAgentBudget(new AgentBudgetOperation.RegisterRoot(root, 0));
         var grantIds = new java.util.ArrayList<UUID>();
         var invocationIds = new java.util.ArrayList<UUID>();
         for (int i = 0; i < topLevelGrants; i++) {
@@ -2843,7 +3011,12 @@ public abstract class ExecutionStoreContract {
             builder.applyAgentBudget(new AgentBudgetOperation.RegisterGrant(grant,
                     new AgentAuthorityBinding(grantId, "agent-" + i, invocationId, Set.of()), 7, 0));
         }
-        await(store().apply(builder.build()));
+        if (pinned) {
+            builder.publish(event(key, traversalId, "AGENT_PINNED"));
+            await(store().applyWithPinnedAgentAuthorityRoot(builder.build(), pinnedRoot(root)));
+        } else {
+            await(store().apply(builder.build()));
+        }
         return new AgentBudgetFixture(key, traversalId, List.copyOf(grantIds), List.copyOf(invocationIds));
     }
 

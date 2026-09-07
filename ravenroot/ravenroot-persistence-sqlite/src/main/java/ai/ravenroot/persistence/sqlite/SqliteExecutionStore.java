@@ -10,6 +10,8 @@ import ai.ravenroot.api.persistence.DurableHumanTask;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetSnapshot;
+import ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot;
 import ai.ravenroot.api.persistence.AgentAuthorityBudgetFold;
 import ai.ravenroot.api.persistence.AgentAuthorityControl;
 import ai.ravenroot.api.persistence.AgentAuthorityControlState;
@@ -404,8 +406,28 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
+        return applyInternal(batch, null);
+    }
+
+    @Override
+    public CompletionStage<StoredProcessInstance> applyWithPinnedAgentAuthorityRoot(
+            ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot) {
+        if (pinnedRoot == null) return java.util.concurrent.CompletableFuture.failedFuture(
+                failure(ExecutionStoreFailure.invalid("pinned root is required")));
+        return applyInternal(batch, pinnedRoot);
+    }
+
+    private CompletionStage<StoredProcessInstance> applyInternal(ExecutionBatch batch,
+                                                                 PinnedAgentAuthorityRoot pinnedRoot) {
         return async(() -> {
             Objects.requireNonNull(batch, "batch");
+            if (pinnedRoot != null) {
+                try {
+                    AgentAuthorityBudgetFold.requirePinnedRegistrationBatch(batch, pinnedRoot);
+                } catch (IllegalArgumentException invalid) {
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
+            }
             // Decidable from the request alone, so it happens before a transaction is even opened.
             requireNoFencingTokenUnderNotPresent(batch);
             batch.timersToSchedule().forEach(timer -> requireWithinPayloadLimit(timer.payload()));
@@ -425,11 +447,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
                         "application/vnd.ravenroot.tool-continuation"));
             });
             requireEnvelopesMatchBatch(batch);
-            return inWriteTransaction(batch.key(), () -> applyLocked(batch));
+            return inWriteTransaction(batch.key(), () -> applyLocked(batch, pinnedRoot));
         });
     }
 
-    private StoredProcessInstance applyLocked(ExecutionBatch batch) throws SQLException {
+    private StoredProcessInstance applyLocked(ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot) throws SQLException {
         ExecutionKey key = batch.key();
         InstanceMeta existing = readMeta(key);
 
@@ -450,6 +472,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
         StoredProcessInstance replay = replayOf(batch, existing);
         if (replay != null) {
+            if (pinnedRoot != null) requirePinnedReplay(readAgentAuthorityBudget(key).orElse(null), pinnedRoot);
             return replay;
         }
 
@@ -503,7 +526,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         // a wait -- and a re-entry -- atomic with the transitions beside it.
         writeHandlers(key, batch, folded, revision);
         writeToolApprovals(key, batch, folded, pin, revision, now);
-        writeAgentAuthorityBudget(key, batch, folded, now);
+        writeAgentAuthorityBudget(key, batch, folded, now, pinnedRoot);
         writeExecutionPauses(key, batch, folded, pin, revision);
         writeHumanTasks(key, batch, folded, pin, revision, now);
         batch.idempotency().ifPresent(write -> writeIdempotencyRecord(key, write, revision, now));
@@ -534,6 +557,11 @@ public final class SqliteExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return loadAgentAuthorityBudgetSnapshot(key).thenApply(value -> value.map(AgentAuthorityBudgetSnapshot::budget));
+    }
+
+    @Override
+    public CompletionStage<Optional<AgentAuthorityBudgetSnapshot>> loadAgentAuthorityBudgetSnapshot(ExecutionKey key) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
             return inReadTransaction(key, () -> readAgentAuthorityBudget(key));
@@ -3126,7 +3154,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
         }
     }
 
-    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(ExecutionKey key)
+    private Optional<AgentAuthorityBudgetSnapshot> readAgentAuthorityBudget(ExecutionKey key)
             throws SQLException {
         try (PreparedStatement statement = connection.prepareStatement(
                 "SELECT aggregate FROM agent_authority_budget WHERE tenant_id = ? "
@@ -3136,7 +3164,7 @@ public final class SqliteExecutionStore implements ExecutionStore {
             try (ResultSet rows = statement.executeQuery()) {
                 if (!rows.next()) return Optional.empty();
                 try {
-                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes(1)));
+                    return Optional.of(AgentAuthorityBudgetCodec.readSnapshot(key, rows.getBytes(1)));
                 } catch (RuntimeException corrupted) {
                     throw failure(new ExecutionStoreFailure.Corrupted(key,
                             "agent authority aggregate is invalid"));
@@ -3175,25 +3203,25 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 String tenantId = rows.getString(1);
                 ExecutionKey key = new ExecutionKey(tenantId, StoredUuid.required(rows, 2,
                         "agent_authority_budget", "process_instance_id", tenantId));
-                DurableAgentAuthorityBudget budget;
+                AgentAuthorityBudgetSnapshot budget;
                 try {
-                    budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes(3));
+                    budget = AgentAuthorityBudgetCodec.readSnapshot(key, rows.getBytes(3));
                 } catch (RuntimeException invalid) {
                     throw failure(new ExecutionStoreFailure.Corrupted(key,
                             "agent authority aggregate is invalid"));
                 }
-                if (budget.state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
-                        && budget.controlEpoch() == expectedEpoch) {
-                    DurableAgentAuthorityBudget killed = AgentAuthorityBudgetFold.apply(key, budget,
+                if (budget.budget().state() == ai.ravenroot.api.persistence.AgentAuthorityState.ACTIVE
+                        && budget.budget().controlEpoch() == expectedEpoch) {
+                    AgentAuthorityBudgetSnapshot killed = AgentAuthorityBudgetFold.applySnapshot(key, budget,
                             new AgentBudgetOperation.KillRoot(expectedEpoch), clock.instant());
                     try {
                         releasedTeamActive = Math.addExact(releasedTeamActive,
-                                budget.reserved().teamActive() - killed.reserved().teamActive());
+                                budget.budget().reserved().teamActive() - killed.budget().reserved().teamActive());
                     } catch (ArithmeticException overflow) {
                         throw failure(ExecutionStoreFailure.invalid(
                                 "agent authority release aggregate is exhausted"));
                     }
-                    replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
+                    replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.writeSnapshot(killed)));
                 }
             }
         }
@@ -3214,9 +3242,9 @@ public final class SqliteExecutionStore implements ExecutionStore {
     private record BudgetReplacement(ExecutionKey key, byte[] aggregate) { }
 
     private void writeAgentAuthorityBudget(ExecutionKey key, ExecutionBatch batch,
-                                           ProcessInstance folded, Instant now) throws SQLException {
+                                           ProcessInstance folded, Instant now, PinnedAgentAuthorityRoot pinnedRoot) throws SQLException {
         if (batch.agentBudgetOperations().isEmpty()) return;
-        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(key).orElse(null);
+        AgentAuthorityBudgetSnapshot budget = readAgentAuthorityBudget(key).orElse(null);
         AgentAuthorityControl control = readAgentAuthorityControl();
         for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
             requireAgentAuthorityControl(operation, control);
@@ -3233,12 +3261,14 @@ public final class SqliteExecutionStore implements ExecutionStore {
                 }
             }
             try {
-                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+                budget = pinnedRoot != null && operation instanceof AgentBudgetOperation.RegisterRoot register
+                        ? AgentAuthorityBudgetFold.registerPinnedRoot(key, budget, register, pinnedRoot, now)
+                        : AgentAuthorityBudgetFold.applySnapshot(key, budget, operation, now);
             } catch (IllegalArgumentException | IllegalStateException invalid) {
                 throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
             }
         }
-        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        byte[] encoded = AgentAuthorityBudgetCodec.writeSnapshot(budget);
         if (encoded.length > config.maxPayloadBytes()) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length, config.maxPayloadBytes()));
         }
@@ -3250,6 +3280,15 @@ public final class SqliteExecutionStore implements ExecutionStore {
             statement.setString(2, key.processInstanceId().toString());
             statement.setBytes(3, encoded);
             statement.executeUpdate();
+        }
+    }
+
+    private static void requirePinnedReplay(AgentAuthorityBudgetSnapshot snapshot, PinnedAgentAuthorityRoot pinnedRoot) {
+        if (pinnedRoot == null) return;
+        try {
+            AgentAuthorityBudgetFold.requirePinnedRoot(snapshot, pinnedRoot);
+        } catch (IllegalStateException invalid) {
+            throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
         }
     }
 

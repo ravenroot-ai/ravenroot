@@ -13,6 +13,8 @@ import ai.ravenroot.api.persistence.AgentAuthorityControlState;
 import ai.ravenroot.api.persistence.AgentAuthorityState;
 import ai.ravenroot.api.persistence.AgentBudgetOperation;
 import ai.ravenroot.api.persistence.DurableAgentAuthorityBudget;
+import ai.ravenroot.api.persistence.AgentAuthorityBudgetSnapshot;
+import ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot;
 import ai.ravenroot.api.persistence.DurableExecutionPause;
 import ai.ravenroot.api.persistence.DurableExecutionResult;
 import ai.ravenroot.api.persistence.DurableHandler;
@@ -516,8 +518,28 @@ public final class PostgresExecutionStore implements ExecutionStore {
 
     @Override
     public CompletionStage<StoredProcessInstance> apply(ExecutionBatch batch) {
+        return applyInternal(batch, null);
+    }
+
+    @Override
+    public CompletionStage<StoredProcessInstance> applyWithPinnedAgentAuthorityRoot(
+            ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot) {
+        if (pinnedRoot == null) return java.util.concurrent.CompletableFuture.failedFuture(
+                failure(ExecutionStoreFailure.invalid("pinned root is required")));
+        return applyInternal(batch, pinnedRoot);
+    }
+
+    private CompletionStage<StoredProcessInstance> applyInternal(ExecutionBatch batch,
+                                                                 PinnedAgentAuthorityRoot pinnedRoot) {
         return async(() -> {
             Objects.requireNonNull(batch, "batch");
+            if (pinnedRoot != null) {
+                try {
+                    AgentAuthorityBudgetFold.requirePinnedRegistrationBatch(batch, pinnedRoot);
+                } catch (IllegalArgumentException invalid) {
+                    throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
+                }
+            }
             // All decidable from the request alone, so they happen before a connection is taken from
             // the pool, let alone a transaction opened. A rejection that needed a round trip would make
             // a caller bug cost the same as a write.
@@ -544,7 +566,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         "application/vnd.ravenroot.tool-continuation"));
             });
             requireEnvelopesMatchBatch(batch);
-            return write(batch.key(), connection -> applyLocked(connection, batch));
+            return write(batch.key(), connection -> applyLocked(connection, batch, pinnedRoot));
         });
     }
 
@@ -557,7 +579,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
      * host could move the row in between and this method would write a decision about a state that no
      * longer exists.</p>
      */
-    private StoredProcessInstance applyLocked(Connection connection, ExecutionBatch batch)
+    private StoredProcessInstance applyLocked(Connection connection, ExecutionBatch batch, PinnedAgentAuthorityRoot pinnedRoot)
             throws SQLException {
         ExecutionKey key = batch.key();
         InstanceMeta existing = readMeta(connection, key, true);
@@ -579,6 +601,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
 
         StoredProcessInstance replay = replayOf(connection, batch, existing);
         if (replay != null) {
+            if (pinnedRoot != null) requirePinnedReplay(readAgentAuthorityBudget(connection, key, false).orElse(null), pinnedRoot);
             return replay;
         }
 
@@ -637,7 +660,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         // changing.
         writeHandlers(connection, key, batch, folded, revision);
         writeToolApprovals(connection, key, batch, folded, pin, revision, now);
-        writeAgentAuthorityBudget(connection, key, batch, folded, now);
+        writeAgentAuthorityBudget(connection, key, batch, folded, now, pinnedRoot);
         writeExecutionPauses(connection, key, batch, folded, pin, revision);
         writeHumanTasks(connection, key, batch, folded, pin, revision, now);
         IdempotencyWrite idempotency = batch.idempotency().orElse(null);
@@ -3710,8 +3733,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
     // ---------------------------------------------------------------- agent authority and budgets
 
     @Override
-    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(
-            ExecutionKey key) {
+    public CompletionStage<Optional<DurableAgentAuthorityBudget>> loadAgentAuthorityBudget(ExecutionKey key) {
+        return loadAgentAuthorityBudgetSnapshot(key).thenApply(value -> value.map(AgentAuthorityBudgetSnapshot::budget));
+    }
+
+    @Override
+    public CompletionStage<Optional<AgentAuthorityBudgetSnapshot>> loadAgentAuthorityBudgetSnapshot(ExecutionKey key) {
         return async(() -> {
             Objects.requireNonNull(key, "key");
             return read(key, connection -> readAgentAuthorityBudget(connection, key, false));
@@ -3838,7 +3865,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
         }
     }
 
-    private Optional<DurableAgentAuthorityBudget> readAgentAuthorityBudget(Connection connection,
+    private Optional<AgentAuthorityBudgetSnapshot> readAgentAuthorityBudget(Connection connection,
                                                                            ExecutionKey key,
                                                                            boolean forUpdate)
             throws SQLException {
@@ -3853,7 +3880,7 @@ public final class PostgresExecutionStore implements ExecutionStore {
                     return Optional.empty();
                 }
                 try {
-                    return Optional.of(AgentAuthorityBudgetCodec.read(key, rows.getBytes("aggregate")));
+                    return Optional.of(AgentAuthorityBudgetCodec.readSnapshot(key, rows.getBytes("aggregate")));
                 } catch (RuntimeException corrupted) {
                     throw failure(new ExecutionStoreFailure.Corrupted(key,
                             "agent authority aggregate is invalid"));
@@ -3885,20 +3912,20 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 String tenantId = rows.getString("tenant_id");
                 var key = new ExecutionKey(tenantId, StoredUuid.required(rows,
                         "agent_authority_budget", "process_instance_id", tenantId));
-                DurableAgentAuthorityBudget budget;
+                AgentAuthorityBudgetSnapshot budget;
                 try {
-                    budget = AgentAuthorityBudgetCodec.read(key, rows.getBytes("aggregate"));
+                    budget = AgentAuthorityBudgetCodec.readSnapshot(key, rows.getBytes("aggregate"));
                 } catch (RuntimeException invalid) {
                     throw failure(new ExecutionStoreFailure.Corrupted(key,
                             "agent authority aggregate is invalid"));
                 }
-                if (budget.state() != AgentAuthorityState.ACTIVE
-                        || budget.controlEpoch() != expectedEpoch) {
+                if (budget.budget().state() != AgentAuthorityState.ACTIVE
+                        || budget.budget().controlEpoch() != expectedEpoch) {
                     continue;
                 }
-                DurableAgentAuthorityBudget killed;
+                AgentAuthorityBudgetSnapshot killed;
                 try {
-                    killed = AgentAuthorityBudgetFold.apply(key, budget,
+                    killed = AgentAuthorityBudgetFold.applySnapshot(key, budget,
                             new AgentBudgetOperation.KillRoot(expectedEpoch), now);
                 } catch (IllegalArgumentException | IllegalStateException invalid) {
                     // Wrapped for the same reason the batch path wraps it, and not because this call
@@ -3911,12 +3938,12 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 }
                 try {
                     releasedTeamActive = Math.addExact(releasedTeamActive,
-                            budget.reserved().teamActive() - killed.reserved().teamActive());
+                            budget.budget().reserved().teamActive() - killed.budget().reserved().teamActive());
                 } catch (ArithmeticException overflow) {
                     throw failure(ExecutionStoreFailure.invalid(
                             "agent authority release aggregate is exhausted"));
                 }
-                replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.write(killed)));
+                replacements.add(new BudgetReplacement(key, AgentAuthorityBudgetCodec.writeSnapshot(killed)));
             }
         }
         try (PreparedStatement update = connection.prepareStatement(
@@ -3947,13 +3974,13 @@ public final class PostgresExecutionStore implements ExecutionStore {
      * the way of one that did.</p>
      */
     private void writeAgentAuthorityBudget(Connection connection, ExecutionKey key,
-                                           ExecutionBatch batch, ProcessInstance folded, Instant now)
+                                           ExecutionBatch batch, ProcessInstance folded, Instant now, PinnedAgentAuthorityRoot pinnedRoot)
             throws SQLException {
         if (batch.agentBudgetOperations().isEmpty()) {
             return;
         }
         AgentAuthorityControl control = readAgentAuthorityControl(connection, "FOR SHARE");
-        DurableAgentAuthorityBudget budget = readAgentAuthorityBudget(connection, key, true)
+        AgentAuthorityBudgetSnapshot budget = readAgentAuthorityBudget(connection, key, true)
                 .orElse(null);
         for (AgentBudgetOperation operation : batch.agentBudgetOperations()) {
             requireAgentAuthorityControl(operation, control);
@@ -3961,12 +3988,14 @@ public final class PostgresExecutionStore implements ExecutionStore {
                 requireGrantBindingMatchesFold(folded, register);
             }
             try {
-                budget = AgentAuthorityBudgetFold.apply(key, budget, operation, now);
+                budget = pinnedRoot != null && operation instanceof AgentBudgetOperation.RegisterRoot register
+                        ? AgentAuthorityBudgetFold.registerPinnedRoot(key, budget, register, pinnedRoot, now)
+                        : AgentAuthorityBudgetFold.applySnapshot(key, budget, operation, now);
             } catch (IllegalArgumentException | IllegalStateException invalid) {
                 throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
             }
         }
-        byte[] encoded = AgentAuthorityBudgetCodec.write(budget);
+        byte[] encoded = AgentAuthorityBudgetCodec.writeSnapshot(budget);
         if (encoded.length > config.maxPayloadBytes()) {
             throw failure(new ExecutionStoreFailure.PayloadTooLarge(encoded.length,
                     config.maxPayloadBytes()));
@@ -4000,6 +4029,15 @@ public final class PostgresExecutionStore implements ExecutionStore {
                         .equals(register.binding().causalParentInvocationIds())) {
             throw failure(ExecutionStoreFailure.invalid(
                     "agent grant binding does not name the post-fold invocation"));
+        }
+    }
+
+    private static void requirePinnedReplay(AgentAuthorityBudgetSnapshot snapshot, PinnedAgentAuthorityRoot pinnedRoot) {
+        if (pinnedRoot == null) return;
+        try {
+            AgentAuthorityBudgetFold.requirePinnedRoot(snapshot, pinnedRoot);
+        } catch (IllegalStateException invalid) {
+            throw failure(ExecutionStoreFailure.invalid(invalid.getMessage()));
         }
     }
 

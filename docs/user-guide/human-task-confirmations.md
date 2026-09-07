@@ -76,6 +76,14 @@ identifier, and generation. After a reload or server restart, re-authenticate an
 that locator to fetch the task's durable presentation and current state. It never reconstructs the
 row from browser-cached task data.
 
+A recovered decision can open **View related tasks**. Ravenroot reads a fresh bounded list for that
+task's exact graph version, node, and deployment or process from the same authenticated service.
+This service-scoped list does not select a node or claim that the restored workspace document is the
+task's graph. Its count comes from the service even when the current page is empty. Choose a listed
+task to move the decision dialog to that exact task and generation; after a successful decision the
+list refreshes before offering the remaining work. Changing document, tenant, service, or
+authentication closes the recovered view and requires another exact authorized lookup.
+
 This release provides the confirmation inside the main workbench connected to the embedded or
 single-server runtime, including SQLite-backed restart recovery. External approval pages, redirects,
 callbacks, CAPTCHAs, arbitrary URLs, and third-party signing flows are outside this interaction.

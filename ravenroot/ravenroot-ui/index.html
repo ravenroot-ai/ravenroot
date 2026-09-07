@@ -920,17 +920,39 @@
       <h2 id="human-task-dialog-title">Human task decision</h2>
       <button class="btn" type="button" data-human-task-close>Close</button>
     </header>
-    <p id="human-task-dialog-prompt" class="human-task-prompt" data-human-task-prompt></p>
-    <p class="human-task-dialog-identity" data-human-task-identity></p>
-    <div class="editor-field full" data-human-task-comment-field>
-      <label for="human-task-comment">Comment</label>
-      <textarea id="human-task-comment" data-human-task-comment
-                aria-describedby="human-task-comment-hint human-task-error"></textarea>
-      <small id="human-task-comment-hint" data-human-task-comment-hint></small>
+    <div data-human-task-decision-view>
+      <p id="human-task-dialog-prompt" class="human-task-prompt" data-human-task-prompt></p>
+      <p class="human-task-dialog-identity" data-human-task-identity></p>
+      <div class="human-task-related-entry">
+        <button class="btn" type="button" data-human-task-related-open hidden>View related tasks</button>
+        <button class="btn" type="button" data-human-task-related-back hidden>Back to related tasks</button>
+      </div>
+      <div class="editor-field full" data-human-task-comment-field>
+        <label for="human-task-comment">Comment</label>
+        <textarea id="human-task-comment" data-human-task-comment
+                  aria-describedby="human-task-comment-hint human-task-error"></textarea>
+        <small id="human-task-comment-hint" data-human-task-comment-hint></small>
+      </div>
+      <p id="human-task-error" class="credential-error" role="status" aria-live="polite"
+         data-human-task-error hidden></p>
+      <div class="human-task-dialog-actions" data-human-task-actions></div>
     </div>
-    <p id="human-task-error" class="credential-error" role="status" aria-live="polite"
-       data-human-task-error hidden></p>
-    <div class="human-task-dialog-actions" data-human-task-actions></div>
+    <section class="human-task-related" data-human-task-related-view
+             aria-labelledby="human-task-related-title" hidden>
+      <h3 id="human-task-related-title" tabindex="-1">Related Human tasks</h3>
+      <p class="credential-note">Fresh tasks for this task's node and execution context. This list does not select a graph.</p>
+      <p class="human-task-related-status" role="status" aria-live="polite" tabindex="-1"
+         data-human-task-related-status></p>
+      <ul class="human-task-list" aria-labelledby="human-task-related-title"
+          data-human-task-related-list></ul>
+      <div class="human-task-pagination" data-human-task-related-pagination hidden>
+        <button class="btn" type="button" data-human-task-related-previous>Previous</button>
+        <span data-human-task-related-page>Page 1</span>
+        <button class="btn" type="button" data-human-task-related-next>Next</button>
+        <button class="btn" type="button" data-human-task-related-refresh>Refresh</button>
+      </div>
+      <button class="btn" type="button" data-human-task-related-current>Back to current task</button>
+    </section>
   </form>
 </dialog>
 

@@ -1915,6 +1915,10 @@
     .human-task-dialog-identity { margin: 0; color: var(--tx-2); font: 10px/1.45 'SFMono-Regular', Consolas, monospace; overflow-wrap: anywhere; }
     .human-task-dialog textarea { width: 100%; min-height: 96px; resize: vertical; }
     .human-task-dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+    .human-task-related-entry { display: flex; gap: 8px; margin: 8px 0; }
+    .human-task-related { display: grid; gap: 10px; }
+    .human-task-related h3 { margin: 0; font-size: 14px; }
+    .human-task-related-status { color: var(--tx-2); font-size: 11px; line-height: 1.45; margin: 0; }
     .human-task-decision-deny, .human-task-decision-cancel { color: var(--outcome-error-text); }
 
     .d3-nodes circle.human-task-attention {

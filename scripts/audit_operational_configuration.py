@@ -909,15 +909,14 @@ def json_schema_reference_candidates(text: str) -> list[tuple[int, str, str, str
     return rows
 
 
-def discover_paths(root: Path, relative_paths: Iterable[Path]) -> tuple[Candidate, ...]:
-    """Run the production candidate scanner over an explicit bounded path set."""
+def discover_source_texts(sources: dict[Path, str]) -> tuple[Candidate, ...]:
+    """Run the production candidate scanner over explicit in-memory source texts."""
     provisional: list[tuple[str, int, str, str, str, str, str, str, bool]] = []
-    for relative in sorted(set(relative_paths)):
+    for relative, text in sorted(sources.items()):
         surface_name = surface(relative)
         if surface_name is None or (relative.suffix not in SOURCE_SUFFIXES
                                     and not relative.name.startswith("Dockerfile")):
             continue
-        text = (root / relative).read_text(encoding="utf-8", errors="strict")
         if relative.suffix in {".java", ".js", ".mjs", ".ts"}:
             found = code_candidates(relative, text, surface_name)
         else:
@@ -943,6 +942,18 @@ def discover_paths(root: Path, relative_paths: Iterable[Path]) -> tuple[Candidat
         candidates.append(Candidate(identifier, path, line, symbol_name, kind, role, expression, digest,
                                     evidence, evidence_digest, surface_name, fixture))
     return tuple(candidates)
+
+
+def discover_paths(root: Path, relative_paths: Iterable[Path]) -> tuple[Candidate, ...]:
+    """Run the production candidate scanner over an explicit bounded path set."""
+    sources: dict[Path, str] = {}
+    for relative in sorted(set(relative_paths)):
+        surface_name = surface(relative)
+        if surface_name is None or (relative.suffix not in SOURCE_SUFFIXES
+                                    and not relative.name.startswith("Dockerfile")):
+            continue
+        sources[relative] = (root / relative).read_text(encoding="utf-8", errors="strict")
+    return discover_source_texts(sources)
 
 
 def discover(root: Path) -> tuple[Candidate, ...]:
@@ -3175,7 +3186,9 @@ ROUTE_BOUND_PATHS = {
 }
 EXECUTION_RUNTIME_FAMILY_ID = "execution-runtime-engine-four-v1"
 EXECUTION_RUNTIME_SOURCE_FINAL_REVISION = "63661709c127bdc206857343382d3a1d4d47274a"
-EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION = "cddc8576a34b48c3b8d456769e98238d3e6caae1"
+EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION = "b2adc1f67edb5564aa891a99c12dde6e4228f727"
+EXECUTION_RUNTIME_CARRIER_REKEY_REVISION = "b2adc1f67edb5564aa891a99c12dde6e4228f727"
+EXECUTION_RUNTIME_CARRIER_REKEY_PARENT = "91e2277c3baff0147fae152852520a64fac175be"
 EXECUTION_RUNTIME_CLAIM_BASE_REVISION = "f4be893d5b34742460a6b4658867aac69b558015"
 EXECUTION_RUNTIME_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionRuntimeConfiguration.java")
@@ -3183,6 +3196,8 @@ EXECUTION_ENGINE_POLICY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/ExecutionEnginePolicy.java")
 TERMINAL_NODE_HISTORY_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/TerminalNodeHistory.java")
+EXECUTION_STORE_BOOTSTRAP_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java")
 EXECUTION_RUNTIME_FAMILY_CANDIDATE_PATHS = frozenset({
     EXECUTION_RUNTIME_CONFIGURATION_PATH,
     EXECUTION_ENGINE_POLICY_PATH,
@@ -3220,6 +3235,7 @@ EXECUTION_RUNTIME_SOURCE_FINAL_PATHS = frozenset({
     Path("deploy/kubernetes/ravenroot.yaml"),
     Path("docs/reference/configuration.md"),
     Path("scripts/publish_environment_reference.py"),
+    EXECUTION_STORE_BOOTSTRAP_PATH,
 })
 EXECUTION_RUNTIME_SETTINGS = (
     {
@@ -3289,6 +3305,8 @@ EXECUTION_RUNTIME_TEST_AUTHORITIES = (
      "RavenrootServerMainLifecycleTest", "oneResolvedExecutionRuntimeReachesEveryServerExecutionConsumer"),
     ("ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/cli/RavenrootCliMainExecutionRuntimeConfigurationTest.java",
      "RavenrootCliMainExecutionRuntimeConfigurationTest", "localCompositionProjectsOneTupleIntoTheEngineAndActualRunnerShutdown"),
+    ("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrapTest.java",
+     "ExecutionStoreBootstrapTest", "resolvedBusyTimeoutReachesAllThreeOwnedConnections"),
 )
 EXECUTION_RUNTIME_TRANSITIONS = (
     ("oc-48bca2478a170c1b31cf", "execution-engine.actor-node-stash-capacity", "baseline-duplicate-atom", "6c81c82769749773df85a17424514a592a24ac40", "465e70a25caaf1f31f81417e030d903a2d52b551"),
@@ -3309,6 +3327,16 @@ EXECUTION_RUNTIME_CONSOLIDATIONS = (
      ("oc-48bca2478a170c1b31cf", "oc-82d21c2d5ca718e22886"), 1),
     ("execution-engine.actor-lifecycle-step-bound",
      ("oc-3ba88abd98e9a79ff3d4", "oc-9b1bde733ded46e394b1"), 1),
+)
+EXECUTION_RUNTIME_CURRENT_CARRIER_REKEYS = (
+    ("execution-engine.actor-node-stash-capacity", "oc-c5204a7b3b5efc758558",
+     "oc-9ccb2bccdc17fc78fd3d", "2f4a6bf2be99cb0f9145af87c9c14b35c7297fd4876305930f3ffe2bb16b2554"),
+    ("execution-engine.actor-lifecycle-step-bound", "oc-f4e7f5616ddcf5af551a",
+     "oc-98345297c4f565a376d0", "4feb0f47eb0fa8627acbe9e3a0cc8d9b4e1a3d7f201b063eaad4b8c2e1a794ba"),
+    ("execution-engine.terminal-node-history-capacity", "oc-7dfa4728faf45b9499d4",
+     "oc-13f971b19670397787ab", "a56fa5e18c5b7cba4b34340916441c7ca4a41d9eb3f1b86115b8e16eb5b0b9da"),
+    ("graph-runner.shutdown-step-bound", "oc-04fde683748febc56038",
+     "oc-c5293a23d9389592cd69", "ac3972a04125fef2b3fdc2990027d616296a3f99d7c283e0f1e3c6d3adac5b58"),
 )
 HUMAN_TASK_LEGACY_CONSOLIDATIONS = (
     ("oc-f01e525c4ff5b6f33249", "human-task.default-response-bytes"),
@@ -5157,15 +5185,45 @@ def execution_runtime_source_errors(root: Path) -> list[str]:
             or not server_code.index(runtime_call) < stores[0].start() < server_code.index(engine_call):
         errors.append("execution runtime server resolve/store/engine startup order has drifted")
 
+    bootstrap = (root / EXECUTION_STORE_BOOTSTRAP_PATH).read_text(encoding="utf-8")
+    configured = java_method_span(bootstrap, "ExecutionStoreBootstrap", "openConfigured")
+    bootstrap_code = normalized(strip_c_comments(
+        bootstrap[slice(*configured)] if configured else ""))
+    bootstrap_clauses = (
+        "int busyTimeoutMillis = Math.toIntExact(storeConfig.busyTimeout().toMillis())",
+        "new SqliteGraphDefinitionStore(configuration.location(), clock, "
+        "ai.ravenroot.api.persistence.GraphDefinitionReferences.NONE, "
+        "graphMlLimits.maxBytes(), busyTimeoutMillis)",
+        "new SqliteExecutionManifestStore(configuration.location(), clock, "
+        "ai.ravenroot.api.persistence.ExecutionManifestReferences.NONE, busyTimeoutMillis)",
+    )
+    if any(normalized(clause) not in bootstrap_code for clause in bootstrap_clauses):
+        errors.append("execution store graph/manifest busy-timeout bootstrap seam has drifted")
+
+    errors.extend(execution_runtime_test_source_errors(root))
+    return errors
+
+
+def execution_runtime_test_source_errors(
+        root: Path, source_overrides: dict[str, str] | None = None) -> list[str]:
+    """Pin the runnable tests that substantiate the accepted engine and bootstrap seams."""
+    errors: list[str] = []
+    overrides = source_overrides or {}
     for path, type_symbol, method in EXECUTION_RUNTIME_TEST_AUTHORITIES:
         try:
-            source = (root / path).read_text(encoding="utf-8")
+            source = overrides[path] if path in overrides \
+                else (root / path).read_text(encoding="utf-8")
         except OSError:
             errors.append(f"execution runtime runnable test is absent: {path}#{method}")
             continue
+        pinned = committed_source(root, EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION, path)
+        if pinned is None or source != pinned:
+            errors.append(f"execution runtime runnable test source identity has drifted: {type_symbol}")
         if java_type_span(source, type_symbol) is None \
                 or not exact_import_identity(source, "org.junit.jupiter.api.Test") \
-                or java_method_annotations(source, type_symbol, method) != ("@Test",):
+                or java_method_annotations(source, type_symbol, method) != ("@Test",) \
+                or re.search(r"@(?:org\.junit\.jupiter\.api\.)?Disabled\b",
+                             strip_c_comments_and_literals(source)) is not None:
             errors.append(f"execution runtime runnable test authority has drifted: {type_symbol}#{method}")
     return errors
 
@@ -5190,6 +5248,20 @@ def execution_runtime_authority_from_source(
              "beforeRevision": before, "afterRevision": after, "redundancyDelta": 0}
             for identity, setting, category, before, after in EXECUTION_RUNTIME_TRANSITIONS
         ],
+        "currentCarrierRekeys": [
+            {"setting": setting, "beforeCandidateId": before_id,
+             "afterCandidateId": after_id,
+             "path": "deploy/helm/ravenroot/values.schema.json",
+             "kind": "configuration-scalar", "role": "x-ravenroot-environment",
+             "expression": '"x-ravenroot-environment"',
+             "evidenceDigest": evidence_digest,
+             "beforeRevision": EXECUTION_RUNTIME_CARRIER_REKEY_PARENT,
+             "afterRevision": EXECUTION_RUNTIME_CARRIER_REKEY_REVISION,
+             "cause": "preceding persistence schema carrier insertion shifted lexical duplicate identity",
+             "redundancyDelta": 0}
+            for setting, before_id, after_id, evidence_digest
+            in EXECUTION_RUNTIME_CURRENT_CARRIER_REKEYS
+        ],
     }
 
 
@@ -5207,7 +5279,7 @@ def execution_runtime_authority_errors(root: Path, authorities: object,
         return ["execution runtime requires one exact closed family authority"]
     authority = authorities[EXECUTION_RUNTIME_FAMILY_ID]
     required = {"kind", "claimBaseRevision", "sourceFinalRevision", "currentSourceRevision",
-                "settings", "implementationStages", "candidateTransitions"}
+                "settings", "implementationStages", "candidateTransitions", "currentCarrierRekeys"}
     if not isinstance(authority, dict) or set(authority) != required:
         return ["execution runtime family authority has an unsupported shape"]
     errors: list[str] = []
@@ -5244,6 +5316,45 @@ def execution_runtime_authority_errors(root: Path, authorities: object,
             ["git", "rev-parse", f"{after}^"], cwd=root, capture_output=True, text=True)
         if parent.returncode != 0 or parent.stdout.strip() != before:
             errors.append("execution runtime candidate transition is not a direct parent/child change")
+    expected_rekeys = execution_runtime_authority_from_source(root, discovered)
+    expected_rekeys = expected_rekeys["currentCarrierRekeys"] if expected_rekeys is not None else []
+    if authority["currentCarrierRekeys"] != expected_rekeys:
+        errors.append("execution runtime current carrier identity rekeys have drifted")
+    elif any(item["redundancyDelta"] != 0 for item in authority["currentCarrierRekeys"]):
+        errors.append("execution runtime current carrier identity rekeys cannot receive consolidation credit")
+    rekey_parent = subprocess.run(
+        ["git", "rev-parse", f"{EXECUTION_RUNTIME_CARRIER_REKEY_REVISION}^"],
+        cwd=root, capture_output=True, text=True)
+    if rekey_parent.returncode != 0 \
+            or rekey_parent.stdout.strip() != EXECUTION_RUNTIME_CARRIER_REKEY_PARENT:
+        errors.append("execution runtime current carrier rekey revision is not the reviewed direct change")
+    schema_path = Path("deploy/helm/ravenroot/values.schema.json")
+    before_schema = committed_source(
+        root, EXECUTION_RUNTIME_CARRIER_REKEY_PARENT, schema_path.as_posix())
+    after_schema = committed_source(
+        root, EXECUTION_RUNTIME_CARRIER_REKEY_REVISION, schema_path.as_posix())
+    before_candidates = ({candidate.id: candidate for candidate in discover_source_texts(
+        {schema_path: before_schema})} if before_schema is not None else {})
+    after_candidates = ({candidate.id: candidate for candidate in discover_source_texts(
+        {schema_path: after_schema})} if after_schema is not None else {})
+    for item in expected_rekeys:
+        before_id = str(item["beforeCandidateId"])
+        after_id = str(item["afterCandidateId"])
+        before_candidate = before_candidates.get(before_id)
+        after_candidate = after_candidates.get(after_id)
+        candidate = discovered.get(after_id)
+        if before_candidate is None or after_candidate is None or candidate is None \
+                or any(getattr(candidate, attribute) != item[field] for attribute, field in (
+                ("path", "path"), ("kind", "kind"), ("role", "role"),
+                ("expression", "expression"), ("evidence_digest", "evidenceDigest"))) \
+                or any(getattr(before_candidate, attribute) != getattr(after_candidate, attribute)
+                       for attribute in ("path", "symbol", "kind", "role", "expression",
+                                         "expression_digest", "evidence", "evidence_digest")):
+            errors.append(f"execution runtime current carrier rekey target has drifted: {after_id}")
+        setting_partition = expected.get(str(item["setting"]), {})
+        supporting = setting_partition.get("supportingCandidateIds", [])
+        if after_id not in supporting or item["beforeCandidateId"] in supporting:
+            errors.append(f"execution runtime current carrier rekey is not reflected in mapping: {after_id}")
     expected_ids = {identifier for partition in expected.values()
                     for key in ("operatorCandidateIds", "supportingCandidateIds")
                     for identifier in partition[key]}

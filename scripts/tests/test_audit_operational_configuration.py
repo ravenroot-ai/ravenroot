@@ -2369,6 +2369,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         errors = self.execution_runtime_inventory_errors(credited_rekey, candidates)
         self.assertTrue(any("zero-credit accounting" in error for error in errors), errors)
 
+        for field, value in (("redundancyDelta", 1),
+                             ("afterCandidateId", "oc-00000000000000000000")):
+            with self.subTest(current_carrier_rekey=field):
+                changed_rekey = copy.deepcopy(document)
+                changed_rekey["executionRuntimeAuthorities"][family][
+                    "currentCarrierRekeys"][0][field] = value
+                errors = self.execution_runtime_inventory_errors(changed_rekey, candidates)
+                self.assertTrue(any("current carrier identity rekeys" in error
+                                    for error in errors), errors)
+
         wrong_consolidation = copy.deepcopy(document)
         wrong_consolidation["authorityConsolidations"][0]["redundancyDelta"] = 2
         errors = self.execution_runtime_inventory_errors(wrong_consolidation, candidates)
@@ -2420,6 +2430,33 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         with mock.patch.object(audit, "committed_source", side_effect=changed_anchor):
             errors = audit.execution_runtime_source_errors(ROOT)
         self.assertTrue(any("reviewed source has drifted" in error for error in errors), errors)
+
+        test_path, test_type, test_method = audit.EXECUTION_RUNTIME_TEST_AUTHORITIES[0]
+        test_source = (ROOT / test_path).read_text(encoding="utf-8")
+        method_span = audit.java_method_span(test_source, test_type, test_method)
+        self.assertIsNotNone(method_span)
+        opening = test_source.index("{", method_span[0], method_span[1])
+        empty_body = test_source[:opening + 1] + "\n    }" + test_source[method_span[1]:]
+        errors = audit.execution_runtime_test_source_errors(
+            ROOT, {test_path: empty_body})
+        self.assertTrue(any("test source identity" in error for error in errors), errors)
+
+        method_line = test_source.rfind("\n", 0, method_span[0]) + 1
+        disabled_method = (test_source[:method_line]
+                           + "    @org.junit.jupiter.api.Disabled\n"
+                           + test_source[method_line:])
+        errors = audit.execution_runtime_test_source_errors(
+            ROOT, {test_path: disabled_method})
+        self.assertTrue(any("runnable test authority" in error for error in errors), errors)
+
+        type_declaration = test_source.index(f"class {test_type}")
+        type_line = test_source.rfind("\n", 0, type_declaration) + 1
+        disabled_type = (test_source[:type_line]
+                         + "@org.junit.jupiter.api.Disabled\n"
+                         + test_source[type_line:])
+        errors = audit.execution_runtime_test_source_errors(
+            ROOT, {test_path: disabled_type})
+        self.assertTrue(any("runnable test authority" in error for error in errors), errors)
 
     def graph_limit_inventory_document(self, authorities, entries, candidates):
         return {
@@ -2718,6 +2755,25 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                                  require_complete=False)
         self.assertTrue(any("unclassified operational candidate" in error and "ofSeconds(37)" in error
                             for error in errors), errors)
+
+    def test_bounded_discovery_filters_binary_and_excluded_paths_before_reading(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            source = Path("ravenroot/example/src/main/java/dev/example/Policy.java")
+            (root / source).parent.mkdir(parents=True)
+            (root / source).write_text(
+                "final class Policy { static final int QUEUE_CAPACITY = 7; }\n",
+                encoding="utf-8",
+            )
+            binary = Path("docs/assets/not-utf8.png")
+            (root / binary).parent.mkdir(parents=True)
+            (root / binary).write_bytes(b"\x89PNG\r\n\x1a\n\xff\xfe")
+            excluded_missing = Path(".git/objects/missing.java")
+            expected = audit.discover_paths(root, [source])
+            self.assertEqual(
+                expected,
+                audit.discover_paths(root, [source, binary, excluded_missing]),
+            )
 
     def test_explicit_time_unit_calls_discover_only_timeout_argument_atoms(self) -> None:
         source = """

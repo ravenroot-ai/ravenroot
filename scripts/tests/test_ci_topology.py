@@ -48,9 +48,23 @@ def operational_audit_gate_errors(block: str) -> list[str]:
     errors = []
     if not re.search(r"(?m)^\s+fetch-depth: 0$", block):
         errors.append("full repository history is absent")
-    if block.count(AUDIT_SUITE_COMMAND) != 1:
+    step_starts = list(re.finditer(r"(?m)^      - name: [^\n]+$", block))
+    matching = [(index, match) for index, match in enumerate(step_starts)
+                if match.group(0) == "      - name: Verify Python tooling contracts"]
+    if len(matching) != 1:
+        return errors + ["one enabled Python tooling step is required"]
+    index, step_start = matching[0]
+    step_end = step_starts[index + 1].start() if index + 1 < len(step_starts) else len(block)
+    step_lines = block[step_start.start():step_end].rstrip().splitlines()
+    if len(step_lines) < 3 or step_lines[1] != "        run: |" \
+            or any(not line.startswith("          ") for line in step_lines[2:]):
+        return errors + ["Python tooling step has unsupported keys or shape"]
+    commands = [line[10:] for line in step_lines[2:] if line[10:]]
+    if any(not command.startswith("python3 ") for command in commands):
+        errors.append("Python tooling step contains a non-executable or conditional shell line")
+    if commands.count(AUDIT_SUITE_COMMAND) != 1:
         errors.append("operational audit unit suite is absent or duplicated")
-    if block.count(AUDIT_STRICT_COMMAND) != 1:
+    if commands.count(AUDIT_STRICT_COMMAND) != 1:
         errors.append("operational audit strict check is absent or duplicated")
     return errors
 
@@ -158,8 +172,25 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
                 self.assertEqual([], operational_audit_gate_errors(block))
                 mutations = {
                     "history": block.replace("fetch-depth: 0", "fetch-depth: 2", 1),
-                    "unit-suite": block.replace(AUDIT_SUITE_COMMAND, "true", 1),
-                    "strict-check": block.replace(AUDIT_STRICT_COMMAND, "true", 1),
+                    "commented-commands": block.replace(
+                        AUDIT_SUITE_COMMAND, "# " + AUDIT_SUITE_COMMAND, 1).replace(
+                            AUDIT_STRICT_COMMAND, "# " + AUDIT_STRICT_COMMAND, 1),
+                    "disabled-step": block.replace(
+                        "      - name: Verify Python tooling contracts\n        run: |",
+                        "      - name: Verify Python tooling contracts\n        if: false\n        run: |", 1),
+                    "shell-conditional": block.replace(
+                        AUDIT_SUITE_COMMAND,
+                        "if false; then\n          " + AUDIT_SUITE_COMMAND + "\n          fi", 1),
+                    "after-run-if": block.replace(
+                        "          python3 scripts/check_release_configuration.py",
+                        "          python3 scripts/check_release_configuration.py\n        if: false", 1),
+                    "after-run-continue": block.replace(
+                        "          python3 scripts/check_release_configuration.py",
+                        "          python3 scripts/check_release_configuration.py\n"
+                        "        continue-on-error: true", 1),
+                    "after-run-shell": block.replace(
+                        "          python3 scripts/check_release_configuration.py",
+                        "          python3 scripts/check_release_configuration.py\n        shell: echo {0}", 1),
                 }
                 for seam, changed in mutations.items():
                     with self.subTest(job=job, seam=seam):

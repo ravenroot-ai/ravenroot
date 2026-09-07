@@ -103,14 +103,27 @@ async function selectDeploymentContext(page, ready) {
 }
 
 async function selectHumanTaskNode(page) {
-  const point = await page.evaluate(nodeId => {
+  const hit = await page.evaluate(nodeId => {
     const active = window.ravenroot.activeDocument();
     const node = active.cy.getElementById(nodeId);
     const position = node.renderedPosition();
     const bounds = active.cy.container().getBoundingClientRect();
-    return { x: bounds.left + position.x, y: bounds.top + position.y };
+    return {
+      point: { x: bounds.left + position.x, y: bounds.top + position.y },
+      viewport: { left: bounds.left, top: bounds.top, right: bounds.right, bottom: bounds.bottom },
+      hits: active.cy.nodes().filter(candidate => {
+        const box = candidate.renderedBoundingBox({ includeLabels: false, includeOverlays: false });
+        return position.x >= box.x1 && position.x <= box.x2
+          && position.y >= box.y1 && position.y <= box.y2;
+      }).map(candidate => candidate.id()),
+    };
   }, NODE_ID);
-  await page.mouse.click(point.x, point.y);
+  expect(hit.hits).toEqual([NODE_ID]);
+  expect(hit.point.x).toBeGreaterThan(hit.viewport.left);
+  expect(hit.point.x).toBeLessThan(hit.viewport.right);
+  expect(hit.point.y).toBeGreaterThan(hit.viewport.top);
+  expect(hit.point.y).toBeLessThan(hit.viewport.bottom);
+  await page.mouse.click(hit.point.x, hit.point.y);
   await expect.poll(() => page.evaluate(nodeId => {
     const selected = window.ravenroot.activeDocument().cy.nodes(':selected');
     return { count: selected.length, nodeId: selected.length === 1 ? selected.first().id() : null };

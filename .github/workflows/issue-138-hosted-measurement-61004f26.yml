@@ -52,6 +52,8 @@ jobs:
           mkdir -p measurement/identity
           {
             printf 'workflowCommit\t%s\n' "$GITHUB_SHA"
+            printf 'workflowRunId\t%s\n' "$GITHUB_RUN_ID"
+            printf 'workflowRunAttempt\t%s\n' "$GITHUB_RUN_ATTEMPT"
             printf 'baseCommit\t%s\n' "$BASE_SHA"
             printf 'candidateCommit\t%s\n' "$CANDIDATE_SHA"
             printf 'baseModuleTree\t%s\n' \
@@ -59,6 +61,7 @@ jobs:
             printf 'candidateModuleTree\t%s\n' \
               "$(git -C candidate rev-parse "$CANDIDATE_SHA:$MODULE_REL")"
           } >measurement/identity/commits.tsv
+          test "$GITHUB_RUN_ATTEMPT" = 1
 
           subject_paths=(
             "$MODULE_REL/src/main/java/ai/ravenroot/testkit/sandbox/SandboxSupervisorContract.java"
@@ -128,6 +131,51 @@ jobs:
               -pl ravenroot-sandbox-supervisor-testkit -am -DskipTests install \
               >measurement/bootstrap/candidate.log 2>&1
 
+      - name: Resolve and prove each offline Surefire provider prerequisite
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          provider_smoke() {
+            local checkout=$1 repo=$2 label=$3
+            local reactor="$GITHUB_WORKSPACE/$checkout/ravenroot"
+            local reports="$reactor/ravenroot-sandbox-supervisor-testkit/target/surefire-reports"
+            local suffix="issue138-provider-$label"
+            local log="$GITHUB_WORKSPACE/measurement/bootstrap/$label-provider-smoke.log"
+            MAVEN_OPTS="-Dmaven.repo.local=$GITHUB_WORKSPACE/$repo" \
+              mvn -B --no-transfer-progress -f "$reactor/pom.xml" \
+                -pl ravenroot-sandbox-supervisor-testkit \
+                -Dtest=RemainingOutcomesCoverageTest \
+                -Dsurefire.rerunFailingTestsCount=0 -DforkCount=1 -DreuseForks=false \
+                -Dsurefire.reportNameSuffix="$suffix" test >"$log" 2>&1
+            local xml_matches=("$reports"/TEST-*"$suffix".xml)
+            local text_matches=("$reports"/*"$suffix".txt)
+            (( ${#xml_matches[@]} == 1 && ${#text_matches[@]} == 1 ))
+            [[ -f "${xml_matches[0]}" && -f "${text_matches[0]}" ]]
+            cp "${xml_matches[0]}" \
+              "$GITHUB_WORKSPACE/measurement/bootstrap/$label-provider-smoke.xml"
+            cp "${text_matches[0]}" \
+              "$GITHUB_WORKSPACE/measurement/bootstrap/$label-provider-smoke.txt"
+            python3 - "$GITHUB_WORKSPACE/measurement/bootstrap/$label-provider-smoke.xml" <<'PY'
+          import sys
+          import xml.etree.ElementTree as ET
+
+          root = ET.parse(sys.argv[1]).getroot()
+          expected = {"tests": "3", "failures": "0", "errors": "0", "skipped": "0"}
+          if any(root.attrib.get(key) != value for key, value in expected.items()):
+              raise SystemExit(f"invalid provider smoke statistics: {root.attrib}")
+          if len(root.findall("testcase")) != 3:
+              raise SystemExit("provider smoke did not select exactly three test cases")
+          if root.findall(".//rerunFailure") or root.findall(".//rerunError"):
+              raise SystemExit("provider smoke contained a rerun")
+          if root.findall(".//flakyFailure") or root.findall(".//flakyError"):
+              raise SystemExit("provider smoke contained a flaky result")
+          PY
+          }
+
+          provider_smoke base .m2-issue138-base base
+          provider_smoke candidate .m2-issue138-candidate candidate
+
       - name: Run the predeclared fresh-process matrix
         shell: bash
         run: |
@@ -183,6 +231,42 @@ jobs:
           test "$(wc -l <measurement/all-auxiliary.jsonl)" -eq 6
           test "$(awk -F '\t' '$2 == "FINISHED" && $8 != 0 {count++} END {print count+0}' \
             measurement/phase-status.tsv)" -eq 0
+
+          jq -r '[.commit,.mode,.condition,.sample] | @tsv' measurement/all-scheduled.jsonl \
+            | sort >measurement/scheduled-tuples.tsv
+          jq -r '[.commit,.mode,.condition,.sample] | @tsv' measurement/all-samples.jsonl \
+            | sort >measurement/sample-tuples.tsv
+          cmp measurement/scheduled-tuples.tsv measurement/sample-tuples.tsv
+          test "$(sort -u measurement/scheduled-tuples.tsv | wc -l)" -eq 90
+
+          : >measurement/expected-tuples.tsv
+          for mode in base candidate; do
+            for condition in isolated contended; do
+              for index in $(seq 1 20); do
+                commit=$CANDIDATE_SHA
+                [[ "$mode" == base ]] && commit=$BASE_SHA
+                printf '%s\t%s\t%s\t%03d\n' "$commit" "$mode" "$condition" "$index" \
+                  >>measurement/expected-tuples.tsv
+              done
+            done
+          done
+          for condition in isolated contended; do
+            for index in $(seq 1 5); do
+              printf '%s\tcandidate-siblings\t%s\t%03d\n' \
+                "$CANDIDATE_SHA" "$condition" "$index" \
+                >>measurement/expected-tuples.tsv
+            done
+          done
+          sort -o measurement/expected-tuples.tsv measurement/expected-tuples.tsv
+          cmp measurement/expected-tuples.tsv measurement/sample-tuples.tsv
+
+          jq -r 'select(.auxiliaryScheduled == true) | [.condition,.sample] | @tsv' \
+            measurement/all-samples.jsonl | sort >measurement/auxiliary-tuples.tsv
+          printf '%s\n' \
+            $'contended\t001' $'contended\t010' $'contended\t020' \
+            $'isolated\t001' $'isolated\t010' $'isolated\t020' \
+            >measurement/expected-auxiliary-tuples.tsv
+          cmp measurement/expected-auxiliary-tuples.tsv measurement/auxiliary-tuples.tsv
 
           jq -se '
             length == 90 and

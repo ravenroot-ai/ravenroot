@@ -1662,8 +1662,14 @@ function selectedRealNodeIds(owner = workspace.active, captured = null) {
 }
 
 function finishVisualGroups(owner = workspace.active) {
-  owner?.visualGroupsRenderer?.finish();
-  elasticRendererFor(owner)?.elasticMount?.finishVisualGroupTransition?.();
+  // Finishing an already-settled transition repaints its last projection. That projection owns a
+  // selection snapshot from the last group refresh, not the live selection a user may have made
+  // since then, so an otherwise read-only save could restore a stale (often empty) selection and
+  // clear the Inspector. A settled renderer is already at its target; only an active transition
+  // needs to be forced to its final frame.
+  if (owner?.visualGroupsRenderer?.isAnimating) owner.visualGroupsRenderer.finish();
+  const elastic = elasticRendererFor(owner)?.elasticMount;
+  if (elastic?.visualGroupAnimating) elastic.finishVisualGroupTransition?.();
 }
 
 // Group presentation lives only on its document; it has no module-level working-view mirror.
@@ -6260,12 +6266,13 @@ function guardInspectorSelectionChange(desiredIds) {
   return true;
 }
 
-function openInspectorUnsavedDialog(draft, desiredIds, valid) {
+function openInspectorUnsavedDialog(draft, desiredIds, valid, { preserveDraft = false } = {}) {
   pendingInspectorTransition = {
     draft,
     desiredIds: [...desiredIds],
     origin: document.activeElement,
     complete: null,
+    preserveDraft,
   };
   restoreDraftSelection(draft);
   const dialog = document.getElementById('inspector-unsaved-dialog');
@@ -6300,8 +6307,18 @@ function completeInspectorTransition(action) {
   }
   pendingInspectorTransition = null;
   dialog.close();
-  retireInspectorDraft(pending.draft.form);
-  if (pending.complete) return Boolean(pending.complete());
+  const retainCommittedDraft = pending.preserveDraft && action === 'save';
+  if (!retainCommittedDraft) retireInspectorDraft(pending.draft.form);
+  if (pending.complete) {
+    const completed = Boolean(pending.complete());
+    // Discard intentionally keeps the document model and drops the form values. Saving GraphML
+    // does not otherwise transition the Inspector, so repaint the selected element after the
+    // download instead of leaving a disconnected invalid draft on screen.
+    if (pending.preserveDraft && action === 'discard') {
+      queueMicrotask(() => showSelectionInfo({ skipDraftGuard: true }));
+    }
+    return completed;
+  }
   applyStableSelection(cy, pending.desiredIds);
   queueMicrotask(() => showSelectionInfo({ skipDraftGuard: true }));
   return true;
@@ -6309,7 +6326,9 @@ function completeInspectorTransition(action) {
 
 // Commands that mutate the graph or replace the Inspector enter here before doing either. The
 // dialog therefore owns a deferred intention, not a rollback of work that already happened.
-function runAfterInspectorDraft(action, { deferredAction = action, deferredResult = true } = {}) {
+function runAfterInspectorDraft(action, {
+  deferredAction = action, deferredResult = true, preserveDraft = false,
+} = {}) {
   if (pendingInspectorTransition) return deferredResult;
   const draft = inspectorDraft;
   if (!draft?.form.isConnected) return Boolean(action());
@@ -6318,18 +6337,18 @@ function runAfterInspectorDraft(action, { deferredAction = action, deferredResul
   const assessment = inspectInspectorDraft(draft);
   if (inspectorAutosave && assessment.valid) {
     if (assessment.changed && !commitInspectorDraft(draft, { coalesceKey: draft.focusKey })) {
-      openInspectorUnsavedDialog(draft, [draft.elementId], false);
+      openInspectorUnsavedDialog(draft, [draft.elementId], false, { preserveDraft });
       pendingInspectorTransition.complete = deferredAction;
       return deferredResult;
     }
-    retireInspectorDraft(draft.form);
+    if (!preserveDraft) retireInspectorDraft(draft.form);
     return Boolean(action());
   }
   if (!assessment.changed) {
-    retireInspectorDraft(draft.form);
+    if (!preserveDraft) retireInspectorDraft(draft.form);
     return Boolean(action());
   }
-  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid);
+  openInspectorUnsavedDialog(draft, [draft.elementId], assessment.valid, { preserveDraft });
   pendingInspectorTransition.complete = deferredAction;
   return deferredResult;
 }
@@ -13744,7 +13763,7 @@ const commandRegistry = createCommandRegistry(createAppCommands({
   openFile: () => runAfterInspectorDraft(() => document.getElementById('file-inp').click()),
   replaceActive: () => runAfterInspectorDraft(() => document.getElementById('replace-file-inp').click()),
   forkDocument: () => runAfterInspectorDraft(() => forkActiveDocument()),
-  save: () => runAfterInspectorDraft(() => exportGraphML()),
+  save: () => runAfterInspectorDraft(() => exportGraphML(), { preserveDraft: true }),
   closeDocument: (_context, invocation) => requestCloseDocument(workspace.activeId,
     invocation.control?.closest('#application-menu') ? menuTrigger('file') : invocation.control),
   undo: () => undoEdit(),

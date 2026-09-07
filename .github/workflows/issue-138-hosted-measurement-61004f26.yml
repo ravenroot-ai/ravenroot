@@ -1,0 +1,231 @@
+name: Issue 138 hosted measurement 61004f26
+
+on:
+  push:
+    branches: [measurement/issue_138-hosted-61004f26]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue-138-hosted-measurement-61004f26
+  cancel-in-progress: false
+
+env:
+  BASE_SHA: f1436cc185b0eed255b321fb1abd6c984604eb25
+  CANDIDATE_SHA: 61004f26a7aff0807132b84e89fdc18eef84bded
+  MODULE_REL: ravenroot/ravenroot-sandbox-supervisor-testkit
+
+jobs:
+  measure:
+    name: pinned base and candidate CPU red-control matrix
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - name: Check out exact candidate source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: candidate
+          ref: ${{ env.CANDIDATE_SHA }}
+
+      - name: Check out exact pre-fix source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          path: base
+          ref: ${{ env.BASE_SHA }}
+
+      - name: Set up Java
+        uses: actions/setup-java@dd06d9cba3e5552c54d9f8ea23572deb30010f7c # v6.0.0
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Verify source identities and install the base observer overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate rev-parse HEAD)" = "$CANDIDATE_SHA"
+          test "$(git -C base rev-parse HEAD)" = "$BASE_SHA"
+
+          mkdir -p measurement/identity
+          {
+            printf 'workflowCommit\t%s\n' "$GITHUB_SHA"
+            printf 'baseCommit\t%s\n' "$BASE_SHA"
+            printf 'candidateCommit\t%s\n' "$CANDIDATE_SHA"
+            printf 'baseModuleTree\t%s\n' \
+              "$(git -C base rev-parse "$BASE_SHA:$MODULE_REL")"
+            printf 'candidateModuleTree\t%s\n' \
+              "$(git -C candidate rev-parse "$CANDIDATE_SHA:$MODULE_REL")"
+          } >measurement/identity/commits.tsv
+
+          subject_paths=(
+            "$MODULE_REL/src/main/java/ai/ravenroot/testkit/sandbox/SandboxSupervisorContract.java"
+            "$MODULE_REL/src/test/java/ai/ravenroot/testkit/sandbox/NonCompliantOnCpu.java"
+            "$MODULE_REL/src/test/java/ai/ravenroot/testkit/sandbox/NonCompliantSupervisorRedControlTest.java"
+            "$MODULE_REL/src/test/java/ai/ravenroot/testkit/sandbox/RealisticFakeSupervisor.java"
+          )
+          for path in "${subject_paths[@]}"; do
+            printf '%s\t%s\t%s\n' "$path" \
+              "$(git -C base rev-parse "$BASE_SHA:$path")" \
+              "$(git -C candidate rev-parse "$CANDIDATE_SHA:$path")" \
+              >>measurement/identity/subject-blobs.tsv
+            test "$(git -C base hash-object "$GITHUB_WORKSPACE/base/$path")" = \
+              "$(git -C base rev-parse "$BASE_SHA:$path")"
+            test "$(git -C candidate hash-object "$GITHUB_WORKSPACE/candidate/$path")" = \
+              "$(git -C candidate rev-parse "$CANDIDATE_SHA:$path")"
+          done
+
+          overlay_paths=(
+            "$MODULE_REL/src/test/java/ai/ravenroot/testkit/sandbox/CpuContentionWorker.java"
+            "$MODULE_REL/src/test/java/ai/ravenroot/testkit/sandbox/CpuRedControlMeasurement.java"
+            "$MODULE_REL/src/test/java/ai/ravenroot/testkit/sandbox/CpuServiceCalibration.java"
+            "$MODULE_REL/src/test/scripts/measure-cpu-red-control.sh"
+            "$MODULE_REL/src/test/scripts/validate-cpu-measurement.py"
+          )
+          for path in "${overlay_paths[@]}"; do
+            mkdir -p "base/$(dirname "$path")"
+            cp "candidate/$path" "base/$path"
+            declared=$(git -C candidate rev-parse "$CANDIDATE_SHA:$path")
+            copied=$(git -C base hash-object "$GITHUB_WORKSPACE/base/$path")
+            printf '%s\t%s\t%s\n' "$path" "$declared" "$copied" \
+              >>measurement/identity/observer-overlay-blobs.tsv
+            test "$declared" = "$copied"
+          done
+          git -C base status --short >measurement/identity/base-status-after-overlay.txt
+
+      - name: Record host and toolchain metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            uname -a
+            printf 'runnerImage=%s\n' "${ImageOS:-unknown}"
+            printf 'runnerImageVersion=%s\n' "${ImageVersion:-unknown}"
+            printf 'availableProcessors=%s\n' "$(getconf _NPROCESSORS_ONLN)"
+            if [[ -r /sys/fs/cgroup/cpu.max ]]; then
+              printf 'cpu.max='; cat /sys/fs/cgroup/cpu.max
+            fi
+            if [[ -r /proc/pressure/cpu ]]; then
+              cat /proc/pressure/cpu
+            fi
+            java -version
+            mvn -version
+          } >measurement/host-and-toolchain.txt 2>&1
+
+      - name: Compile exact base and candidate in separate Maven repositories
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p measurement/bootstrap
+          MAVEN_OPTS="-Dmaven.repo.local=$GITHUB_WORKSPACE/.m2-issue138-base" \
+            mvn -B --no-transfer-progress -f base/ravenroot/pom.xml \
+              -pl ravenroot-sandbox-supervisor-testkit -am -DskipTests install \
+              >measurement/bootstrap/base.log 2>&1
+          MAVEN_OPTS="-Dmaven.repo.local=$GITHUB_WORKSPACE/.m2-issue138-candidate" \
+            mvn -B --no-transfer-progress -f candidate/ravenroot/pom.xml \
+              -pl ravenroot-sandbox-supervisor-testkit -am -DskipTests install \
+              >measurement/bootstrap/candidate.log 2>&1
+
+      - name: Run the predeclared fresh-process matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p measurement/phases
+          : >measurement/phase-status.tsv
+
+          run_phase() {
+            local checkout=$1 mode=$2 condition=$3 start=$4 count=$5 commit=$6 label=$7 repo=$8
+            local output="$GITHUB_WORKSPACE/measurement/phases/$label"
+            local script="$GITHUB_WORKSPACE/$checkout/$MODULE_REL/src/test/scripts/measure-cpu-red-control.sh"
+            local started ended code
+            started=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
+            printf '%s\tSCHEDULED\t%s\t%s\t%s\t%s\t%s\n' \
+              "$label" "$started" "$commit" "$mode" "$condition" "$count" \
+              >>measurement/phase-status.tsv
+            set +e
+            MAVEN_OPTS="-Dmaven.repo.local=$GITHUB_WORKSPACE/$repo" \
+              "$script" "$GITHUB_WORKSPACE/$checkout" "$mode" "$condition" \
+                "$start" "$count" "$commit" "$output"
+            code=$?
+            set -e
+            ended=$(date -u +%Y-%m-%dT%H:%M:%S.%NZ)
+            printf '%s\tFINISHED\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$label" "$ended" "$commit" "$mode" "$condition" "$count" "$code" \
+              >>measurement/phase-status.tsv
+          }
+
+          # Preserve the agreed I10/C20/I10 ordering. Base auxiliary observations are
+          # selected by the script only at outer indexes 1, 10 and 20 per condition.
+          run_phase base base isolated 1 10 "$BASE_SHA" base-i01-10 .m2-issue138-base
+          run_phase base base contended 1 20 "$BASE_SHA" base-c01-20 .m2-issue138-base
+          run_phase base base isolated 11 10 "$BASE_SHA" base-i11-20 .m2-issue138-base
+          run_phase candidate candidate isolated 1 10 "$CANDIDATE_SHA" candidate-i01-10 .m2-issue138-candidate
+          run_phase candidate candidate contended 1 20 "$CANDIDATE_SHA" candidate-c01-20 .m2-issue138-candidate
+          run_phase candidate candidate isolated 11 10 "$CANDIDATE_SHA" candidate-i11-20 .m2-issue138-candidate
+          run_phase candidate candidate-siblings isolated 1 5 "$CANDIDATE_SHA" siblings-i01-05 .m2-issue138-candidate
+          run_phase candidate candidate-siblings contended 1 5 "$CANDIDATE_SHA" siblings-c01-05 .m2-issue138-candidate
+
+      - name: Assemble and validate every scheduled denominator
+        shell: bash
+        run: |
+          set -euo pipefail
+          find measurement/phases -name samples.jsonl -print0 | sort -z | xargs -0 cat \
+            >measurement/all-samples.jsonl
+          find measurement/phases -name scheduled.jsonl -print0 | sort -z | xargs -0 cat \
+            >measurement/all-scheduled.jsonl
+          jq -c 'select(.auxiliaryScheduled == true) | .auxiliary' \
+            measurement/all-samples.jsonl >measurement/all-auxiliary.jsonl
+
+          test "$(wc -l <measurement/all-scheduled.jsonl)" -eq 90
+          test "$(wc -l <measurement/all-samples.jsonl)" -eq 90
+          test "$(wc -l <measurement/all-auxiliary.jsonl)" -eq 6
+          test "$(awk -F '\t' '$2 == "FINISHED" && $8 != 0 {count++} END {print count+0}' \
+            measurement/phase-status.tsv)" -eq 0
+
+          jq -se '
+            length == 90 and
+            (map(select(.mode == "base")) | length == 40) and
+            (map(select(.mode == "candidate")) | length == 40) and
+            (map(select(.mode == "candidate-siblings")) | length == 10) and
+            (map(select(.condition == "isolated" and .mode == "base")) | length == 20) and
+            (map(select(.condition == "contended" and .mode == "base")) | length == 20) and
+            (map(select(.condition == "isolated" and .mode == "candidate")) | length == 20) and
+            (map(select(.condition == "contended" and .mode == "candidate")) | length == 20) and
+            (map(select(.condition == "isolated" and .mode == "candidate-siblings")) | length == 5) and
+            (map(select(.condition == "contended" and .mode == "candidate-siblings")) | length == 5) and
+            all(.rerunCount == 0 and .safetyTimedOut == false and .loadValid == true and
+              .outer.valid == true and .outer.reruns == 0 and .outer.flaky == 0) and
+            (map(select(.mode == "base")) |
+              all(.commit == env.BASE_SHA and .calibration != null and
+                (.calibration.category == "RUNNABLE" or
+                 .calibration.category == "NOT_RUNNABLE"))) and
+            (map(select(.mode == "candidate")) |
+              all(.commit == env.CANDIDATE_SHA and .calibration == null and
+                .outer.category == "INTENDED_CPU_ASSERTION")) and
+            (map(select(.mode == "candidate-siblings")) |
+              all(.commit == env.CANDIDATE_SHA and .calibration == null and
+                .outer.category == "ALL_NINE_INTENDED_ASSERTIONS")) and
+            (map(select(.auxiliaryScheduled == true)) |
+              length == 6 and all(.auxiliary.valid == true and .auxiliaryLoadValid == true))
+          ' measurement/all-samples.jsonl >/dev/null
+
+          jq -s '{
+            scheduled:length,
+            base:map(select(.mode == "base"))|length,
+            baseRunnable:map(select(.mode == "base" and .calibration.category == "RUNNABLE"))|length,
+            baseNotRunnable:map(select(.mode == "base" and .calibration.category == "NOT_RUNNABLE"))|length,
+            candidate:map(select(.mode == "candidate"))|length,
+            candidateSiblings:map(select(.mode == "candidate-siblings"))|length,
+            auxiliary:map(select(.auxiliaryScheduled == true))|length
+          }' measurement/all-samples.jsonl >measurement/summary.json
+
+      - name: Upload raw issue 138 measurement evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: issue-138-hosted-measurement-${{ github.run_id }}
+          path: measurement
+          if-no-files-found: error
+          retention-days: 30

@@ -45,6 +45,80 @@ class RouteTableSpecServerAgreementTest {
     Path uiDirectory;
 
     @Test
+    void eventStreamSpecSeparatesSseTextFromVersionedDataAndControlFrames() {
+        java.util.function.Function<ai.ravenroot.api.payload.PayloadValue,
+                java.util.Map<String, ai.ravenroot.api.payload.PayloadValue>> members = value ->
+                ((ai.ravenroot.api.payload.PayloadValue.MapValue) value).entries();
+        java.util.function.Function<ai.ravenroot.api.payload.PayloadValue, String> text = value ->
+                ((ai.ravenroot.api.payload.PayloadValue.TextValue) value).value();
+        var document = members.apply(ai.ravenroot.api.payload.PayloadJson.read(
+                OpenApiSpecGenerator.generate(RouteTable.ALL).getBytes(StandardCharsets.UTF_8),
+                ai.ravenroot.api.payload.PayloadLimits.DEFAULTS));
+        assertEquals("3.0.3", text.apply(document.get("openapi")));
+        var paths = members.apply(document.get("paths"));
+        var operation = members.apply(members.apply(paths.get("/v1/events")).get("get"));
+        var response = members.apply(members.apply(operation.get("responses")).get("200"));
+        var content = members.apply(response.get("content"));
+        assertEquals(Set.of("text/event-stream"), content.keySet());
+        var stream = members.apply(content.get("text/event-stream"));
+        assertEquals("string", text.apply(members.apply(stream.get("schema")).get("type")));
+        var headers = members.apply(response.get("headers"));
+        assertEquals(Set.of("X-Ravenroot-Event-Source", "X-Ravenroot-Event-Continuity",
+                "X-Ravenroot-Event-Schema-Version"), headers.keySet());
+        var namedEvents = members.apply(stream.get("x-ravenroot-sse-events"));
+        assertEquals(Set.of("execution", "stream-truncated", "stream-overrun"), namedEvents.keySet());
+        assertEquals("#/components/schemas/ExecutionStreamEvent", text.apply(members.apply(
+                members.apply(namedEvents.get("execution")).get("dataSchema")).get("$ref")));
+        var schemas = members.apply(members.apply(document.get("components")).get("schemas"));
+        var base = members.apply(schemas.get("ExecutionStreamEventBase"));
+        assertEquals(ai.ravenroot.api.payload.PayloadValue.of(true), base.get("additionalProperties"));
+        var baseProperties = members.apply(base.get("properties"));
+        assertTrue(baseProperties.containsKey("type"), "the compatibility alias belongs to the common schema");
+        assertFalse(members.apply(baseProperties.get("occurredAt")).containsKey("format"),
+                "extended-year Java Instant values must not be narrowed to RFC 3339");
+        assertEquals("^(0|-?[1-9][0-9]*)$", text.apply(
+                members.apply(baseProperties.get("id")).get("pattern")));
+        var envelope = members.apply(schemas.get("ExecutionStreamEvent"));
+        assertEquals("source", text.apply(members.apply(envelope.get("discriminator")).get("propertyName")));
+        var examples = members.apply(stream.get("examples"));
+        for (var entry : java.util.Map.of("ring", "RingExecutionStreamEvent",
+                "durable", "DurableExecutionStreamEvent").entrySet()) {
+            String wire = text.apply(members.apply(examples.get(entry.getKey())).get("value"));
+            assertTrue(wire.startsWith("id: ") && wire.contains("\nevent: execution\ndata: "));
+            String data = wire.substring(wire.indexOf("\ndata: ") + 7, wire.indexOf("\n\n"));
+            var decoded = ai.ravenroot.api.payload.PayloadJson.read(data.getBytes(StandardCharsets.UTF_8),
+                    ai.ravenroot.api.payload.PayloadLimits.DEFAULTS);
+            assertEquals(members.apply(schemas.get(entry.getValue())).get("example"), decoded);
+            assertEquals(wire.substring(4, wire.indexOf('\n')), text.apply(members.apply(decoded).get("id")));
+            var variants = (ai.ravenroot.api.payload.PayloadValue.ListValue)
+                    members.apply(schemas.get(entry.getValue())).get("allOf");
+            var variant = members.apply(variants.values().get(1));
+            assertEquals(ai.ravenroot.api.payload.PayloadValue.of(true), variant.get("additionalProperties"));
+            var exclusions = (ai.ravenroot.api.payload.PayloadValue.ListValue)
+                    members.apply(variant.get("not")).get("anyOf");
+            var excludedFields = exclusions.values().stream().map(exclusion -> {
+                var required = (ai.ravenroot.api.payload.PayloadValue.ListValue)
+                        members.apply(exclusion).get("required");
+                return text.apply(required.values().getFirst());
+            }).collect(java.util.stream.Collectors.toSet());
+            var expectedExclusions = "ring".equals(entry.getKey())
+                    ? Set.of("journalOffset", "streamSequence", "eventId", "causationId", "handlerId")
+                    : Set.of("sequence", "engineId", "executionId", "activeInstances", "inFlightArrivals",
+                            "fallback", "publicReason", "message", "messageRedacted", "messageTruncated",
+                            "output", "outputRedacted", "outputTruncated", "processingDuration");
+            assertEquals(expectedExclusions, excludedFields);
+            assertFalse(excludedFields.contains("type"),
+                    "an equal common type alias is accepted by readers of either source");
+        }
+        assertTrue(text.apply(members.apply(examples.get("ring")).get("value")).contains(": keepalive\n\n"));
+        assertTrue(text.apply(members.apply(examples.get("truncated")).get("value"))
+                .startsWith("event: stream-truncated\ndata: "));
+        var recent = members.apply(members.apply(paths.get("/v1/events/recent")).get("get"));
+        assertFalse(members.apply(members.apply(recent.get("responses")).get("200")).containsKey("content"),
+                "the stream schema must not silently replace the legacy polling projection");
+    }
+
+    @Test
     void theCheckedInSpecMatchesWhatTheTableGeneratesRightNow() throws Exception {
         String generatedNow = OpenApiSpecGenerator.generate(RouteTable.ALL);
         RouteDescriptor buildStatus = RouteTable.ALL.stream()

@@ -194,7 +194,7 @@ jobs:
       - name: Verify deterministic core JVM contracts
         run: >-
           mvn -B --no-transfer-progress -f ravenroot/pom.xml
-          -pl ravenroot-core,ravenroot-persistence-sqlite,ravenroot-programming-graalvm,ravenroot-pekko
+          -pl ravenroot-core,ravenroot-persistence-sqlite,ravenroot-persistence-postgresql,ravenroot-programming-graalvm,ravenroot-pekko
           -am test -Dsurefire.rerunFailingTestsCount=1
 
   fast-support-build:

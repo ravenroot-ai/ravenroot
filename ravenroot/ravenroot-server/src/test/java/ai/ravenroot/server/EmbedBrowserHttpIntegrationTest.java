@@ -24,6 +24,7 @@ import ai.ravenroot.core.runtime.ExecutionMonitor;
 import ai.ravenroot.pekko.PekkoExecutionEngine;
 import ai.ravenroot.server.embed.EmbedBrowserConfiguration;
 import ai.ravenroot.server.embed.EmbedBrowserHttpHandler;
+import ai.ravenroot.server.embed.EmbedSecurityAuditSink;
 import ai.ravenroot.server.embed.EmbedViewerOrigin;
 import ai.ravenroot.server.embed.P256EmbedProofVerifier;
 import ai.ravenroot.server.security.AuthenticatedPrincipal;
@@ -52,6 +53,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -60,6 +62,65 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class EmbedBrowserHttpIntegrationTest {
     private static final String VIEWER = "https://viewer.example";
     private static final String PARENT = "https://parent.example";
+
+    @Test
+    void contextualAdapterIgnoresConflictingLegacyPrincipalAndKeepsTheCarrierRequestId() throws Exception {
+        var registrations = new InMemoryEmbedRegistrationAuthority();
+        provision(registrations, command("reg", PARENT, Optional.empty()));
+        var authorization = new DefaultAuthorizationService(event -> { });
+        var recorded = new AtomicReference<EmbedSecurityAuditSink.Event>();
+        var configuration = new EmbedBrowserConfiguration(true, new EmbedViewerOrigin(VIEWER),
+                new AuthorizedEmbedSessionCreation(authorization, registrations), registrations,
+                new AuthorizedEmbedGraphProjection(authorization, registrations), recorded::set,
+                Clock.systemUTC(), Duration.ofMinutes(1), Duration.ofMinutes(1), Duration.ofMinutes(2),
+                Duration.ofMinutes(1), 16, 16, 32, 1, true);
+        var handler = new EmbedBrowserHttpHandler(configuration);
+        var explicit = HttpRequestContext.create("explicit-embed-request")
+                .withClient("127.0.0.1", false)
+                .withPrincipal(new AuthenticatedPrincipal("workload", AuthenticatedPrincipal.Type.WORKLOAD,
+                        "issuer", "tenant", Set.of(Role.VIEWER),
+                        Set.of("ravenroot.embed.session.create")));
+        var raw = com.sun.net.httpserver.HttpServer.create(
+                new InetSocketAddress(InetAddress.getByName("127.0.0.1"), 0), 0);
+        raw.createContext(EmbedBrowserHttpHandler.CREATE_PATH, exchange -> {
+            if (exchange.getRequestURI().getPath().endsWith("/alias")) {
+                handler.createSession(exchange);
+                return;
+            }
+            AuthenticatedPrincipalAttribute.install(exchange,
+                    new AuthenticatedPrincipal("poison", AuthenticatedPrincipal.Type.WORKLOAD,
+                            "issuer", "other-tenant", Set.of(), Set.of()));
+            try {
+                handler.createSession(exchange, explicit);
+            } finally {
+                AuthenticatedPrincipalAttribute.clear(exchange);
+            }
+        });
+        raw.start();
+        try {
+            var response = send(HttpClient.newHttpClient(), HttpRequest.newBuilder(URI.create(
+                            "http://127.0.0.1:" + raw.getAddress().getPort()
+                                    + EmbedBrowserHttpHandler.CREATE_PATH))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString("{\"registrationId\":\"reg\"}"))
+                    .build());
+
+            assertEquals(201, response.statusCode(), response.body());
+            assertEquals("explicit-embed-request", recorded.get().requestId());
+            assertEquals("tenant", recorded.get().tenantId());
+            assertEquals("workload", recorded.get().principal());
+
+            var invalidLegacyPath = send(HttpClient.newHttpClient(), HttpRequest.newBuilder(URI.create(
+                            "http://127.0.0.1:" + raw.getAddress().getPort()
+                                    + EmbedBrowserHttpHandler.CREATE_PATH + "/alias"))
+                    .POST(HttpRequest.BodyPublishers.noBody()).build());
+            assertEquals(403, invalidLegacyPath.statusCode(), invalidLegacyPath.body());
+            assertEquals("{\"error\":\"EMBED_SESSION_UNAVAILABLE\"}", invalidLegacyPath.body());
+            assertPrivate(invalidLegacyPath);
+        } finally {
+            raw.stop(0);
+        }
+    }
 
     @Test
     void conditionalRouteTableSurfaceMatchesTheFiveLiveHandlerPaths() {

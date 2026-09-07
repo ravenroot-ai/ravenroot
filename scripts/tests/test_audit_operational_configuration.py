@@ -1992,7 +1992,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
     def graph_limit_authority_fixture(self, root: Path):
         paths = (audit.GRAPH_EXECUTION_LIMITS_PATH, audit.GRAPH_ML_LIMITS_PATH,
-                 audit.PAYLOAD_LIMITS_PATH)
+                 audit.PAYLOAD_LIMITS_PATH, audit.GRAPH_DEFINITION_STORE_PATH,
+                 Path("compose.yaml"), Path("deploy/helm/ravenroot/values.yaml"),
+                 Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+                 Path("deploy/helm/ravenroot/values.schema.json"),
+                 Path("deploy/kubernetes/ravenroot.yaml"),
+                 Path("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/"
+                      "GraphDeploymentConfigurationContractTest.java"),
+                 Path("scripts/tests/test_graph_platform_configuration.sh"))
         pinned = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
             capture_output=True, text=True,
@@ -2012,6 +2019,14 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         records = inventory["evidenceRecords"]
         graph_rows = [copy.deepcopy(entry) for entry in inventory["entries"]
                       if entry.get("setting") in audit.GRAPH_LIMIT_AUTHORITY_BY_SETTING]
+        for entry in graph_rows:
+            coverage = entry.get("coverageEvidence")
+            if isinstance(coverage, dict) and coverage.get("kind") == "graph-platform-carriers-v1":
+                for path_field, digest_field in (
+                        ("contractTestPath", "contractTestDigest"),
+                        ("shellTestPath", "shellTestDigest")):
+                    coverage[digest_field] = audit.hashlib.sha256(
+                        (ROOT / coverage[path_field]).read_bytes()).hexdigest()
         candidates = {
             entry["id"]: audit.Candidate(
                 id=entry["id"], path=entry["path"], line=entry["line"],
@@ -2027,8 +2042,30 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIsNotNone(authority)
         return ({audit.GRAPH_LIMIT_FAMILY_ID: authority}, entries, candidates)
 
+    def graph_limit_inventory_document(self, authorities, entries, candidates):
+        return {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": [copy.deepcopy(entries[identifier]) for identifier in sorted(entries)],
+            "retiredEntries": [], "migrationHistory": [],
+            "evidenceRecords": {
+                candidate.evidence_digest: candidate.evidence
+                for candidate in candidates.values()
+            },
+            "graphLimitAuthorities": copy.deepcopy(authorities),
+        }
+
+    def graph_limit_inventory_errors(self, document, candidates):
+        # This fixture intentionally contains only graph rows. Assistant's separately mandatory
+        # fixed family is covered by its own general-entrypoint tests.
+        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+            return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
+
     def graph_limit_errors(self, root: Path, authorities, entries, candidates):
         return audit.graph_limit_authority_errors(root, authorities, entries, candidates)
+
+    def assert_graph_source_family_rejected(self, root: Path) -> None:
+        refreshed = {candidate.id: candidate for candidate in audit.discover(root)}
+        self.assertIsNone(audit.graph_limit_family_from_source(root, refreshed))
 
     def test_graph_environment_family_proves_all_25_cross_owner_bindings(self) -> None:
         with tempfile.TemporaryDirectory() as location:
@@ -2040,8 +2077,59 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 {"GraphMlLimits": 10, "PayloadLimits": 6, "GraphExecutionLimits": 9},
                 dict(Counter(setting["targetConstructor"] for setting in authority["settings"])),
             )
+            self.assertEqual(
+                ("10485760 bytes", "1..268435456",
+                 ["oc-2f030c18b06c04d7ca7d", "oc-4fcd39d64aa4eba16a87",
+                  "oc-8a17ba40f2d9eefefd3c"]),
+                next((setting["defaultDisplay"], setting["validationDisplay"],
+                      setting["defaultEvidence"]) for setting in authority["settings"]
+                     if setting["setting"] == "graph.graphml.max-bytes"),
+            )
             self.assertEqual([], self.graph_limit_errors(
                 root, authorities, entries, candidates))
+
+    def test_graph_environment_family_binds_public_defaults_ranges_and_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authorities, entries, candidates = self.graph_limit_authority_fixture(root)
+            document = self.graph_limit_inventory_document(authorities, entries, candidates)
+            self.assertEqual([], self.graph_limit_inventory_errors(document, candidates))
+            setting = "graph.graphml.max-nodes"
+            setting_rows = [entry for entry in document["entries"]
+                            if entry.get("setting") == setting]
+            environment_id = next(
+                entry["id"] for entry in setting_rows
+                if entry["path"] == audit.GRAPH_EXECUTION_LIMITS_PATH.as_posix()
+                and entry["kind"] == "environment-binding")
+            correct_evidence = list(setting_rows[0]["defaultEvidence"])
+
+            for label, change in (
+                ("default", lambda entry: entry.update(default="fabricated default")),
+                ("validation", lambda entry: entry.update(validation="fabricated validation")),
+                ("default-evidence", lambda entry: entry.update(
+                    defaultEvidence=[environment_id])),
+                ("duplicate-default-evidence", lambda entry: entry.update(
+                    defaultEvidence=correct_evidence + [correct_evidence[0]])),
+                ("default-evidence-with-environment", lambda entry: entry.update(
+                    defaultEvidence=correct_evidence + [environment_id])),
+                ("combined", lambda entry: entry.update(
+                    default="fabricated default", validation="fabricated validation",
+                    defaultEvidence=[environment_id])),
+            ):
+                with self.subTest(row_metadata=label):
+                    changed = copy.deepcopy(document)
+                    for entry in changed["entries"]:
+                        if entry.get("setting") == setting:
+                            change(entry)
+                    errors = self.graph_limit_inventory_errors(changed, candidates)
+                    self.assertTrue(any("graph default, range, or exact default evidence"
+                                        in error for error in errors), errors)
+
+            missing = copy.deepcopy(document)
+            for entry in missing["entries"]:
+                if entry.get("setting") == setting:
+                    entry["defaultEvidence"] = []
+            self.assertTrue(self.graph_limit_inventory_errors(missing, candidates))
 
     def test_graph_environment_family_rejects_metadata_candidates_and_source_flow_mutations(self) -> None:
         with tempfile.TemporaryDirectory() as location:
@@ -2130,8 +2218,19 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 "raw-value-refusal": original.replace(
                     "throw invalid(name, ceiling);",
                     "throw new IllegalArgumentException(raw, invalid);", 1),
+                "ignored-positive-within": original.replace(
+                    "if (value < 1) throw new IllegalArgumentException(name + \" must be positive\");",
+                    "if (false) throw new IllegalArgumentException(name + \" must be positive\");", 1),
                 "wrong-environment-literal": original.replace(
                     '"RAVENROOT_GRAPHML_MAX_BYTES"', '"RAVENROOT_GRAPH_MAX_NODES"', 1),
+                "wrong-root-graphml-default": original.replace(
+                    "GraphMlLimits.DEFAULTS,\n            PayloadLimits.DEFAULTS,",
+                    "new GraphMlLimits(1, 1, 1, 1, 1, 1, 1, 1, 1, 1),\n"
+                    "            PayloadLimits.DEFAULTS,", 1),
+                "wrong-root-payload-default": original.replace(
+                    "GraphMlLimits.DEFAULTS,\n            PayloadLimits.DEFAULTS,",
+                    "GraphMlLimits.DEFAULTS,\n"
+                    "            new PayloadLimits(1, 1, 1, 1, 1, 1),", 1),
                 "nested-long-shadow": original.replace(
                     "\n}\n", "\n    private static final class Long {\n"
                     "        static long parseLong(String raw) { return 1; }\n"
@@ -2143,16 +2242,46 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 with self.subTest(source=label):
                     self.assertNotEqual(original, mutated)
                     source_path.write_text(mutated, encoding="utf-8")
-                    changed = copy.deepcopy(authorities)
-                    changed_authority = changed[audit.GRAPH_LIMIT_FAMILY_ID]
-                    changed_authority["factoryBodyDigest"] = audit.java_method_digest(
-                        mutated, "GraphExecutionLimits", "fromEnvironment")
-                    changed_authority["helperBodyDigests"]["integer"] = audit.java_method_digest(
-                        mutated, "GraphExecutionLimits", "integer")
-                    errors = self.graph_limit_errors(root, changed, entries, candidates)
-                    self.assertTrue(any("source family has drifted" in error for error in errors),
-                                    (label, errors))
+                    self.assert_graph_source_family_rejected(root)
             source_path.write_text(original, encoding="utf-8")
+
+            graph_ml_path = root / audit.GRAPH_ML_LIMITS_PATH
+            original_graph_ml = graph_ml_path.read_text(encoding="utf-8")
+            graph_ml_mutations = {
+                "wrong-default": original_graph_ml.replace(
+                    "GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,\n            10_000,",
+                    "GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,\n            10_001,", 1),
+                "wrong-default-same-valued-field": original_graph_ml.replace(
+                    "GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,\n            10_000,",
+                    "GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES,\n"
+                    "            DEFAULTS.maxNamespaceDeclarations(),", 1),
+                "wrong-ceiling": original_graph_ml.replace(
+                    "public static final int HARD_MAX_NODES = 1_000_000;",
+                    "public static final int HARD_MAX_NODES = 1_000_001;", 1),
+                "missing-defaults": original_graph_ml.replace(
+                    "public static final GraphMlLimits DEFAULTS =",
+                    "public static final GraphMlLimits LEGACY_DEFAULTS =", 1),
+                "multiple-defaults": original_graph_ml.replace(
+                    "public GraphMlLimits(int maxBytes,",
+                    "public static final GraphMlLimits DEFAULTS = new GraphMlLimits(\n"
+                    "        GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES, 10_000, 25_000,\n"
+                    "        100_000, 64, 1024 * 1024, 4_096, 250_000, 500_000, 10_000);\n\n"
+                    "    public GraphMlLimits(int maxBytes,", 1),
+                "wrong-constant-owner-import": original_graph_ml.replace(
+                    "import ai.ravenroot.api.persistence.GraphDefinitionStore;",
+                    "import example.GraphDefinitionStore;", 1),
+                "compact-constructor-rewrites-component": original_graph_ml.replace(
+                    "public GraphMlLimits {\n",
+                    "public GraphMlLimits {\n        maxNodes = 1;\n", 1),
+                "explicit-component-accessor": original_graph_ml.rsplit("\n}", 1)[0]
+                    + "\n\n    public int maxNodes() {\n        return 1;\n    }\n}\n",
+            }
+            for label, mutated in graph_ml_mutations.items():
+                with self.subTest(default_source=label):
+                    self.assertNotEqual(original_graph_ml, mutated)
+                    graph_ml_path.write_text(mutated, encoding="utf-8")
+                    self.assert_graph_source_family_rejected(root)
+            graph_ml_path.write_text(original_graph_ml, encoding="utf-8")
 
     def test_report_counts_retained_published_contract_descriptions(self) -> None:
         with tempfile.TemporaryDirectory() as location:

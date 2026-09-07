@@ -140,6 +140,8 @@ GRAPH_ML_LIMITS_PATH = Path(
     "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/graph/GraphMlLimits.java")
 PAYLOAD_LIMITS_PATH = Path(
     "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/payload/PayloadLimits.java")
+GRAPH_DEFINITION_STORE_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/GraphDefinitionStore.java")
 GRAPH_LIMIT_TYPED_AUTHORITIES = frozenset({
     ("graph.execution.max-amplified-deliveries", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxAmplifiedDeliveries", "RAVENROOT_GRAPH_MAX_AMPLIFIED_DELIVERIES"),
     ("graph.execution.max-cumulative-payload-bytes", "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphExecutionLimits.java#GraphExecutionLimits", "maxCumulativePayloadBytes", "RAVENROOT_GRAPH_MAX_CUMULATIVE_PAYLOAD_BYTES"),
@@ -248,6 +250,61 @@ GRAPH_LIMIT_SOURCE_BY_SETTING = {
     }
     for setting, target, root_component, environment_symbol, helper, fallback, ceiling
     in GRAPH_LIMIT_SOURCE_CONTRACTS
+}
+GRAPH_LIMIT_DEFAULT_CONTRACTS = {
+    "graph.graphml.max-bytes": ("GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES", "bytes"),
+    "graph.graphml.max-nodes": ("10_000", "nodes"),
+    "graph.graphml.max-edges": ("25_000", "edges"),
+    "graph.graphml.max-properties": ("100_000", "properties"),
+    "graph.graphml.max-depth": ("64", "nesting levels"),
+    "graph.graphml.max-string-length": ("1024 * 1024", "UTF-16 code units"),
+    "graph.graphml.max-keys": ("4_096", "distinct keys"),
+    "graph.graphml.max-elements": ("250_000", "XML elements"),
+    "graph.graphml.max-attributes": ("500_000", "XML attributes"),
+    "graph.graphml.max-namespace-declarations": ("10_000", "namespace declarations"),
+    "graph.payload.max-encoded-bytes": ("256 * 1024", "bytes"),
+    "graph.payload.max-depth": ("32", "nesting levels"),
+    "graph.payload.max-collection-size": ("1_000", "members per collection"),
+    "graph.payload.max-value-count": ("10_000", "values"),
+    "graph.payload.max-text-length": ("32 * 1024", "UTF-16 code units"),
+    "graph.payload.max-key-length": ("256", "UTF-16 code units"),
+    "graph.execution.max-fan-out": ("64", "targets"),
+    "graph.execution.max-resident-actors": ("256", "actors"),
+    "graph.execution.max-live-actors-per-traversal": ("256", "actors"),
+    "graph.execution.max-in-flight-hops-per-traversal": ("1_024", "messages"),
+    "graph.execution.max-queued-admissions-per-node": ("1_024", "messages"),
+    "graph.execution.max-traversal-steps": ("100_000", "deliveries"),
+    "graph.execution.max-amplified-deliveries": ("100_000", "deliveries"),
+    "graph.execution.max-cumulative-payload-bytes": ("64L * 1024 * 1024", "bytes"),
+    "graph.execution.max-recovery-deliveries-per-attempt": ("8", "delivery claims"),
+}
+GRAPH_NUMERIC_CONSTANT_EXPRESSIONS = {
+    "GraphDefinitionStore.DEFAULT_MAX_DEFINITION_BYTES": "10 * 1024 * 1024",
+    "GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES": "256 * 1024 * 1024",
+    "GraphMlLimits.HARD_MAX_NODES": "1_000_000",
+    "GraphMlLimits.HARD_MAX_EDGES": "5_000_000",
+    "GraphMlLimits.HARD_MAX_PROPERTIES": "10_000_000",
+    "GraphMlLimits.HARD_MAX_DEPTH": "1_024",
+    "GraphMlLimits.HARD_MAX_STRING_LENGTH": "64 * 1024 * 1024",
+    "GraphMlLimits.HARD_MAX_KEYS": "100_000",
+    "GraphMlLimits.HARD_MAX_ELEMENTS": "10_000_000",
+    "GraphMlLimits.HARD_MAX_ATTRIBUTES": "20_000_000",
+    "GraphMlLimits.HARD_MAX_NAMESPACE_DECLARATIONS": "1_000_000",
+    "PayloadLimits.HARD_MAX_ENCODED_BYTES": "64 * 1024 * 1024",
+    "PayloadLimits.HARD_MAX_DEPTH": "256",
+    "PayloadLimits.HARD_MAX_COLLECTION_SIZE": "1_000_000",
+    "PayloadLimits.HARD_MAX_VALUE_COUNT": "5_000_000",
+    "PayloadLimits.HARD_MAX_TEXT_LENGTH": "64 * 1024 * 1024",
+    "PayloadLimits.HARD_MAX_KEY_LENGTH": "4_096",
+    "GraphExecutionLimits.HARD_MAX_FAN_OUT": "256",
+    "GraphExecutionLimits.HARD_MAX_RESIDENT_ACTORS": "4_096",
+    "GraphExecutionLimits.HARD_MAX_LIVE_ACTORS": "1_024",
+    "GraphExecutionLimits.HARD_MAX_IN_FLIGHT_HOPS": "4_096",
+    "GraphExecutionLimits.HARD_MAX_QUEUED_ADMISSIONS": "4_096",
+    "GraphExecutionLimits.HARD_MAX_TRAVERSAL_STEPS": "1_000_000L",
+    "GraphExecutionLimits.HARD_MAX_AMPLIFIED_DELIVERIES": "1_000_000L",
+    "GraphExecutionLimits.HARD_MAX_CUMULATIVE_PAYLOAD_BYTES": "256L * 1024 * 1024",
+    "GraphExecutionLimits.HARD_MAX_RECOVERY_DELIVERIES": "64",
 }
 
 
@@ -1886,6 +1943,148 @@ def resolver_authority_errors(root: Path, authorities: object) -> list[str]:
     return errors
 
 
+def graph_default_constructor_arguments(source: str, type_symbol: str,
+                                        components: tuple[str, ...]) \
+        -> dict[str, tuple[str, int, int]] | None:
+    """Return the exact component arguments of one direct static DEFAULTS constructor."""
+    initializer = java_static_final_initializer(source, type_symbol, "DEFAULTS")
+    if initializer is None:
+        return None
+    _expression, start, end = initializer
+    actual = source[start:end]
+    code = strip_c_comments_and_literals(source)[start:end]
+    constructor = re.match(rf"\s*new\s+{re.escape(type_symbol)}\s*\(", code)
+    if constructor is None:
+        return None
+    opening = code.find("(", constructor.start())
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None or len(parsed[0]) != len(components) \
+            or code[parsed[1] + 1:].strip():
+        return None
+    return {
+        component: (argument, start + argument_start, start + argument_end)
+        for component, (argument, argument_start, argument_end)
+        in zip(components, parsed[0])
+    }
+
+
+def graph_record_semantics_match(source: str, type_symbol: str,
+                                 components: tuple[str, ...], expected_constructor: str) -> bool:
+    """Bind graph defaults to the accepted compact-constructor and implicit-accessor semantics."""
+    compact = java_compact_constructor_span(source, type_symbol)
+    if compact is None or normalized(strip_c_comments(source[slice(*compact)])) \
+            != normalized(expected_constructor):
+        return False
+    return all(java_method_span(source, type_symbol, component) is None
+               for component in components)
+
+
+def graph_numeric_constant_initializer(source: str, type_symbol: str,
+                                       field: str) -> tuple[str, int, int] | None:
+    """Return one checker-supported direct int/long constant initializer."""
+    if type_symbol != "GraphDefinitionStore":
+        initializer = java_static_final_initializer(source, type_symbol, field)
+        span = java_type_span(source, type_symbol)
+        if initializer is None or span is None:
+            return None
+        base, limit = span
+        code = strip_c_comments_and_literals(source)[base:limit]
+        depths = java_brace_depths(code)
+        declarations = [match for match in re.finditer(
+            rf"\b(?:public|private)\s+static\s+final\s+(?:int|long)\s+"
+            rf"{re.escape(field)}\s*=", code,
+        ) if depths[match.start()] == 1]
+        return initializer if len(declarations) == 1 else None
+
+    span = java_type_span(source, type_symbol)
+    if span is None:
+        return None
+    base, limit = span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    matches: list[tuple[str, int, int]] = []
+    for declaration in re.finditer(rf"\bint\s+{re.escape(field)}\s*=", code):
+        if depths[declaration.start()] != 1:
+            continue
+        equals = code.find("=", declaration.start(), declaration.end())
+        semicolon = code.find(";", equals + 1)
+        if semicolon < 0 or any(char in code[equals + 1:semicolon] for char in "{}"):
+            continue
+        start = base + equals + 1
+        end = base + semicolon
+        matches.append((normalized(source[start:end]), start, end))
+    return matches[0] if len(matches) == 1 else None
+
+
+def numeric_candidate_ids_in_source_span(relative: Path, source: str, start: int, end: int,
+                                         discovered: dict[str, Candidate]) -> list[str]:
+    """Return numeric atom IDs from one exact source span, preserving lexical multiplicity."""
+    grouped: dict[tuple[str, str, str, str, str], list[str]] = {}
+    for candidate in discovered.values():
+        if candidate.path != relative.as_posix():
+            continue
+        key = (candidate.symbol, candidate.kind, candidate.role, candidate.expression,
+               candidate.evidence_digest)
+        grouped.setdefault(key, []).append(candidate.id)
+    occurrences: Counter[tuple[str, str, str, str, str]] = Counter()
+    selected: list[str] = []
+    for offset, symbol_name, candidate_kind, candidate_role, expression, evidence in code_candidates(
+            relative, source, surface(relative) or "java"):
+        evidence_digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+        key = (symbol_name, candidate_kind, candidate_role, expression, evidence_digest)
+        occurrence = occurrences[key]
+        occurrences[key] += 1
+        identifiers = grouped.get(key, [])
+        if start <= offset < end and NUMBER.fullmatch(expression) and occurrence < len(identifiers):
+            selected.append(identifiers[occurrence])
+    return selected
+
+
+def graph_numeric_value_and_evidence(
+        expression: str, current_owner: str, sources: dict[str, tuple[Path, str]],
+        span: tuple[Path, str, int, int] | None, discovered: dict[str, Candidate],
+        active: set[str] | None = None, require_evidence: bool = True) -> tuple[int, list[str]] | None:
+    """Evaluate the closed graph integer grammar and retain terminal numeric atom IDs."""
+    active = set() if active is None else active
+    direct_ids = (numeric_candidate_ids_in_source_span(*span, discovered)
+                  if span is not None else [])
+    referenced_ids: list[str] = []
+
+    def resolve(token: str) -> int | None:
+        qualified = token if "." in token else f"{current_owner}.{token}"
+        expected = GRAPH_NUMERIC_CONSTANT_EXPRESSIONS.get(qualified)
+        if expected is None or qualified in active:
+            return None
+        owner, field = qualified.split(".", 1)
+        source_info = sources.get(owner)
+        if source_info is None:
+            return None
+        relative, source = source_info
+        initializer = graph_numeric_constant_initializer(source, owner, field)
+        if initializer is None or normalized(initializer[0]) != normalized(expected):
+            return None
+        active.add(qualified)
+        resolved = graph_numeric_value_and_evidence(
+            initializer[0], owner, sources,
+            (relative, source, initializer[1], initializer[2]), discovered, active,
+            require_evidence)
+        active.remove(qualified)
+        if resolved is None:
+            return None
+        value, identifiers = resolved
+        referenced_ids.extend(identifiers)
+        return value
+
+    # Every supported long literal is within int32; the suffix changes Java type, not its value.
+    integer_expression = re.sub(r"(?<=\d)[lL]\b", "", expression)
+    value = java_int_expression_value(integer_expression, resolve)
+    if value is None:
+        return None
+    identifiers = direct_ids + referenced_ids
+    return (value, identifiers) if identifiers or not require_evidence else None
+
+
 def graph_limit_family_from_source(root: Path,
                                    discovered: dict[str, Candidate]) -> dict[str, object] | None:
     """Derive the closed 25-setting GraphExecutionLimits binding family from source."""
@@ -1895,6 +2094,7 @@ def graph_limit_family_from_source(root: Path,
     source = (root / GRAPH_EXECUTION_LIMITS_PATH).read_text(encoding="utf-8")
     graph_ml_source = (root / GRAPH_ML_LIMITS_PATH).read_text(encoding="utf-8")
     payload_source = (root / PAYLOAD_LIMITS_PATH).read_text(encoding="utf-8")
+    graph_store_source = (root / GRAPH_DEFINITION_STORE_PATH).read_text(encoding="utf-8")
     root_components = java_record_components(source, "GraphExecutionLimits")
     graph_ml_components = java_record_components(graph_ml_source, "GraphMlLimits")
     payload_components = java_record_components(payload_source, "PayloadLimits")
@@ -1911,6 +2111,79 @@ def graph_limit_family_from_source(root: Path,
                 "maxEncodedBytes", "maxDepth", "maxCollectionSize", "maxValueCount",
                 "maxTextLength", "maxKeyLength"):
         return None
+    if java_package(graph_ml_source) != "ai.ravenroot.core.graph" \
+            or java_package(payload_source) != "ai.ravenroot.api.payload" \
+            or java_package(graph_store_source) != "ai.ravenroot.api.persistence" \
+            or not exact_import_identity(
+                graph_ml_source, "ai.ravenroot.api.persistence.GraphDefinitionStore") \
+            or not java_has_no_simple_name_shadow(
+                graph_ml_source, "GraphMlLimits", {"GraphDefinitionStore"}):
+        return None
+    if any(not graph_record_semantics_match(record_source, type_symbol, components, constructor)
+           for record_source, type_symbol, components, constructor in (
+        (graph_ml_source, "GraphMlLimits", graph_ml_components, """
+            GraphMlLimits {
+                if (maxBytes < 1 || maxNodes < 1 || maxEdges < 1 || maxProperties < 1
+                        || maxDepth < 1 || maxStringLength < 1 || maxKeys < 1
+                        || maxElements < 1 || maxAttributes < 1 || maxNamespaceDeclarations < 1) {
+                    throw new IllegalArgumentException("GraphML limits must all be positive");
+                }
+                if (maxBytes > GraphDefinitionStore.HARD_MAX_DEFINITION_BYTES
+                        || maxNodes > HARD_MAX_NODES || maxEdges > HARD_MAX_EDGES
+                        || maxProperties > HARD_MAX_PROPERTIES || maxDepth > HARD_MAX_DEPTH
+                        || maxStringLength > HARD_MAX_STRING_LENGTH || maxKeys > HARD_MAX_KEYS
+                        || maxElements > HARD_MAX_ELEMENTS || maxAttributes > HARD_MAX_ATTRIBUTES
+                        || maxNamespaceDeclarations > HARD_MAX_NAMESPACE_DECLARATIONS) {
+                    throw new IllegalArgumentException("GraphML limits exceed the supported safety ceiling");
+                }
+            }
+        """),
+        (payload_source, "PayloadLimits", payload_components, """
+            PayloadLimits {
+                if (maxEncodedBytes < 1 || maxDepth < 1 || maxCollectionSize < 1 || maxValueCount < 1
+                        || maxTextLength < 1 || maxKeyLength < 1) {
+                    throw new IllegalArgumentException("payload limits must all be positive");
+                }
+                if (maxEncodedBytes > HARD_MAX_ENCODED_BYTES || maxDepth > HARD_MAX_DEPTH
+                        || maxCollectionSize > HARD_MAX_COLLECTION_SIZE
+                        || maxValueCount > HARD_MAX_VALUE_COUNT || maxTextLength > HARD_MAX_TEXT_LENGTH
+                        || maxKeyLength > HARD_MAX_KEY_LENGTH) {
+                    throw new IllegalArgumentException("payload limits exceed the supported safety ceiling");
+                }
+            }
+        """),
+        (source, "GraphExecutionLimits", root_components, """
+            GraphExecutionLimits {
+                Objects.requireNonNull(graphMl, "graphMl");
+                Objects.requireNonNull(payload, "payload");
+                positiveWithin("maxFanOut", maxFanOut, HARD_MAX_FAN_OUT);
+                positiveWithin("maxResidentActors", maxResidentActors, HARD_MAX_RESIDENT_ACTORS);
+                positiveWithin("maxLiveActorsPerTraversal", maxLiveActorsPerTraversal, HARD_MAX_LIVE_ACTORS);
+                positiveWithin("maxInFlightHopsPerTraversal", maxInFlightHopsPerTraversal,
+                        HARD_MAX_IN_FLIGHT_HOPS);
+                positiveWithin("maxQueuedAdmissionsPerNode", maxQueuedAdmissionsPerNode,
+                        HARD_MAX_QUEUED_ADMISSIONS);
+                positiveWithin("maxTraversalSteps", maxTraversalSteps, HARD_MAX_TRAVERSAL_STEPS);
+                positiveWithin("maxAmplifiedDeliveries", maxAmplifiedDeliveries, HARD_MAX_AMPLIFIED_DELIVERIES);
+                positiveWithin("maxCumulativePayloadBytes", maxCumulativePayloadBytes,
+                        HARD_MAX_CUMULATIVE_PAYLOAD_BYTES);
+                positiveWithin("maxRecoveryDeliveriesPerAttempt", maxRecoveryDeliveriesPerAttempt,
+                        HARD_MAX_RECOVERY_DELIVERIES);
+            }
+        """),
+    )):
+        return None
+    for record_source, record_type in (
+            (graph_ml_source, "GraphMlLimits"), (payload_source, "PayloadLimits")):
+        imports = re.findall(
+            r"(?m)^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;",
+            strip_c_comments_and_literals(record_source),
+        )
+        if any(imported.rsplit(".", 1)[-1] == "IllegalArgumentException"
+               for imported in imports) \
+                or not java_has_no_simple_name_shadow(
+                    record_source, record_type, {"IllegalArgumentException"}):
+            return None
     if java_package(source) != "ai.ravenroot.core.runtime" \
             or java_method_header(source, "GraphExecutionLimits", "fromEnvironment") != \
             "public static GraphExecutionLimits fromEnvironment(Map<String, String> environment)" \
@@ -2035,6 +2308,12 @@ def graph_limit_family_from_source(root: Path,
             "invalid(String name, long ceiling) { return new IllegalArgumentException(name + "
             "\" must be a whole number from 1 through \" + ceiling); }",
         ),
+        "positiveWithin": (
+            "private static void positiveWithin(String name, long value, long ceiling)",
+            "positiveWithin(String name, long value, long ceiling) { if (value < 1) "
+            "throw new IllegalArgumentException(name + \" must be positive\"); if (value > ceiling) "
+            "throw new IllegalArgumentException(name + \" exceeds the supported safety ceiling\"); }",
+        ),
     }
     helper_digests: dict[str, str] = {}
     for method, (header, body) in exact_helpers.items():
@@ -2053,6 +2332,23 @@ def graph_limit_family_from_source(root: Path,
         "PayloadLimits": payload_components,
         "GraphExecutionLimits": root_components,
     }
+    numeric_sources = {
+        "GraphExecutionLimits": (GRAPH_EXECUTION_LIMITS_PATH, source),
+        "GraphMlLimits": (GRAPH_ML_LIMITS_PATH, graph_ml_source),
+        "PayloadLimits": (PAYLOAD_LIMITS_PATH, payload_source),
+        "GraphDefinitionStore": (GRAPH_DEFINITION_STORE_PATH, graph_store_source),
+    }
+    default_arguments = {
+        target: graph_default_constructor_arguments(numeric_sources[target][1], target, components)
+        for target, components in target_components.items()
+    }
+    if any(arguments is None for arguments in default_arguments.values()):
+        return None
+    root_defaults = default_arguments["GraphExecutionLimits"]
+    if root_defaults is None \
+            or normalized(root_defaults["graphMl"][0]) != "GraphMlLimits.DEFAULTS" \
+            or normalized(root_defaults["payload"][0]) != "PayloadLimits.DEFAULTS":
+        return None
     settings: list[dict[str, object]] = []
     for setting, target, root_component, environment_symbol, helper, fallback, ceiling \
             in GRAPH_LIMIT_SOURCE_CONTRACTS:
@@ -2067,6 +2363,26 @@ def graph_limit_family_from_source(root: Path,
         expected_argument = f"{helper}(environment, {environment_symbol}, {fallback}, {ceiling})"
         if normalized(argument) != normalized(expected_argument):
             return None
+        default_contract = GRAPH_LIMIT_DEFAULT_CONTRACTS.get(setting)
+        typed_defaults = default_arguments[target]
+        if default_contract is None or typed_defaults is None or field not in typed_defaults:
+            return None
+        default_expression, default_start, default_end = typed_defaults[field]
+        expected_default_expression, unit = default_contract
+        if normalized(default_expression) != normalized(expected_default_expression):
+            return None
+        default_result = graph_numeric_value_and_evidence(
+            default_expression, target, numeric_sources,
+            (numeric_sources[target][0], numeric_sources[target][1], default_start, default_end),
+            discovered,
+        )
+        ceiling_result = graph_numeric_value_and_evidence(
+            ceiling, "GraphExecutionLimits", numeric_sources, None, discovered,
+            require_evidence=False)
+        if default_result is None or ceiling_result is None:
+            return None
+        default_value, default_ids = default_result
+        ceiling_value, _ceiling_ids = ceiling_result
         initializer = java_static_final_initializer(
             source, "GraphExecutionLimits", environment_symbol)
         environment = str(fixed["environment"])
@@ -2096,6 +2412,12 @@ def graph_limit_family_from_source(root: Path,
             "environment": environment, "environmentCandidateId": environment_ids[0],
             "helper": helper, "fallbackAccessor": fallback, "ceilingAccessor": ceiling,
             "callDigest": hashlib.sha256(argument.encode("utf-8")).hexdigest(),
+            "defaultExpression": expected_default_expression,
+            "defaultValue": default_value,
+            "defaultDisplay": f"{default_value} {unit}",
+            "defaultEvidence": sorted(default_ids),
+            "ceilingValue": ceiling_value,
+            "validationDisplay": f"1..{ceiling_value}",
         })
     return {
         "kind": "java-graph-environment-family-v1",
@@ -2141,6 +2463,17 @@ def graph_limit_authority_errors(root: Path, authorities: object,
                 or representative.get("bindings") != [spec["environment"]] \
                 or representative.get("bindingAuthority") is not None:
             errors.append(f"{setting}: graph typed owner/field/environment metadata has drifted")
+        if any(entry.get("default") != spec["defaultDisplay"]
+               or entry.get("validation") != spec["validationDisplay"]
+               or not isinstance(entry.get("defaultEvidence"), list)
+               or Counter(str(identifier) for identifier in entry["defaultEvidence"])
+               != Counter(str(identifier) for identifier in spec["defaultEvidence"])
+               for entry in setting_entries):
+            errors.append(f"{setting}: graph default, range, or exact default evidence has drifted")
+        if any(identifier not in discovered
+               or entries.get(identifier, {}).get("setting") != setting
+               for identifier in spec["defaultEvidence"]):
+            errors.append(f"{setting}: graph typed default atoms are absent or assigned elsewhere")
         if current_source_owner(root, str(spec["typedOwner"])) is None \
                 or not current_source_field(root, str(spec["typedOwner"]), str(spec["field"])):
             errors.append(f"{setting}: graph typed owner does not declare its exact component")

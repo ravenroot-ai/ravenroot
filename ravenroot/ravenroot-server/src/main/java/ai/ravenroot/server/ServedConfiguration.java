@@ -72,7 +72,7 @@ record ServedConfiguration(int schemaVersion, int graphDocumentMaxBytes) {
                 + ",\"attentionBackoffMaxMillis\":" + confirmation.pollBackoffMaxMillis()
                 + ",\"attentionPageSize\":" + confirmation.attentionDefaultPageSize()
                 + ",\"attentionPageSizeMax\":" + confirmation.attentionMaxPageSize()
-                + "}}";
+                + "}";
     }
 
 }

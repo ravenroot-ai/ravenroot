@@ -53,6 +53,7 @@ public final class RavenrootCli {
                 // says otherwise. RavenrootCliMain intercepts it before an engine is ever built, so
                 // this case is the embedded-object entry point rather than the usual one.
                 case "validate" -> GraphMlValidateCommand.run(args, output, errors);
+                case "events" -> EventStreamDecodeCommand.run(args, System.in, output, errors);
                 case "run" -> runGraph(args);
                 case "result" -> result(args);
                 case "live" -> liveExecutions();
@@ -558,6 +559,7 @@ public final class RavenrootCli {
         // Listed separately because it is answered locally whether or not --server is
         // given -- the document is on this machine and so is the profile that reads it.
         output.println("       ravenroot validate <graph.graphml>");
+        output.println("       ravenroot events decode   (decode a captured SSE body from stdin)");
         // Listed separately for the opposite reason to 'validate': this REQUIRES
         // --server, because stored credentials live in a running server's own store, not in anything
         // the embedded (no --server) CLI composes -- BehaviorEnvironment.safeDefaults() has no

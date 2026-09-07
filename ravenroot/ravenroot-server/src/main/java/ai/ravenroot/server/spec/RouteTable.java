@@ -634,6 +634,12 @@ public final class RouteTable {
                     concat(STANDARD_ERRORS, ErrorCode.INTERNAL_ERROR.code()), NEVER, false),
             new RouteDescriptor(Set.of("GET"), "/v1/events",
                     "Server-Sent Events stream of execution events, resumable via Last-Event-ID. "
+                            + "Execution data uses schemaVersion 1, source RING or DURABLE, canonical eventType, "
+                            + "and string id equal to the SSE cursor. Compare ids only within the authenticated "
+                            + "tenant and source; RING additionally requires the same process-local continuity. "
+                            + "Live type remains a compatibility alias with no scheduled removal. "
+                            + "Source and schema response headers agree with every execution payload; "
+                            + "keepalive comments and named retention/overrun controls are separate shapes. "
                             + "Without a selector it uses the durable journal when available. "
                             + "'include=diagnostics' instead selects the authenticated in-memory ring "
                             + "for the entire stream and declares source RING with PROCESS_LOCAL "
@@ -662,7 +668,8 @@ public final class RouteTable {
             // same authorization, to the same principal -- a different shape of one surface, so a
             // posture weaker than its stream's would be an inconsistency rather than caution.
             new RouteDescriptor(Set.of("GET"), "/v1/events/recent",
-                    "Bounded, resumable read of recent execution events, ascending by cursor, strictly "
+                    "Legacy polling projection, separate from the versioned SSE envelope. "
+                            + "Bounded, resumable read of recent execution events, ascending by cursor, strictly "
                             + "after 'after'. Declares which source served it and the oldest cursor still "
                             + "available; reports an explicit gap when 'after' precedes that floor rather "
                             + "than returning a silently continuous list. A 'limit' above the server cap "

@@ -240,30 +240,17 @@ public final class RavenrootServer implements AutoCloseable {
      * {@link IllegalStateException} if it dies instead of being answered.
      * {@code JdkHeaderCapOrderingHazardTest} demonstrates the hazard exactly this way -- a fresh JVM,
      * a foreign {@code HttpServer.create()} before the first {@code RavenrootServer} -- rather than
-     * assuming it, because a test that instead relied on this suite's own class-loading order would
-     * pass or fail depending on which test class Surefire happens to run first, which is exactly the
-     * failure mode being guarded against. This module's own test suite closes, at the source, every
-     * foreign {@code HttpServer.create()} known to run inside its own shared Surefire JVM -- two sites.
-     * {@code security/TestOidcProvider.java}'s own static initializer touches this class
-     * ({@code Class.forName(RavenrootServer.class.getName())}, which the JLS specifies to run this
-     * class's static initializer, unlike a bare {@code .class} literal) before creating its own foreign
-     * {@code HttpServer}, and {@code JdkHeaderCapConnectFailureClassificationTest} does the same before
-     * its own. A third {@code HttpServer.create()} lives in this module, in
-     * {@code JdkHeaderCapOrderingHazardBoundary}, but it is not a third instance of this hazard: it runs
-     * in its own freshly launched {@code java} process (see {@code JdkHeaderCapOrderingHazardTest}), never
-     * inside this module's shared Surefire JVM, so it cannot lose or win this race at all. Each in-process
-     * guard wins its own race regardless of which test class Surefire schedules first, but the guard is
-     * per call site, not general: it does nothing for a {@code HttpServer.create()} added to this module's
-     * test sources tomorrow without the same guard -- see
-     * {@code docs/qa/what-the-testkits-do-not-cover.md} for the measurement behind that limit. Setting the
-     * property on the {@code java} command line -- guaranteed to apply before any class loads, so it
-     * cannot lose this race at all -- is not available the same way here: {@code ravenroot-server/pom.xml}
-     * cannot add its own {@code -D} to the forked test JVM (Maven's argLine composition is reactor-wide,
-     * by design; see {@code scripts/check_argline.py}), which is why an in-process guard at each known
-     * foreign call site, plus this runtime verification as the general-purpose backstop, is what covers
-     * this module's own suite. The command-line recommendation is real for a deployment, though, where it
-     * is this class's own process and nothing stops an operator from setting it: see
-     * {@code docs/deployment.md}.</p>
+     * assuming it. The server module's Maven tests avoid that race generally: its POM populates the
+     * parent's composable {@code ravenroot.surefire.extraArgLine}, so the reused Surefire JVM starts with
+     * the property before any test class can load. The same boundary test reads that actual JVM input
+     * argument, forwards only the observed token to a fresh process, creates a bare zero-context server
+     * first, and brackets the live cap with real requests. Existing call-site initialization guards stay
+     * as defense for nonstandard direct test launches, but the fork argument is the module-wide invariant.
+     *
+     * <p>This runtime verification remains the general-purpose backstop for embedders, whose process may
+     * create an unrelated {@code HttpServer} before this class. A deployment should set the property on
+     * its {@code java} command line, where it is guaranteed to apply before any class loads; see the
+     * deployment documentation.</p>
      *
      * <p>Read, not overwritten, if already set: an operator's own {@code -D} takes precedence, and so
      * does a test that needs a different value -- {@code JdkHeaderCapOrderingHazardTest} also covers

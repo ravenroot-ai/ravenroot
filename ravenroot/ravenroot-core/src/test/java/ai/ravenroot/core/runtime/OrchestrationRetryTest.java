@@ -470,6 +470,9 @@ class OrchestrationRetryTest {
                     scheduler.releaseSchedule();
                     assertTrue(scheduler.awaitFirstRegistration(BOUND_MILLIS),
                             "the join timeout must become visible to the manual scheduler");
+                    assertEquals(1, scheduler.liveCount(),
+                            "the registered join timeout must still be live before it is fired");
+                    awaitParkedBranchCount(runner, 1);
                     assertEquals(1, scheduler.fireAll(),
                             "exactly one join timeout was scheduled, and this is it");
                 } finally {
@@ -949,6 +952,22 @@ class OrchestrationRetryTest {
         }
         throw new AssertionError("node '" + nodeId + "' never reached " + expected
                 + " attempts within " + BOUND_MILLIS + "ms");
+    }
+
+    /** Waits until the join has installed the branch that the registered timeout must release. */
+    private static void awaitParkedBranchCount(GraphRunner runner, int expected) throws InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofMillis(BOUND_MILLIS).toNanos();
+        while (System.nanoTime() < deadline) {
+            if (runner.liveParkedBranchCount() == expected) {
+                return;
+            }
+            if (Thread.interrupted()) {
+                throw new InterruptedException("interrupted while awaiting a parked join branch");
+            }
+            Thread.yield();
+        }
+        assertEquals(expected, runner.liveParkedBranchCount(),
+                "b1 never reached the parked join state after its timeout was registered");
     }
 
     private static long createRunningInstance(ExecutionStore store, ExecutionKey key, UUID traversalId,

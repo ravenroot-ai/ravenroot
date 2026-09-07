@@ -3343,7 +3343,17 @@ def assistant_limit_carrier_errors(root: Path, spec: dict[str, object], evidence
         schema = json.loads((root / "deploy/helm/ravenroot/values.schema.json").read_text(
             encoding="utf-8"))
         assistant = schema["properties"]["assistant"]
-        leaf = assistant["properties"][helm_field]
+        expected_fields = {str(item["helmField"]) for item in ASSISTANT_LIMIT_SETTINGS}
+        required_fields = assistant.get("required")
+        properties = assistant.get("properties")
+        if set(assistant) != {"type", "additionalProperties", "required", "properties"} \
+                or assistant.get("type") != "object" \
+                or assistant.get("additionalProperties") is not False \
+                or not isinstance(required_fields, list) or len(required_fields) != 2 \
+                or set(required_fields) != expected_fields \
+                or not isinstance(properties, dict) or set(properties) != expected_fields:
+            raise ValueError("unsupported assistant schema object")
+        leaf = properties[helm_field]
         branches = leaf["oneOf"]
         if not isinstance(branches, list) or len(branches) != 2:
             raise ValueError("unsupported assistant schema branch set")

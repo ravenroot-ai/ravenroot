@@ -1037,6 +1037,48 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
 
             schema_path = root / "deploy/helm/ravenroot/values.schema.json"
             schema_source = schema_path.read_text(encoding="utf-8")
+            baseline_schema = json.loads(schema_source)
+            assistant_schema = baseline_schema["properties"]["assistant"]
+            schema_mutations = []
+
+            missing_type = copy.deepcopy(baseline_schema)
+            missing_type["properties"]["assistant"].pop("type")
+            schema_mutations.append(("missing type", missing_type))
+            wrong_type = copy.deepcopy(baseline_schema)
+            wrong_type["properties"]["assistant"]["type"] = "array"
+            schema_mutations.append(("wrong type", wrong_type))
+            permissive = copy.deepcopy(baseline_schema)
+            permissive["properties"]["assistant"]["additionalProperties"] = True
+            schema_mutations.append(("permissive additional properties", permissive))
+            missing_closed_flag = copy.deepcopy(baseline_schema)
+            missing_closed_flag["properties"]["assistant"].pop("additionalProperties")
+            schema_mutations.append(("missing additionalProperties", missing_closed_flag))
+            extra_property = copy.deepcopy(baseline_schema)
+            extra_property["properties"]["assistant"]["properties"]["alienLimit"] = {
+                "type": "integer"}
+            schema_mutations.append(("extra property", extra_property))
+            missing_property = copy.deepcopy(baseline_schema)
+            missing_property["properties"]["assistant"]["properties"].pop("maxOutputTokens")
+            schema_mutations.append(("missing property", missing_property))
+            extra_required = copy.deepcopy(baseline_schema)
+            extra_required["properties"]["assistant"]["required"].append("alienLimit")
+            schema_mutations.append(("extra required", extra_required))
+            missing_required = copy.deepcopy(baseline_schema)
+            missing_required["properties"]["assistant"]["required"].remove("maxOutputTokens")
+            schema_mutations.append(("missing required", missing_required))
+            duplicate_required = copy.deepcopy(baseline_schema)
+            duplicate_required["properties"]["assistant"]["required"] = [
+                "maxOutputTokens", "maxOutputTokens"]
+            schema_mutations.append(("duplicate required", duplicate_required))
+            self.assertEqual({"maxOutputTokens", "maxToolIterations"},
+                             set(assistant_schema["properties"]))
+            for label, mutated_schema in schema_mutations:
+                schema_path.write_text(json.dumps(mutated_schema), encoding="utf-8")
+                self.assertTrue(any("schema binding/range/blank" in error
+                                    for error in self.assistant_limit_errors(
+                                        root, authorities, entries, candidates)), label)
+            schema_path.write_text(schema_source, encoding="utf-8")
+
             schema_path.write_text(schema_source.replace(
                 '"maximum": 16000', '"maximum": 15999', 1), encoding="utf-8")
             self.assertTrue(any("schema binding/range/blank" in error

@@ -222,6 +222,195 @@ class AgentAuthorityBudgetSqliteIntegrationTest {
         }
     }
 
+    @Test
+    void changedPolicyRefusesConsumedBeforeApprovalReservationRevisionOrEffectChanges() throws Exception {
+        for (boolean legacy : List.of(false, true)) {
+            Path database = directory.resolve("strict-" + legacy + ".db");
+            Scenario scenario; UUID approvalId;
+            byte[] checkpoint = "checkpoint-v1".getBytes(StandardCharsets.UTF_8);
+            try (var store = new SqliteExecutionStore(database, CLOCK)) {
+                scenario = createScenario(store); var original = service(store, 1);
+                try (var recorder = recorder(store, scenario.key(), "original");
+                     var binding = original.bindLive(scenario.key(), recorder)) {
+                    var approvals = new ToolApprovalService(store, CLOCK, original);
+                    try (var approvalBinding = approvals.bindLive(scenario.key(), recorder)) {
+                        var session = original.admit(scenario.message(), resources());
+                        var authorization = managed(original, approvals).toolAuthorization().authorize(
+                                scenario.message(), "alpha__search", new byte[]{'{', '}'});
+                        approvalId = ((DurableToolApprovalSuspension) authorization.suspend(1, checkpoint)).approvalId();
+                        session.suspend();
+                    }
+                }
+            }
+            if (legacy) removePinsForLegacyFixture(database, scenario.key());
+            try (var store = new SqliteExecutionStore(database, CLOCK)) {
+                var changed = AgentAuthorityBudgetFingerprintTest.copy(policy(99), 9, 2L);
+                var strict = new AgentAuthorityBudgetService(store, CLOCK, changed, AgentBudgetTelemetry.discarding());
+                var approvals = new ToolApprovalService(store, CLOCK, strict);
+                approvals.approve(approver(), scenario.key().processInstanceId(), approvalId);
+                var approved = store.loadToolApproval(scenario.key(), approvalId).toCompletableFuture().join().orElseThrow();
+                assertEquals(ToolApprovalStatus.APPROVED, approved.status());
+                try (var recorder = recorder(store, scenario.key(), "strict");
+                     var binding = strict.bindLive(scenario.key(), recorder)) {
+                    var before = store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow();
+                    long revision = store.load(scenario.key()).toCompletableFuture().join().revision();
+                    int journal = store.readJournal(scenario.key().tenantId(), 0, 100).toCompletableFuture().join().size();
+                    var effects = new java.util.concurrent.atomic.AtomicInteger();
+                    var failure = assertThrows(NodePackageServiceException.class, () -> {
+                        approvals.redeemStored(approved, invocation -> new ToolDecision(
+                                ToolDecision.Disposition.ALLOW, "allow", "policy-v1"), "strict");
+                        effects.incrementAndGet();
+                    });
+                    assertEquals(NodePackageServiceException.Reason.ADMISSION_REFUSED, failure.reason());
+                    assertEquals(null, failure.getCause());
+                    var request = approved.request();
+                    assertThrows(NodePackageServiceException.class, () -> strict.hold(scenario.key(), request));
+                    assertEquals(0, effects.get());
+                    var unchanged = store.loadToolApproval(scenario.key(), approvalId).toCompletableFuture().join().orElseThrow();
+                    assertEquals(approved.status(), unchanged.status());
+                    assertEquals(approved.revision(), unchanged.revision());
+                    assertEquals(approved.actor(), unchanged.actor());
+                    assertEquals(approved.request().approvalId(), unchanged.request().approvalId());
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(approved.request().canonicalArguments(), unchanged.request().canonicalArguments());
+                    org.junit.jupiter.api.Assertions.assertArrayEquals(approved.request().continuation(), unchanged.request().continuation());
+                    assertEquals(before, store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow());
+                    assertEquals(revision, store.load(scenario.key()).toCompletableFuture().join().revision());
+                    assertEquals(journal, store.readJournal(scenario.key().tenantId(), 0, 100).toCompletableFuture().join().size());
+                    var release = strict.release(approved).orElseThrow();
+                    recorder.record(List.of(), List.of(), List.of(release));
+                    var cleaned = store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow();
+                    assertEquals(before.pinnedRoot(), cleaned.pinnedRoot());
+                    assertEquals(AgentReservationState.RELEASED, cleaned.budget().reservations().values().iterator().next().state());
+                    strict.finishProcess(scenario.key(), false);
+                    assertEquals(before.pinnedRoot(), store.loadAgentAuthorityBudgetSnapshot(scenario.key())
+                            .toCompletableFuture().join().orElseThrow().pinnedRoot());
+
+                }
+            }
+            try (var reopened = new SqliteExecutionStore(database, CLOCK)) {
+                assertEquals(!legacy, reopened.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture()
+                        .join().orElseThrow().pinnedRoot().isPresent());
+            }
+        }
+    }
+
+    @Test
+    void driftAndLegacyKeepStoredSettlementIndeterminateAndGlobalCleanupAvailable() throws Exception {
+        for (boolean legacy : List.of(false, true)) {
+            Path database = directory.resolve("cleanup-" + legacy + ".db");
+            Scenario scenario;
+            try (var store = new SqliteExecutionStore(database, CLOCK)) {
+                scenario = createScenario(store); var original = service(store, 1);
+                try (var recorder = recorder(store, scenario.key(), "original");
+                     var binding = original.bindLive(scenario.key(), recorder)) {
+                    var session = original.admit(scenario.message(), resources());
+                    session.reserveModelTurn(1).dispatch(); session.suspend();
+                }
+            }
+            if (legacy) removePinsForLegacyFixture(database, scenario.key());
+            try (var store = new SqliteExecutionStore(database, CLOCK)) {
+                var changed = AgentAuthorityBudgetFingerprintTest.copy(policy(2), 10, 300L);
+                var strict = new AgentAuthorityBudgetService(store, CLOCK, changed, AgentBudgetTelemetry.discarding());
+                var before = store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow();
+                try (var recorder = recorder(store, scenario.key(), "cleanup");
+                     var binding = strict.bindLive(scenario.key(), recorder)) {
+                    assertThrows(NodePackageServiceException.class, () -> strict.admit(scenario.message(), resources()));
+                    var reservations = List.copyOf(before.budget().reservations().values());
+                    recorder.record(List.of(), List.of(), List.of(
+                            new ai.ravenroot.api.persistence.AgentBudgetOperation.Settle(reservations.get(0).reservationId(),
+                                    reservations.get(0).requested())));
+                    var cleaned = store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow();
+                    assertEquals(before.pinnedRoot(), cleaned.pinnedRoot());
+                    assertEquals(160, cleaned.budget().spent().costMicros(), "accepted costs must not be repriced at new rate300");
+                    strict.trip(operator()); strict.reset(operator());
+                    assertEquals(before.pinnedRoot(), store.loadAgentAuthorityBudgetSnapshot(scenario.key())
+                            .toCompletableFuture().join().orElseThrow().pinnedRoot());
+                }
+            }
+        }
+    }
+
+    @Test
+    void consumedContinuationRejectsDriftWithoutAliasAndItsCleanupHooksRemainUsable() throws Exception {
+        for (boolean legacy : List.of(false, true)) {
+            for (boolean indeterminate : List.of(false, true)) {
+                Path database = directory.resolve("consumed-" + legacy + "-" + indeterminate + ".db");
+                Scenario scenario; UUID approvalId; byte[] checkpoint = new byte[]{1};
+                try (var store = new SqliteExecutionStore(database, CLOCK)) {
+                    scenario = createScenario(store); var original = service(store, 1);
+                    var approvals = new ToolApprovalService(store, CLOCK, original);
+                    try (var recorder = recorder(store, scenario.key(), "original");
+                         var binding = original.bindLive(scenario.key(), recorder);
+                         var approvalBinding = approvals.bindLive(scenario.key(), recorder)) {
+                        var session = original.admit(scenario.message(), resources());
+                        var authorization = managed(original, approvals).toolAuthorization().authorize(
+                                scenario.message(), "alpha__search", new byte[]{'{', '}'});
+                        approvalId = ((DurableToolApprovalSuspension) authorization.suspend(1, checkpoint)).approvalId();
+                        session.suspend();
+                    }
+                    approvals.approve(approver(), scenario.key().processInstanceId(), approvalId);
+                    var approved = store.loadToolApproval(scenario.key(), approvalId).toCompletableFuture().join().orElseThrow();
+                    approvals.redeemStored(approved, invocation -> new ToolDecision(
+                            ToolDecision.Disposition.ALLOW, "allow", "policy-v1"), "initial");
+                }
+                if (legacy) removePinsForLegacyFixture(database, scenario.key());
+                try (var store = new SqliteExecutionStore(database, CLOCK)) {
+                    var strict = new AgentAuthorityBudgetService(store, CLOCK,
+                            AgentAuthorityBudgetFingerprintTest.copy(policy(2), 9, 2L), AgentBudgetTelemetry.discarding());
+                    var approval = store.loadToolApproval(scenario.key(), approvalId).toCompletableFuture().join().orElseThrow();
+                    assertEquals(ToolApprovalStatus.CONSUMED, approval.status());
+                    var r = approval.request();
+                    var continuation = new ToolCallContinuationInput(scenario.reentryMessage(), approvalId,
+                            r.traversalId(), r.invocationId(), r.attemptId(), r.tool(), r.canonicalArguments(),
+                            r.argumentsDigest(), ToolCallContinuationInput.Decision.APPROVED, r.continuationVersion(),
+                            checkpoint, r.continuationDigest());
+                    try (var recorder = recorder(store, scenario.key(), "cleanup");
+                         var binding = strict.bindLive(scenario.key(), recorder)) {
+                        var before = store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow();
+                        long revision = recorder.revision();
+                        assertThrows(NodePackageServiceException.class, () -> strict.resume(continuation, resources()));
+                        for (String name : List.of("aliases", "sessions")) {
+                            var field = AgentAuthorityBudgetService.class.getDeclaredField(name); field.setAccessible(true);
+                            assertTrue(((Map<?, ?>) field.get(strict)).isEmpty(), "refused resume must not publish " + name);
+                        }
+                        assertEquals(revision, recorder.revision());
+                        assertEquals(before, store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow());
+                        var operation = (indeterminate ? strict.indeterminate(approval) : strict.settle(approval)).orElseThrow();
+                        recorder.record(List.of(), List.of(), List.of(operation));
+                        var after = store.loadAgentAuthorityBudgetSnapshot(scenario.key()).toCompletableFuture().join().orElseThrow();
+                        assertEquals(before.pinnedRoot(), after.pinnedRoot());
+                        assertEquals(indeterminate ? AgentReservationState.INDETERMINATE : AgentReservationState.SETTLED,
+                                after.budget().reservations().values().iterator().next().state());
+                        assertEquals(1, after.budget().spent().toolCalls());
+                    }
+                }
+            }
+        }
+    }
+
+    private static void removePinsForLegacyFixture(Path database, ExecutionKey key) throws Exception {
+        try (var connection = java.sql.DriverManager.getConnection("jdbc:sqlite:" + database);
+             var read = connection.prepareStatement("SELECT aggregate FROM agent_authority_budget WHERE tenant_id=? AND process_instance_id=?")) {
+            read.setString(1, key.tenantId()); read.setString(2, key.processInstanceId().toString());
+            byte[] bytes;
+            try (var rows = read.executeQuery()) { assertTrue(rows.next()); bytes = rows.getBytes(1); }
+            byte[] marker = policy(1).policyFingerprint().getBytes(StandardCharsets.US_ASCII);
+            int start = -1;
+            for (int i = 4; i <= bytes.length - marker.length; i++) {
+                if (java.util.Arrays.equals(marker, java.util.Arrays.copyOfRange(bytes, i, i + marker.length))) { start = i - 4; break; }
+            }
+            assertTrue(start > 4); assertEquals(2, java.nio.ByteBuffer.wrap(bytes).getInt());
+            byte[] legacy = new byte[bytes.length - 136];
+            System.arraycopy(bytes, 0, legacy, 0, start);
+            System.arraycopy(bytes, start + 136, legacy, start, bytes.length - start - 136);
+            java.nio.ByteBuffer.wrap(legacy).putInt(1);
+            try (var update = connection.prepareStatement("UPDATE agent_authority_budget SET aggregate=? WHERE tenant_id=? AND process_instance_id=?")) {
+                update.setBytes(1, legacy); update.setString(2, key.tenantId()); update.setString(3, key.processInstanceId().toString());
+                assertEquals(1, update.executeUpdate());
+            }
+        }
+    }
+
     private static Scenario createScenario(SqliteExecutionStore store) {
         ExecutionKey key = new ExecutionKey("tenant-a", UUID.randomUUID());
         UUID traversalId = UUID.randomUUID();

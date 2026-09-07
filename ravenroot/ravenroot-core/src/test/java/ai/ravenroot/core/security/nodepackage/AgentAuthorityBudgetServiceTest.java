@@ -843,6 +843,230 @@ class AgentAuthorityBudgetServiceTest {
         return parent.createChild(request);
     }
 
+    @Test
+    void sameVersionPolicyAndRateDriftRefuseAdmissionBeforeRevisionOrGrantChanges() throws Exception {
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            f.budgets.admit(f.message, resources());
+            var before = f.budget(); long revision = f.recorder.revision();
+            for (var changed : List.of(
+                    AgentAuthorityBudgetFingerprintTest.copy(policy(99), 5, Duration.ofHours(2)),
+                    AgentAuthorityBudgetFingerprintTest.copy(policy(99), 7, 101L),
+                    AgentAuthorityBudgetFingerprintTest.copy(policy(99), 8, 21L),
+                    AgentAuthorityBudgetFingerprintTest.copy(policy(99), 9, 2L),
+                    AgentAuthorityBudgetFingerprintTest.copy(policy(99), 10, 4L),
+                    AgentAuthorityBudgetFingerprintTest.copy(policy(99), 12,
+                            Set.of("runtime:delegate", "tool:use", "runtime:root")))) {
+                var restarted = new AgentAuthorityBudgetService(f.store, CLOCK, changed, AgentBudgetTelemetry.discarding());
+                try (var ignored = restarted.bindLive(f.key, f.recorder)) {
+                    assertRefused(() -> restarted.admit(f.message, resources()));
+                    assertRefused(() -> restarted.reserveDirectTool(f.message, UUID.randomUUID()));
+                }
+                assertEquals(before, f.budget()); assertEquals(revision, f.recorder.revision());
+            }
+        }
+    }
+
+    @Test
+    void cachedSessionsTurnsChildrenAndDispatchReloadProofAndFailedDispatchCanRetry() throws Exception {
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var corrupt = new java.util.concurrent.atomic.AtomicBoolean();
+            var absent = new java.util.concurrent.atomic.AtomicBoolean();
+            var source = (ai.ravenroot.api.persistence.ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                    getClass().getClassLoader(), new Class<?>[]{ai.ravenroot.api.persistence.ExecutionStore.class},
+                    (proxy, method, args) -> {
+                        if (method.getName().equals("loadAgentAuthorityBudgetSnapshot") && absent.get()) {
+                            return CompletableFuture.completedFuture(Optional.empty());
+                        }
+                        if (method.getName().equals("loadAgentAuthorityBudgetSnapshot") && corrupt.get()) {
+                            var real = f.store.loadAgentAuthorityBudgetSnapshot((ExecutionKey) args[0]).toCompletableFuture().join();
+                            return CompletableFuture.completedFuture(real.map(value ->
+                                    ai.ravenroot.api.persistence.AgentAuthorityBudgetSnapshot.pinned(value.budget(),
+                                    new ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot(value.budget().root(),
+                                            "0".repeat(64), "1".repeat(64)))));
+                        }
+                        try { return method.invoke(f.store, args); }
+                        catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                    });
+            var service = new AgentAuthorityBudgetService(source, CLOCK, policy(1), AgentBudgetTelemetry.discarding());
+            try (var ignored = service.bindLive(f.key, f.recorder)) {
+                var session = service.admit(f.message, resources());
+                var held = session.reserveModelTurn(1); NodeMessage child = f.addChildMessage();
+                var childRequest = new AgentChildResourceRequest(child, Set.of("data-a"), Set.of(),
+                        new AgentResourceRequest(3, 90, 10, Duration.ofMillis(900)));
+                var before = f.budget(); long revision = f.recorder.revision();
+                corrupt.set(true);
+                assertRefused(() -> service.admit(f.message, resources()));
+                assertRefused(() -> session.reserveModelTurn(1));
+                assertRefused(() -> session.reserveModelTurn(2));
+                assertRefused(() -> session.createChild(childRequest));
+                assertRefused(held::dispatch);
+                assertEquals(before, f.budget()); assertEquals(revision, f.recorder.revision());
+                corrupt.set(false); absent.set(true);
+                assertRefused(() -> service.admit(f.message, resources()));
+                assertRefused(() -> session.reserveModelTurn(1));
+                absent.set(false);
+                assertSame(session, service.admit(f.message, resources()));
+                held.dispatch(); // failed compatibility lookup must not consume the dispatch CAS
+                corrupt.set(true);
+                held.settle(Optional.of(1L), Optional.of(1L)); // cleanup does not load compatible policy
+                assertEquals(AgentReservationState.SETTLED, f.budget().reservations().values().iterator().next().state());
+                corrupt.set(false);
+                var childSession = session.createChild(childRequest);
+                assertEquals(2, f.budget().grants().size()); childSession.cancel();
+            }
+        }
+    }
+
+    @Test
+    void newRootUsesOneAdmissionInstantAndLaterRootlessGrantKeepsStoredDeadline() throws Exception {
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var reads = new java.util.concurrent.atomic.AtomicInteger();
+            Clock ticking = new Clock() {
+                @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+                @Override public Clock withZone(ZoneId zone) { return this; }
+                @Override public Instant instant() { return CLOCK.instant().plusNanos(reads.getAndIncrement()); }
+            };
+            var shortPolicy = AgentAuthorityBudgetFingerprintTest.copy(policy(1), 5, Duration.ofSeconds(1));
+            var service = new AgentAuthorityBudgetService(f.store, ticking, shortPolicy, AgentBudgetTelemetry.discarding());
+            try (var ignored = service.bindLive(f.key, f.recorder)) {
+                var huge = new AgentResourceRequest(4, 1000, 20, Duration.ofSeconds(Long.MAX_VALUE));
+                service.admit(f.message, huge);
+                var first = f.budget();
+                assertEquals(CLOCK.instant().plusNanos(1).plusSeconds(1), first.root().absoluteDeadline());
+                assertEquals(first.root().absoluteDeadline(), first.grants().values().iterator().next().registration().absoluteDeadline());
+                var fresh = f.addFreshTraversalMessage();
+                service.admit(fresh, huge);
+                assertEquals(first.root(), f.budget().root());
+                assertTrue(f.budget().grants().values().stream().allMatch(grant ->
+                        grant.registration().absoluteDeadline().equals(first.root().absoluteDeadline())));
+            }
+        }
+    }
+
+    @Test
+    void durationAndInstantEdgesRefuseBeforeWritesAndSettlementBoundsBeforeTerminalCas() throws Exception {
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var invalid = AgentAuthorityBudgetFingerprintTest.copy(policy(1), 5, Duration.ofSeconds(Long.MAX_VALUE));
+            var failure = assertThrows(IllegalArgumentException.class, () -> new AgentAuthorityBudgetService(
+                    f.store, CLOCK, invalid, AgentBudgetTelemetry.discarding()));
+            assertEquals(null, failure.getCause());
+            long revision = f.recorder.revision();
+            assertRefused(() -> f.budgets.admit(f.message, new AgentResourceRequest(4, 1000, 20, Duration.ofNanos(1))));
+            assertEquals(revision, f.recorder.revision());
+            assertTrue(f.store.loadAgentAuthorityBudget(f.key).toCompletableFuture().join().isEmpty());
+            var clock = new MutableClock(CLOCK.instant());
+            var service = new AgentAuthorityBudgetService(f.store, clock, policy(1), AgentBudgetTelemetry.discarding());
+            try (var ignored = service.bindLive(f.key, f.recorder)) {
+                clock.now = Instant.MAX;
+                assertRefused(() -> service.admit(f.message, resources()));
+                assertEquals(revision, f.recorder.revision());
+                clock.now = CLOCK.instant();
+                var session = service.admit(f.message, new AgentResourceRequest(4, 1000, 20, Duration.ofSeconds(Long.MAX_VALUE)));
+                var turn = session.reserveModelTurn(1); turn.dispatch();
+                clock.now = Instant.MAX;
+                turn.settle(Optional.of(1L), Optional.of(1L));
+                turn.settle(Optional.of(1L), Optional.of(1L));
+                assertEquals(10_000, f.budget().spent().elapsedMillis());
+                assertEquals(1, f.budget().spent().turns());
+            }
+        }
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var clock = new MutableClock(CLOCK.instant());
+            var service = new AgentAuthorityBudgetService(f.store, clock, policy(1), AgentBudgetTelemetry.discarding());
+            try (var ignored = service.bindLive(f.key, f.recorder)) {
+                var turn = service.admit(f.message, resources()).reserveModelTurn(1); turn.dispatch();
+                clock.now = Instant.MIN;
+                turn.settle(Optional.of(1L), Optional.of(1L));
+                assertEquals(0, f.budget().spent().elapsedMillis());
+                assertEquals(1, f.budget().spent().turns());
+            }
+        }
+    }
+
+    @Test
+    void pinnedRecorderUsesTheSameFenceLossAndRevisionBookkeeping() throws Exception {
+        for (boolean leaseLost : List.of(false, true)) {
+            try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+                f.detachRecorder();
+                var rawWrites = new java.util.concurrent.atomic.AtomicInteger();
+                var pinnedWrites = new java.util.concurrent.atomic.AtomicInteger();
+                var source = (ai.ravenroot.api.persistence.ExecutionStore) java.lang.reflect.Proxy.newProxyInstance(
+                        getClass().getClassLoader(), new Class<?>[]{ai.ravenroot.api.persistence.ExecutionStore.class},
+                        (proxy, method, args) -> {
+                            if (method.getName().equals("apply")) rawWrites.incrementAndGet();
+                            if (method.getName().equals("applyWithPinnedAgentAuthorityRoot")) {
+                                pinnedWrites.incrementAndGet();
+                                ai.ravenroot.api.persistence.ExecutionStoreFailure failure = leaseLost
+                                        ? new ai.ravenroot.api.persistence.ExecutionStoreFailure.LeaseLost(f.key, "test")
+                                        : new ai.ravenroot.api.persistence.ExecutionStoreFailure.FencedOut(f.key, 1, 2);
+                                return CompletableFuture.failedFuture(new ai.ravenroot.api.persistence.ExecutionStoreException(failure));
+                            }
+                            try { return method.invoke(f.store, args); }
+                            catch (java.lang.reflect.InvocationTargetException failure) { throw failure.getCause(); }
+                        });
+                long revision = f.store.load(f.key).toCompletableFuture().join().revision();
+                try (var recorder = ExecutionRecorder.open(source, f.key, "pinned", Duration.ofSeconds(30), revision)) {
+                    var service = new AgentAuthorityBudgetService(source, CLOCK, policy(1), AgentBudgetTelemetry.discarding());
+                    try (var binding = service.bindLive(f.key, recorder)) {
+                        assertThrows(ai.ravenroot.api.persistence.ExecutionStoreException.class, () -> service.admit(f.message, resources()));
+                        assertEquals(false, recorder.holdsFence()); assertEquals(revision, recorder.revision());
+                        assertEquals(0, rawWrites.get()); assertEquals(1, pinnedWrites.get());
+                        assertTrue(f.store.loadAgentAuthorityBudget(f.key).toCompletableFuture().join().isEmpty());
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
+    void settlementClockFailureBeforeTerminalCasRemainsRetryable() throws Exception {
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var fail = new java.util.concurrent.atomic.AtomicBoolean();
+            Clock clock = new Clock() {
+                @Override public ZoneId getZone() { return ZoneOffset.UTC; }
+                @Override public Clock withZone(ZoneId zone) { return this; }
+                @Override public Instant instant() {
+                    if (fail.getAndSet(false)) throw new IllegalStateException("clock unavailable");
+                    return CLOCK.instant();
+                }
+            };
+            var service = new AgentAuthorityBudgetService(f.store, clock, policy(1), AgentBudgetTelemetry.discarding());
+            try (var binding = service.bindLive(f.key, f.recorder)) {
+                var permit = service.admit(f.message, resources()).reserveModelTurn(1); permit.dispatch();
+                long revision = f.recorder.revision(); fail.set(true);
+                assertThrows(IllegalStateException.class, () -> permit.settle(Optional.of(1L), Optional.of(1L)));
+                assertEquals(revision, f.recorder.revision());
+                assertEquals(AgentReservationState.DISPATCHED, f.budget().reservations().values().iterator().next().state());
+                permit.settle(Optional.of(1L), Optional.of(1L));
+                assertEquals(AgentReservationState.SETTLED, f.budget().reservations().values().iterator().next().state());
+                assertEquals(1, f.budget().spent().turns());
+            }
+        }
+    }
+
+    @Test
+    void remainingDeadlineIsBoundedBeforeMillisAcrossTheFullInstantRange() throws Exception {
+        try (Fixture f = new Fixture(policy(1), AgentBudgetTelemetry.discarding())) {
+            var clock = new MutableClock(CLOCK.instant());
+            var service = new AgentAuthorityBudgetService(f.store, clock, policy(1), AgentBudgetTelemetry.discarding());
+            try (var binding = service.bindLive(f.key, f.recorder)) {
+                var session = service.admit(f.message, resources());
+                clock.now = Instant.MIN;
+                var permit = session.reserveModelTurn(1);
+                assertEquals(Duration.ofSeconds(1), permit.maximumDuration());
+                permit.dispatch(); clock.now = Instant.MAX;
+                permit.settle(Optional.of(1L), Optional.of(1L));
+                assertEquals(1000, f.budget().spent().elapsedMillis());
+            }
+        }
+    }
+
+    private static void assertRefused(Runnable action) {
+        var failure = assertThrows(NodePackageServiceException.class, action::run);
+        assertEquals(NodePackageServiceException.Reason.ADMISSION_REFUSED, failure.reason());
+        assertEquals(null, failure.getCause());
+    }
+
     private static AgentResourceSession admit(Fixture fixture, CountDownLatch ready, CountDownLatch start) {
         return admit(fixture, fixture.message, resources(), ready, start);
     }

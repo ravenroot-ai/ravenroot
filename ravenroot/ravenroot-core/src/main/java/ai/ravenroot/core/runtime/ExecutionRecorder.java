@@ -3,6 +3,7 @@ package ai.ravenroot.core.runtime;
 import ai.ravenroot.api.persistence.EventEnvelope;
 import ai.ravenroot.api.persistence.DurableToolApproval;
 import ai.ravenroot.api.persistence.AgentBudgetOperation;
+import ai.ravenroot.api.persistence.PinnedAgentAuthorityRoot;
 import ai.ravenroot.api.persistence.ExecutionBatch;
 import ai.ravenroot.api.persistence.ExecutionKey;
 import ai.ravenroot.api.persistence.ExecutionPauseRegistration;
@@ -229,8 +230,20 @@ public final class ExecutionRecorder implements AutoCloseable {
     /** Adds durable agent accounting to the same fenced commit as its lifecycle and audit events. */
     public synchronized void record(List<ExecutionTransition> transitions, List<EventEnvelope> events,
                                     List<AgentBudgetOperation> agentBudgetOperations) {
+        recordInternal(transitions, events, agentBudgetOperations, null);
+    }
+
+    /** Commits new root provenance through the same revision, fence and failure bookkeeping. */
+    public synchronized void recordWithPinnedAgentAuthorityRoot(List<ExecutionTransition> transitions,
+            List<EventEnvelope> events, List<AgentBudgetOperation> agentBudgetOperations,
+            PinnedAgentAuthorityRoot pinnedRoot) {
+        recordInternal(transitions, events, agentBudgetOperations, Objects.requireNonNull(pinnedRoot, "pinnedRoot"));
+    }
+
+    private void recordInternal(List<ExecutionTransition> transitions, List<EventEnvelope> events,
+            List<AgentBudgetOperation> agentBudgetOperations, PinnedAgentAuthorityRoot pinnedRoot) {
         requireFence();
-        if ((transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
+        if (pinnedRoot == null && (transitions == null || transitions.isEmpty()) && (events == null || events.isEmpty())
                 && (agentBudgetOperations == null || agentBudgetOperations.isEmpty())) {
             return;
         }
@@ -259,7 +272,8 @@ public final class ExecutionRecorder implements AutoCloseable {
             agentBudgetOperations.forEach(batch::applyAgentBudget);
         }
         try {
-            StoredProcessInstance applied = await(store.apply(batch.build()));
+            StoredProcessInstance applied = await(pinnedRoot == null ? store.apply(batch.build())
+                    : store.applyWithPinnedAgentAuthorityRoot(batch.build(), pinnedRoot));
             revision = applied.revision();
         } catch (ExecutionStoreException failed) {
             if (failed.failure() instanceof ExecutionStoreFailure.FencedOut

@@ -88,6 +88,12 @@ humanTask:
   defaultAttentionPageSize: ""
   maxAttentionPageSize: ""
 
+# Live authoring-assistant limits. Empty values leave the numerical defaults in Java; explicit
+# values may tighten the output or provider-turn ceiling without activating an assistant profile.
+assistant:
+  maxOutputTokens: ""
+  maxToolIterations: ""
+
 # Program execution timeout. RAVENROOT_PROGRAM_TIMEOUT_MS
 # has no chart-level default at all before this: an operator who wires in their own SEC-11 sandbox
 # supervisor (RAVENROOT_GRAAL_SANDBOX_SUPERVISOR is deliberately absent from this chart -- see

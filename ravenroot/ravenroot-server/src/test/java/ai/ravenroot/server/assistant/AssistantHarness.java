@@ -29,11 +29,17 @@ public final class AssistantHarness {
 
     /** A fully ready configuration whose credential is the canary the leak test greps for. */
     public static AssistantConfiguration readyConfiguration() {
+        return readyConfiguration(4096, 4);
+    }
+
+    /** The same ready configuration with explicit live-turn limits. */
+    public static AssistantConfiguration readyConfiguration(int maxOutputTokens,
+                                                            int maxToolIterations) {
         return new AssistantConfiguration(true, AssistantConfiguration.ANTHROPIC_PROVIDER,
                 AssistantConfiguration.ANTHROPIC_ENDPOINT, "claude-opus-5",
                 AssistantCredential.ofNullable(PLANTED_CREDENTIAL),
                 OutboundHttpPolicy.fromCommaSeparatedHosts("api.anthropic.com"),
-                Duration.ofSeconds(5), 4096, 4);
+                Duration.ofSeconds(5), maxOutputTokens, maxToolIterations);
     }
 
     /** The service an operator has switched off. Answers 404, which the panel reads as inert. */
@@ -107,6 +113,11 @@ public final class AssistantHarness {
         /** The service under test: the real one, around this scripted provider. */
         public AssistantService service() {
             return new AssistantService(readyConfiguration(), provider());
+        }
+
+        /** The real service under an explicit configuration, for configuration-propagation tests. */
+        public AssistantService service(AssistantConfiguration configuration) {
+            return new AssistantService(configuration, provider());
         }
 
         /**

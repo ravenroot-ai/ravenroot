@@ -131,4 +131,66 @@ class AssistantConfigurationTest {
         assertEquals(AssistantCredentialSource.API_KEY, configuration.credentialSource());
         assertEquals(AssistantCredential.Scheme.API_KEY, configuration.credential().scheme());
     }
+
+    @Test
+    void assistantOperationalLimitsDefaultAndTightenIndependently() {
+        var defaults = AssistantConfiguration.fromEnvironment(Map.of());
+        assertEquals(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS, defaults.maxOutputTokens());
+        assertEquals(AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS, defaults.maxToolIterations());
+
+        for (String blank : new String[] {"", " \t\u2003 "}) {
+            var blankConfiguration = AssistantConfiguration.fromEnvironment(Map.of(
+                    AssistantConfiguration.MAX_OUTPUT_TOKENS_VARIABLE, blank,
+                    AssistantConfiguration.MAX_TOOL_ITERATIONS_VARIABLE, blank));
+            assertEquals(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS,
+                    blankConfiguration.maxOutputTokens());
+            assertEquals(AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS,
+                    blankConfiguration.maxToolIterations());
+        }
+
+        var outputOnly = AssistantConfiguration.fromEnvironment(Map.of(
+                AssistantConfiguration.MAX_OUTPUT_TOKENS_VARIABLE, " 1 "));
+        assertEquals(1, outputOnly.maxOutputTokens());
+        assertEquals(AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS,
+                outputOnly.maxToolIterations(), "the output setting must not alter loop iterations");
+
+        var iterationsOnly = AssistantConfiguration.fromEnvironment(Map.of(
+                AssistantConfiguration.MAX_TOOL_ITERATIONS_VARIABLE, " +1 "));
+        assertEquals(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS,
+                iterationsOnly.maxOutputTokens(), "the iteration setting must not alter output tokens");
+        assertEquals(1, iterationsOnly.maxToolIterations());
+
+        var maxima = AssistantConfiguration.fromEnvironment(Map.of(
+                AssistantConfiguration.MAX_OUTPUT_TOKENS_VARIABLE,
+                Integer.toString(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS),
+                AssistantConfiguration.MAX_TOOL_ITERATIONS_VARIABLE,
+                Integer.toString(AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS)));
+        assertEquals(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS, maxima.maxOutputTokens());
+        assertEquals(AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS, maxima.maxToolIterations());
+    }
+
+    @Test
+    void invalidAssistantOperationalLimitsAreCauseFreeAndDoNotEchoValues() {
+        assertInvalidLimit(AssistantConfiguration.MAX_OUTPUT_TOKENS_VARIABLE,
+                AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS,
+                "0", "-1", "1.5",
+                Integer.toString(AssistantConfiguration.DEFAULT_MAX_OUTPUT_TOKENS + 1),
+                "2147483648", "\u00a0", "output-limit-canary");
+        assertInvalidLimit(AssistantConfiguration.MAX_TOOL_ITERATIONS_VARIABLE,
+                AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS,
+                "0", "-1", "1.5",
+                Integer.toString(AssistantConfiguration.DEFAULT_MAX_TOOL_ITERATIONS + 1),
+                "2147483648", "\u00a0", "iteration-limit-canary");
+    }
+
+    private static void assertInvalidLimit(String variable, int maximum, String... invalidValues) {
+        for (String invalid : invalidValues) {
+            var failure = assertThrows(IllegalArgumentException.class, () ->
+                    AssistantConfiguration.fromEnvironment(Map.of(variable, invalid)));
+            assertEquals(variable + " must be a whole number from 1 to " + maximum,
+                    failure.getMessage());
+            assertNull(failure.getCause());
+            assertFalse(failure.getMessage().contains("canary"));
+        }
+    }
 }

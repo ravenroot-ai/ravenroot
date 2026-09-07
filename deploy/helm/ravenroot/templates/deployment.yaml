@@ -153,6 +153,12 @@ spec:
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.defaultAttentionPageSize }}
             - name: RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE
               value: {{ include "ravenroot.humanTaskValue" .Values.humanTask.maxAttentionPageSize }}
+            # Blank assistant limits preserve the Java defaults. Explicit values may only tighten
+            # the existing deployed output and provider-turn maxima.
+            - name: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS
+              value: {{ include "ravenroot.graphLimitValue" .Values.assistant.maxOutputTokens }}
+            - name: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS
+              value: {{ include "ravenroot.graphLimitValue" .Values.assistant.maxToolIterations }}
             # The default execution store is SQLite/WAL. It shares this one-pod RWO volume with the
             # durable audit trail and must never be placed on the read-only root filesystem or /tmp.
             - name: RAVENROOT_AUDIT_DIR

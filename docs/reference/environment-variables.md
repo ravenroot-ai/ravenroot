@@ -58,6 +58,8 @@ Detailed contract: [Authoring assistant](../operator-guide/authoring-assistant.m
 | `RAVENROOT_ASSISTANT_DEVICE_AUTHORIZATION_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_ENABLED` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_ENDPOINT` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS` | See the linked contract for exact type, default, and applicability. |
+| `RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_MODEL` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_OAUTH_CLIENT_ID` | See the linked contract for exact type, default, and applicability. |
 | `RAVENROOT_ASSISTANT_PROVIDER` | See the linked contract for exact type, default, and applicability. |

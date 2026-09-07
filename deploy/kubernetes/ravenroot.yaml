@@ -168,6 +168,12 @@ spec:
               value: ""
             - name: RAVENROOT_HUMAN_TASK_MAX_ATTENTION_PAGE_SIZE
               value: ""
+            # Blank assistant limits preserve the Java defaults. Overlays may provide quoted
+            # positive integers that tighten the existing deployed maxima.
+            - name: RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS
+              value: ""
+            - name: RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS
+              value: ""
             # A local SQLite store is a single-pod durability mode. The main database and its WAL
             # sidecars share this RWO PVC with the audit trail; neither may fall back to read-only
             # image layers or the tmpfs below.

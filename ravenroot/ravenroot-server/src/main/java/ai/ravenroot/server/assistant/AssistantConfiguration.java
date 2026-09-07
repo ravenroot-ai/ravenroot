@@ -61,6 +61,12 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
      * another declaration must be a positive whole number of seconds.
      */
     public static final String TIMEOUT_VARIABLE = "RAVENROOT_ASSISTANT_TIMEOUT_SECONDS";
+    /** Tightenable output ceiling for each provider turn; absence keeps the current default. */
+    public static final String MAX_OUTPUT_TOKENS_VARIABLE =
+            "RAVENROOT_ASSISTANT_MAX_OUTPUT_TOKENS";
+    /** Tightenable provider-turn ceiling for one author message; absence keeps the current default. */
+    public static final String MAX_TOOL_ITERATIONS_VARIABLE =
+            "RAVENROOT_ASSISTANT_MAX_TOOL_ITERATIONS";
     /**
      * Which credential model this deployment uses: {@code api-key} (default) or {@code oauth}.
      *
@@ -182,8 +188,12 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
                     : model;
         }
         return new AssistantConfiguration(enabled, providerId, endpoint, model, credential, egress,
-                seconds(trimmed(env.get(TIMEOUT_VARIABLE))), DEFAULT_MAX_OUTPUT_TOKENS,
-                DEFAULT_MAX_TOOL_ITERATIONS, source, allowLocalHttp);
+                seconds(trimmed(env.get(TIMEOUT_VARIABLE))),
+                boundedPositiveInteger(env.get(MAX_OUTPUT_TOKENS_VARIABLE),
+                        MAX_OUTPUT_TOKENS_VARIABLE, DEFAULT_MAX_OUTPUT_TOKENS),
+                boundedPositiveInteger(env.get(MAX_TOOL_ITERATIONS_VARIABLE),
+                        MAX_TOOL_ITERATIONS_VARIABLE, DEFAULT_MAX_TOOL_ITERATIONS),
+                source, allowLocalHttp);
     }
 
     /**
@@ -374,6 +384,27 @@ public record AssistantConfiguration(boolean enabled, String providerId, URI end
     private static IllegalArgumentException invalidPorts() {
         return new IllegalArgumentException(ALLOWED_PORTS_VARIABLE
                 + " must contain comma-separated ports from 1 to 65535");
+    }
+
+    private static int boundedPositiveInteger(String value, String variable, int defaultAndMaximum) {
+        String normalized = trimmed(value);
+        if (normalized == null) {
+            return defaultAndMaximum;
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(normalized);
+        } catch (NumberFormatException invalid) {
+            throw boundedIntegerRefusal(variable, defaultAndMaximum);
+        }
+        if (parsed < 1 || parsed > defaultAndMaximum) {
+            throw boundedIntegerRefusal(variable, defaultAndMaximum);
+        }
+        return parsed;
+    }
+
+    private static IllegalArgumentException boundedIntegerRefusal(String variable, int maximum) {
+        return new IllegalArgumentException(variable + " must be a whole number from 1 to " + maximum);
     }
 
     private static String trimmed(String value) {

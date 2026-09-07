@@ -246,7 +246,7 @@ class DurableSseReplayIntegrationTest {
 
             long beyondJavaScriptIntegerPrecision = 9_007_199_254_740_993L;
             var started = TEST_CLIENT.send(HttpRequest.newBuilder(
-                            URI.create("http://127.0.0.1:" + server.port() + "/v1/executions"))
+                            URI.create("http://127.0.0.1:" + server.port() + "/v1/executions?mode=run"))
                             .timeout(TEST_TIMEOUT).POST(HttpRequest.BodyPublishers.ofString(CHAIN_GRAPH)).build(),
                     HttpResponse.BodyHandlers.ofString());
             assertEquals(202, started.statusCode(), started.body());

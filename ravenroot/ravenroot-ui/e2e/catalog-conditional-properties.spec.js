@@ -13,6 +13,10 @@ import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 // adapter name appears anywhere in this file or in src/app.js's handling of it.
 
 const CONTRACT = 'ravenroot.property-condition/1';
+const SERVICE_CONFIGURATION = JSON.stringify({
+  schemaVersion: 1,
+  graphDocumentMaxBytes: 10 * 1024 * 1024,
+});
 
 function propertyCondition(property, values) {
   return { contract: CONTRACT, property, operator: values.length > 1 ? 'ONE_OF' : 'EQUALS', values };
@@ -100,6 +104,11 @@ function startService() {
       Vary: 'Origin',
       'Content-Type': 'application/json; charset=utf-8',
     };
+    if (request.url === '/v1/configuration') {
+      response.writeHead(200, headers);
+      response.end(SERVICE_CONFIGURATION);
+      return;
+    }
     if (request.url === '/v1/node-types') {
       response.writeHead(200, headers);
       response.end(JSON.stringify(catalog));

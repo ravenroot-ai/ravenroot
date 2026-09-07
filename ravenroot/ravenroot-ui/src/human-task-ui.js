@@ -126,7 +126,13 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   let task = null;
   let capability = null;
   let submitting = false;
-  let suspended = false;
+  let generation = 0;
+
+  const taskKey = value => value && `${value.taskId}\u0000${value.generation}`;
+  function advance() { generation += 1; }
+  function isCurrent(token, expectedTask) {
+    return generation === token && taskKey(task) === taskKey(expectedTask);
+  }
 
   function say(message = '') {
     error.textContent = message;
@@ -142,7 +148,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
 
   function close() {
     if (submitting) return;
+    advance();
     task = null;
+    capability = null;
     comment.value = '';
     say();
     if (dialog.open && typeof dialog.close === 'function') dialog.close();
@@ -151,7 +159,9 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
   }
 
   function suspend() {
-    suspended = true;
+    advance();
+    submitting = false;
+    dialog.removeAttribute('aria-busy');
     task = null;
     capability = null;
     comment.value = '';
@@ -165,19 +175,23 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
     const check = validateDecisionComment(comment.value, task.presentation.commentRequirement,
       task.commentMaxUtf8Bytes);
     if (!check.ok) { say(check.error); comment.focus(); return; }
+    const sourceTask = task;
+    const token = generation;
     say();
     setBusy(true);
     try {
-      await onSubmit({ task, action, comment: check.value });
+      await onSubmit({ task: sourceTask, action, comment: check.value,
+        isCurrent: () => isCurrent(token, sourceTask) });
     } catch (failure) {
-      if (!suspended) {
+      if (isCurrent(token, sourceTask)) {
         say(failure?.message || 'The decision outcome is unknown. Refresh before trying another action.');
+        setBusy(false);
       }
       return;
-    } finally {
-      setBusy(false);
     }
-    if (!suspended) close();
+    if (!isCurrent(token, sourceTask)) return;
+    setBusy(false);
+    close();
   }
 
   actions.addEventListener('click', event => {
@@ -194,7 +208,8 @@ export function createHumanTaskDecisionDialog({ dialog, onSubmit = async () => (
 
   return {
     open(nextTask, nextCapability) {
-      suspended = false;
+      advance();
+      setBusy(false);
       task = nextTask;
       capability = nextCapability;
       prompt.textContent = task.presentation.prompt;

@@ -529,6 +529,28 @@ def java_type_span(source: str, symbol: str) -> tuple[int, int] | None:
     return None
 
 
+def java_exact_top_level_type_header(source: str, symbol: str, expected: str) -> bool:
+    """Require one unannotated top-level type declaration with an exact supported header."""
+    code = strip_c_comments_and_literals(source)
+    depths = java_brace_depths(code)
+    declarations = [match for match in re.finditer(
+        rf"\b(?:class|record|interface|enum|@interface)\s+{re.escape(symbol)}\b", code)
+        if depths[match.start()] == 0
+    ]
+    if len(declarations) != 1:
+        return False
+    declaration = declarations[0]
+    start = code.rfind("\n", 0, declaration.start()) + 1
+    opening = code.find("{", declaration.end())
+    if opening < 0 or normalized(code[start:opening]) != normalized(expected):
+        return False
+    boundary = 0
+    for offset, char in enumerate(code[:start]):
+        if depths[offset] == 0 and char in ";}":
+            boundary = offset + 1
+    return not code[boundary:start].strip()
+
+
 def java_type_declares_field(source: str, symbol: str, field: str) -> bool:
     """Check an exact record component or direct member declared by the named Java type."""
     span = java_type_span(source, symbol)
@@ -1542,14 +1564,22 @@ def java_reachable_helper_methods(source: str, type_symbol: str,
 
 @lru_cache(maxsize=None)
 def committed_source(root: Path, revision: str, path: str) -> str | None:
-    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+    if not historical_source_locator_is_safe(revision, path):
         return None
     relative = Path(path)
-    if relative.is_absolute() or ".." in relative.parts:
-        return None
     result = subprocess.run(["git", "show", f"{revision}:{relative.as_posix()}"], cwd=root,
                             capture_output=True, text=True)
     return result.stdout if result.returncode == 0 else None
+
+
+def historical_source_locator_is_safe(revision: object, path: object) -> bool:
+    """Accept only a full lowercase commit id and one normalized repository-relative path."""
+    if not isinstance(revision, str) or re.fullmatch(r"[0-9a-f]{40}", revision) is None \
+            or not isinstance(path, str) or not path or "\0" in path or "\\" in path:
+        return False
+    relative = Path(path)
+    return not relative.is_absolute() and ".." not in relative.parts \
+        and "." not in relative.parts and relative.as_posix() == path
 
 
 @lru_cache(maxsize=None)
@@ -2114,6 +2144,14 @@ def graph_limit_family_from_source(root: Path,
     if java_package(graph_ml_source) != "ai.ravenroot.core.graph" \
             or java_package(payload_source) != "ai.ravenroot.api.payload" \
             or java_package(graph_store_source) != "ai.ravenroot.api.persistence" \
+            or not java_exact_top_level_type_header(
+                graph_store_source, "GraphDefinitionStore",
+                "public interface GraphDefinitionStore extends AutoCloseable") \
+            or any(imported.rsplit(".", 1)[-1] == "AutoCloseable" for imported in re.findall(
+                r"(?m)^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;",
+                strip_c_comments_and_literals(graph_store_source))) \
+            or not java_has_no_simple_name_shadow(
+                graph_store_source, "GraphDefinitionStore", {"AutoCloseable"}) \
             or not exact_import_identity(
                 graph_ml_source, "ai.ravenroot.api.persistence.GraphDefinitionStore") \
             or not java_has_no_simple_name_shadow(
@@ -4649,6 +4687,21 @@ def assistant_limit_authority_errors(root: Path, authorities: object,
 
 def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...]) -> list[str]:
     errors: list[str] = []
+    migration_history = document.get("migrationHistory", [])
+    if isinstance(migration_history, list):
+        for migration in migration_history:
+            if not isinstance(migration, dict) \
+                    or "sourceRevision" not in migration or "sourcePath" not in migration:
+                continue
+            source_revision = migration["sourceRevision"]
+            source_path = migration["sourcePath"]
+            if not historical_source_locator_is_safe(source_revision, source_path):
+                errors.append(
+                    f"inventory migration source is not locally resolvable: "
+                    f"{source_revision}:{source_path}")
+    # Reject unsafe Git arguments before source-owner or family validation can invoke Git.
+    if errors:
+        return errors
     raw_entries = document["entries"]
     assert isinstance(raw_entries, list)
     entries: dict[str, dict[str, object]] = {}

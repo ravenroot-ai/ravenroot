@@ -2283,6 +2283,16 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                     self.assert_graph_source_family_rejected(root)
             graph_ml_path.write_text(original_graph_ml, encoding="utf-8")
 
+            graph_store_path = root / audit.GRAPH_DEFINITION_STORE_PATH
+            original_graph_store = graph_store_path.read_text(encoding="utf-8")
+            wrong_owner_kind = original_graph_store.replace(
+                "public interface GraphDefinitionStore extends AutoCloseable {",
+                "public abstract class GraphDefinitionStore implements AutoCloseable {", 1)
+            self.assertNotEqual(original_graph_store, wrong_owner_kind)
+            graph_store_path.write_text(wrong_owner_kind, encoding="utf-8")
+            self.assert_graph_source_family_rejected(root)
+            graph_store_path.write_text(original_graph_store, encoding="utf-8")
+
     def test_report_counts_retained_published_contract_descriptions(self) -> None:
         with tempfile.TemporaryDirectory() as location:
             root = Path(location)
@@ -2758,26 +2768,41 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             ("deadbeef", "inventory.json"),
             ("0" * 40, "../inventory.json"),
             ("0" * 40, "/tmp/inventory.json"),
+            ("0" * 40, ""),
+            ("0" * 40, "inventory.json\0ignored"),
+            ("0" * 40, "./inventory.json"),
+            ("0" * 40, "nested//inventory.json"),
         )
-        for revision, source_path in cases:
-            with self.subTest(revision=revision, source_path=source_path):
-                document = copy.deepcopy(base)
-                document["migrationHistory"] = [{
-                    "fromSchema": 1,
-                    "toSchema": audit.SCHEMA_VERSION,
-                    "sourceRevision": revision,
-                    "sourcePath": source_path,
-                    "sourceFileDigest": "0" * 64,
-                    "candidateCount": 0,
-                    "statusCounts": {},
-                    "rationale": "Synthetic invalid migration source.",
-                }]
-                with mock.patch.object(audit, "tracked_files", return_value=()), \
-                        mock.patch.object(audit.subprocess, "run") as run:
-                    errors = audit.inventory_errors(Path("/unused"), document, ())
-                self.assertTrue(any("migration source is not locally resolvable" in error
-                                    for error in errors), errors)
-                run.assert_not_called()
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            assistant = root / audit.ASSISTANT_CONFIGURATION_PATH
+            assistant.parent.mkdir(parents=True, exist_ok=True)
+            assistant.write_bytes((ROOT / audit.ASSISTANT_CONFIGURATION_PATH).read_bytes())
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "add", assistant.relative_to(root).as_posix()],
+                           cwd=root, check=True)
+            for revision, source_path in cases:
+                with self.subTest(revision=revision, source_path=source_path):
+                    audit.current_source_owner.cache_clear()
+                    audit.committed_source.cache_clear()
+                    audit.commit_exists.cache_clear()
+                    audit.revision_is_ancestor.cache_clear()
+                    document = copy.deepcopy(base)
+                    document["migrationHistory"] = [{
+                        "fromSchema": 1,
+                        "toSchema": audit.SCHEMA_VERSION,
+                        "sourceRevision": revision,
+                        "sourcePath": source_path,
+                        "sourceFileDigest": "0" * 64,
+                        "candidateCount": 0,
+                        "statusCounts": {},
+                        "rationale": "Synthetic invalid migration source.",
+                    }]
+                    with mock.patch.object(audit.subprocess, "run") as run:
+                        errors = audit.inventory_errors(root, document, ())
+                    self.assertTrue(any("migration source is not locally resolvable" in error
+                                        for error in errors), errors)
+                    run.assert_not_called()
 
     def test_migration_history_accepts_full_revision_and_tracked_json_source(self) -> None:
         with tempfile.TemporaryDirectory() as location:
@@ -2815,7 +2840,18 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 }],
             }
             errors = audit.inventory_errors(root, document, ())
-        self.assertEqual([], errors)
+            self.assertEqual([], errors)
+
+            audit.committed_source.cache_clear()
+            unresolved = copy.deepcopy(document)
+            unresolved["migrationHistory"][0]["sourceRevision"] = "f" * 40
+            real_run = subprocess.run
+            with mock.patch.object(audit.subprocess, "run", wraps=real_run) as run:
+                errors = audit.inventory_errors(root, unresolved, ())
+            self.assertTrue(any("migration source is not locally resolvable" in error
+                                for error in errors), errors)
+            self.assertTrue(any(call.args[0][:2] == ["git", "show"]
+                                for call in run.call_args_list), run.call_args_list)
 
     def test_converted_setting_rejects_no_op_revision_provenance(self) -> None:
         with synthetic_repository() as location:

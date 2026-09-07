@@ -979,6 +979,54 @@ describe('Ravenroot runtime client security boundary', () => {
     } finally { gate.resolve(); disconnect(); }
   });
 
+  it('fences pending delivery when a new connection replaces the old stream', async () => {
+    const oldDelivery = deferredValue();
+    const newStreamEnd = deferredValue();
+    const frame = id => `id: ${id}\nevent: execution\ndata: ${JSON.stringify(
+      versionedRingEvent({ id, sequence: Number(id) }))}\n\n`;
+    const oldResponse = streamResponse([frame('1') + frame('2')]);
+    const oldReader = oldResponse.body.getReader();
+    oldResponse.body.getReader = () => oldReader;
+    const newResponse = streamResponse([]);
+    const newReader = newResponse.body.getReader();
+    newReader.read.mockResolvedValueOnce({ value: new TextEncoder().encode(frame('10')), done: false })
+      .mockImplementation(() => newStreamEnd.promise);
+    newResponse.body.getReader = () => newReader;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(oldResponse).mockResolvedValueOnce(newResponse)
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const oldStates = [];
+    const newStates = [];
+    const oldCallback = vi.fn(() => oldDelivery.promise);
+    const newCallback = vi.fn();
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    client.connect(oldCallback, status => oldStates.push(status));
+    try {
+      await vi.waitFor(() => expect(oldCallback).toHaveBeenCalledTimes(1));
+      const oldSignal = fetchImpl.mock.calls[0][1].signal;
+      client.connect(newCallback, status => newStates.push(status));
+      await vi.waitFor(() => expect(newReader.read).toHaveBeenCalledTimes(2));
+      expect(oldSignal.aborted).toBe(true);
+      expect(client.lastEventId).toBe('10');
+      expect(newCallback.mock.calls.map(([event]) => event.id)).toEqual(['10']);
+
+      oldDelivery.resolve();
+      // Finish B after releasing A; B's reconnect exposes any stale cursor overwrite by A.
+      newStreamEnd.resolve({ value: undefined, done: true });
+      await vi.waitFor(() => expect(newStates.at(-1)).toBe('revoked'));
+      expect(client.lastEventId).toBe('10');
+      expect(oldCallback.mock.calls.map(([event]) => event.id)).toEqual(['1']);
+      expect(oldReader.read).toHaveBeenCalledTimes(1);
+      expect(oldStates).toEqual(['connected']);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(fetchImpl.mock.calls[2][1].signal).toBe(fetchImpl.mock.calls[1][1].signal);
+      expect(fetchImpl.mock.calls[2][1].headers['Last-Event-ID']).toBe('10');
+    } finally {
+      client.disconnect();
+      oldDelivery.resolve();
+      newStreamEnd.resolve({ value: undefined, done: true });
+    }
+  });
+
   it('exhausts the existing retry budget without acknowledging a repeatedly invalid first event', async () => {
     const readers = [];
     const fetchImpl = vi.fn(() => {

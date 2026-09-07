@@ -120,12 +120,16 @@ class EventStreamDecodeCommandTest {
         Result publicReason = run("id: 1\nevent: execution\ndata: "
                 + versionedRing(1, "").replace("\"publicReason\":null",
                         "\"publicReason\":\"contains space\"") + "\n\n");
+        Result emptyPublicReason = run("id: 1\nevent: execution\ndata: "
+                + versionedRing(1, "").replace("\"publicReason\":null",
+                        "\"publicReason\":\"\"") + "\n\n");
         Result flag = run("id: 1\nevent: execution\ndata: "
                 + versionedRing(1, ",\"outputRedacted\":\"false\"") + "\n\n");
         Result common = run("id: 1\nevent: execution\ndata: "
                 + versionedRing(1, ",\"invocationId\":\"1-1-1-1-1\"") + "\n\n");
 
         assertEquals("Error: INVALID_EXECUTION_EVENT frame=1\n", publicReason.errors);
+        assertEquals("Error: INVALID_EXECUTION_EVENT frame=1\n", emptyPublicReason.errors);
         assertEquals("Error: INVALID_EXECUTION_EVENT frame=1\n", flag.errors);
         assertEquals("Error: INVALID_EXECUTION_EVENT frame=1\n", common.errors);
     }

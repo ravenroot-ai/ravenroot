@@ -398,7 +398,7 @@ final class ExecutionEventStreamDecoder {
     private void validatePublicReason(PayloadValue value) {
         if (!(value instanceof PayloadValue.TextValue text)) return;
         String reason = text.value();
-        if (reason.length() > 64 || !reason.matches("[A-Za-z0-9._:-]*")) invalidExecution();
+        if (reason.length() > 64 || !reason.matches("[A-Za-z0-9._:-]+")) invalidExecution();
     }
 
     private void requireBoolean(Map<String, PayloadValue> members, String name) {

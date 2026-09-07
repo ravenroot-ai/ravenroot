@@ -37,18 +37,12 @@ class MailImapCredentialIsolationTest {
      * verifies, not just reduce noise. Left unwidened, and the number is a measurement rather than a
      * tuned guess:
      *
-     * <p>The seam is not missing. {@code MailImapQueryNodeBehavior} already carries an injectable
-     * {@code LongSupplier nanoTime} (field, package-private constructor, and two call sites at
-     * {@code checkDeadline} and the pre-watchdog deadline computation) -- this test's own package could
-     * reach it. What it cannot reach is {@code DeadlineWatchdog}: that class is a {@code private static}
-     * nested class, so it has no access to the outer instance's field at all, and it computes its
-     * deadline from {@code System.nanoTime()} directly, re-read at four sites (deadline computation,
-     * {@code remainingNanos()}, and both places {@code state} is resolved). Wiring the existing supplier
-     * through means adding a parameter to {@code DeadlineWatchdog}'s constructor and replacing those
-     * four call sites -- a small but real production change to a timeout mechanism that a test-bound
-     * adjustment does not make. That is the actual reason "measure the deadline without going
-     * through wall-clock" is out of scope here: not that no seam exists, but that the one seam that does
-     * exist doesn't reach the class that needs it.
+     * <p>The query and watchdog clocks have distinct package-private seams. Existing constructors,
+     * including the one used here, retain {@code System.nanoTime()} for the watchdog; only a test that
+     * must order a transport failure independently of the deadline supplies both clocks explicitly.
+     * This test deliberately keeps the real watchdog clock because elapsed wall time is the property
+     * being measured. Replacing it with a controlled clock would make the upper-bound assertion prove
+     * the seam rather than the production deadline.
      *
      * <p>So the number was verified as a measurement instead. Isolated (8 runs): 124-146ms. Under
      * artificial ~9-way CPU contention across this machine's 10 cores (6 runs, the same contention

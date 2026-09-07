@@ -32,6 +32,7 @@ CLASSIFICATIONS = {
     "operator-configurable",
     "security-ceiling-or-default",
     "protocol-or-format-invariant",
+    "published-contract-description",
     "derived",
     "test-fixture",
 }
@@ -48,6 +49,7 @@ CLASSIFICATION_STATUSES = {
     "operator-configurable": {"already-centralized", "confirmed-hardcoded", "converted", "deferred"},
     "security-ceiling-or-default": {"retained", "deferred"},
     "protocol-or-format-invariant": {"retained", "deferred"},
+    "published-contract-description": {"retained", "deferred"},
     "derived": {"retained", "deferred"},
     "test-fixture": {"retained"},
 }
@@ -1336,6 +1338,28 @@ def java_declared_method_names(source: str, type_symbol: str) -> set[str]:
     return {name for name, count in names.items() if count == 1}
 
 
+def java_direct_method_declaration_count(source: str, type_symbol: str, method: str) -> int:
+    """Count every supported direct declaration, including ambiguous overloads."""
+    type_span = java_type_span(source, type_symbol)
+    if type_span is None:
+        return 0
+    base, limit = type_span
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    count = 0
+    for match in re.finditer(rf"\b{re.escape(method)}\s*\(", code):
+        if depths[match.start()] != 1:
+            continue
+        opening = code.find("(", match.start())
+        closing = matching_delimiter(code, opening, "(", ")")
+        if closing is None:
+            continue
+        suffix = re.match(r"\s*(?:throws\s+[^{};]+)?\s*\{", code[closing + 1:])
+        if suffix is not None:
+            count += 1
+    return count
+
+
 def java_method_calls(source: str, type_symbol: str, method: str,
                       declared_methods: set[str]) -> set[str] | None:
     """Find same-type helper names called from one supported, unambiguous method body."""
@@ -2374,6 +2398,743 @@ def graph_platform_coverage_errors(root: Path, setting: str, contract: dict[str,
     return errors
 
 
+ROUTE_TABLE_AUTHORITY_ID = "route-table-all-v1"
+ROUTE_TABLE_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
+ROUTE_DESCRIPTOR_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteDescriptor.java")
+OPENAPI_GENERATOR_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/OpenApiSpecGenerator.java")
+ROUTE_TABLE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/spec/RouteTableSpecServerAgreementTest.java")
+STABLE_EDGE_ID_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/StableEdgeId.java")
+EDGE_WIRE_BUDGET_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/EdgeTraversalWireBudget.java")
+STABLE_EDGE_TEST_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/application/StableEdgeIdContractTest.java")
+STABLE_EDGE_WIRE_TEST_PATH = Path(
+    "ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/StableEdgeIdWireContractTest.java")
+ROUTE_BOUND_CANDIDATES = {
+    "oc-68d83961ae8fd9333d39": ("StableEdgeId.MAX_UTF8_BYTES",),
+    "oc-87cc337254d84e793594":
+        ("EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",),
+    "oc-72d27bee3c7d60226c09": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+    "oc-af3a93f860fc52c46a00": (
+        "StableEdgeId.MAX_UTF8_BYTES",
+        "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
+    ),
+    "oc-e29595d4bc323f7da368": ("StableEdgeId.SSE_FRAME_MAX_BYTES",),
+}
+ROUTE_BOUND_PATHS = {
+    "oc-68d83961ae8fd9333d39": "/v1/events",
+    "oc-87cc337254d84e793594": "/v1/events",
+    "oc-72d27bee3c7d60226c09": "/v1/events",
+    "oc-af3a93f860fc52c46a00": "/v1/events/recent",
+    "oc-e29595d4bc323f7da368": "/v1/events/recent",
+}
+
+
+def java_source_candidates(relative: Path, source: str) -> tuple[tuple[int, Candidate], ...]:
+    """Reproduce stable candidate IDs and retain offsets for one Java source."""
+    provisional = [
+        (relative.as_posix(), line_number(source, offset), symbol, kind, role, expression,
+         evidence, "java", False, offset)
+        for offset, symbol, kind, role, expression, evidence
+        in code_candidates(relative, source, "java")
+    ]
+    occurrences: Counter[tuple[str, str, str, str, str]] = Counter()
+    result: list[tuple[int, Candidate]] = []
+    for row in sorted(provisional, key=lambda item: item[:-1]):
+        path, line, symbol, kind, role, expression, evidence, surface_name, fixture, offset = row
+        key = (path, symbol, kind, role, expression)
+        occurrence = occurrences[key]
+        occurrences[key] += 1
+        evidence_digest = hashlib.sha256(evidence.encode("utf-8")).hexdigest()
+        material = "\0".join(
+            (path, symbol, kind, role, expression, evidence_digest, str(occurrence)))
+        candidate = Candidate(
+            "oc-" + hashlib.sha256(material.encode("utf-8")).hexdigest()[:20],
+            path, line, symbol, kind, role, expression,
+            hashlib.sha256(expression.encode("utf-8")).hexdigest(), evidence,
+            evidence_digest, surface_name, fixture,
+        )
+        result.append((offset, candidate))
+    return tuple(result)
+
+
+def java_string_value(expression: str) -> str | None:
+    """Decode the bounded Java string-literal subset shared with JSON escaping."""
+    try:
+        value = json.loads(expression)
+    except json.JSONDecodeError:
+        return None
+    return value if isinstance(value, str) else None
+
+
+def java_literal_concatenation(expression: str) -> tuple[str, tuple[tuple[int, int], ...]] | None:
+    """Read one expression made only from Java double-quoted literals and plus operators."""
+    token = re.compile(r'"(?:\\.|[^"\\])*"')
+    cursor = 0
+    values: list[str] = []
+    spans: list[tuple[int, int]] = []
+    for match in token.finditer(expression):
+        separator = expression[cursor:match.start()]
+        if values:
+            if re.fullmatch(r"\s*\+\s*", separator) is None:
+                return None
+        elif separator.strip():
+            return None
+        value = java_string_value(match.group())
+        if value is None:
+            return None
+        values.append(value)
+        spans.append(match.span())
+        cursor = match.end()
+    if not values or expression[cursor:].strip():
+        return None
+    return "".join(values), tuple(spans)
+
+
+def direct_factory_arguments(expression: str, factory: str) \
+        -> tuple[tuple[str, int, int], ...] | None:
+    """Return arguments of one expression that is exactly `factory(...)`."""
+    code = strip_c_comments_and_literals(expression)
+    match = re.match(rf"\s*{re.escape(factory)}\s*\(", code)
+    if match is None:
+        return None
+    opening = code.find("(", match.start())
+    parsed = split_java_arguments(expression, code, opening)
+    if parsed is None or code[parsed[1] + 1:].strip():
+        return None
+    return tuple(parsed[0])
+
+
+def route_table_descriptors(source: str) -> tuple[tuple[tuple[str, int, int], ...], ...] | None:
+    """Parse the direct RouteTable.ALL List.of initializer and its nine-argument descriptors."""
+    span = java_type_span(source, "RouteTable")
+    if span is None or java_package(source) != "ai.ravenroot.server.spec" \
+            or not exact_import_identity(source, "java.util.List") \
+            or not exact_import_identity(source, "java.util.Set") \
+            or not same_package_type_identity(
+                source, "RouteTable", "ai.ravenroot.server.spec.RouteDescriptor") \
+            or not java_has_no_simple_name_shadow(source, "RouteTable", {"List", "Set"}):
+        return None
+    base, limit = span
+    actual = source[base:limit]
+    code = strip_c_comments_and_literals(source)[base:limit]
+    depths = java_brace_depths(code)
+    declarations = [
+        match for match in re.finditer(
+            r"\bpublic\s+static\s+final\s+List\s*<\s*RouteDescriptor\s*>\s+"
+            r"ALL\s*=\s*List\s*\.\s*of\s*\(", code)
+        if depths[match.start()] == 1
+    ]
+    if len(declarations) != 1:
+        return None
+    opening = code.find("(", declarations[0].start())
+    parsed = split_java_arguments(actual, code, opening)
+    if parsed is None or re.match(r"\s*;", code[parsed[1] + 1:]) is None:
+        return None
+    descriptors: list[tuple[tuple[str, int, int], ...]] = []
+    for _descriptor, start, end in parsed[0]:
+        descriptor = actual[start:end]
+        descriptor_code = strip_c_comments_and_literals(descriptor)
+        match = re.match(r"\s*new\s+RouteDescriptor\s*\(", descriptor_code)
+        if match is None:
+            return None
+        descriptor_opening = descriptor_code.find("(", match.start())
+        arguments = split_java_arguments(descriptor, descriptor_code, descriptor_opening)
+        if arguments is None or len(arguments[0]) != 9 \
+                or descriptor_code[arguments[1] + 1:].strip():
+            return None
+        descriptors.append(tuple(
+            (argument, base + start + argument_start, base + start + argument_end)
+            for argument, argument_start, argument_end in arguments[0]
+        ))
+    return tuple(descriptors)
+
+
+def route_table_candidate_partitions(source: str) -> tuple[
+        dict[str, list[str]], list[dict[str, object]], dict[str, Candidate]] | None:
+    """Bind every supported RouteTable candidate to one typed constructor position."""
+    descriptors = route_table_descriptors(source)
+    if descriptors is None:
+        return None
+    occurrences = java_source_candidates(ROUTE_TABLE_PATH, source)
+    by_id = {candidate.id: candidate for _offset, candidate in occurrences}
+    partitions = {role: [] for role in ("methods", "path", "summary", "successStatuses")}
+    details: list[dict[str, object]] = []
+
+    def ids_in(start: int, end: int) -> list[str]:
+        return [candidate.id for offset, candidate in occurrences if start <= offset < end]
+
+    for ordinal, arguments in enumerate(descriptors, 1):
+        methods = direct_factory_arguments(arguments[0][0], "Set.of")
+        path = java_literal_concatenation(arguments[1][0])
+        summary = java_literal_concatenation(arguments[2][0])
+        statuses = direct_factory_arguments(arguments[5][0], "Set.of")
+        if methods is None or not methods or path is None or len(path[1]) != 1 or summary is None:
+            return None
+        method_values: list[str] = []
+        for argument, _start, _end in methods:
+            value = java_literal_concatenation(argument)
+            if value is None or len(value[1]) != 1 or value[0] not in {"GET", "POST", "DELETE"}:
+                return None
+            method_values.append(value[0])
+        if not path[0].startswith("/") or not summary[0].strip():
+            return None
+        status_arguments = statuses if statuses is not None else ((arguments[5][0], 0, len(arguments[5][0])),)
+        status_values: list[int] = []
+        for status, _start, _end in status_arguments:
+            if re.fullmatch(r"\s*[0-9](?:_?[0-9])*\s*", status) is None:
+                return None
+            value = int(status.strip().replace("_", ""))
+            if not 200 <= value < 300:
+                return None
+            status_values.append(value)
+        role_arguments = {
+            "methods": arguments[0], "path": arguments[1],
+            "summary": arguments[2], "successStatuses": arguments[5],
+        }
+        role_ids = {role: ids_in(argument[1], argument[2])
+                    for role, argument in role_arguments.items()}
+        if any(not role_ids[role] for role in role_ids):
+            return None
+        for role, identifiers in role_ids.items():
+            partitions[role].extend(identifiers)
+        details.append({
+            "ordinal": ordinal, "path": path[0], "summary": summary[0],
+            "statusValues": status_values, "candidateIds": role_ids,
+        })
+    return partitions, details, by_id
+
+
+def exact_import_identity(source: str, qualified: str) -> bool:
+    """Require one exact normal import and no competing/local declaration of its simple name."""
+    code = strip_c_comments_and_literals(source)
+    simple = qualified.rsplit(".", 1)[-1]
+    imports = re.findall(
+        r"(?m)^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", code)
+    matching = [item for item in imports if item.rsplit(".", 1)[-1] == simple]
+    return matching == [qualified] and re.search(
+        rf"\b(?:class|record|enum|interface)\s+{re.escape(simple)}\b"
+        rf"|@interface\s+{re.escape(simple)}\b", code,
+    ) is None
+
+
+def same_package_type_identity(source: str, type_symbol: str, qualified: str) -> bool:
+    """Require a same-package simple type with no import, local type, or direct-value shadow."""
+    package, simple = qualified.rsplit(".", 1)
+    code = strip_c_comments_and_literals(source)
+    imports = re.findall(
+        r"(?m)^\s*import\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;", code)
+    return java_package(source) == package \
+        and not any(item.rsplit(".", 1)[-1] == simple for item in imports) \
+        and java_has_no_simple_name_shadow(source, type_symbol, {simple})
+
+
+def java_has_no_simple_name_shadow(source: str, type_symbol: str,
+                                   names: set[str]) -> bool:
+    """Reject local type/direct-value/static-import bindings for reviewed simple type names."""
+    code = strip_c_comments_and_literals(source)
+    for name in names:
+        if re.search(
+                rf"\b(?:class|record|enum|interface)\s+{re.escape(name)}\b"
+                rf"|@interface\s+{re.escape(name)}\b", code,
+        ) is not None or java_type_declares_field(source, type_symbol, name):
+            return False
+    static_imports = re.findall(
+        r"(?m)^\s*import\s+static\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*\.\*)"
+        r"\s*;|^\s*import\s+static\s+([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)+)\s*;",
+        code,
+    )
+    imported = [left or right for left, right in static_imports]
+    return not any(item.endswith(".*") or item.rsplit(".", 1)[-1] in names for item in imported)
+
+
+def java_has_exact_junit_assertions(source: str, type_symbol: str,
+                                    names: set[str]) -> bool:
+    """Bind reviewed assertion calls to exact JUnit methods and reject local method/value shadows."""
+    code = strip_c_comments_and_literals(source)
+    static_imports = re.findall(
+        r"(?m)^\s*import\s+static\s+"
+        r"([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*(?:\.\*)?)\s*;", code)
+    if any(item.endswith(".*") for item in static_imports):
+        return False
+    for name in names:
+        matching = [item for item in static_imports if item.rsplit(".", 1)[-1] == name]
+        if matching != [f"org.junit.jupiter.api.Assertions.{name}"] \
+                or java_direct_method_declaration_count(source, type_symbol, name) != 0 \
+                or java_type_declares_field(source, type_symbol, name):
+            return False
+    return True
+
+
+def java_direct_field_has_annotation(source: str, type_symbol: str, field: str,
+                                     annotation: str) -> bool:
+    span = java_type_span(source, type_symbol)
+    if span is None:
+        return False
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    depths = java_brace_depths(code)
+    return any(depths[match.start()] == 1 for match in re.finditer(
+        rf"@{re.escape(annotation)}\s+(?:[A-Za-z_$][\w$<>?,.\[\]]*\s+)+{re.escape(field)}\s*;",
+        code,
+    ))
+
+
+def java_int_expression_value(expression: str, resolver) -> int | None:
+    """Evaluate the small checked Java integer expression grammar used by wire-bound constants."""
+    tokens = re.findall(r"[A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*|[0-9](?:_?[0-9])*|[()+*/-]",
+                        expression)
+    if "".join(tokens) != re.sub(r"\s+", "", expression):
+        return None
+    position = 0
+
+    def checked(value: int) -> int:
+        if value < -2_147_483_648 or value > 2_147_483_647:
+            raise ValueError
+        return value
+
+    def atom() -> int:
+        nonlocal position
+        if position >= len(tokens):
+            raise ValueError
+        token = tokens[position]
+        position += 1
+        if token == "(":
+            value = add()
+            if position >= len(tokens) or tokens[position] != ")":
+                raise ValueError
+            position += 1
+            return value
+        if re.fullmatch(r"[0-9](?:_?[0-9])*", token):
+            return checked(int(token.replace("_", "")))
+        resolved = resolver(token)
+        if resolved is None:
+            raise ValueError
+        return checked(resolved)
+
+    def multiply() -> int:
+        nonlocal position
+        value = atom()
+        while position < len(tokens) and tokens[position] in {"*", "/"}:
+            operator = tokens[position]
+            position += 1
+            right = atom()
+            if operator == "/":
+                if right == 0:
+                    raise ValueError
+                value = (abs(value) // abs(right)) * (-1 if (value < 0) != (right < 0) else 1)
+            else:
+                value *= right
+            value = checked(value)
+        return value
+
+    def add() -> int:
+        nonlocal position
+        value = multiply()
+        while position < len(tokens) and tokens[position] in {"+", "-"}:
+            operator = tokens[position]
+            position += 1
+            right = multiply()
+            value = checked(value + right if operator == "+" else value - right)
+        return value
+
+    try:
+        value = add()
+        return value if position == len(tokens) else None
+    except ValueError:
+        return None
+
+
+def public_static_final_int_expression(source: str, type_symbol: str, field: str) -> str | None:
+    initializer = java_static_final_initializer(source, type_symbol, field)
+    span = java_type_span(source, type_symbol)
+    if initializer is None or span is None:
+        return None
+    code = strip_c_comments_and_literals(source)[slice(*span)]
+    depths = java_brace_depths(code)
+    declarations = [match for match in re.finditer(
+        rf"\bpublic\s+static\s+final\s+int\s+{re.escape(field)}\s*=", code,
+    ) if depths[match.start()] == 1]
+    return initializer[0] if len(declarations) == 1 else None
+
+
+def route_bound_values(root: Path) -> dict[str, int] | None:
+    sources = {
+        "StableEdgeId": (STABLE_EDGE_ID_PATH, "StableEdgeId"),
+        "EdgeTraversalWireBudget": (EDGE_WIRE_BUDGET_PATH, "EdgeTraversalWireBudget"),
+    }
+    if any(current_source_owner(root, f"{path.as_posix()}#{type_symbol}") is None
+           for path, type_symbol in sources.values()):
+        return None
+    texts = {name: (root / path).read_text(encoding="utf-8")
+             for name, (path, _type) in sources.items()}
+    if not same_package_type_identity(
+            texts["EdgeTraversalWireBudget"], "EdgeTraversalWireBudget",
+            "ai.ravenroot.api.application.StableEdgeId"):
+        return None
+    cache: dict[str, int] = {}
+    active: set[str] = set()
+
+    def resolve(qualified: str, current: str | None = None) -> int | None:
+        name = qualified if "." in qualified else f"{current}.{qualified}"
+        if name in cache:
+            return cache[name]
+        if name in active or "." not in name:
+            return None
+        owner, field = name.split(".", 1)
+        if owner not in sources or "." in field:
+            return None
+        expression = public_static_final_int_expression(texts[owner], owner, field)
+        if expression is None:
+            return None
+        active.add(name)
+        value = java_int_expression_value(expression, lambda token: resolve(token, owner))
+        active.remove(name)
+        if value is not None:
+            cache[name] = value
+        return value
+
+    required = {qualified for fields in ROUTE_BOUND_CANDIDATES.values() for qualified in fields}
+    result = {name: resolve(name) for name in required}
+    return None if any(value is None for value in result.values()) else {
+        name: int(value) for name, value in result.items()
+    }
+
+
+def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> list[str]:
+    errors: list[str] = []
+    consumer_digests = authority.get("consumerBodyDigests")
+    required_digests = {
+        "routeDescriptorValidation", "openApiGenerate", "openApiPathEntry",
+        "openApiOperationEntry", "openApiSuccessResponse",
+    }
+    if not isinstance(consumer_digests, dict) or set(consumer_digests) != required_digests:
+        return ["RouteTable authority requires exact typed consumer body digests"]
+
+    descriptor = (root / ROUTE_DESCRIPTOR_PATH).read_text(encoding="utf-8")
+    expected_components = (
+        "methods", "path", "summary", "authenticated", "registersContext", "successStatuses",
+        "wireErrorCodes", "assistantPosture", "sideEffectFree",
+    )
+    compact = java_compact_constructor_span(descriptor, "RouteDescriptor")
+    compact_code = normalized(strip_c_comments_and_literals(
+        descriptor[slice(*compact)] if compact is not None else ""))
+    if java_package(descriptor) != "ai.ravenroot.server.spec" \
+            or java_record_components(descriptor, "RouteDescriptor") != expected_components \
+            or java_span_digest(descriptor, compact) != consumer_digests["routeDescriptorValidation"]:
+        errors.append("RouteTable RouteDescriptor typed component/validation digest has drifted")
+    for required in (
+        "path == null || path.isBlank()", "summary == null || summary.isBlank()",
+        "status < 200 || status >= 300", "methods = Set.copyOf(methods)",
+        "successStatuses = Set.copyOf(successStatuses)",
+    ):
+        if normalized(required) not in compact_code:
+            errors.append(f"RouteTable RouteDescriptor validation lost {required}")
+    descriptor_code = normalized(strip_c_comments_and_literals(descriptor))
+    forwarding = normalized(
+        "public RouteDescriptor(Set<String> methods, String path, String summary, "
+        "boolean authenticated, boolean registersContext, int successStatus, "
+        "List<String> wireErrorCodes, AssistantPosture assistantPosture, boolean sideEffectFree) { "
+        "this(methods, path, summary, authenticated, registersContext, Set.of(successStatus), "
+        "wireErrorCodes, assistantPosture, sideEffectFree); }")
+    if forwarding not in descriptor_code:
+        errors.append("RouteTable RouteDescriptor convenience constructor lost positional forwarding")
+
+    generator = (root / OPENAPI_GENERATOR_PATH).read_text(encoding="utf-8")
+    if not same_package_type_identity(
+            generator, "OpenApiSpecGenerator", "ai.ravenroot.server.spec.RouteDescriptor") \
+            or not exact_import_identity(generator, "ai.ravenroot.server.audit.JsonStrings") \
+            or not exact_import_identity(generator, "java.util.List") \
+            or not exact_import_identity(generator, "java.util.stream.Collectors"):
+        errors.append("RouteTable OpenAPI consumer does not resolve the same-package RouteDescriptor type")
+    generate_span = java_method_span(generator, "OpenApiSpecGenerator", "generate")
+    generate_source = generator[slice(*generate_span)] if generate_span else ""
+    generate_code = normalized(strip_c_comments_and_literals(generate_source))
+    if java_method_header(generator, "OpenApiSpecGenerator", "generate") != \
+            "public static String generate(List<RouteDescriptor> routes)" \
+            or java_method_digest(generator, "OpenApiSpecGenerator", "generate") != \
+            consumer_digests["openApiGenerate"]:
+        errors.append("RouteTable OpenAPI generate signature/body has drifted")
+    publication_chain = (
+        "json.append(routes.stream().sorted(java.util.Comparator.comparing(RouteDescriptor::path))"
+        ".map(OpenApiSpecGenerator::pathEntry).collect(Collectors.joining()));")
+    generate_compact = re.sub(r"\s+", "", strip_c_comments_and_literals(generate_source))
+    if publication_chain not in generate_compact:
+        errors.append("RouteTable OpenAPI generate lost the routes-to-pathEntry append chain")
+    if normalized("return json.toString()") not in generate_code:
+        errors.append("RouteTable OpenAPI generate lost return json.toString()")
+    for role, method, header, required in (
+        ("openApiPathEntry", "pathEntry", "private static String pathEntry(RouteDescriptor route)",
+         ("route.methods().stream().sorted().map(method -> operationEntry(route, method))",
+          "JsonStrings.escape(route.path())", "operations")),
+        ("openApiOperationEntry", "operationEntry",
+         "private static String operationEntry(RouteDescriptor route, String method)",
+         ("method.toLowerCase(java.util.Locale.ROOT)", "JsonStrings.escape(route.summary())",
+          "route.successStatuses().stream().sorted().forEach(status -> responses.add(successResponse(route, method, status)))")),
+    ):
+        span = java_method_span(generator, "OpenApiSpecGenerator", method)
+        code = normalized(strip_c_comments_and_literals(generator[slice(*span)] if span else ""))
+        if java_method_header(generator, "OpenApiSpecGenerator", method) != header \
+                or java_method_digest(generator, "OpenApiSpecGenerator", method) != consumer_digests[role]:
+            errors.append(f"RouteTable typed consumer {method} signature/body has drifted")
+        for expression in required:
+            if normalized(expression) not in code:
+                errors.append(f"RouteTable typed consumer {method} lost {expression}")
+    success_span = java_method_span(generator, "OpenApiSpecGenerator", "successResponse")
+    success_source = generator[slice(*success_span)] if success_span else ""
+    if java_method_header(generator, "OpenApiSpecGenerator", "successResponse") != \
+            "private static String successResponse(RouteDescriptor route, String method, int status)" \
+            or java_method_digest(generator, "OpenApiSpecGenerator", "successResponse") != \
+            consumer_digests["openApiSuccessResponse"] \
+            or 'return "          \\"" + status + "\\": {\\"description\\": \\"success\\""' \
+            not in success_source:
+        errors.append("RouteTable OpenAPI successResponse lost status serialization")
+    return errors
+
+
+def route_publication_test_errors(root: Path, authority: dict[str, object]) -> list[str]:
+    evidence = authority.get("publicationTestAuthority")
+    required = {"testBodyDigest", "checkedInSpecBodyDigest"}
+    if not isinstance(evidence, dict) or set(evidence) != required:
+        return ["RouteTable authority requires exact publication test evidence"]
+    source = (root / ROUTE_TABLE_TEST_PATH).read_text(encoding="utf-8")
+    errors: list[str] = []
+    test_type = "RouteTableSpecServerAgreementTest"
+    method = "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow"
+    helper = "checkedInSpec"
+    if java_package(source) != "ai.ravenroot.server.spec" \
+            or not java_test_type_is_directly_runnable(source, test_type) \
+            or not exact_import_identity(source, "org.junit.jupiter.api.Test") \
+            or not exact_import_identity(source, "org.junit.jupiter.api.io.TempDir") \
+            or not exact_import_identity(source, "java.nio.file.Path") \
+            or not java_direct_field_has_annotation(source, test_type, "uiDirectory", "TempDir") \
+            or not same_package_type_identity(
+                source, test_type, "ai.ravenroot.server.spec.RouteTable") \
+            or not same_package_type_identity(
+                source, test_type, "ai.ravenroot.server.spec.OpenApiSpecGenerator") \
+            or not java_has_exact_junit_assertions(
+                source, test_type, {"assertEquals", "assertTrue"}):
+        errors.append("RouteTable publication test type/import/TempDir identity has drifted")
+    if java_method_header(source, test_type, method) != f"void {method}() throws Exception" \
+            or java_method_annotations(source, test_type, method) != ("@Test",) \
+            or java_method_digest(source, test_type, method) != evidence["testBodyDigest"]:
+        errors.append("RouteTable publication parity test is not an exact runnable @Test")
+    span = java_method_span(source, test_type, method)
+    code = normalized(strip_c_comments_and_literals(source[slice(*span)] if span else ""))
+    for expression in (
+        "OpenApiSpecGenerator.generate(RouteTable.ALL)", "checkedInSpec()",
+        "assertEquals(generatedNow, onDisk",
+    ):
+        if normalized(expression) not in code:
+            errors.append(f"RouteTable publication parity test lost {expression}")
+    helper_span = java_method_span(source, test_type, helper)
+    helper_code = normalized(strip_c_comments_and_literals(
+        source[slice(*helper_span)] if helper_span else ""))
+    if java_method_header(source, test_type, helper) != \
+            "private static String checkedInSpec() throws IOException" \
+            or java_method_digest(source, test_type, helper) != evidence["checkedInSpecBodyDigest"] \
+            or "getResourceAsStream(" not in helper_code or "readAllBytes()" not in helper_code:
+        errors.append("RouteTable checkedInSpec helper closure has drifted")
+    return errors
+
+
+def route_bound_test_errors(root: Path, authority: dict[str, object]) -> list[str]:
+    evidence = authority.get("boundTestBodyDigests")
+    required = {
+        "StableEdgeIdContractTest": {
+            "acceptsTheExactUtf8BoundWithoutChangingIdentityAndRejectsOneByteMore",
+            "auxiliaryReserveIsEnforcedAsOneCombinedEscapedByteBudget",
+        },
+        "StableEdgeIdWireContractTest": {
+            "worstCaseEscapedMaximumFitsTheCompleteRuntimeClientFrame",
+            "saturatedLiveAndLogFieldsStillFitWithTheMaximumEscapedIdentity",
+            "saturatedDurableProjectionAndPayloadStayInsideTheirExplicitBounds",
+        },
+    }
+    if not isinstance(evidence, dict) or set(evidence) != set(required):
+        return ["RouteTable authority requires exact typed-bound test evidence"]
+    errors: list[str] = []
+    for test_type, methods in required.items():
+        relative = STABLE_EDGE_TEST_PATH if test_type == "StableEdgeIdContractTest" \
+            else STABLE_EDGE_WIRE_TEST_PATH
+        source = (root / relative).read_text(encoding="utf-8")
+        recorded = evidence.get(test_type)
+        type_names = {"StableEdgeId", "EdgeTraversalWireBudget"}
+        same_package = test_type == "StableEdgeIdContractTest"
+        imports_are_exact = (java_package(source) == "ai.ravenroot.api.application"
+                             and same_package_type_identity(
+                                 source, test_type,
+                                 "ai.ravenroot.api.application.StableEdgeId")
+                             and same_package_type_identity(
+                                 source, test_type,
+                                 "ai.ravenroot.api.application.EdgeTraversalWireBudget")
+                             if same_package else
+                             exact_import_identity(source, "ai.ravenroot.api.application.StableEdgeId")
+                             and exact_import_identity(
+                                 source, "ai.ravenroot.api.application.EdgeTraversalWireBudget"))
+        if not isinstance(recorded, dict) or set(recorded) != methods \
+                or not java_test_type_is_directly_runnable(source, test_type) \
+                or not exact_import_identity(source, "org.junit.jupiter.api.Test") \
+                or not imports_are_exact \
+                or not java_has_no_simple_name_shadow(source, test_type, type_names) \
+                or not java_has_exact_junit_assertions(
+                    source, test_type, {"assertEquals", "assertThrows", "assertTrue"}):
+            errors.append(f"RouteTable typed-bound test authority {test_type} is incomplete")
+            continue
+        for method in methods:
+            if java_method_header(source, test_type, method) != f"void {method}()" \
+                    or java_method_annotations(source, test_type, method) != ("@Test",) \
+                    or java_method_digest(source, test_type, method) != recorded[method]:
+                errors.append(f"RouteTable typed-bound test {test_type}.{method} has drifted")
+                continue
+            span = java_method_span(source, test_type, method)
+            code = normalized(strip_c_comments_and_literals(
+                source[slice(*span)] if span is not None else ""))
+            structural = {
+                "acceptsTheExactUtf8BoundWithoutChangingIdentityAndRejectsOneByteMore": (
+                    "StableEdgeId.MAX_UTF8_BYTES", "assertEquals", "assertThrows"),
+                "auxiliaryReserveIsEnforcedAsOneCombinedEscapedByteBudget": (
+                    "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
+                    "requireLiveProjection", "requireDurableProjection", "assertThrows"),
+                "worstCaseEscapedMaximumFitsTheCompleteRuntimeClientFrame": (
+                    "StableEdgeId.MAX_UTF8_BYTES", "StableEdgeId.SSE_FRAME_MAX_BYTES",
+                    "liveFrame.length", "assertTrue"),
+                "saturatedLiveAndLogFieldsStillFitWithTheMaximumEscapedIdentity": (
+                    "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
+                    "StableEdgeId.SSE_FRAME_MAX_BYTES", "liveFrame.length", "logLine.length"),
+                "saturatedDurableProjectionAndPayloadStayInsideTheirExplicitBounds": (
+                    "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES",
+                    "StableEdgeId.SSE_FRAME_MAX_BYTES", "durableFrame.length", "assertEquals"),
+            }[method]
+            for expression in structural:
+                if expression not in code:
+                    errors.append(
+                        f"RouteTable typed-bound test {test_type}.{method} lost {expression}")
+    return errors
+
+
+def route_table_authority_errors(root: Path, authorities: object,
+                                 entries: dict[str, dict[str, object]],
+                                 discovered: dict[str, Candidate]) -> list[str]:
+    """Verify the closed RouteTable retained-candidate family and publication evidence."""
+    reviewed = [entry for entry in entries.values()
+                if entry.get("path") == ROUTE_TABLE_PATH.as_posix()
+                and entry.get("status") != "pending-review"]
+    if not reviewed:
+        return [] if authorities in (None, {}) else ["RouteTable authority exists without reviewed rows"]
+    if not isinstance(authorities, dict) or set(authorities) != {ROUTE_TABLE_AUTHORITY_ID}:
+        return ["reviewed RouteTable rows require the one closed RouteTable authority"]
+    authority = authorities[ROUTE_TABLE_AUTHORITY_ID]
+    required = {
+        "kind", "candidateIdsByRole", "descriptorCandidateIds", "consumerBodyDigests",
+        "publicationTestAuthority", "boundTestBodyDigests", "publishedBoundClauses",
+    }
+    if not isinstance(authority, dict) or set(authority) != required \
+            or authority.get("kind") != "java-route-descriptor-publication-v1":
+        return ["RouteTable authority has an unsupported or incomplete shape"]
+    required_sources = {
+        ROUTE_TABLE_PATH: "RouteTable", ROUTE_DESCRIPTOR_PATH: "RouteDescriptor",
+        OPENAPI_GENERATOR_PATH: "OpenApiSpecGenerator",
+        ROUTE_TABLE_TEST_PATH: "RouteTableSpecServerAgreementTest",
+        STABLE_EDGE_ID_PATH: "StableEdgeId", EDGE_WIRE_BUDGET_PATH: "EdgeTraversalWireBudget",
+        STABLE_EDGE_TEST_PATH: "StableEdgeIdContractTest",
+        STABLE_EDGE_WIRE_TEST_PATH: "StableEdgeIdWireContractTest",
+    }
+    if any(current_source_owner(root, f"{path.as_posix()}#{symbol}") is None
+           for path, symbol in required_sources.items()):
+        return ["RouteTable authority has a missing tracked source/test owner"]
+    source = (root / ROUTE_TABLE_PATH).read_text(encoding="utf-8")
+    if not same_package_type_identity(
+            source, "RouteTable", "ai.ravenroot.server.spec.RouteDescriptor"):
+        return ["RouteTable.ALL does not resolve the same-package RouteDescriptor type"]
+    parsed = route_table_candidate_partitions(source)
+    if parsed is None:
+        return ["RouteTable.ALL is not the supported direct RouteDescriptor table"]
+    partitions, details, source_candidates = parsed
+    errors: list[str] = []
+    expected_counts = {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54}
+    if len(details) != 53 or {role: len(ids) for role, ids in partitions.items()} != expected_counts:
+        errors.append("RouteTable authority no longer has the reviewed 53/508 positional shape")
+    recorded = authority["candidateIdsByRole"]
+    if not isinstance(recorded, dict) or set(recorded) != set(expected_counts) \
+            or any(recorded.get(role) != partitions[role] for role in expected_counts):
+        errors.append("RouteTable authority candidate positional partitions have drifted")
+    descriptor_evidence = [
+        {"ordinal": detail["ordinal"], "path": detail["path"],
+         "candidateIds": detail["candidateIds"]}
+        for detail in details
+    ]
+    if authority["descriptorCandidateIds"] != descriptor_evidence:
+        errors.append("RouteTable authority descriptor ordinal/path candidate positions have drifted")
+    all_ids = [identifier for values in partitions.values() for identifier in values]
+    if len(all_ids) != len(set(all_ids)) or set(all_ids) != set(source_candidates):
+        errors.append("RouteTable authority does not partition every RouteTable candidate exactly once")
+    expected_classification = {
+        **{identifier: "protocol-or-format-invariant"
+           for role in ("methods", "path", "successStatuses") for identifier in partitions[role]},
+        **{identifier: "published-contract-description" for identifier in partitions["summary"]},
+    }
+    for identifier, classification in expected_classification.items():
+        entry = entries.get(identifier)
+        if entry is None or entry.get("classification") != classification \
+                or entry.get("status") != "retained" \
+                or entry.get("retainedAuthority") != ROUTE_TABLE_AUTHORITY_ID:
+            errors.append(f"RouteTable candidate {identifier} lacks its exact retained positional authority")
+        if identifier not in discovered or discovered[identifier].path != ROUTE_TABLE_PATH.as_posix():
+            errors.append(f"RouteTable candidate {identifier} is absent from current discovery")
+    if set(expected_classification) != {str(entry.get("id")) for entry in reviewed}:
+        errors.append("RouteTable reviewed rows do not equal the complete supported candidate family")
+
+    clauses = authority["publishedBoundClauses"]
+    expected_clauses = {identifier: list(fields)
+                        for identifier, fields in ROUTE_BOUND_CANDIDATES.items()}
+    if clauses != expected_clauses:
+        errors.append("RouteTable published bound clauses do not use exact candidate-specific authorities")
+    values = route_bound_values(root)
+    by_path = {str(detail["path"]): str(detail["summary"]) for detail in details}
+    if values is None:
+        errors.append("RouteTable typed wire-bound constants are not resolvable")
+    else:
+        max_id = values["StableEdgeId.MAX_UTF8_BYTES"]
+        auxiliary = values["EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES"]
+        frame = values["StableEdgeId.SSE_FRAME_MAX_BYTES"]
+        typed_clauses = {
+            "/v1/events": (
+                f"edgeId is accepted unchanged up to {max_id} strict UTF-8 bytes;",
+                f"all auxiliary traversal strings share a {auxiliary}-byte escaped budget",
+                f"the complete frame below {frame} bytes.",
+            ),
+            "/v1/events/recent": (
+                f"edgeId is accepted unchanged up to {max_id} strict UTF-8 bytes; "
+                f"auxiliary traversal strings share a {auxiliary}-byte escaped budget",
+                f"keeping each frame below {frame} bytes.",
+            ),
+        }
+        for path, expected in typed_clauses.items():
+            summary = by_path.get(path, "")
+            for clause in expected:
+                if summary.count(clause) != 1:
+                    errors.append(f"RouteTable {path} summary lost typed bound clause: {clause}")
+        for identifier, fields in ROUTE_BOUND_CANDIDATES.items():
+            expected_path = ROUTE_BOUND_PATHS[identifier]
+            detail = next((item for item in details
+                           if item["path"] == expected_path
+                           and identifier in item["candidateIds"]["summary"]), None)
+            candidate = source_candidates.get(identifier)
+            if detail is None or candidate is None or any(
+                    str(values[field]) not in candidate.expression for field in fields):
+                errors.append(
+                    f"RouteTable typed bound candidate {identifier} is not the exact {expected_path} clause")
+    errors.extend(route_table_consumer_errors(root, authority))
+    errors.extend(route_publication_test_errors(root, authority))
+    errors.extend(route_bound_test_errors(root, authority))
+    return errors
+
+
 def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...]) -> list[str]:
     errors: list[str] = []
     raw_entries = document["entries"]
@@ -2427,6 +3188,11 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.append(f"{identifier}: test-fixture surface must remain a retained test-fixture")
         if classification == "test-fixture" and candidate.surface != "test-fixture":
             errors.append(f"{identifier}: only a test-fixture surface may use the test-fixture classification")
+        if classification == "published-contract-description" and (
+                candidate.path != ROUTE_TABLE_PATH.as_posix()
+                or entry.get("retainedAuthority") != ROUTE_TABLE_AUTHORITY_ID):
+            errors.append(
+                f"{identifier}: published-contract-description requires the closed RouteTable authority")
         if classification == "operator-configurable" and status != "pending-review":
             for field in ("setting", "owner", "field", "default", "validation", "scope", "pinning",
                           "coverage"):
@@ -2579,6 +3345,9 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     resolver_authorities = document.get("resolverAuthorities")
     if resolver_authorities is not None:
         errors.extend(resolver_authority_errors(root, resolver_authorities))
+    errors.extend(route_table_authority_errors(
+        root, document.get("routeTableAuthorities"), entries, discovered,
+    ))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}

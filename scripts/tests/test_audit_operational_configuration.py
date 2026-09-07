@@ -60,6 +60,504 @@ def classify_non_pending(root: Path) -> None:
 
 
 class OperationalConfigurationAuditTest(unittest.TestCase):
+    def route_table_authority_fixture(self, root: Path):
+        paths = (
+            audit.ROUTE_TABLE_PATH, audit.ROUTE_DESCRIPTOR_PATH, audit.OPENAPI_GENERATOR_PATH,
+            audit.ROUTE_TABLE_TEST_PATH, audit.STABLE_EDGE_ID_PATH, audit.EDGE_WIRE_BUDGET_PATH,
+            audit.STABLE_EDGE_TEST_PATH, audit.STABLE_EDGE_WIRE_TEST_PATH,
+        )
+        for relative in paths:
+            target = root / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes((ROOT / relative).read_bytes())
+        subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+        subprocess.run(["git", "add", *[path.as_posix() for path in paths]], cwd=root, check=True)
+
+        route_source = (root / audit.ROUTE_TABLE_PATH).read_text(encoding="utf-8")
+        parsed = audit.route_table_candidate_partitions(route_source)
+        self.assertIsNotNone(parsed)
+        partitions, details, source_candidates = parsed
+        entries = {}
+        for role, identifiers in partitions.items():
+            for identifier in identifiers:
+                entry = source_candidates[identifier].inventory_entry()
+                entry.update(
+                    status="retained",
+                    classification=("published-contract-description" if role == "summary"
+                                    else "protocol-or-format-invariant"),
+                    rationale="Exact typed RouteDescriptor publication evidence.",
+                    retainedAuthority=audit.ROUTE_TABLE_AUTHORITY_ID,
+                )
+                entries[identifier] = entry
+
+        descriptor = (root / audit.ROUTE_DESCRIPTOR_PATH).read_text(encoding="utf-8")
+        generator = (root / audit.OPENAPI_GENERATOR_PATH).read_text(encoding="utf-8")
+        publication_test = (root / audit.ROUTE_TABLE_TEST_PATH).read_text(encoding="utf-8")
+        edge_test = (root / audit.STABLE_EDGE_TEST_PATH).read_text(encoding="utf-8")
+        wire_test = (root / audit.STABLE_EDGE_WIRE_TEST_PATH).read_text(encoding="utf-8")
+        authority = {
+            "kind": "java-route-descriptor-publication-v1",
+            "candidateIdsByRole": partitions,
+            "descriptorCandidateIds": [
+                {"ordinal": detail["ordinal"], "path": detail["path"],
+                 "candidateIds": detail["candidateIds"]}
+                for detail in details
+            ],
+            "consumerBodyDigests": {
+                "routeDescriptorValidation": audit.java_span_digest(
+                    descriptor, audit.java_compact_constructor_span(descriptor, "RouteDescriptor")),
+                "openApiGenerate": audit.java_method_digest(
+                    generator, "OpenApiSpecGenerator", "generate"),
+                "openApiPathEntry": audit.java_method_digest(
+                    generator, "OpenApiSpecGenerator", "pathEntry"),
+                "openApiOperationEntry": audit.java_method_digest(
+                    generator, "OpenApiSpecGenerator", "operationEntry"),
+                "openApiSuccessResponse": audit.java_method_digest(
+                    generator, "OpenApiSpecGenerator", "successResponse"),
+            },
+            "publicationTestAuthority": {
+                "testBodyDigest": audit.java_method_digest(
+                    publication_test, "RouteTableSpecServerAgreementTest",
+                    "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow"),
+                "checkedInSpecBodyDigest": audit.java_method_digest(
+                    publication_test, "RouteTableSpecServerAgreementTest", "checkedInSpec"),
+            },
+            "boundTestBodyDigests": {
+                "StableEdgeIdContractTest": {
+                    method: audit.java_method_digest(edge_test, "StableEdgeIdContractTest", method)
+                    for method in (
+                        "acceptsTheExactUtf8BoundWithoutChangingIdentityAndRejectsOneByteMore",
+                        "auxiliaryReserveIsEnforcedAsOneCombinedEscapedByteBudget",
+                    )
+                },
+                "StableEdgeIdWireContractTest": {
+                    method: audit.java_method_digest(
+                        wire_test, "StableEdgeIdWireContractTest", method)
+                    for method in (
+                        "worstCaseEscapedMaximumFitsTheCompleteRuntimeClientFrame",
+                        "saturatedLiveAndLogFieldsStillFitWithTheMaximumEscapedIdentity",
+                        "saturatedDurableProjectionAndPayloadStayInsideTheirExplicitBounds",
+                    )
+                },
+            },
+            "publishedBoundClauses": {
+                identifier: list(fields)
+                for identifier, fields in audit.ROUTE_BOUND_CANDIDATES.items()
+            },
+        }
+        return authority, entries, source_candidates, details
+
+    def route_table_errors(self, root: Path, authority: dict, entries: dict,
+                           candidates: dict) -> list[str]:
+        return audit.route_table_authority_errors(
+            root, {audit.ROUTE_TABLE_AUTHORITY_ID: authority}, entries, candidates,
+        )
+
+    def test_route_table_authority_proves_all_508_positions_consumers_and_bounds(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authority, entries, candidates, details = self.route_table_authority_fixture(root)
+            self.assertEqual(53, len(details))
+            self.assertEqual(
+                {"methods": 60, "path": 53, "summary": 341, "successStatuses": 54},
+                {role: len(ids) for role, ids in authority["candidateIdsByRole"].items()},
+            )
+            self.assertEqual(508, len(entries))
+            self.assertEqual([], self.route_table_errors(root, authority, entries, candidates))
+            self.assertEqual({
+                "StableEdgeId.MAX_UTF8_BYTES": 8192,
+                "EdgeTraversalWireBudget.MAX_AUXILIARY_ESCAPED_VALUE_BYTES": 12287,
+                "StableEdgeId.SSE_FRAME_MAX_BYTES": 65536,
+            }, audit.route_bound_values(root))
+            self.assertIsNone(audit.java_int_expression_value(
+                "2147483647 + 1", lambda _name: None))
+            self.assertIsNone(audit.java_int_expression_value("1 / 0", lambda _name: None))
+            self.assertIsNone(audit.java_int_expression_value("external()", lambda _name: None))
+
+    def test_route_table_authority_rejects_metadata_and_position_mutations(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authority, entries, candidates, _details = self.route_table_authority_fixture(root)
+
+            missing = copy.deepcopy(authority)
+            missing["candidateIdsByRole"]["methods"].pop()
+            errors = self.route_table_errors(root, missing, entries, candidates)
+            self.assertTrue(any("positional partitions have drifted" in error for error in errors), errors)
+
+            for identifier in audit.ROUTE_BOUND_CANDIDATES:
+                with self.subTest(missing_bound_candidate_subset=identifier):
+                    wrong_subset = copy.deepcopy(authority)
+                    wrong_subset["publishedBoundClauses"].pop(identifier)
+                    errors = self.route_table_errors(root, wrong_subset, entries, candidates)
+                    self.assertTrue(any("exact candidate-specific authorities" in error
+                                        for error in errors), errors)
+            wrong_subset = copy.deepcopy(authority)
+            wrong_subset["publishedBoundClauses"]["oc-68d83961ae8fd9333d39"] = [
+                "StableEdgeId.MAX_UTF8_BYTES", "StableEdgeId.SSE_FRAME_MAX_BYTES",
+            ]
+            errors = self.route_table_errors(root, wrong_subset, entries, candidates)
+            self.assertTrue(any("exact candidate-specific authorities" in error
+                                for error in errors), errors)
+
+            wrong_classification = copy.deepcopy(entries)
+            summary_id = authority["candidateIdsByRole"]["summary"][0]
+            wrong_classification[summary_id]["classification"] = "protocol-or-format-invariant"
+            errors = self.route_table_errors(root, authority, wrong_classification, candidates)
+            self.assertTrue(any(summary_id in error and "exact retained positional authority" in error
+                                for error in errors), errors)
+
+            missing_consumer = copy.deepcopy(authority)
+            missing_consumer["consumerBodyDigests"].pop("openApiOperationEntry")
+            errors = self.route_table_errors(root, missing_consumer, entries, candidates)
+            self.assertTrue(any("exact typed consumer body digests" in error
+                                for error in errors), errors)
+
+            route_path = root / audit.ROUTE_TABLE_PATH
+            original_route = route_path.read_text(encoding="utf-8")
+            route_path.write_text(original_route.replace(
+                'Set.of("GET"), "/health", "Liveness probe."',
+                'Set.of("GET"), "Liveness probe.", "/health"', 1,
+            ), encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("not the supported direct RouteDescriptor table" in error
+                                for error in errors), errors)
+
+            route_path.write_text(original_route.replace(
+                '"Liveness probe."', 'summary()', 1,
+            ), encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("not the supported direct RouteDescriptor table" in error
+                                for error in errors), errors)
+
+            chained = original_route.replace(
+                "                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false));",
+                "                    concat(STANDARD_ERRORS, ErrorCode.INVALID_REQUEST.code()), NEVER, false))"
+                ".stream().filter(route -> false).toList();",
+                1,
+            )
+            self.assertNotEqual(original_route, chained)
+            route_path.write_text(chained, encoding="utf-8")
+            refreshed_candidates = {
+                candidate.id: candidate
+                for _offset, candidate in audit.java_source_candidates(audit.ROUTE_TABLE_PATH, chained)
+            }
+            old_rows = list(candidates.values())
+            new_rows = list(refreshed_candidates.values())
+            self.assertEqual(len(old_rows), len(new_rows))
+            self.assertEqual(
+                [(row.symbol, row.kind, row.role, row.expression) for row in old_rows],
+                [(row.symbol, row.kind, row.role, row.expression) for row in new_rows],
+            )
+            remapped = {old.id: new.id for old, new in zip(old_rows, new_rows)}
+            refreshed_entries = {}
+            for old_id, entry in entries.items():
+                candidate = refreshed_candidates[remapped[old_id]]
+                refreshed = candidate.inventory_entry()
+                refreshed.update({
+                    key: value for key, value in entry.items()
+                    if key in {"status", "classification", "rationale", "retainedAuthority"}
+                })
+                refreshed_entries[candidate.id] = refreshed
+            refreshed_authority = copy.deepcopy(authority)
+            refreshed_authority["candidateIdsByRole"] = {
+                role: [remapped[identifier] for identifier in identifiers]
+                for role, identifiers in authority["candidateIdsByRole"].items()
+            }
+            for descriptor in refreshed_authority["descriptorCandidateIds"]:
+                descriptor["candidateIds"] = {
+                    role: [remapped[identifier] for identifier in identifiers]
+                    for role, identifiers in descriptor["candidateIds"].items()
+                }
+            refreshed_authority["publishedBoundClauses"] = {
+                remapped[identifier]: fields
+                for identifier, fields in authority["publishedBoundClauses"].items()
+            }
+            errors = self.route_table_errors(
+                root, refreshed_authority, refreshed_entries, refreshed_candidates)
+            self.assertTrue(any("not the supported direct RouteDescriptor table" in error
+                                for error in errors), errors)
+
+            route_path.write_text(
+                original_route.replace(
+                    "package ai.ravenroot.server.spec;",
+                    "package ai.ravenroot.server.spec;\n\nimport example.RouteDescriptor;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("does not resolve the same-package RouteDescriptor type" in error
+                                for error in errors), errors)
+
+            route_path.write_text(original_route.replace(
+                '"Liveness probe."', '"Health." /* "Liveness probe." */', 1,
+            ), encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("not the supported direct RouteDescriptor table" in error
+                                for error in errors), errors)
+
+            route_path.write_text(original_route.replace("8192", "8193", 1), encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("summary lost typed bound clause" in error for error in errors), errors)
+
+            route_path.write_text(original_route.rsplit("}", 1)[0]
+                                  + '  static final String MAX_ROUTE_SUMMARY = "Liveness probe.";\n}\n',
+                                  encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("partition every RouteTable candidate exactly once" in error
+                                for error in errors), errors)
+            route_path.write_text(original_route, encoding="utf-8")
+
+    def test_route_table_authority_rejects_consumer_test_and_typed_bound_mutations(self) -> None:
+        with tempfile.TemporaryDirectory() as location:
+            root = Path(location)
+            authority, entries, candidates, _details = self.route_table_authority_fixture(root)
+
+            generator_path = root / audit.OPENAPI_GENERATOR_PATH
+            original_generator = generator_path.read_text(encoding="utf-8")
+            generator_path.write_text(original_generator.replace(
+                "JsonStrings.escape(route.summary())", "JsonStrings.escape(route.path())", 1,
+            ), encoding="utf-8")
+            mutated = generator_path.read_text(encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["consumerBodyDigests"]["openApiOperationEntry"] = audit.java_method_digest(
+                mutated, "OpenApiSpecGenerator", "operationEntry")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("lost JsonStrings.escape(route.summary())" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            generate_span = audit.java_method_span(
+                original_generator, "OpenApiSpecGenerator", "generate")
+            self.assertIsNotNone(generate_span)
+            start, end = generate_span
+            ignored_routes = original_generator[start:end].replace(
+                "json.append(routes.stream()", "String ignored = routes.stream()", 1)
+            ignored_routes = ignored_routes.replace(
+                '.collect(Collectors.joining(",\\n")));',
+                '.collect(Collectors.joining(",\\n"));\n        json.append("");', 1)
+            self.assertNotEqual(original_generator[start:end], ignored_routes)
+            generator_path.write_text(
+                original_generator[:start] + ignored_routes + original_generator[end:],
+                encoding="utf-8",
+            )
+            changed = copy.deepcopy(authority)
+            mutated = generator_path.read_text(encoding="utf-8")
+            changed["consumerBodyDigests"]["openApiGenerate"] = audit.java_method_digest(
+                mutated, "OpenApiSpecGenerator", "generate")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("routes-to-pathEntry append chain" in error for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            success_span = audit.java_method_span(
+                original_generator, "OpenApiSpecGenerator", "successResponse")
+            self.assertIsNotNone(success_span)
+            start, end = success_span
+            lost_status = original_generator[start:end].replace(
+                '" + status + "', '" + 200 + "', 1)
+            self.assertNotEqual(original_generator[start:end], lost_status)
+            generator_path.write_text(
+                original_generator[:start] + lost_status + original_generator[end:],
+                encoding="utf-8",
+            )
+            changed = copy.deepcopy(authority)
+            mutated = generator_path.read_text(encoding="utf-8")
+            changed["consumerBodyDigests"]["openApiSuccessResponse"] = audit.java_method_digest(
+                mutated, "OpenApiSpecGenerator", "successResponse")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("successResponse lost status serialization" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            generator_path.write_text(
+                original_generator.replace(
+                    "package ai.ravenroot.server.spec;",
+                    "package ai.ravenroot.server.spec;\n\nimport example.RouteDescriptor;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("does not resolve the same-package RouteDescriptor type" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            generator_path.write_text(
+                original_generator.rsplit("}", 1)[0]
+                + "  private static final class RouteDescriptor {}\n}\n",
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("does not resolve the same-package RouteDescriptor type" in error
+                                for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            descriptor_path = root / audit.ROUTE_DESCRIPTOR_PATH
+            original_descriptor = descriptor_path.read_text(encoding="utf-8")
+            descriptor_path.write_text(original_descriptor.replace(
+                "Set.of(successStatus)", "Set.of(200)", 1,
+            ), encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("convenience constructor lost positional forwarding" in error
+                                for error in errors), errors)
+            descriptor_path.write_text(original_descriptor, encoding="utf-8")
+
+            test_path = root / audit.ROUTE_TABLE_TEST_PATH
+            original_test = test_path.read_text(encoding="utf-8")
+            test_path.write_text(original_test.replace(
+                "    @Test\n    void theCheckedInSpecMatchesWhatTheTableGeneratesRightNow",
+                "    void theCheckedInSpecMatchesWhatTheTableGeneratesRightNow", 1,
+            ), encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed_test = test_path.read_text(encoding="utf-8")
+            changed["publicationTestAuthority"]["testBodyDigest"] = audit.java_method_digest(
+                changed_test, "RouteTableSpecServerAgreementTest",
+                "theCheckedInSpecMatchesWhatTheTableGeneratesRightNow")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("not an exact runnable @Test" in error for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            test_path.write_text(
+                original_test.replace(
+                    "import static org.junit.jupiter.api.Assertions.assertEquals;",
+                    "import static example.Assertions.assertEquals;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("test type/import/TempDir identity has drifted" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            test_path.write_text(
+                original_test.rsplit("}", 1)[0]
+                + "  private static void assertTrue(Object... ignored) {}\n"
+                + "  private static void assertTrue(boolean ignored) {}\n}\n",
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("test type/import/TempDir identity has drifted" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            test_path.write_text(
+                original_test.rsplit("}", 1)[0]
+                + "  private static final class OpenApiSpecGenerator {}\n}\n",
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("test type/import/TempDir identity has drifted" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            test_path.write_text(original_test.replace(
+                "import org.junit.jupiter.api.Test;", "import example.fake.Test;", 1,
+            ), encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("test type/import/TempDir identity has drifted" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            test_path.write_text(original_test.replace("readAllBytes()", "toString()", 1),
+                                 encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed_test = test_path.read_text(encoding="utf-8")
+            changed["publicationTestAuthority"]["checkedInSpecBodyDigest"] = audit.java_method_digest(
+                changed_test, "RouteTableSpecServerAgreementTest", "checkedInSpec")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("checkedInSpec helper closure has drifted" in error
+                                for error in errors), errors)
+            test_path.write_text(original_test, encoding="utf-8")
+
+            constant_path = root / audit.STABLE_EDGE_ID_PATH
+            original_constant = constant_path.read_text(encoding="utf-8")
+            constant_path.write_text(original_constant.replace("64 * 1024", "32 * 1024", 1),
+                                     encoding="utf-8")
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("summary lost typed bound clause" in error for error in errors), errors)
+            constant_path.write_text(original_constant, encoding="utf-8")
+
+            edge_budget_path = root / audit.EDGE_WIRE_BUDGET_PATH
+            original_budget = edge_budget_path.read_text(encoding="utf-8")
+            edge_budget_path.write_text(
+                original_budget.replace(
+                    "package ai.ravenroot.api.application;",
+                    "package ai.ravenroot.api.application;\n\nimport example.StableEdgeId;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("typed wire-bound constants are not resolvable" in error
+                                for error in errors), errors)
+            edge_budget_path.write_text(original_budget, encoding="utf-8")
+
+            edge_test_path = root / audit.STABLE_EDGE_TEST_PATH
+            original_edge_test = edge_test_path.read_text(encoding="utf-8")
+            method = "acceptsTheExactUtf8BoundWithoutChangingIdentityAndRejectsOneByteMore"
+            span = audit.java_method_span(original_edge_test, "StableEdgeIdContractTest", method)
+            self.assertIsNotNone(span)
+            start, end = span
+            mutated_method = original_edge_test[start:end].replace(
+                "StableEdgeId.MAX_UTF8_BYTES", "1")
+            edge_test_path.write_text(
+                original_edge_test[:start] + mutated_method + original_edge_test[end:],
+                encoding="utf-8",
+            )
+            changed = copy.deepcopy(authority)
+            changed_source = edge_test_path.read_text(encoding="utf-8")
+            changed["boundTestBodyDigests"]["StableEdgeIdContractTest"][method] = \
+                audit.java_method_digest(changed_source, "StableEdgeIdContractTest", method)
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any(f"{method} lost StableEdgeId.MAX_UTF8_BYTES" in error
+                                for error in errors), errors)
+
+            edge_test_path.write_text(
+                original_edge_test.rsplit("}", 1)[0]
+                + "  private static final class StableEdgeId {}\n}\n",
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("typed-bound test authority StableEdgeIdContractTest is incomplete"
+                                in error for error in errors), errors)
+
+            edge_test_path.write_text(
+                original_edge_test.replace(
+                    "package ai.ravenroot.api.application;",
+                    "package ai.ravenroot.api.application;\n\nimport example.StableEdgeId;",
+                    1,
+                ),
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("typed-bound test authority StableEdgeIdContractTest is incomplete"
+                                in error for error in errors), errors)
+
+            edge_test_path.write_text(
+                original_edge_test.rsplit("}", 1)[0]
+                + "  private static void assertThrows(Object... ignored) {}\n}\n",
+                encoding="utf-8",
+            )
+            errors = self.route_table_errors(root, authority, entries, candidates)
+            self.assertTrue(any("typed-bound test authority StableEdgeIdContractTest is incomplete"
+                                in error for error in errors), errors)
+
+    def test_published_contract_description_cannot_classify_an_arbitrary_string(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            inventory = root / "scripts/operational-configuration-inventory.json"
+            document = json.loads(inventory.read_text(encoding="utf-8"))
+            entry = next(item for item in document["entries"] if item["status"] == "pending-review")
+            entry.update(
+                status="retained", classification="published-contract-description",
+                rationale="This arbitrary source string is not a published RouteDescriptor summary.",
+                retainedAuthority=audit.ROUTE_TABLE_AUTHORITY_ID,
+            )
+            errors = audit.inventory_errors(root, document, audit.discover(root))
+            self.assertTrue(any("published-contract-description requires the closed RouteTable authority"
+                                in error for error in errors), errors)
+
     def environment_authority_fixture(self, root: Path):
         source_path = root / "ravenroot/example/src/main/java/dev/example/RuntimeLimits.java"
         source_path.write_text(

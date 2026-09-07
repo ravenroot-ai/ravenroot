@@ -909,9 +909,10 @@ def json_schema_reference_candidates(text: str) -> list[tuple[int, str, str, str
     return rows
 
 
-def discover(root: Path) -> tuple[Candidate, ...]:
+def discover_paths(root: Path, relative_paths: Iterable[Path]) -> tuple[Candidate, ...]:
+    """Run the production candidate scanner over an explicit bounded path set."""
     provisional: list[tuple[str, int, str, str, str, str, str, str, bool]] = []
-    for relative in tracked_files(root):
+    for relative in sorted(set(relative_paths)):
         surface_name = surface(relative)
         if surface_name is None or (relative.suffix not in SOURCE_SUFFIXES
                                     and not relative.name.startswith("Dockerfile")):
@@ -942,6 +943,10 @@ def discover(root: Path) -> tuple[Candidate, ...]:
         candidates.append(Candidate(identifier, path, line, symbol_name, kind, role, expression, digest,
                                     evidence, evidence_digest, surface_name, fixture))
     return tuple(candidates)
+
+
+def discover(root: Path) -> tuple[Candidate, ...]:
+    return discover_paths(root, tracked_files(root))
 
 
 def load_inventory(path: Path = INVENTORY, *, allow_previous_schema: bool = False) -> dict[str, object]:
@@ -3130,6 +3135,10 @@ ROUTE_EXECUTION_EVENT_SCHEMAS_BODY_DIGEST = \
     "f4b91c57c74f5f1ee76b9aca4a3edd52a2cce10a0f67efe3d4cacd270dd56f6b"
 ROUTE_EVENT_STREAM_PUBLICATION_TEST_BODY_DIGEST = \
     "fd78aef6ecb775a1552fcfad1556dc02f4465345ac9d5837cb5521734a41a385"
+ROUTE_OPENAPI_GENERATE_BODY_DIGEST = \
+    "3c7a6a8dbebc41ae82f86ca79f1e3b7ccf29e74aeffedb692b5a365e1f2f7648"
+ROUTE_OPENAPI_SUCCESS_RESPONSE_BODY_DIGEST = \
+    "452562a1d0667dfdf51510a0d1eef559d251443b3b0dfaa4c8af543bd3288ce8"
 ROUTE_TABLE_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/spec/RouteTable.java")
 ROUTE_DESCRIPTOR_PATH = Path(
@@ -3164,6 +3173,172 @@ ROUTE_BOUND_PATHS = {
     "oc-418656067bc7b4ad0c5c": "/v1/events/recent",
     "oc-8eed875577d7d07c6447": "/v1/events/recent",
 }
+EXECUTION_RUNTIME_FAMILY_ID = "execution-runtime-engine-four-v1"
+EXECUTION_RUNTIME_SOURCE_FINAL_REVISION = "63661709c127bdc206857343382d3a1d4d47274a"
+EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION = "cddc8576a34b48c3b8d456769e98238d3e6caae1"
+EXECUTION_RUNTIME_CLAIM_BASE_REVISION = "f4be893d5b34742460a6b4658867aac69b558015"
+EXECUTION_RUNTIME_CONFIGURATION_PATH = Path(
+    "ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionRuntimeConfiguration.java")
+EXECUTION_ENGINE_POLICY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/ExecutionEnginePolicy.java")
+TERMINAL_NODE_HISTORY_PATH = Path(
+    "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/TerminalNodeHistory.java")
+EXECUTION_RUNTIME_FAMILY_CANDIDATE_PATHS = frozenset({
+    EXECUTION_RUNTIME_CONFIGURATION_PATH,
+    EXECUTION_ENGINE_POLICY_PATH,
+    TERMINAL_NODE_HISTORY_PATH,
+    Path("compose.yaml"),
+    Path("deploy/helm/ravenroot/values.yaml"),
+    Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+    Path("deploy/helm/ravenroot/values.schema.json"),
+    Path("deploy/kubernetes/ravenroot.yaml"),
+    Path("scripts/publish_environment_reference.py"),
+})
+EXECUTION_RUNTIME_SOURCE_FINAL_PATHS = frozenset({
+    EXECUTION_RUNTIME_CONFIGURATION_PATH,
+    EXECUTION_ENGINE_POLICY_PATH,
+    TERMINAL_NODE_HISTORY_PATH,
+    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/ExecutionEngine.java"),
+    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/ExecutionEngineProvider.java"),
+    Path("ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/execution/ExecutionEngines.java"),
+    Path("ravenroot/ravenroot-akka/src/main/java/ai/ravenroot/akka/AkkaExecutionEngine.java"),
+    Path("ravenroot/ravenroot-akka/src/main/java/ai/ravenroot/akka/AkkaExecutionEngineProvider.java"),
+    Path("ravenroot/ravenroot-pekko/src/main/java/ai/ravenroot/pekko/PekkoExecutionEngine.java"),
+    Path("ravenroot/ravenroot-pekko/src/main/java/ai/ravenroot/pekko/PekkoExecutionEngineProvider.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/manifest/ExecutionManifestResolver.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/GraphRunner.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultGraphDeployment.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/pause/DurableExecutionPauseService.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/approval/PinnedGraphToolApprovalContinuationExecutor.java"),
+    Path("ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/humantask/PinnedGraphHumanTaskContinuationExecutor.java"),
+    Path("compose.yaml"),
+    Path("deploy/helm/ravenroot/templates/_helpers.tpl"),
+    Path("deploy/helm/ravenroot/templates/deployment.yaml"),
+    Path("deploy/helm/ravenroot/values.schema.json"),
+    Path("deploy/helm/ravenroot/values.yaml"),
+    Path("deploy/kubernetes/ravenroot.yaml"),
+    Path("docs/reference/configuration.md"),
+    Path("scripts/publish_environment_reference.py"),
+})
+EXECUTION_RUNTIME_SETTINGS = (
+    {
+        "setting": "execution-engine.actor-node-stash-capacity",
+        "environment": "RAVENROOT_ENGINE_MAX_STASHED_COMMANDS_PER_NODE",
+        "component": "maxStashedCommandsPerNode", "helm": "maxStashedCommandsPerNode",
+        "default": "10000", "maximum": 10000,
+        "owner": f"{EXECUTION_ENGINE_POLICY_PATH.as_posix()}#ExecutionEnginePolicy",
+        "field": "maxStashedCommandsPerNode", "defaultPath": EXECUTION_ENGINE_POLICY_PATH,
+        "defaultExpression": "10_000", "durable": True,
+    },
+    {
+        "setting": "execution-engine.actor-lifecycle-step-bound",
+        "environment": "RAVENROOT_ENGINE_LIFECYCLE_STEP_SECONDS",
+        "component": "lifecycleStepBound", "helm": "lifecycleStepSeconds",
+        "default": "10 seconds", "maximum": 10,
+        "owner": f"{EXECUTION_ENGINE_POLICY_PATH.as_posix()}#ExecutionEnginePolicy",
+        "field": "lifecycleStepBound", "defaultPath": EXECUTION_ENGINE_POLICY_PATH,
+        "defaultExpression": "10", "durable": True,
+    },
+    {
+        "setting": "execution-engine.terminal-node-history-capacity",
+        "environment": "RAVENROOT_ENGINE_TERMINAL_HISTORY_CAPACITY",
+        "component": "terminalNodeHistoryCapacity", "helm": "terminalHistoryCapacity",
+        "default": "1024", "maximum": 1024,
+        "owner": f"{EXECUTION_ENGINE_POLICY_PATH.as_posix()}#ExecutionEnginePolicy",
+        "field": "terminalNodeHistoryCapacity", "defaultPath": TERMINAL_NODE_HISTORY_PATH,
+        "defaultExpression": "1024", "durable": False,
+    },
+    {
+        "setting": "graph-runner.shutdown-step-bound",
+        "environment": "RAVENROOT_GRAPH_RUNNER_SHUTDOWN_STEP_SECONDS",
+        "component": "runnerShutdownStepBound", "helm": "runnerShutdownStepSeconds",
+        "default": "10 seconds", "maximum": 10,
+        "owner": f"{EXECUTION_RUNTIME_CONFIGURATION_PATH.as_posix()}#ExecutionRuntimeConfiguration",
+        "field": "runnerShutdownStepBound", "defaultPath": EXECUTION_RUNTIME_CONFIGURATION_PATH,
+        "defaultExpression": "10", "durable": False,
+    },
+)
+EXECUTION_RUNTIME_STAGES = (
+    ("b6dd1b756c57248e98696de6b0a256e5abdd7f12", "policy/config"),
+    ("5582e16ea063eca417dcd05f60f15a4c0e491e82", "SPI"),
+    ("465e70a25caaf1f31f81417e030d903a2d52b551", "adapters and manifest"),
+    ("8b977d8c798e3937cc5535d402aba3a64586c61e", "runner and five owners"),
+    ("81e8b9bfe2b36f1e85ebce730c462b8cb4ef1ddf", "server and CLI composition"),
+    ("da0ed207dfe9823a8e40fdb16f32d65fcb647e77", "carriers/docs"),
+    (EXECUTION_RUNTIME_SOURCE_FINAL_REVISION, "terminal policy constant alias"),
+)
+EXECUTION_RUNTIME_CLI_PATH = Path(
+    "ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RavenrootCliMain.java")
+EXECUTION_RUNTIME_SERVER_PATH = Path(
+    "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java")
+EXECUTION_RUNTIME_TEST_AUTHORITIES = (
+    ("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/execution/ExecutionEnginePolicyTest.java",
+     "ExecutionEnginePolicyTest", "compatibilityFingerprintHasOneStableOwnerAndExcludesTerminalHistory"),
+    ("ravenroot/ravenroot-application-api/src/test/java/ai/ravenroot/api/execution/ExecutionEngineProviderPolicyTest.java",
+     "ExecutionEngineProviderPolicyTest", "historicalProviderDelegatesOnlyTheExactFrozenLegacyPolicy"),
+    ("ravenroot/ravenroot-akka/src/test/java/ai/ravenroot/akka/AkkaExecutionEnginePolicyTest.java",
+     "AkkaExecutionEnginePolicyTest", "conversionPreservesOneNanosecondAndSaturatesBeforeOverflow"),
+    ("ravenroot/ravenroot-pekko/src/test/java/ai/ravenroot/pekko/PekkoExecutionEnginePolicyTest.java",
+     "PekkoExecutionEnginePolicyTest", "conversionPreservesOneNanosecondAndSaturatesBeforeOverflow"),
+    ("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/ExecutionRuntimeConfigurationTest.java",
+     "ExecutionRuntimeConfigurationTest", "eachBindingMapsToItsIndependentPolicyComponent"),
+    ("ravenroot/ravenroot-core/src/test/java/ai/ravenroot/core/runtime/GraphRunnerShutdownTest.java",
+     "GraphRunnerShutdownTest", "convertsEveryPositiveShutdownDurationWithoutLosingSubMillisecondValuesOrOverflowing"),
+    ("ravenroot/ravenroot-server/src/test/java/ai/ravenroot/server/RavenrootServerMainLifecycleTest.java",
+     "RavenrootServerMainLifecycleTest", "oneResolvedExecutionRuntimeReachesEveryServerExecutionConsumer"),
+    ("ravenroot/ravenroot-cli/src/test/java/ai/ravenroot/cli/RavenrootCliMainExecutionRuntimeConfigurationTest.java",
+     "RavenrootCliMainExecutionRuntimeConfigurationTest", "localCompositionProjectsOneTupleIntoTheEngineAndActualRunnerShutdown"),
+)
+EXECUTION_RUNTIME_TRANSITIONS = (
+    ("oc-48bca2478a170c1b31cf", "execution-engine.actor-node-stash-capacity", "baseline-duplicate-atom", "6c81c82769749773df85a17424514a592a24ac40", "465e70a25caaf1f31f81417e030d903a2d52b551"),
+    ("oc-82d21c2d5ca718e22886", "execution-engine.actor-node-stash-capacity", "baseline-duplicate-atom", "6c81c82769749773df85a17424514a592a24ac40", "465e70a25caaf1f31f81417e030d903a2d52b551"),
+    ("oc-aa41b9b80dfbc15a16d8", "execution-engine.actor-node-stash-capacity", "feature-transient-atom", "251b60daab99a549c51d88e21c829d641329d123", "8b977d8c798e3937cc5535d402aba3a64586c61e"),
+    ("oc-9b1bde733ded46e394b1", "execution-engine.actor-lifecycle-step-bound", "baseline-duplicate-atom", "6c81c82769749773df85a17424514a592a24ac40", "465e70a25caaf1f31f81417e030d903a2d52b551"),
+    ("oc-3ba88abd98e9a79ff3d4", "execution-engine.actor-lifecycle-step-bound", "baseline-duplicate-atom", "6c81c82769749773df85a17424514a592a24ac40", "465e70a25caaf1f31f81417e030d903a2d52b551"),
+    ("oc-ba35660d0c978073ce87", "execution-engine.actor-lifecycle-step-bound", "feature-transient-atom", "251b60daab99a549c51d88e21c829d641329d123", "8b977d8c798e3937cc5535d402aba3a64586c61e"),
+    ("oc-20800ee826c00923e97e", "execution-engine.terminal-node-history-capacity", "feature-transient-atom", "251b60daab99a549c51d88e21c829d641329d123", "8b977d8c798e3937cc5535d402aba3a64586c61e"),
+    ("oc-01aa43acbebb78d6857b", "graph-runner.shutdown-step-bound", "feature-transient-atom", "251b60daab99a549c51d88e21c829d641329d123", "8b977d8c798e3937cc5535d402aba3a64586c61e"),
+    ("oc-1b497b651ab803655991", "graph-runner.shutdown-step-bound", "baseline-authority-relocation", "251b60daab99a549c51d88e21c829d641329d123", "8b977d8c798e3937cc5535d402aba3a64586c61e"),
+    ("oc-1eed65896f5bba1182c6", "execution-engine.terminal-node-history-capacity", "feature-transient-atom", "c9534676f60f03d0433549d8d00baf6fc3cbdf25", "63661709c127bdc206857343382d3a1d4d47274a"),
+    ("oc-95929fb19c5a85e01179>oc-5c95bb22070332a3062f", "execution-engine.actor-node-stash-capacity", "feature-transient-identity-rekey", "c9534676f60f03d0433549d8d00baf6fc3cbdf25", "63661709c127bdc206857343382d3a1d4d47274a"),
+    ("oc-36be8f29c4600f158d7c>oc-58a624fec85532ae75ff", "execution-engine.actor-lifecycle-step-bound", "feature-transient-identity-rekey", "c9534676f60f03d0433549d8d00baf6fc3cbdf25", "63661709c127bdc206857343382d3a1d4d47274a"),
+)
+EXECUTION_RUNTIME_CONSOLIDATIONS = (
+    ("execution-engine.actor-node-stash-capacity",
+     ("oc-48bca2478a170c1b31cf", "oc-82d21c2d5ca718e22886"), 1),
+    ("execution-engine.actor-lifecycle-step-bound",
+     ("oc-3ba88abd98e9a79ff3d4", "oc-9b1bde733ded46e394b1"), 1),
+)
+HUMAN_TASK_LEGACY_CONSOLIDATIONS = (
+    ("oc-f01e525c4ff5b6f33249", "human-task.default-response-bytes"),
+    ("oc-d40d2ea5bfc7803d6e82", "human-task.max-response-bytes"),
+    ("oc-4844edec942e6a8b464d", "human-task.default-escalation-seconds"),
+    ("oc-5dfc25380697ad06798f", "human-task.max-escalation-seconds"),
+    ("oc-1d2b767994ede099b3c3", "human-task.default-expiry-seconds"),
+    ("oc-13b0a967d1d36e28730b", "human-task.max-expiry-seconds"),
+    ("oc-c3ea195fb165360a4828", "human-task.max-title-bytes"),
+    ("oc-24c8e019785e1de2bc91", "human-task.max-description-bytes"),
+    ("oc-401a4ab6635b0d9514c1", "human-task.max-response-schema-bytes"),
+    ("oc-3f2fb897eedcf9c577c9", "human-task.max-authorization-tokens"),
+    ("oc-ccb69cc8780301b73e95", "human-task.max-authorization-token-bytes"),
+    ("oc-c9a0a2c5318c61bea479", "human-task.max-decision-body-bytes"),
+    ("oc-8f67b44960c639030c00", "human-task.default-page-size"),
+    ("oc-cd38a8e272108ae06209", "human-task.max-page-size"),
+    ("oc-e1bcd51c2967d5211bd3", "human-task.response-max-depth"),
+    ("oc-616f8cc86912d14abe00", "human-task.response-max-collection-size"),
+    ("oc-9589010b7bb26bcb3c6a", "human-task.response-max-value-count"),
+    ("oc-ddda07e21ca51c2d0064", "human-task.response-max-text-length"),
+    ("oc-2ac60d58022213773715", "human-task.response-max-key-length"),
+    ("oc-c925180c0c9029f36005", "human-task.write-attempts"),
+    ("oc-0d5f8b5da9c4a272aba5", "human-task.max-confirmation-prompt-bytes"),
+    ("oc-1645a4edb3a288cd04f3", "human-task.max-confirmation-action-label-bytes"),
+    ("oc-bc749046cd358114d4cf", "human-task.max-decision-comment-bytes"),
+    ("oc-570a24e3b58118350d41", "human-task.attention-poll-millis"),
+    ("oc-d62da50d672cec9a003f", "human-task.attention-poll-backoff-max-millis"),
+    ("oc-3414cbc2d6051a7c7307", "human-task.default-attention-page-size"),
+    ("oc-892a803718d418e181cb", "human-task.max-attention-page-size"),
+)
 ASSISTANT_CONFIGURATION_PATH = Path(
     "ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/assistant/AssistantConfiguration.java")
 ASSISTANT_CONFIGURATION_TEST_PATH = Path(
@@ -3735,7 +3910,9 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
     if java_method_header(generator, "OpenApiSpecGenerator", "generate") != \
             "public static String generate(List<RouteDescriptor> routes)" \
             or java_method_digest(generator, "OpenApiSpecGenerator", "generate") != \
-            consumer_digests["openApiGenerate"]:
+            consumer_digests["openApiGenerate"] \
+            or java_method_digest(generator, "OpenApiSpecGenerator", "generate") != \
+            ROUTE_OPENAPI_GENERATE_BODY_DIGEST:
         errors.append("RouteTable OpenAPI generate signature/body has drifted")
     publication_chain = (
         "json.append(routes.stream().sorted(java.util.Comparator.comparing(RouteDescriptor::path))"
@@ -3779,6 +3956,8 @@ def route_table_consumer_errors(root: Path, authority: dict[str, object]) -> lis
             "private static String successResponse(RouteDescriptor route, String method, int status)" \
             or java_method_digest(generator, "OpenApiSpecGenerator", "successResponse") != \
             consumer_digests["openApiSuccessResponse"] \
+            or java_method_digest(generator, "OpenApiSpecGenerator", "successResponse") != \
+            ROUTE_OPENAPI_SUCCESS_RESPONSE_BODY_DIGEST \
             or success_expressions is None \
             or not sse_value.lstrip().startswith('"200":') \
             or '"text/event-stream"' not in sse_value \
@@ -4834,6 +5013,310 @@ def assistant_limit_authority_errors(root: Path, authorities: object,
     return errors
 
 
+def execution_runtime_expected_entry_ids(
+        root: Path, discovered: dict[str, Candidate]) -> tuple[dict[str, dict[str, list[str]]], list[str]]:
+    """Derive the accepted four-setting 10+15 partitions from bounded live discovery."""
+    errors: list[str] = []
+    result: dict[str, dict[str, list[str]]] = {}
+    publisher = "scripts/publish_environment_reference.py"
+    schema_path = "deploy/helm/ravenroot/values.schema.json"
+    template_path = "deploy/helm/ravenroot/templates/deployment.yaml"
+    raw_path = "deploy/kubernetes/ravenroot.yaml"
+    values_path = "deploy/helm/ravenroot/values.yaml"
+
+    candidates = list(discovered.values())
+    for spec in EXECUTION_RUNTIME_SETTINGS:
+        setting = str(spec["setting"])
+        environment = str(spec["environment"])
+        environment_rows = [candidate for candidate in candidates
+                            if candidate.kind == "environment-binding"
+                            and candidate.expression == environment]
+        production_environment = [candidate for candidate in environment_rows
+                                  if candidate.path != publisher]
+        schema_environment = [candidate for candidate in production_environment
+                              if candidate.path == schema_path]
+        template_environment = [candidate for candidate in production_environment
+                                if candidate.path == template_path]
+        raw_environment = [candidate for candidate in production_environment
+                           if candidate.path == raw_path]
+        publisher_environment = [candidate for candidate in environment_rows
+                                 if candidate.path == publisher]
+        java_declaration = [candidate for candidate in candidates
+                            if candidate.path == EXECUTION_RUNTIME_CONFIGURATION_PATH.as_posix()
+                            and candidate.kind == "fixed-declaration"
+                            and candidate.expression == json.dumps(environment)]
+        canonical_default = [candidate for candidate in candidates
+                             if candidate.path == Path(spec["defaultPath"]).as_posix()
+                             and candidate.kind == "fixed-declaration"
+                             and candidate.expression == spec["defaultExpression"]]
+        helm_blank = [candidate for candidate in candidates
+                      if candidate.path == values_path
+                      and candidate.kind == "configuration-scalar"
+                      and candidate.role == spec["helm"] and candidate.expression == '""']
+        schema_reference = [candidate for candidate in candidates
+                            if candidate.path == schema_path
+                            and candidate.kind == "schema-reference-binding"
+                            and candidate.expression == "#/definitions/graphBlank"
+                            and str(spec["helm"]) in candidate.role]
+        if not (len(production_environment) == 6 and len(schema_environment) == 1
+                and len(template_environment) == 1 and len(raw_environment) == 1
+                and len(publisher_environment) == 1
+                and len(java_declaration) == len(canonical_default) == len(helm_blank)
+                == len(schema_reference) == 1):
+            errors.append(f"{setting}: engine operator candidate topology has drifted")
+            result[setting] = {"operatorCandidateIds": [], "supportingCandidateIds": []}
+            continue
+
+        schema_lines = {schema_environment[0].line, schema_environment[0].line + 1}
+        schema_support = [candidate for candidate in candidates
+                          if candidate.path == schema_path and candidate.line in schema_lines
+                          and candidate.kind == "configuration-scalar"]
+        template_support = [candidate for candidate in candidates
+                            if candidate.path == template_path
+                            and candidate.line == template_environment[0].line + 1
+                            and candidate.kind == "configuration-scalar"]
+        raw_support = [candidate for candidate in candidates
+                       if candidate.path == raw_path and candidate.line == raw_environment[0].line + 1
+                       and candidate.kind == "configuration-scalar" and candidate.expression == '""']
+        publisher_support = [candidate for candidate in candidates
+                             if candidate.path == publisher
+                             and candidate.line == publisher_environment[0].line]
+        operator = production_environment + java_declaration + canonical_default + helm_blank + schema_reference
+        supporting = schema_support + template_support + raw_support + publisher_support
+        if len(operator) != 10 or len({candidate.id for candidate in operator}) != 10:
+            errors.append(f"{setting}: engine operator partition must contain 10 unique candidates")
+        if len(schema_support) != 11 or len(template_support) != 1 or len(raw_support) != 1 \
+                or len(publisher_support) != 2 or len(supporting) != 15 \
+                or len({candidate.id for candidate in supporting}) != 15:
+            errors.append(f"{setting}: engine supporting partition must contain exact 11+1+1+2 roles")
+        if {candidate.id for candidate in operator} & {candidate.id for candidate in supporting}:
+            errors.append(f"{setting}: engine operator and supporting partitions overlap")
+        result[setting] = {
+            "operatorCandidateIds": sorted(candidate.id for candidate in operator),
+            "supportingCandidateIds": sorted(candidate.id for candidate in supporting),
+        }
+    union = [identifier for partition in result.values() for key in (
+        "operatorCandidateIds", "supportingCandidateIds") for identifier in partition[key]]
+    if len(union) != 100 or len(set(union)) != 100:
+        errors.append("execution runtime family must map exactly 100 unique candidates")
+    return result, errors
+
+
+def execution_runtime_source_errors(root: Path) -> list[str]:
+    """Pin reviewed complex bodies and verify the live server/CLI composition seams."""
+    errors: list[str] = []
+    for path in sorted(EXECUTION_RUNTIME_SOURCE_FINAL_PATHS):
+        expected = committed_source(root, EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION, path.as_posix())
+        try:
+            actual = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            actual = None
+        if expected is None or actual != expected:
+            errors.append(f"execution runtime reviewed source has drifted: {path.as_posix()}")
+
+    configuration = (root / EXECUTION_RUNTIME_CONFIGURATION_PATH).read_text(encoding="utf-8")
+    policy = (root / EXECUTION_ENGINE_POLICY_PATH).read_text(encoding="utf-8")
+    terminal = (root / TERMINAL_NODE_HISTORY_PATH).read_text(encoding="utf-8")
+    if java_record_components(configuration, "ExecutionRuntimeConfiguration") != \
+            ("enginePolicy", "runnerShutdownStepBound") \
+            or java_record_components(policy, "ExecutionEnginePolicy") != \
+            ("maxStashedCommandsPerNode", "lifecycleStepBound", "terminalNodeHistoryCapacity") \
+            or java_static_final_initializer(terminal, "TerminalNodeHistory", "DEFAULT_CAPACITY") is None \
+            or java_static_final_initializer(terminal, "TerminalNodeHistory", "DEFAULT_CAPACITY")[0] != "1024" \
+            or normalized("this(DEFAULT_CAPACITY)") not in normalized(strip_c_comments_and_literals(terminal)):
+        errors.append("execution runtime typed policy/default structure has drifted")
+
+    cli = (root / EXECUTION_RUNTIME_CLI_PATH).read_text(encoding="utf-8")
+    pinned_cli = committed_source(
+        root, EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION, EXECUTION_RUNTIME_CLI_PATH.as_posix())
+    if pinned_cli is None or any(
+            java_method_digest(cli, "RavenrootCliMain", method) !=
+            java_method_digest(pinned_cli, "RavenrootCliMain", method)
+            for method in ("main", "embeddedRuntime")):
+        errors.append("execution runtime embedded CLI composition has drifted")
+    cli_main = java_method_span(cli, "RavenrootCliMain", "main")
+    cli_code = normalized(strip_c_comments(cli[slice(*cli_main)] if cli_main else ""))
+    if "return;" not in cli_code or "embeddedRuntime(System.getenv(), ExecutionEngines::create)" not in cli_code \
+            or cli_code.index("return;") > cli_code.index("embeddedRuntime(System.getenv(), ExecutionEngines::create)"):
+        errors.append("execution runtime CLI remote return/local composition order has drifted")
+
+    server = (root / EXECUTION_RUNTIME_SERVER_PATH).read_text(encoding="utf-8")
+    pinned_server = committed_source(
+        root, EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION, EXECUTION_RUNTIME_SERVER_PATH.as_posix())
+    server_run = java_method_span(server, "RavenrootServerMain", "run")
+    server_code = normalized(strip_c_comments(
+        server[slice(*server_run)] if server_run else ""))
+    runtime_call = "ResolvedExecutionRuntime.fromEnvironment(System.getenv())"
+    engine_call = 'executionRuntime.createEngine(engineId, "ravenroot-server", ExecutionEngines::create)'
+    stores = list(re.finditer(
+        r"ExecutionStoreConfiguration\s*\.\s*(?:fromEnvironment|resolveEnvironment)"
+        r"\(System\.getenv\(\)\)", server_code))
+    if pinned_server is None or java_method_digest(server, "RavenrootServerMain", "run") != \
+            java_method_digest(pinned_server, "RavenrootServerMain", "run") \
+            or runtime_call not in server_code or engine_call not in server_code or len(stores) != 1 \
+            or not server_code.index(runtime_call) < stores[0].start() < server_code.index(engine_call):
+        errors.append("execution runtime server resolve/store/engine startup order has drifted")
+
+    for path, type_symbol, method in EXECUTION_RUNTIME_TEST_AUTHORITIES:
+        try:
+            source = (root / path).read_text(encoding="utf-8")
+        except OSError:
+            errors.append(f"execution runtime runnable test is absent: {path}#{method}")
+            continue
+        if java_type_span(source, type_symbol) is None \
+                or not exact_import_identity(source, "org.junit.jupiter.api.Test") \
+                or java_method_annotations(source, type_symbol, method) != ("@Test",):
+            errors.append(f"execution runtime runnable test authority has drifted: {type_symbol}#{method}")
+    return errors
+
+
+def execution_runtime_authority_from_source(
+        root: Path, discovered: dict[str, Candidate]) -> dict[str, object] | None:
+    settings, errors = execution_runtime_expected_entry_ids(root, discovered)
+    if errors:
+        return None
+    return {
+        "kind": EXECUTION_RUNTIME_FAMILY_ID,
+        "claimBaseRevision": EXECUTION_RUNTIME_CLAIM_BASE_REVISION,
+        "sourceFinalRevision": EXECUTION_RUNTIME_SOURCE_FINAL_REVISION,
+        "currentSourceRevision": EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION,
+        "settings": settings,
+        "implementationStages": [
+            {"revision": revision, "purpose": purpose}
+            for revision, purpose in EXECUTION_RUNTIME_STAGES
+        ],
+        "candidateTransitions": [
+            {"candidateIdentity": identity, "setting": setting, "category": category,
+             "beforeRevision": before, "afterRevision": after, "redundancyDelta": 0}
+            for identity, setting, category, before, after in EXECUTION_RUNTIME_TRANSITIONS
+        ],
+    }
+
+
+def execution_runtime_authority_errors(root: Path, authorities: object,
+                                       entries: dict[str, dict[str, object]],
+                                       discovered: dict[str, Candidate]) -> list[str]:
+    settings = {str(spec["setting"]) for spec in EXECUTION_RUNTIME_SETTINGS}
+    assigned = {identifier for identifier, entry in entries.items()
+                if entry.get("setting") in settings}
+    retained = {identifier for identifier, entry in entries.items()
+                if entry.get("retainedAuthority") == EXECUTION_RUNTIME_FAMILY_ID}
+    if not assigned and not retained and authorities is None:
+        return []
+    if not isinstance(authorities, dict) or set(authorities) != {EXECUTION_RUNTIME_FAMILY_ID}:
+        return ["execution runtime requires one exact closed family authority"]
+    authority = authorities[EXECUTION_RUNTIME_FAMILY_ID]
+    required = {"kind", "claimBaseRevision", "sourceFinalRevision", "currentSourceRevision",
+                "settings", "implementationStages", "candidateTransitions"}
+    if not isinstance(authority, dict) or set(authority) != required:
+        return ["execution runtime family authority has an unsupported shape"]
+    errors: list[str] = []
+    if authority["kind"] != EXECUTION_RUNTIME_FAMILY_ID \
+            or authority["claimBaseRevision"] != EXECUTION_RUNTIME_CLAIM_BASE_REVISION \
+            or authority["sourceFinalRevision"] != EXECUTION_RUNTIME_SOURCE_FINAL_REVISION \
+            or authority["currentSourceRevision"] != EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION:
+        errors.append("execution runtime revision authority has drifted")
+    expected, partition_errors = execution_runtime_expected_entry_ids(root, discovered)
+    errors.extend(partition_errors)
+    if authority["settings"] != expected:
+        errors.append("execution runtime recorded candidate partition differs from live bounded discovery")
+    expected_stages = [{"revision": revision, "purpose": purpose}
+                       for revision, purpose in EXECUTION_RUNTIME_STAGES]
+    if authority["implementationStages"] != expected_stages:
+        errors.append("execution runtime implementation stage history has drifted")
+    history = (EXECUTION_RUNTIME_CLAIM_BASE_REVISION,
+               *(revision for revision, _purpose in EXECUTION_RUNTIME_STAGES),
+               EXECUTION_RUNTIME_CURRENT_SOURCE_REVISION)
+    if any(not commit_exists(root, revision) for revision in history) \
+            or any(not revision_is_ancestor(root, before, after)
+                   for before, after in zip(history, history[1:])):
+        errors.append("execution runtime implementation history is incomplete or out of order")
+    expected_transitions = [
+        {"candidateIdentity": identity, "setting": setting, "category": category,
+         "beforeRevision": before, "afterRevision": after, "redundancyDelta": 0}
+        for identity, setting, category, before, after in EXECUTION_RUNTIME_TRANSITIONS
+    ]
+    if authority["candidateTransitions"] != expected_transitions:
+        errors.append("execution runtime candidate transition history or zero-credit accounting has drifted")
+    for before, after in sorted({(before, after) for _identity, _setting, _category, before, after
+                                 in EXECUTION_RUNTIME_TRANSITIONS}):
+        parent = subprocess.run(
+            ["git", "rev-parse", f"{after}^"], cwd=root, capture_output=True, text=True)
+        if parent.returncode != 0 or parent.stdout.strip() != before:
+            errors.append("execution runtime candidate transition is not a direct parent/child change")
+    expected_ids = {identifier for partition in expected.values()
+                    for key in ("operatorCandidateIds", "supportingCandidateIds")
+                    for identifier in partition[key]}
+    if assigned | retained != expected_ids:
+        errors.append("execution runtime inventory assignments do not equal the exact 100-row family")
+    for setting, partition in expected.items():
+        for identifier in partition["operatorCandidateIds"]:
+            entry = entries.get(identifier, {})
+            if entry.get("setting") != setting or entry.get("status") != "converted" \
+                    or entry.get("classification") != "operator-configurable" \
+                    or entry.get("executionRuntimeAuthority") != EXECUTION_RUNTIME_FAMILY_ID:
+                errors.append(f"{setting}: engine operator row is absent or misclassified: {identifier}")
+        for identifier in partition["supportingCandidateIds"]:
+            entry = entries.get(identifier, {})
+            if entry.get("setting") != setting or entry.get("status") != "retained" \
+                    or entry.get("classification") != "derived" \
+                    or entry.get("retainedAuthority") != EXECUTION_RUNTIME_FAMILY_ID:
+                errors.append(f"{setting}: engine supporting row is absent or misclassified: {identifier}")
+    errors.extend(execution_runtime_source_errors(root))
+    return errors
+
+
+def verified_human_task_legacy_delta(document: dict[str, object]) -> int | None:
+    retired = document.get("retiredEntries", [])
+    if not isinstance(retired, list):
+        return None
+    actual = [entry for entry in retired if isinstance(entry, dict)
+              and str(entry.get("setting", "")).startswith("human-task.")
+              and entry.get("status") == "duplicate-removed"]
+    if not actual:
+        return 0
+    expected = set(HUMAN_TASK_LEGACY_CONSOLIDATIONS)
+    if {(str(entry.get("id", "")), str(entry.get("setting", ""))) for entry in actual} != expected:
+        return None
+    owners = {
+        "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/"
+        "HumanTaskPolicy.java#HumanTaskPolicy",
+        "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/persistence/"
+        "HumanTaskPolicy.java#Confirmation",
+    }
+    for entry in actual:
+        removal = entry.get("removal")
+        if entry.get("path") != "deploy/helm/ravenroot/values.yaml" \
+                or not isinstance(removal, dict) \
+                or removal.get("kind") != "yaml-default-authority-v1" \
+                or removal.get("replacementOwner") not in owners:
+            return None
+    return len(expected)
+
+
+def authority_consolidation_errors(document: dict[str, object]) -> list[str]:
+    consolidations = document.get("authorityConsolidations")
+    engine = document.get("executionRuntimeAuthorities")
+    if consolidations is None and engine is None:
+        return []
+    expected = [
+        {"setting": setting, "claimBaseRevision": EXECUTION_RUNTIME_CLAIM_BASE_REVISION,
+         "removedCandidateIds": list(removed), "baselineAuthorityCount": 2,
+         "finalAuthorityCount": 1, "redundancyDelta": delta}
+        for setting, removed, delta in EXECUTION_RUNTIME_CONSOLIDATIONS
+    ]
+    if not isinstance(consolidations, list) or any(
+            not isinstance(item, dict) for item in consolidations):
+        return ["authorityConsolidations must be an array of verified groups"]
+    errors = []
+    if consolidations != expected:
+        errors.append(
+            "execution runtime authorityConsolidations must contain only two exact 2-to-1 baseline groups")
+    if verified_human_task_legacy_delta(document) is None:
+        errors.append("verified Human Task legacy redundancy groups are incomplete or have drifted")
+    return errors
+
+
 def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[Candidate, ...]) -> list[str]:
     errors: list[str] = []
     migration_history = document.get("migrationHistory", [])
@@ -4870,6 +5353,7 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     discovered = {candidate.id: candidate for candidate in candidates}
     assistant_authorities = document.get("assistantLimitAuthorities")
     assistant_settings = {str(item["setting"]) for item in ASSISTANT_LIMIT_SETTINGS}
+    execution_runtime_settings = {str(item["setting"]) for item in EXECUTION_RUNTIME_SETTINGS}
     assistant_family = assistant_limit_family_index(assistant_authorities)
     for identifier, candidate in discovered.items():
         entry = entries.get(identifier)
@@ -4937,6 +5421,11 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
                     if family is None or conversion != family["conversion"]:
                         errors.append(
                             f"{identifier}: converted assistant row must cite its exact family conversion")
+                    continue
+                if setting in execution_runtime_settings:
+                    if conversion != {"issue": "#225", "authority": EXECUTION_RUNTIME_FAMILY_ID}:
+                        errors.append(
+                            f"{identifier}: converted execution-runtime row must cite its exact family authority")
                     continue
                 required = ("issue", "beforeRevision", "afterRevision", "path", "symbol",
                             "binding", "bindingSymbol", "field", "beforeExpression", "afterExpression")
@@ -5078,6 +5567,10 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
     errors.extend(graph_limit_authority_errors(
         root, document.get("graphLimitAuthorities"), entries, discovered,
     ))
+    errors.extend(execution_runtime_authority_errors(
+        root, document.get("executionRuntimeAuthorities"), entries, discovered,
+    ))
+    errors.extend(authority_consolidation_errors(document))
 
     tracked_paths = set(tracked_files(root))
     representatives: dict[str, dict[str, object]] = {}
@@ -5096,17 +5589,19 @@ def inventory_errors(root: Path, document: dict[str, object], candidates: tuple[
             errors.extend(assistant_limit_entry_adapter_errors(
                 root, setting, setting_entries, entries, discovered, assistant_authorities,
             ))
-        else:
+        elif setting not in execution_runtime_settings:
             errors.extend(binding_authority_errors(
                 root, setting, representative, setting_entries, entries, discovered,
                 resolver_authorities,
             ))
             errors.extend(default_authority_errors(
                 root, setting, representative, entries, discovered))
-        errors.extend(schema_evidence_errors(setting, representative, entries, discovered, evidence_records))
-        errors.extend(graph_platform_coverage_errors(
-            root, setting, representative, entries, discovered, evidence_records, tracked_paths,
-        ))
+        if setting not in execution_runtime_settings:
+            errors.extend(schema_evidence_errors(
+                setting, representative, entries, discovered, evidence_records))
+            errors.extend(graph_platform_coverage_errors(
+                root, setting, representative, entries, discovered, evidence_records, tracked_paths,
+            ))
         for entry in setting_entries:
             evidence_ids = entry.get("defaultEvidence", [])
             if isinstance(evidence_ids, list):
@@ -5139,9 +5634,22 @@ def render_report(document: dict[str, object]) -> str:
     assert isinstance(retired, list)
     migrations = document.get("migrationHistory", [])
     assert isinstance(migrations, list)
-    duplicate_settings = {str(entry["setting"]) for entry in retired if isinstance(entry, dict)
-                          and entry.get("status") == "duplicate-removed" and entry.get("setting")}
-    duplicates = len(duplicate_settings)
+    consolidations = document.get("authorityConsolidations")
+    if isinstance(consolidations, list):
+        expected_engine = [
+            {"setting": setting, "claimBaseRevision": EXECUTION_RUNTIME_CLAIM_BASE_REVISION,
+             "removedCandidateIds": list(removed), "baselineAuthorityCount": 2,
+             "finalAuthorityCount": 1, "redundancyDelta": delta}
+            for setting, removed, delta in EXECUTION_RUNTIME_CONSOLIDATIONS
+        ]
+        legacy_delta = verified_human_task_legacy_delta(document)
+        duplicates = (legacy_delta if legacy_delta is not None else 0) \
+            + (sum(item["redundancyDelta"] for item in expected_engine)
+               if consolidations == expected_engine else 0)
+    else:
+        duplicate_settings = {str(entry["setting"]) for entry in retired if isinstance(entry, dict)
+                              and entry.get("status") == "duplicate-removed" and entry.get("setting")}
+        duplicates = len(duplicate_settings)
     deferred = statuses["deferred"]
     hardcoded = statuses["confirmed-hardcoded"]
     complete = statuses["pending-review"] == 0 and deferred == 0 and hardcoded == 0

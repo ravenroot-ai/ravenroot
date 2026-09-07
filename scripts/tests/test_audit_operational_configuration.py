@@ -508,6 +508,15 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             errors = refreshed_success_errors(lost_header)
             self.assertTrue(any("SSE response lost header X-Ravenroot-Event-Continuity" in error
                                 for error in errors), errors)
+            forced_generic_status = original_success.replace(
+                '        return "          \\"" + status + "\\": {\\"description\\": \\"success\\""',
+                '        status = 200;\n'
+                '        return "          \\"" + status + "\\": {\\"description\\": \\"success\\""',
+                1,
+            )
+            errors = refreshed_success_errors(forced_generic_status)
+            self.assertTrue(any("successResponse lost status serialization" in error
+                                for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
             removed_schema_append = original_generator.replace(
@@ -522,6 +531,23 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                 removed_schema_append, "OpenApiSpecGenerator", "generate")
             errors = self.route_table_errors(root, changed, entries, candidates)
             self.assertTrue(any("schema publication flow" in error for error in errors), errors)
+            generator_path.write_text(original_generator, encoding="utf-8")
+
+            disabled_schema_append = original_generator.replace(
+                '        json.append(",\\n").append(executionEventSchemas()).append("    }\\n");',
+                '        if (false) {\n'
+                '            json.append(",\\n").append(executionEventSchemas()).append("    }\\n");\n'
+                '        }',
+                1,
+            )
+            self.assertNotEqual(original_generator, disabled_schema_append)
+            generator_path.write_text(disabled_schema_append, encoding="utf-8")
+            changed = copy.deepcopy(authority)
+            changed["consumerBodyDigests"]["openApiGenerate"] = audit.java_method_digest(
+                disabled_schema_append, "OpenApiSpecGenerator", "generate")
+            errors = self.route_table_errors(root, changed, entries, candidates)
+            self.assertTrue(any("generate signature/body has drifted" in error
+                                for error in errors), errors)
             generator_path.write_text(original_generator, encoding="utf-8")
 
             removed_schema_helper = original_generator.replace(
@@ -2229,6 +2255,172 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertIsNotNone(authority)
         return ({audit.GRAPH_LIMIT_FAMILY_ID: authority}, entries, candidates)
 
+    def execution_runtime_family_fixture(self):
+        candidates = {
+            candidate.id: candidate for candidate in audit.discover_paths(
+                ROOT, audit.EXECUTION_RUNTIME_FAMILY_CANDIDATE_PATHS)
+        }
+        authority = audit.execution_runtime_authority_from_source(ROOT, candidates)
+        self.assertIsNotNone(authority)
+        selected_ids = {
+            identifier for partition in authority["settings"].values()
+            for key in ("operatorCandidateIds", "supportingCandidateIds")
+            for identifier in partition[key]
+        }
+        candidates = {identifier: candidates[identifier] for identifier in selected_ids}
+        entries = {}
+        specs = {str(spec["setting"]): spec for spec in audit.EXECUTION_RUNTIME_SETTINGS}
+        for setting, partition in authority["settings"].items():
+            spec = specs[setting]
+            default_id = next(
+                identifier for identifier in partition["operatorCandidateIds"]
+                if candidates[identifier].path == Path(spec["defaultPath"]).as_posix()
+                and candidates[identifier].kind == "fixed-declaration"
+                and candidates[identifier].expression == spec["defaultExpression"]
+            )
+            common = {
+                "setting": setting, "owner": spec["owner"], "field": spec["field"],
+                "default": spec["default"], "validation": f"whole number from 1 to {spec['maximum']}",
+                "scope": "process startup", "pinning": (
+                    "included in compatibility fingerprint" if spec["durable"]
+                    else "excluded from compatibility fingerprint"),
+                "coverage": "closed execution runtime source and deployment family",
+                "bindings": [spec["environment"]], "defaultEvidence": [default_id],
+            }
+            for identifier in partition["operatorCandidateIds"]:
+                entry = candidates[identifier].inventory_entry()
+                entry.update(common, status="converted", classification="operator-configurable",
+                             rationale="Operator-tightened execution runtime bound.",
+                             executionRuntimeAuthority=audit.EXECUTION_RUNTIME_FAMILY_ID,
+                             conversion={"issue": "#225",
+                                         "authority": audit.EXECUTION_RUNTIME_FAMILY_ID})
+                entries[identifier] = entry
+            for identifier in partition["supportingCandidateIds"]:
+                entry = candidates[identifier].inventory_entry()
+                entry.update(status="retained", classification="derived", setting=setting,
+                             rationale="Derived carrier structure for the closed execution runtime family.",
+                             retainedAuthority=audit.EXECUTION_RUNTIME_FAMILY_ID)
+                entries[identifier] = entry
+        consolidations = [
+            {"setting": setting, "claimBaseRevision": audit.EXECUTION_RUNTIME_CLAIM_BASE_REVISION,
+             "removedCandidateIds": list(removed), "baselineAuthorityCount": 2,
+             "finalAuthorityCount": 1, "redundancyDelta": delta}
+            for setting, removed, delta in audit.EXECUTION_RUNTIME_CONSOLIDATIONS
+        ]
+        document = {
+            "schemaVersion": audit.SCHEMA_VERSION,
+            "entries": [entries[identifier] for identifier in sorted(entries)],
+            "retiredEntries": [], "migrationHistory": [],
+            "evidenceRecords": {candidate.evidence_digest: candidate.evidence
+                                for candidate in candidates.values()},
+            "executionRuntimeAuthorities": {
+                audit.EXECUTION_RUNTIME_FAMILY_ID: authority,
+            },
+            "authorityConsolidations": consolidations,
+        }
+        return document, entries, candidates
+
+    def execution_runtime_inventory_errors(self, document, candidates):
+        with mock.patch.object(audit, "assistant_limit_authority_errors", return_value=[]):
+            return audit.inventory_errors(ROOT, document, tuple(candidates.values()))
+
+    def test_execution_runtime_family_maps_exactly_four_times_ten_plus_fifteen(self) -> None:
+        document, entries, candidates = self.execution_runtime_family_fixture()
+        authority = document["executionRuntimeAuthorities"][audit.EXECUTION_RUNTIME_FAMILY_ID]
+        self.assertEqual(4, len(authority["settings"]))
+        self.assertEqual(
+            {(10, 15)},
+            {(len(partition["operatorCandidateIds"]),
+              len(partition["supportingCandidateIds"]))
+             for partition in authority["settings"].values()},
+        )
+        self.assertEqual(100, len(entries))
+        self.assertEqual([], audit.execution_runtime_source_errors(ROOT))
+        self.assertEqual([], self.execution_runtime_inventory_errors(document, candidates))
+
+    def test_execution_runtime_family_rejects_refreshed_metadata_and_partition_mutants(self) -> None:
+        document, entries, candidates = self.execution_runtime_family_fixture()
+        family = audit.EXECUTION_RUNTIME_FAMILY_ID
+        setting = "execution-engine.actor-node-stash-capacity"
+        partition = document["executionRuntimeAuthorities"][family]["settings"][setting]
+
+        missing = copy.deepcopy(document)
+        missing["executionRuntimeAuthorities"][family]["settings"][setting][
+            "operatorCandidateIds"].pop()
+        self.assertTrue(any("candidate partition" in error for error in
+                            self.execution_runtime_inventory_errors(missing, candidates)))
+
+        misclassified = copy.deepcopy(document)
+        target = partition["operatorCandidateIds"][0]
+        next(entry for entry in misclassified["entries"] if entry["id"] == target).update(
+            status="retained", classification="derived")
+        errors = self.execution_runtime_inventory_errors(misclassified, candidates)
+        self.assertTrue(any("operator row" in error for error in errors), errors)
+
+        refreshed_revision = copy.deepcopy(document)
+        refreshed_revision["executionRuntimeAuthorities"][family]["currentSourceRevision"] = "0" * 40
+        errors = self.execution_runtime_inventory_errors(refreshed_revision, candidates)
+        self.assertTrue(any("revision authority" in error for error in errors), errors)
+
+        credited_rekey = copy.deepcopy(document)
+        transitions = credited_rekey["executionRuntimeAuthorities"][family]["candidateTransitions"]
+        next(item for item in transitions if item["category"] ==
+             "feature-transient-identity-rekey")["redundancyDelta"] = 1
+        errors = self.execution_runtime_inventory_errors(credited_rekey, candidates)
+        self.assertTrue(any("zero-credit accounting" in error for error in errors), errors)
+
+        wrong_consolidation = copy.deepcopy(document)
+        wrong_consolidation["authorityConsolidations"][0]["redundancyDelta"] = 2
+        errors = self.execution_runtime_inventory_errors(wrong_consolidation, candidates)
+        self.assertTrue(any("2-to-1 baseline groups" in error for error in errors), errors)
+
+        extra_consolidation = copy.deepcopy(document)
+        extra_consolidation["authorityConsolidations"].append({
+            "setting": "unreviewed.extra", "redundancyDelta": 999,
+        })
+        errors = self.execution_runtime_inventory_errors(extra_consolidation, candidates)
+        self.assertTrue(any("only two exact" in error for error in errors), errors)
+        self.assertNotIn(
+            "| Duplicate authorities removed | 1001 |",
+            audit.render_report(extra_consolidation),
+        )
+
+        legacy = copy.deepcopy(document)
+        legacy["retiredEntries"] = [
+            {"id": identifier, "setting": legacy_setting, "status": "duplicate-removed",
+             "path": "deploy/helm/ravenroot/values.yaml",
+             "removal": {"kind": "yaml-default-authority-v1",
+                         "replacementOwner": (
+                             "ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/"
+                             "persistence/HumanTaskPolicy.java#HumanTaskPolicy")}}
+            for identifier, legacy_setting in audit.HUMAN_TASK_LEGACY_CONSOLIDATIONS
+        ]
+        self.assertEqual([], audit.authority_consolidation_errors(legacy))
+        self.assertIn("| Duplicate authorities removed | 29 |", audit.render_report(legacy))
+        legacy["retiredEntries"][0]["status"] = "retained"
+        errors = audit.authority_consolidation_errors(legacy)
+        self.assertTrue(any("Human Task legacy" in error for error in errors), errors)
+
+        fake = copy.copy(next(iter(candidates.values())))
+        object.__setattr__(fake, "id", "oc-00000000000000000000")
+        object.__setattr__(fake, "path", "deploy/extra/runtime.yaml")
+        object.__setattr__(fake, "kind", "environment-binding")
+        object.__setattr__(fake, "expression", audit.EXECUTION_RUNTIME_SETTINGS[0]["environment"])
+        widened = dict(candidates)
+        widened[fake.id] = fake
+        _mapping, errors = audit.execution_runtime_expected_entry_ids(ROOT, widened)
+        self.assertTrue(any("operator candidate topology" in error for error in errors), errors)
+
+        original_committed_source = audit.committed_source
+        def changed_anchor(root, revision, path):
+            source = original_committed_source(root, revision, path)
+            if path == audit.EXECUTION_RUNTIME_CONFIGURATION_PATH.as_posix() and source is not None:
+                return source + "\n// changed reviewed body\n"
+            return source
+        with mock.patch.object(audit, "committed_source", side_effect=changed_anchor):
+            errors = audit.execution_runtime_source_errors(ROOT)
+        self.assertTrue(any("reviewed source has drifted" in error for error in errors), errors)
+
     def graph_limit_inventory_document(self, authorities, entries, candidates):
         return {
             "schemaVersion": audit.SCHEMA_VERSION,
@@ -2487,7 +2679,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
             document = {"entries": list(entries.values()), "retiredEntries": [],
                         "migrationHistory": []}
             self.assertIn(
-                "| Retained published contract descriptions | 341 |",
+                "| Retained published contract descriptions | 348 |",
                 audit.render_report(document),
             )
             deferred = copy.deepcopy(document)
@@ -2495,7 +2687,7 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
                              if entry["classification"] == "published-contract-description")
             published.update(status="deferred", followUp="#225")
             self.assertIn(
-                "| Retained published contract descriptions | 340 |",
+                "| Retained published contract descriptions | 347 |",
                 audit.render_report(deferred),
             )
         self.assertIn(

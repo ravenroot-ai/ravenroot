@@ -238,7 +238,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 2
+          fetch-depth: 0
           ref: ${{ inputs.merge_sha || github.sha }}
       - name: Verify Python tooling contracts
         run: |
@@ -248,10 +248,12 @@ jobs:
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
+          python3 scripts/audit_operational_configuration.py --check
           python3 scripts/check_release_configuration.py
       - name: Verify shell tooling contracts
         run: |
@@ -315,6 +317,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          fetch-depth: 0
           ref: ${{ inputs.merge_sha || github.sha }}
       - name: Verify Python tooling contracts
         run: |
@@ -324,10 +327,12 @@ jobs:
           python3 -m unittest scripts.tests.test_check_public_docs
           python3 -m unittest scripts.tests.test_classify_main_change
           python3 -m unittest scripts.tests.test_ci_topology
+          python3 -m unittest scripts.tests.test_audit_operational_configuration
           python3 -m unittest scripts.tests.test_extension_pack
           python3 -m unittest scripts.tests.test_release_contract
           python3 -m unittest scripts.tests.test_release_registries
           python3 -m unittest scripts.tests.test_verify_api_docs
+          python3 scripts/audit_operational_configuration.py --check
           python3 scripts/check_release_configuration.py
 
   full-shell-contracts:

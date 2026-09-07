@@ -9,6 +9,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 WORKFLOW = ROOT / ".github" / "workflows" / "ci.yml"
+AUDIT_SUITE_COMMAND = "python3 -m unittest scripts.tests.test_audit_operational_configuration"
+AUDIT_STRICT_COMMAND = "python3 scripts/audit_operational_configuration.py --check"
 
 
 def job_blocks(contents: str) -> dict[str, str]:
@@ -39,6 +41,18 @@ def declared_needs(block: str) -> set[str]:
                 needs.add(match.group(1))
             return needs
     return set()
+
+
+def operational_audit_gate_errors(block: str) -> list[str]:
+    """Verify one tier has history plus the executable audit test and strict commands."""
+    errors = []
+    if not re.search(r"(?m)^\s+fetch-depth: 0$", block):
+        errors.append("full repository history is absent")
+    if block.count(AUDIT_SUITE_COMMAND) != 1:
+        errors.append("operational audit unit suite is absent or duplicated")
+    if block.count(AUDIT_STRICT_COMMAND) != 1:
+        errors.append("operational audit strict check is absent or duplicated")
+    return errors
 
 
 class ContinuousIntegrationTopologyTest(unittest.TestCase):
@@ -136,6 +150,20 @@ class ContinuousIntegrationTopologyTest(unittest.TestCase):
             if re.search(r"(?m)^    name: full-", block) and job not in policy_jobs:
                 with self.subTest(job=job):
                     self.assertIn("needs.release-classification.outputs.tier == 'full'", block)
+
+    def test_operational_audit_is_an_executable_history_backed_gate_in_both_tiers(self) -> None:
+        for job in ("fast-tooling-contracts", "full-python-contracts"):
+            block = self.jobs[job]
+            with self.subTest(job=job):
+                self.assertEqual([], operational_audit_gate_errors(block))
+                mutations = {
+                    "history": block.replace("fetch-depth: 0", "fetch-depth: 2", 1),
+                    "unit-suite": block.replace(AUDIT_SUITE_COMMAND, "true", 1),
+                    "strict-check": block.replace(AUDIT_STRICT_COMMAND, "true", 1),
+                }
+                for seam, changed in mutations.items():
+                    with self.subTest(job=job, seam=seam):
+                        self.assertTrue(operational_audit_gate_errors(changed))
 
 
 if __name__ == "__main__":

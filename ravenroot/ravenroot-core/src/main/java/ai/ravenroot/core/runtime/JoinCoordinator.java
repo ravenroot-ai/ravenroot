@@ -15,6 +15,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
@@ -689,7 +690,7 @@ final class JoinCoordinator {
         }
         return attemptSettle(local, branchId, lap, outcome, 1)
                 .whenComplete((ignored, error) -> leaveOperation())
-                .handle((decision, error) -> {
+                .<CompletionStage<JoinDecision>>handle((decision, error) -> {
                     JoinDecision released = local.releasedDecision(branchId);
                     if (released != null) {
                         // A timeout may have settled while this report's store operation was still
@@ -1205,7 +1206,7 @@ final class JoinCoordinator {
             }
             return CompletableFuture.completedFuture(null);
         }
-        return loaded.handle((found, error) -> {
+        return loaded.<CompletionStage<Void>>handle((found, error) -> {
             if (error != null) {
                 if (local.isCurrentTimeoutGeneration(generation)) {
                     failExpiredTimeoutLocally(local, armedFor, Map.of(), error);
@@ -1265,7 +1266,7 @@ final class JoinCoordinator {
                 failExpiredTimeoutLocally(local, armedFor, branches, writeError);
                 return CompletableFuture.<Void>completedFuture(null);
             }
-            return written.handle((stored, writeError) -> {
+            return written.<CompletionStage<Void>>handle((stored, writeError) -> {
                 if (writeError == null) {
                     monitor.joinFailed(identity, local.key.joinNodeId(), failure, joinWait(stored));
                     local.cancelTimeout();

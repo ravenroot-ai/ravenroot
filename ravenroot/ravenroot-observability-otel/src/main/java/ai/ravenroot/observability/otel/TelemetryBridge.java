@@ -2,6 +2,7 @@ package ai.ravenroot.observability.otel;
 
 import ai.ravenroot.api.application.ExecutionEvent;
 import ai.ravenroot.api.application.ExecutionEventType;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.common.AttributeKey;
@@ -26,9 +27,10 @@ import java.util.function.Consumer;
 
 /**
  * Translates {@link ExecutionEvent}s into OpenTelemetry spans, metrics and log-correlatable
- * identifiers (PLAT-01). The only thing this class reads is the event itself: it never reaches
- * into a payload, a {@code Throwable}, or anything upstream of {@link ExecutionEvent} construction.
- * That is the boundary this class owns, and its only obligation is not to widen what it exposes,
+ * identifiers (PLAT-01). Its execution path reads only the event itself, and its result-admission
+ * path reads only a two-value {@link ResultPayloadState} refusal. It never reaches into a payload,
+ * a {@code Throwable}, or anything upstream of either observation's construction. That is the
+ * boundary this class owns, and its only obligation is not to widen what it exposes,
  * which {@link TelemetryBridgeRedactionTest} checks directly. The broader "logging and
  * telemetry privacy-safe" sweep (SEC-14) covers everything outside this translation.
  *
@@ -64,8 +66,9 @@ import java.util.function.Consumer;
  * {@code workloadId} is unbounded by construction exactly like {@code traversalId}, which for Phase A
  * it is. <strong>All seven are span attributes only.</strong>
  * Every metric instrument this class registers is labeled from a fixed allowlist of bounded
- * dimensions &mdash; today, only {@link ExecutionEventType} itself, a 10-value enum, and the
- * catalog-bounded node type &mdash; and nothing else. {@link CardinalityAllowlistTest} enumerates
+ * dimensions: {@link ExecutionEventType}, catalog-bounded node type, retry classification, agent
+ * budget dimension and outcome, and the two-value result-payload refusal state. Nothing else is a
+ * metric label. {@link CardinalityAllowlistTest} enumerates
  * every metric this class can produce and fails if any recorded attribute key is outside that
  * allowlist; {@code nodeId} is the specific mutation that test is built to catch, per its own
  * Javadoc, and it now does the same for {@code deploymentId}/{@code workloadId}.</p>
@@ -86,7 +89,9 @@ import java.util.function.Consumer;
  * ones ({@code ravenroot.execution.events} with {@code ravenroot.event_type in
  * (NODE_FAILED, EXECUTION_FAILED, JOIN_FAILED)} is a failure-rate counter for each, queryable
  * without any additional instrumentation); and a join-wait histogram
- * ({@code ravenroot.join.wait}) for latency-style alerting on fan-in joins specifically.</p>
+ * ({@code ravenroot.join.wait}) for latency-style alerting on fan-in joins specifically; and an
+ * identifier-free result rejection counter ({@code ravenroot.execution.result_payload_rejections})
+ * split only by {@code WITHHELD} and {@code UNCONVERTIBLE}.</p>
  */
 final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         ai.ravenroot.core.security.nodepackage.AgentBudgetTelemetry {
@@ -163,16 +168,21 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
             AttributeKey.stringKey("ravenroot.agent_budget.dimension");
     static final AttributeKey<String> METRIC_ATTR_AGENT_OUTCOME =
             AttributeKey.stringKey("ravenroot.agent_budget.outcome");
+    /** Exactly two values: {@code WITHHELD} and {@code UNCONVERTIBLE}. */
+    static final AttributeKey<String> METRIC_ATTR_RESULT_PAYLOAD_STATE =
+            AttributeKey.stringKey("ravenroot.result_payload_state");
 
     static final Set<AttributeKey<?>> METRIC_LABEL_ALLOWLIST =
             Set.of(METRIC_ATTR_EVENT_TYPE, METRIC_ATTR_NODE_TYPE, METRIC_ATTR_RETRY_CLASSIFICATION,
-                    METRIC_ATTR_AGENT_DIMENSION, METRIC_ATTR_AGENT_OUTCOME);
+                    METRIC_ATTR_AGENT_DIMENSION, METRIC_ATTR_AGENT_OUTCOME,
+                    METRIC_ATTR_RESULT_PAYLOAD_STATE);
 
     private final Tracer tracer;
     private final LongCounter eventCounter;
     private final LongCounter orchestrationRetries;
     private final LongCounter connectorRetries;
     private final LongCounter agentBudget;
+    private final LongCounter resultPayloadRejections;
     private final DoubleHistogram nodeDuration;
     private final DoubleHistogram executionDuration;
     private final DoubleHistogram joinWait;
@@ -203,6 +213,11 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         this.agentBudget = meter.counterBuilder("ravenroot.agent_budget.total")
                 .setDescription("Identifier-free agent authority and budget aggregates. Bounded: "
                         + "labeled only by fixed dimension and outcome enums.")
+                .build();
+        this.resultPayloadRejections = meter.counterBuilder("ravenroot.execution.result_payload_rejections")
+                .setDescription("Result payloads refused before retention. Identifier-free and bounded: "
+                        + "labeled only by ravenroot.result_payload_state, whose values are WITHHELD "
+                        + "and UNCONVERTIBLE.")
                 .build();
         this.nodeDuration = meter.histogramBuilder("ravenroot.node.duration")
                 .setDescription("Node invocation duration, start to terminal outcome (completed or "
@@ -307,6 +322,16 @@ final class TelemetryBridge implements Consumer<ExecutionEvent>, AutoCloseable,
         if (amount <= 0) return;
         agentBudget.add(amount, Attributes.of(METRIC_ATTR_AGENT_DIMENSION, dimension.name(),
                 METRIC_ATTR_AGENT_OUTCOME, outcome.name()));
+    }
+
+    /** Records one identifier-free result admission refusal under its two-value classification. */
+    void recordResultPayloadAdmission(ResultPayloadState state) {
+        if (state != ResultPayloadState.WITHHELD && state != ResultPayloadState.UNCONVERTIBLE) {
+            throw new IllegalArgumentException(
+                    "Result payload admission state must be WITHHELD or UNCONVERTIBLE");
+        }
+        resultPayloadRejections.add(1,
+                Attributes.of(METRIC_ATTR_RESULT_PAYLOAD_STATE, state.name()));
     }
 
     private void startTraversal(ExecutionEvent event) {

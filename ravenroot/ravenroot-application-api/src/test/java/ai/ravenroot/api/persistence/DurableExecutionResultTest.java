@@ -64,6 +64,38 @@ class DurableExecutionResultTest {
     }
 
     @Test
+    void theConfiguredByteBoundaryIsInclusiveAndMeasuredFromCanonicalUtf8() {
+        Object payload = Map.of("nested", List.of("🙂", Map.of("answer", 42L)));
+        int canonicalBytes = ai.ravenroot.api.payload.PayloadJson.write(
+                RuntimeActivityData.output(payload).value()).getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+
+        ExecutionResultPayload atBoundary = DurableExecutionResult.project(payload, canonicalBytes);
+        ExecutionResultPayload oneByteBelow = DurableExecutionResult.project(payload, canonicalBytes - 1);
+
+        assertEquals(ResultPayloadState.RETAINED, atBoundary.state());
+        assertEquals(canonicalBytes, atBoundary.bytes());
+        assertEquals(ResultPayloadState.WITHHELD, oneByteBelow.state());
+        assertEquals(canonicalBytes, oneByteBelow.bytes());
+        assertNull(oneByteBelow.retained());
+    }
+
+    @Test
+    void nestedUnsupportedAndCyclicValuesBecomeBoundedDeclaredProjections() {
+        var cyclic = new java.util.LinkedHashMap<String, Object>();
+        cyclic.put("self", cyclic);
+        Object payload = Map.of("unsupported", new Object(), "cyclic", cyclic);
+
+        ExecutionResultPayload projected = DurableExecutionResult.project(payload, CAP);
+        String json = new String(projected.retained().bytes(), java.nio.charset.StandardCharsets.UTF_8);
+
+        assertEquals(ResultPayloadState.RETAINED, projected.state());
+        assertTrue(projected.truncated());
+        assertTrue(json.contains("ravenroot:truncated:unsupported-type"));
+        assertTrue(json.contains("ravenroot:truncated:cycle"));
+        assertTrue(json.getBytes(java.nio.charset.StandardCharsets.UTF_8).length <= CAP);
+    }
+
+    @Test
     void credentialMaterialIsReplacedAndTheReplacementIsDeclaredRatherThanSilent() {
         ExecutionResultPayload projected =
                 DurableExecutionResult.project(Map.of("apiKey", "sk-live-0123456789"), CAP);

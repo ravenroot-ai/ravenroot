@@ -10,6 +10,7 @@ import ai.ravenroot.api.application.RuntimeActivityData.TextProjection;
 import ai.ravenroot.api.application.RuntimeSnapshot;
 import ai.ravenroot.api.execution.ConnectorRetryReport;
 import ai.ravenroot.api.execution.NodeActionDiagnostic;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import ai.ravenroot.core.graph.GraphEdge;
 
 import java.time.Duration;
@@ -69,6 +70,17 @@ public final class ExecutionMonitor {
     private final ConcurrentHashMap<String, AtomicInteger> arrivalsInFlight = new ConcurrentHashMap<>();
     private final AtomicLong eventSequence = new AtomicLong();
     private final CopyOnWriteArrayList<Consumer<ExecutionEvent>> listeners = new CopyOnWriteArrayList<>();
+    /**
+     * Identifier-free observers of result-payload admissions that retained no payload.
+     *
+     * <p>This is deliberately separate from {@link #listeners}. A result-payload admission is
+     * decided after the traversal's terminal {@link ExecutionEvent} has already been published, and
+     * an execution event necessarily carries tenant, request, process and traversal identity. The
+     * only fact an aggregate metric needs is which of the two closed refusal states occurred, so that
+     * is the only value this channel can carry.</p>
+     */
+    private final CopyOnWriteArrayList<Consumer<ResultPayloadState>> resultPayloadAdmissionListeners =
+            new CopyOnWriteArrayList<>();
     private final ArrayDeque<ExecutionEvent> history = new ArrayDeque<>();
     private final ConcurrentHashMap<UUID, AttemptStart> attemptStarts = new ConcurrentHashMap<>();
     private final LongSupplier monotonicNanos;
@@ -637,6 +649,49 @@ public final class ExecutionMonitor {
         }
         listeners.add(listener);
         return () -> listeners.remove(listener);
+    }
+
+    /**
+     * Subscribes to result-payload admissions that retained no payload.
+     *
+     * <p>The callback receives exactly one of {@link ResultPayloadState#WITHHELD} or
+     * {@link ResultPayloadState#UNCONVERTIBLE}. It receives no execution identity, diagnostic,
+     * payload fragment or caller-authored reason. These observations are not appended to
+     * {@link #history}; they exist only for identifier-free process aggregates.</p>
+     *
+     * @param listener the identifier-free aggregate observer.
+     * @return a handle that stops future callbacks to this listener.
+     */
+    public AutoCloseable subscribeResultPayloadAdmissions(Consumer<ResultPayloadState> listener) {
+        if (listener == null) {
+            throw new IllegalArgumentException("Result payload admission listener cannot be null");
+        }
+        resultPayloadAdmissionListeners.add(listener);
+        return () -> resultPayloadAdmissionListeners.remove(listener);
+    }
+
+    /**
+     * Reports the single bounded fact produced by a refused result-payload admission.
+     *
+     * <p>Package-private so only the canonical runtime admission seam can publish it. A caller
+     * cannot attach identifiers or payload-derived text because the method has no component in
+     * which to put either. Observer defects are isolated from result completion just like ordinary
+     * execution-event observer defects.</p>
+     *
+     * @param state the finite refusal classification.
+     */
+    void resultPayloadAdmissionRejected(ResultPayloadState state) {
+        if (state != ResultPayloadState.WITHHELD && state != ResultPayloadState.UNCONVERTIBLE) {
+            throw new IllegalArgumentException(
+                    "Result payload admission state must be WITHHELD or UNCONVERTIBLE");
+        }
+        resultPayloadAdmissionListeners.forEach(listener -> {
+            try {
+                listener.accept(state);
+            } catch (RuntimeException ignored) {
+                // Observers cannot break result admission or retain their exception payload.
+            }
+        });
     }
 
     /**

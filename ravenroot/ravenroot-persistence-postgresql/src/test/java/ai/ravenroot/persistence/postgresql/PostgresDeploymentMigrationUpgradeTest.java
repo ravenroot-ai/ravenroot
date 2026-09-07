@@ -15,7 +15,11 @@ import java.sql.Statement;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -36,14 +40,23 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * <p>Three properties, and the third is the one migration 2 states as a requirement rather than an
  * expectation: the step applies exactly once and is recorded once; the upgraded database is
  * <em>usable</em> by the registry rather than merely well-shaped; and because the step is purely
- * additive, every pre-existing row in a table that predates it is unchanged afterwards — not merely
- * still present.</p>
+ * additive, every pre-existing row of every table that predates it is unchanged afterwards — not
+ * merely still present.</p>
+ *
+ * <p>That third property is asserted as broadly as it is stated. {@link #contentOfEveryTable} reads
+ * every table the schema holds before the step and every row in each of them, so a table left empty by
+ * the fixture is still covered: a step that inserted into one, or that rewrote a column across a table
+ * nobody seeded, would change the snapshot. Comparing one hand-listed row of one table would have left
+ * the sentence above true only of the row somebody remembered to name.</p>
  */
 class PostgresDeploymentMigrationUpgradeTest {
 
     private static final Clock CLOCK = Clock.fixed(Instant.parse("2026-01-01T00:00:00Z"), ZoneOffset.UTC);
 
     private static final UUID INSTANCE = UUID.fromString("11111111-0000-0000-0000-000000000001");
+    private static final UUID TRAVERSAL = UUID.fromString("11111111-0000-0000-0000-000000000002");
+    private static final UUID INVOCATION = UUID.fromString("11111111-0000-0000-0000-000000000003");
+    private static final String CONTENT_ID = "c".repeat(64);
 
     @Test
     void aDatabaseAtTheVersionBeforeTheRegistryUpgradesByApplyingOnlyThatStep() throws Exception {
@@ -63,9 +76,15 @@ class PostgresDeploymentMigrationUpgradeTest {
             assertTrue(tableExists(connection, "execution_manifest"));
 
             // Real pre-existing state, so the upgrade has something to leave alone rather than an
-            // empty database that would upgrade trivially.
+            // empty database that would upgrade trivially. Five tables across two unrelated
+            // aggregates and three levels of foreign key, because a step that damaged only a child
+            // row or only one aggregate would pass against a single parent row.
             insertExecutionInstance(connection);
-            List<Object> before = readInstanceRow(connection);
+            insertGraphDefinition(connection);
+            Map<String, List<String>> before = contentOfEveryTable(connection);
+            assertTrue(before.size() > 20,
+                    "the snapshot must actually cover the schema; a lookup that found no tables would "
+                            + "compare two empty maps and pass no matter what the migration did");
 
             assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
             assertTrue(tableExists(connection, "deployment"));
@@ -77,8 +96,14 @@ class PostgresDeploymentMigrationUpgradeTest {
             assertTrue(tableExists(connection, "process_instance"), "every earlier table survives");
             assertTrue(tableExists(connection, "execution_manifest"));
 
-            assertEquals(before, readInstanceRow(connection),
-                    "a purely additive migration must leave every pre-existing row unchanged");
+            Map<String, List<String>> after = contentOfEveryTable(connection);
+            assertTrue(after.keySet().containsAll(before.keySet()),
+                    "an additive step drops no table it found, whatever else it adds");
+            for (Map.Entry<String, List<String>> table : before.entrySet()) {
+                assertEquals(table.getValue(), after.get(table.getKey()),
+                        "a purely additive migration must leave every pre-existing row of every "
+                                + "pre-existing table unchanged, and " + table.getKey() + " changed");
+            }
 
             // Re-running is a no-op, which is what an ordinary restart does.
             assertEquals(PostgresSchema.currentVersion(), PostgresSchema.migrate(connection, CLOCK));
@@ -162,20 +187,83 @@ class PostgresDeploymentMigrationUpgradeTest {
         }
     }
 
-    private static List<Object> readInstanceRow(Connection connection) throws SQLException {
+    /** A traversal and an invocation under the instance, plus an unrelated definition and its binding. */
+    private static void insertGraphDefinition(Connection connection) throws SQLException {
+        try (PreparedStatement traversal = connection.prepareStatement(
+                "INSERT INTO traversal (tenant_id, process_instance_id, traversal_id, position, "
+                        + "ingress_node_id, status) VALUES ('acme', ?, ?, 0, 'start', 'RUNNING')");
+             PreparedStatement invocation = connection.prepareStatement(
+                     "INSERT INTO invocation (tenant_id, process_instance_id, traversal_id, "
+                             + "invocation_id, position, node_id, status, node_command) "
+                             + "VALUES ('acme', ?, ?, ?, 0, 'work', 'RUNNING', 'PROCESS')");
+             PreparedStatement definition = connection.prepareStatement(
+                     "INSERT INTO graph_definition (tenant_id, content_id, format_version, "
+                             + "definition_bytes, digest, byte_length, first_graph_id, first_version_id, "
+                             + "stored_at_epoch_second, stored_at_nano) "
+                             + "VALUES ('acme', ?, 1, ?, ?, 5, 'graph', 'v1', 1000, 0)");
+             PreparedStatement binding = connection.prepareStatement(
+                     "INSERT INTO graph_definition_binding (tenant_id, graph_id, version_id, content_id, "
+                             + "bound_at_epoch_second, bound_at_nano) VALUES ('acme', 'graph', 'v1', ?, "
+                             + "1000, 0)")) {
+            traversal.setObject(1, INSTANCE);
+            traversal.setObject(2, TRAVERSAL);
+            traversal.executeUpdate();
+            invocation.setObject(1, INSTANCE);
+            invocation.setObject(2, TRAVERSAL);
+            invocation.setObject(3, INVOCATION);
+            invocation.executeUpdate();
+            definition.setString(1, CONTENT_ID);
+            definition.setBytes(2, "graph".getBytes(StandardCharsets.UTF_8));
+            definition.setBytes(3, new byte[32]);
+            definition.executeUpdate();
+            binding.setString(1, CONTENT_ID);
+            binding.executeUpdate();
+        }
+    }
+
+    /**
+     * Every table in the schema, mapped to every row it holds rendered as canonical JSON text.
+     *
+     * <p>{@code to_jsonb} rather than a column list, because the point of the assertion is to cover
+     * columns nobody enumerated — including one a future migration adds to a predating table, which is
+     * exactly the change that would make the step non-additive without any test noticing. Rows are
+     * sorted rather than left in the server's order: these tables carry no row identity the planner is
+     * obliged to respect, so an unsorted comparison would be asserting something the schema does not
+     * promise and would fail for a reason that is not a defect.</p>
+     *
+     * <p>{@code store_schema_version} and {@code store_schema_history} are excluded. They are the
+     * migration's own bookkeeping and are <em>supposed</em> to change when a step is applied; including
+     * them would make the comparison fail on every run and there would then be nothing left to assert.
+     * That both are written exactly once is checked separately, by {@link #historyRowsFor}.</p>
+     */
+    private static Map<String, List<String>> contentOfEveryTable(Connection connection)
+            throws SQLException {
+        var names = new ArrayList<String>();
         try (PreparedStatement statement = connection.prepareStatement(
-                "SELECT status, graph_version_pin, revision, fencing_token, lifecycle_generation, "
-                        + "created_at_epoch_second, created_at_nano, updated_at_epoch_second, "
-                        + "updated_at_nano FROM process_instance WHERE tenant_id = 'acme' "
-                        + "AND process_instance_id = ?")) {
-            statement.setObject(1, INSTANCE);
-            try (ResultSet rows = statement.executeQuery()) {
-                assertTrue(rows.next(), "the pre-existing instance row must still be readable");
-                return List.of(rows.getString(1), rows.getString(2), rows.getLong(3), rows.getLong(4),
-                        rows.getLong(5), rows.getLong(6), rows.getInt(7), rows.getLong(8),
-                        rows.getInt(9));
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() "
+                        + "AND table_type = 'BASE TABLE' AND table_name NOT IN "
+                        + "('store_schema_version', 'store_schema_history') ORDER BY table_name");
+             ResultSet rows = statement.executeQuery()) {
+            while (rows.next()) {
+                names.add(rows.getString(1));
             }
         }
+        var content = new LinkedHashMap<String, List<String>>();
+        for (String name : names) {
+            // Quoted, and the name came from the server's own catalogue rather than from any caller,
+            // so nothing reaches this string that the database did not just report as a table it owns.
+            try (Statement statement = connection.createStatement();
+                 ResultSet rows = statement.executeQuery(
+                         "SELECT to_jsonb(t)::text FROM \"" + name + "\" t")) {
+                var values = new ArrayList<String>();
+                while (rows.next()) {
+                    values.add(rows.getString(1));
+                }
+                values.sort(Comparator.naturalOrder());
+                content.put(name, List.copyOf(values));
+            }
+        }
+        return content;
     }
 
     private static boolean tableExists(Connection connection, String name) throws SQLException {

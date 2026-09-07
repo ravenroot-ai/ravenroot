@@ -3,11 +3,16 @@ package ai.ravenroot.core.runtime;
 import ai.ravenroot.api.application.ExecutionLookup;
 import ai.ravenroot.api.application.ExecutionTerminationReason;
 import ai.ravenroot.api.application.ProcessInstanceStatus;
+import ai.ravenroot.api.persistence.DurableExecutionResult;
+import ai.ravenroot.api.persistence.ExecutionResultPayload;
+import ai.ravenroot.api.persistence.ResultPayloadState;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Set;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -27,6 +32,12 @@ class ExecutionResultRegistryTest {
 
     private static final String TENANT = "tenant-a";
 
+    private static void complete(ExecutionResultRegistry registry, ExecutionResultRegistry.Key key,
+                                 GraphExecutionResult result) {
+        registry.completed(key, result, ai.ravenroot.api.persistence.DurableExecutionResult.project(
+                result.payload(), ai.ravenroot.api.payload.PayloadLimits.DEFAULTS.maxEncodedBytes()));
+    }
+
     private static ExecutionResultRegistry.Key key(UUID id) {
         return new ExecutionResultRegistry.Key(TENANT, id);
     }
@@ -43,7 +54,7 @@ class ExecutionResultRegistryTest {
         UUID instance = UUID.randomUUID();
         UUID traversal = UUID.randomUUID();
         registry.started(key(traversal), instance);
-        registry.completed(key(traversal), result(instance, traversal, "the-payload",
+        complete(registry, key(traversal), result(instance, traversal, "the-payload",
                 Set.of("start", "worker", "end"), Set.of("worker")));
 
         var found = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
@@ -53,6 +64,74 @@ class ExecutionResultRegistryTest {
         assertEquals(Set.of("worker"), found.outcome().defaultedNodes());
         assertEquals(instance, found.outcome().processInstanceId());
         assertEquals(traversal, found.outcome().executionId());
+    }
+
+    @Test
+    void aCompletedExecutionRetainsOnlyCanonicalBytesAndDecodesAFreshForEveryRead() {
+        var registry = new ExecutionResultRegistry();
+        UUID traversal = UUID.randomUUID();
+        var mutable = new java.util.LinkedHashMap<String, Object>();
+        mutable.put("answer", 42L);
+        GraphExecutionResult result = result(UUID.randomUUID(), traversal, mutable, Set.of("end"), Set.of());
+        ExecutionResultPayload admitted = DurableExecutionResult.project(result.payload(), 1024);
+
+        registry.completed(key(traversal), result, admitted);
+        mutable.put("answer", 99L);
+        var first = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
+        @SuppressWarnings("unchecked")
+        Map<String, Object> firstPayload = (Map<String, Object>) first.outcome().payload();
+        firstPayload.put("answer", -1L);
+        var second = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
+
+        assertEquals(Map.of("answer", 42L), second.outcome().payload(),
+                "neither the engine object nor a prior reader may mutate the retained result");
+    }
+
+    @Test
+    void aCanonicalRefusalIsTheLocalTerminalAnswerRatherThanAnEmptySuccess() {
+        var registry = new ExecutionResultRegistry();
+        UUID traversal = UUID.randomUUID();
+        GraphExecutionResult result = result(UUID.randomUUID(), traversal, "not retained", Set.of("end"), Set.of());
+
+        registry.completed(key(traversal), result,
+                ExecutionResultPayload.withheld(12, DurableExecutionResult.PAYLOAD_CONTENT_TYPE));
+
+        var redacted = assertInstanceOf(ExecutionLookup.Redacted.class, registry.lookup(key(traversal)));
+        assertEquals(ProcessInstanceStatus.COMPLETED, redacted.status());
+        assertEquals(ResultPayloadState.WITHHELD, redacted.payloadState());
+    }
+
+    @Test
+    void concurrentCompletionsCannotPairOneOutcomeWithAnotherPayload() throws Exception {
+        var registry = new ExecutionResultRegistry();
+        UUID traversal = UUID.randomUUID();
+        var expected = new java.util.concurrent.ConcurrentHashMap<UUID, Long>();
+        var ready = new CountDownLatch(32);
+        var release = new CountDownLatch(1);
+        var threads = new java.util.ArrayList<Thread>();
+        for (long value = 0; value < 32; value++) {
+            UUID process = UUID.randomUUID();
+            expected.put(process, value);
+            long candidate = value;
+            threads.add(Thread.startVirtualThread(() -> {
+                ready.countDown();
+                try {
+                    release.await();
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new AssertionError(interrupted);
+                }
+                GraphExecutionResult result = result(process, traversal, candidate, Set.of("end"), Set.of());
+                registry.completed(key(traversal), result, DurableExecutionResult.project(candidate, 1024));
+            }));
+        }
+        assertTrue(ready.await(10, java.util.concurrent.TimeUnit.SECONDS));
+        release.countDown();
+        for (Thread thread : threads) thread.join();
+
+        var found = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
+        assertEquals(expected.get(found.outcome().processInstanceId()), found.outcome().payload(),
+                "the status facts and admitted bytes must be installed in one synchronized operation");
     }
 
     /**
@@ -67,8 +146,8 @@ class ExecutionResultRegistryTest {
         var registry = new ExecutionResultRegistry();
         UUID clean = UUID.randomUUID();
         UUID degraded = UUID.randomUUID();
-        registry.completed(key(clean), result(UUID.randomUUID(), clean, "p", Set.of("start", "end"), Set.of()));
-        registry.completed(key(degraded), result(UUID.randomUUID(), degraded, "p",
+        complete(registry, key(clean), result(UUID.randomUUID(), clean, "p", Set.of("start", "end"), Set.of()));
+        complete(registry, key(degraded), result(UUID.randomUUID(), degraded, "p",
                 Set.of("start", "future", "end"), Set.of("future")));
 
         var cleanFound = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(clean)));
@@ -102,9 +181,9 @@ class ExecutionResultRegistryTest {
         var registry = new ExecutionResultRegistry();
         UUID clean = UUID.randomUUID();
         UUID handled = UUID.randomUUID();
-        registry.completed(key(clean), new GraphExecutionResult(UUID.randomUUID(), clean, "p",
+        complete(registry, key(clean), new GraphExecutionResult(UUID.randomUUID(), clean, "p",
                 Set.of("start", "boom", "end"), Set.of(), Set.of(), Set.of()));
-        registry.completed(key(handled), new GraphExecutionResult(UUID.randomUUID(), handled, "p",
+        complete(registry, key(handled), new GraphExecutionResult(UUID.randomUUID(), handled, "p",
                 Set.of("start", "boom", "handler", "end"), Set.of(), Set.of(), Set.of("boom")));
 
         var cleanFound = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(clean)));
@@ -119,6 +198,24 @@ class ExecutionResultRegistryTest {
         assertTrue(cleanFound.outcome().handledFailureNodes().isEmpty());
         assertTrue(!cleanFound.outcome().handledFailure(),
                 "a run in which nothing failed must not claim a handled failure");
+    }
+
+    @Test
+    void canonicalCompletionKeepsDefaultBypassAndHandledFailureFactsTogether() {
+        var registry = new ExecutionResultRegistry();
+        UUID traversal = UUID.randomUUID();
+        GraphExecutionResult result = new GraphExecutionResult(UUID.randomUUID(), traversal, "bounded",
+                Set.of("start", "defaulted", "bypassed", "handled", "end"), Set.of("defaulted"),
+                Set.of("bypassed"), Set.of("handled"), Set.of("bypassed->alternate [outcome=alternate]"));
+
+        registry.completed(key(traversal), result, DurableExecutionResult.project(result.payload(), 1024));
+
+        var found = assertInstanceOf(ExecutionLookup.Found.class, registry.lookup(key(traversal)));
+        assertEquals(Set.of("defaulted"), found.outcome().defaultedNodes());
+        assertEquals(Set.of("bypassed"), found.outcome().bypassedNodes());
+        assertEquals(Set.of("handled"), found.outcome().handledFailureNodes());
+        assertEquals(Set.of("bypassed->alternate [outcome=alternate]"), found.outcome().untakenEdges());
+        assertEquals("bounded", found.outcome().payload());
     }
 
     /**
@@ -195,10 +292,10 @@ class ExecutionResultRegistryTest {
     void anEvictedResultBecomesExpiredRatherThanUnknown() {
         var registry = new ExecutionResultRegistry(2, 64);
         UUID first = UUID.randomUUID();
-        registry.completed(key(first), result(UUID.randomUUID(), first, "gone-later", Set.of("end"), Set.of()));
+        complete(registry, key(first), result(UUID.randomUUID(), first, "gone-later", Set.of("end"), Set.of()));
         for (int i = 0; i < 2; i++) {
             UUID later = UUID.randomUUID();
-            registry.completed(key(later), result(UUID.randomUUID(), later, "p", Set.of("end"), Set.of()));
+            complete(registry, key(later), result(UUID.randomUUID(), later, "p", Set.of("end"), Set.of()));
         }
 
         var expired = assertInstanceOf(ExecutionLookup.Expired.class, registry.lookup(key(first)),
@@ -213,10 +310,10 @@ class ExecutionResultRegistryTest {
     void onlyPastTheTombstoneBoundDoesAnExecutionBecomeUnknown() {
         var registry = new ExecutionResultRegistry(1, 2);
         UUID oldest = UUID.randomUUID();
-        registry.completed(key(oldest), result(UUID.randomUUID(), oldest, "p", Set.of("end"), Set.of()));
+        complete(registry, key(oldest), result(UUID.randomUUID(), oldest, "p", Set.of("end"), Set.of()));
         for (int i = 0; i < 3; i++) {
             UUID later = UUID.randomUUID();
-            registry.completed(key(later), result(UUID.randomUUID(), later, "p", Set.of("end"), Set.of()));
+            complete(registry, key(later), result(UUID.randomUUID(), later, "p", Set.of("end"), Set.of()));
         }
 
         assertInstanceOf(ExecutionLookup.Unknown.class, registry.lookup(key(oldest)));
@@ -232,7 +329,7 @@ class ExecutionResultRegistryTest {
     void theSameIdUnderAnotherTenantIsUnknown() {
         var registry = new ExecutionResultRegistry();
         UUID traversal = UUID.randomUUID();
-        registry.completed(new ExecutionResultRegistry.Key("tenant-a", traversal),
+        complete(registry, new ExecutionResultRegistry.Key("tenant-a", traversal),
                 result(UUID.randomUUID(), traversal, "tenant-a-secret", Set.of("end"), Set.of()));
 
         assertInstanceOf(ExecutionLookup.Unknown.class,
@@ -301,7 +398,7 @@ class ExecutionResultRegistryTest {
         registry.cancelled(key(cancelled), UUID.randomUUID());
         registry.failed(key(failed), UUID.randomUUID());
         // The second terminal result pushes the first past the result bound and into a tombstone.
-        registry.completed(key(UUID.randomUUID()),
+        complete(registry, key(UUID.randomUUID()),
                 result(UUID.randomUUID(), UUID.randomUUID(), "p", Set.of("start"), Set.of()));
 
         var stopped = assertInstanceOf(ExecutionLookup.Expired.class, registry.lookup(key(cancelled)),

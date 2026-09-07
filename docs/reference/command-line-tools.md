@@ -171,7 +171,7 @@ listings. `--help` and `help` print usage.
 
 `ravenroot events decode < capture.sse` reads local standard input, starts no engine, contacts no
 server and resolves no credentials; global `--server` and `--token-file` options are ignored by this
-command. Each output line is a JSON object with `event`, `id` and `data`; exact decimal execution IDs
+command. Each output line is a JSON object with `event`, `id` and `data`; exact decimal event cursor IDs
 remain strings. Complete input returns 0, malformed or incomplete input and I/O failures return 1,
 argument misuse returns 2, and `stream-truncated` or `stream-overrun` is emitted before returning 3.
 Diagnostics go to standard error without raw input. See [Decoding execution streams](../integrator-guide/application-http.md)

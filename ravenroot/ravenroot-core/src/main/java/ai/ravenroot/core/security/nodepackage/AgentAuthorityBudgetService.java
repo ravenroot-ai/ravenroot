@@ -57,7 +57,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 /** Durable, process-rooted first-party agent authority and budget mediator. */
 public final class AgentAuthorityBudgetService implements AgentResourceService, ToolApprovalBudgetHooks {
     private static final String INTERNAL_DELEGATION_SCOPE = "runtime:delegate";
-    private static final String INTERNAL_ROOT_SCOPE = "runtime:root";
     private final ExecutionStore store;
     private final Clock clock;
     private final AgentAuthorityBudgetPolicy policy;
@@ -482,7 +481,7 @@ public final class AgentAuthorityBudgetService implements AgentResourceService, 
     private AgentAuthorityRootRegistration rootAtDeadline(ai.ravenroot.api.security.SecurityContext security,
                                                            ExecutionKey key, Instant deadline) {
         var rootAuthority = new LinkedHashSet<>(policy.authorityScopes());
-        rootAuthority.add(INTERNAL_ROOT_SCOPE);
+        rootAuthority.add(AgentAuthorityBudgetPolicy.INTERNAL_ROOT_SCOPE);
         return new AgentAuthorityRootRegistration(policy.runtimeInstanceId(), policy.bootEpoch(), security,
                 policy.policyVersion(), policy.rateCardVersion(), deadline, policy.dataScopes(),
                 Set.copyOf(rootAuthority), policy.rootMaxima(), policy.currency());

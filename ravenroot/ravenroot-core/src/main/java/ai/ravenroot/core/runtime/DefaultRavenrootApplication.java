@@ -58,6 +58,7 @@ import ai.ravenroot.core.programming.InMemoryArtifactRegistry;
 import java.io.InputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -265,6 +266,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      */
     private final int maxActiveDeployments;
     private final GraphExecutionLimits graphExecutionLimits;
+    private final Duration runnerShutdownStepBound;
 
     public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor) {
         this(engine, monitor, BehaviorEnvironment.safeDefaults());
@@ -523,11 +525,34 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                                        GraphExecutionLimits graphExecutionLimits,
                                        ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
                                        ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore) {
+        this(engine, monitor, behaviors, artifacts, programRuntime, identitySource, executionStore,
+                maxActiveDeployments, unknownBehaviors, graphDefinitionStore, toolApprovals, humanTasks,
+                graphExecutionLimits, agentBudgets, executionManifestStore,
+                GraphRunner.DEFAULT_SHUTDOWN_BOUND);
+    }
+
+    /** Full production composition with an immutable runner shutdown step bound. */
+    public DefaultRavenrootApplication(ExecutionEngine engine, ExecutionMonitor monitor, BehaviorRegistry behaviors,
+                                       ArtifactRegistry artifacts, ProgramRuntime programRuntime,
+                                       ExecutionIdentitySource identitySource, ExecutionStore executionStore,
+                                       int maxActiveDeployments, UnknownBehaviorPolicy unknownBehaviors,
+                                       ai.ravenroot.api.persistence.GraphDefinitionStore graphDefinitionStore,
+                                       ai.ravenroot.core.approval.ToolApprovalService toolApprovals,
+                                       ai.ravenroot.core.humantask.HumanTaskService humanTasks,
+                                       GraphExecutionLimits graphExecutionLimits,
+                                       ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetService agentBudgets,
+                                       ai.ravenroot.api.persistence.ExecutionManifestStore executionManifestStore,
+                                       Duration runnerShutdownStepBound) {
         this.unknownBehaviors = java.util.Objects.requireNonNull(unknownBehaviors, "unknownBehaviors");
         this.graphDefinitionStore = graphDefinitionStore;
         this.executionManifestStore = executionManifestStore;
         this.toolApprovals = toolApprovals;
         this.graphExecutionLimits = java.util.Objects.requireNonNull(graphExecutionLimits, "graphExecutionLimits");
+        this.runnerShutdownStepBound = java.util.Objects.requireNonNull(
+                runnerShutdownStepBound, "runnerShutdownStepBound");
+        if (runnerShutdownStepBound.isZero() || runnerShutdownStepBound.isNegative()) {
+            throw new IllegalArgumentException("runnerShutdownStepBound must be positive");
+        }
         this.humanTasks = humanTasks;
         this.agentBudgets = agentBudgets;
         this.engine = engine;
@@ -1252,7 +1277,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         GraphRunner runner;
         try {
             runner = new GraphRunner(manager, engine, behaviors, monitor, identitySource,
-                    unknownBehaviors, policy, graphExecutionLimits);
+                    runnerShutdownStepBound, unknownBehaviors, policy, graphExecutionLimits);
         } catch (RuntimeException error) {
             manager.close();
             throw error;
@@ -1619,7 +1644,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
      * <p>{@code active.close()} runs on a fresh virtual thread rather than the calling thread, exactly
      * like the natural-completion path a few lines below in {@link #startGraphMl} -- this may be an HTTP
      * or CLI request thread, not the actor dispatcher, and {@code GraphRunner.close()}'s stop-then-cancel
-     * escalation is bounded by up to {@code GraphRunner.DEFAULT_SHUTDOWN_BOUND} (10s), which a control
+     * escalation is bounded by the immutable {@code runnerShutdownStepBound} per phase, which a control
      * endpoint must not block on to report its result: the atomic map removal above is already the
      * moment cancellation was accepted, and that is what the caller's result reports.</p>
      *
@@ -1894,7 +1919,8 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
         return durablePauses.updateAndGet(existing -> existing != null ? existing
                 : new ai.ravenroot.core.pause.DurableExecutionPauseService(graphDefinitionStore,
                         executionStore, engine, behaviors, monitor, identitySource, workerId,
-                        executionLeaseTtl, graphExecutionLimits, agentBudgets, executionManifests()));
+                        executionLeaseTtl, graphExecutionLimits, agentBudgets, executionManifests(),
+                        runnerShutdownStepBound));
     }
 
     /**
@@ -2285,7 +2311,7 @@ public final class DefaultRavenrootApplication implements RavenrootApplication {
                     ai.ravenroot.api.deployment.RequestReplyLimits.defaults(
                             DefaultGraphDeployment.DEFAULT_INGRESS_BUFFER_CAPACITY),
                     graphDefinitionStore, graphExecutionLimits, agentBudgets, humanTasks,
-                    executionManifests(), executionContextDeploymentId);
+                    executionManifests(), executionContextDeploymentId, runnerShutdownStepBound);
             if (managedIngress != null) created.installManagedIngress(managedIngress);
             return created;
         });

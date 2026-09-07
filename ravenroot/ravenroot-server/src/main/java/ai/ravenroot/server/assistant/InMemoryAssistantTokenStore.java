@@ -75,7 +75,17 @@ public final class InMemoryAssistantTokenStore implements AssistantTokenStore {
         if (lifetime.isZero() || lifetime.isNegative()) {
             return;
         }
-        bySubject.put(subject, new Held(credential, clock.instant().plus(lifetime)));
+        Instant now = clock.instant();
+        Instant expiresAt;
+        try {
+            expiresAt = now.plus(lifetime);
+        } catch (java.time.DateTimeException | ArithmeticException unrepresentable) {
+            // Do not retain the JDK cause: date/time diagnostics include values that are not part of
+            // this public contract. Computing before put also preserves an existing valid session.
+            throw new IllegalArgumentException(
+                    "assistant session lifetime cannot be represented at the current time");
+        }
+        bySubject.put(subject, new Held(credential, expiresAt));
     }
 
     /** Forgets this author's token. What a sign-out is, and what a revocation is answered with. */

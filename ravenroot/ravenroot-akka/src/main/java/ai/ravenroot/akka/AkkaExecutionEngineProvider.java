@@ -1,6 +1,7 @@
 package ai.ravenroot.akka;
 
 import ai.ravenroot.api.execution.ExecutionEngine;
+import ai.ravenroot.api.execution.ExecutionEnginePolicy;
 import ai.ravenroot.api.execution.ExecutionEngineProvider;
 
 public final class AkkaExecutionEngineProvider implements ExecutionEngineProvider {
@@ -12,5 +13,10 @@ public final class AkkaExecutionEngineProvider implements ExecutionEngineProvide
     @Override
     public ExecutionEngine create(String systemName) {
         return new AkkaExecutionEngine(systemName);
+    }
+
+    @Override
+    public ExecutionEngine create(String systemName, ExecutionEnginePolicy policy) {
+        return new AkkaExecutionEngine(systemName, policy);
     }
 }

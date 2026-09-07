@@ -47,6 +47,7 @@ import java.util.TreeSet;
  * and the two sides of a comparison cannot drift apart.</p>
  */
 public final class ExecutionManifestResolver {
+    private static final String ENGINE_POLICY_FINGERPRINT_VERSION = "execution-engine-policy-fingerprint-v1";
 
     private final String engineDigest;
     private final String storeDigest;
@@ -134,6 +135,12 @@ public final class ExecutionManifestResolver {
     }
 
     private static String engineDigestOf(ExecutionEngine engine) {
+        String policyFingerprint = engine.compatibilityFingerprint();
+        if (policyFingerprint == null
+                || (!policyFingerprint.isEmpty() && !policyFingerprint.matches("[0-9a-f]{64}"))) {
+            throw new IllegalArgumentException(
+                    "Execution engine compatibility fingerprint must be empty or lowercase SHA-256 hexadecimal");
+        }
         var parts = new ArrayList<String>();
         parts.add(engine.id());
         var names = new TreeSet<String>();
@@ -142,6 +149,10 @@ public final class ExecutionManifestResolver {
         }
         parts.add(Integer.toString(names.size()));
         parts.addAll(names);
+        if (!policyFingerprint.isEmpty()) {
+            parts.add(ENGINE_POLICY_FINGERPRINT_VERSION);
+            parts.add(policyFingerprint);
+        }
         return ResolvedRuntimeProfile.digestOf(ResolvedRuntimeProfile.ENGINE_DOMAIN, parts);
     }
 

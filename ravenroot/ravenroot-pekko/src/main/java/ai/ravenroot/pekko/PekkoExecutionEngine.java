@@ -3,8 +3,9 @@ package ai.ravenroot.pekko;
 import ai.ravenroot.api.execution.CancellationSignal;
 import ai.ravenroot.api.execution.EngineCapability;
 import ai.ravenroot.api.execution.EngineState;
-import ai.ravenroot.api.execution.ExecutionEngine;
 import ai.ravenroot.api.execution.ExecutionDomain;
+import ai.ravenroot.api.execution.ExecutionEngine;
+import ai.ravenroot.api.execution.ExecutionEnginePolicy;
 import ai.ravenroot.api.execution.Mailbox;
 import ai.ravenroot.api.execution.NodeContext;
 import ai.ravenroot.api.execution.NodeLifecycle;
@@ -27,8 +28,10 @@ import org.apache.pekko.actor.typed.javadsl.ActorContext;
 import org.apache.pekko.actor.typed.javadsl.Behaviors;
 import org.apache.pekko.actor.typed.javadsl.StashBuffer;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
@@ -36,6 +39,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -52,10 +56,10 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * this engine never issued without remembering every node it ever spawned.</p>
  */
 public final class PekkoExecutionEngine implements ExecutionEngine {
-    private static final int STASH_CAPACITY = 10_000;
-    private static final long TERMINATION_BOUND_SECONDS = 10;
-
     private final ActorSystem<Void> actorSystem;
+    private final ExecutionEnginePolicy policy;
+    private final long lifecycleTimeoutNanos;
+    private final DomainReplyGate domainReplyGate;
     /**
      * Nodes that still exist. An entry leaves the moment its lifecycle terminates, so this map is
      * bounded by concurrent liveness rather than by how many nodes the engine has ever spawned.
@@ -72,7 +76,7 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
     }
 
     public PekkoExecutionEngine(String systemName) {
-        this(systemName, TerminalNodeHistory.DEFAULT_CAPACITY);
+        this(systemName, ExecutionEnginePolicy.FROZEN_LEGACY);
     }
 
     /**
@@ -80,7 +84,27 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
      *                                {@link TerminalNodeHistory}
      */
     public PekkoExecutionEngine(String systemName, int terminalHistoryCapacity) {
-        this.history = new TerminalNodeHistory(terminalHistoryCapacity);
+        this(systemName, new ExecutionEnginePolicy(
+                ExecutionEnginePolicy.FROZEN_LEGACY.maxStashedCommandsPerNode(),
+                ExecutionEnginePolicy.FROZEN_LEGACY.lifecycleStepBound(),
+                terminalHistoryCapacity));
+    }
+
+    /**
+     * Creates an engine whose operational policy remains immutable for its lifetime.
+     *
+     * @param systemName name assigned to the underlying actor system
+     * @param policy engine operational policy
+     */
+    public PekkoExecutionEngine(String systemName, ExecutionEnginePolicy policy) {
+        this(systemName, policy, DomainReplyGate.NONE);
+    }
+
+    PekkoExecutionEngine(String systemName, ExecutionEnginePolicy policy, DomainReplyGate domainReplyGate) {
+        this.policy = Objects.requireNonNull(policy, "policy");
+        this.lifecycleTimeoutNanos = timeoutNanos(policy.lifecycleStepBound());
+        this.domainReplyGate = Objects.requireNonNull(domainReplyGate, "domainReplyGate");
+        this.history = new TerminalNodeHistory(policy.terminalNodeHistoryCapacity());
         this.actorSystem = ActorSystem.create(Behaviors.empty(), systemName);
     }
 
@@ -106,6 +130,11 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
         // Declaring a capability the dependency set cannot deliver would make the declaration
         // useless to the only caller it exists for.
         return Set.of();
+    }
+
+    @Override
+    public String compatibilityFingerprint() {
+        return policy.compatibilityFingerprint();
     }
 
     @Override
@@ -162,7 +191,7 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
      * blocked for twenty seconds, a spawn into a second domain completed in 0ms.
      *
      * <p>A wall-clock assertion was tried and removed. It compared elapsed time against
-     * {@code TERMINATION_BOUND_SECONDS}, which made it equivalent to "no spawn timed out" -- true
+     * the lifecycle bound, which made it equivalent to "no spawn timed out" -- true
      * unconditionally, including on the engine it claimed to distinguish. It was deleted rather than
      * repaired, and not replaced, because a case that cannot fail constrains no adapter; and the
      * engine TCK is exercised by exactly one module today, so an unfalsifiable case there is caught
@@ -170,8 +199,8 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
      *
      * <p><b>What justifies the narrow scope, stated at its real strength.</b> Not a measured win: the
      * guardian round trip is cheap in the measured case. It removes a process-wide serialisation point
-     * whose held duration is bounded only by a ten-second timeout -- cheap normally, unbounded under a
-     * GC pause, a saturated dispatcher or a guardian under load -- from a path that is now travelled
+     * whose held duration is bounded only by the configured lifecycle timeout -- cheap normally,
+     * unbounded under a GC pause, a saturated dispatcher or a guardian under load -- from a path that is now travelled
      * once per invocation rather than once per graph node. "Not measured" is not "not real". Widening
      * it again would put an engine-wide monitor back across a blocking actor round trip on the dispatch
      * path, reintroducing the serialisation this narrow scope removes one level up.
@@ -373,31 +402,44 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
         if (!closing.compareAndSet(false, true)) {
             return;
         }
+        boolean interrupted = false;
         try {
-            drain().toCompletableFuture().get(TERMINATION_BOUND_SECONDS, TimeUnit.SECONDS);
-        } catch (Exception ignored) {
-            // A node that will not drain within the bound is cancelled below: close must terminate.
-        }
-        List<NodeEntry> stragglers;
-        synchronized (stateLock) {
-            stragglers = nodes.values().stream().filter(entry -> !entry.lifecycle().state().terminal()).toList();
-        }
-        try {
-            allOf(stragglers, entry -> cancel(entry.lifecycle().node()))
-                    .toCompletableFuture().get(TERMINATION_BOUND_SECONDS, TimeUnit.SECONDS);
-        } catch (Exception ignored) {
-            // ActorSystem termination below remains the final cleanup boundary.
-        } finally {
-            synchronized (stateLock) {
-                state = EngineState.CLOSED;
+            try {
+                drain().toCompletableFuture().get(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException interruption) {
+                interrupted = true;
+            } catch (Exception ignored) {
+                // A node that will not drain within the bound is cancelled below: close must terminate.
             }
-            actorSystem.terminate();
-        }
-        try {
-            actorSystem.getWhenTerminated().toCompletableFuture().get(TERMINATION_BOUND_SECONDS, TimeUnit.SECONDS);
-        } catch (Exception exception) {
-            throw new IllegalStateException("Pekko ActorSystem did not terminate cleanly", exception);
+            List<NodeEntry> stragglers;
+            synchronized (stateLock) {
+                stragglers = nodes.values().stream()
+                        .filter(entry -> !entry.lifecycle().state().terminal()).toList();
+            }
+            try {
+                allOf(stragglers, entry -> cancel(entry.lifecycle().node()))
+                        .toCompletableFuture().get(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException interruption) {
+                interrupted = true;
+            } catch (Exception ignored) {
+                // ActorSystem termination below remains the final cleanup boundary.
+            } finally {
+                synchronized (stateLock) {
+                    state = EngineState.CLOSED;
+                }
+                actorSystem.terminate();
+            }
+            try {
+                actorSystem.getWhenTerminated().toCompletableFuture()
+                        .get(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS);
+            } catch (InterruptedException interruption) {
+                interrupted = true;
+                throw new IllegalStateException("Interrupted awaiting Pekko ActorSystem termination", interruption);
+            } catch (Exception exception) {
+                throw new IllegalStateException("Pekko ActorSystem did not terminate cleanly", exception);
+            }
         } finally {
+            if (interrupted) Thread.currentThread().interrupt();
             // A closed engine owes nobody an answer about a node: spawn is refused and send reports
             // the engine, not the node. Holding the registries past that point would keep an engine
             // an application has finished with as large as everything it ever ran.
@@ -448,23 +490,40 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
             }
             String uniqueName = "domain-" + sanitize(domainName) + "-" + UUID.randomUUID();
             var guardian = actorSystem.<DomainCommand>systemActorOf(
-                    domainBehavior(), uniqueName, Props.empty());
+                    domainBehavior(domainReplyGate), uniqueName, Props.empty());
             return new SubtreeDomain(domainName, uniqueName, guardian);
         }
     }
 
-    private static Behavior<DomainCommand> domainBehavior() {
+    private static Behavior<DomainCommand> domainBehavior(DomainReplyGate replyGate) {
         return Behaviors.setup(context -> Behaviors.receive(DomainCommand.class)
                 .onMessage(SpawnInDomain.class, message -> {
+                    ActorRef<Command> actor = null;
                     try {
-                        message.reply().complete(
-                                context.spawn(message.behavior(), message.uniqueName(), message.props()));
+                        replyGate.beforeSpawnReply();
+                        if (!message.reply().isDone()) {
+                            actor = context.spawn(message.behavior(), message.uniqueName(), message.props());
+                            replyGate.beforeSpawnReplyCompletion(actor);
+                            // A timeout may win after the pre-check but before this completion. In
+                            // that case this guardian still owns the child and must stop it here.
+                            if (!message.reply().complete(actor)) {
+                                context.stop(actor);
+                            }
+                        }
                     } catch (RuntimeException error) {
+                        if (actor != null) context.stop(actor);
                         message.reply().completeExceptionally(error);
+                    } finally {
+                        replyGate.afterSpawnDecision();
                     }
                     return Behaviors.same();
                 })
+                .onMessage(StopUnclaimedSpawn.class, message -> {
+                    context.stop(message.actor());
+                    return Behaviors.same();
+                })
                 .onMessage(StopDomain.class, message -> {
+                    replyGate.beforeStopReply();
                     message.reply().complete(null);
                     // Stopping the guardian stops its children and nothing else: the structural
                     // half of "closing a domain releases exactly its nodes".
@@ -473,7 +532,27 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
                 .build());
     }
 
-    private sealed interface DomainCommand permits SpawnInDomain, StopDomain {
+    interface DomainReplyGate {
+        DomainReplyGate NONE = new DomainReplyGate() {
+        };
+
+        default void beforeSpawnReply() {
+        }
+
+        default void beforeSpawnReplyCompletion(ActorRef<?> actor) {
+        }
+
+        default void afterSpawnDecision() {
+        }
+
+        default void beforeSpawnRefusal() {
+        }
+
+        default void beforeStopReply() {
+        }
+    }
+
+    private sealed interface DomainCommand permits SpawnInDomain, StopDomain, StopUnclaimedSpawn {
     }
 
     private record SpawnInDomain(Behavior<Command> behavior, String uniqueName, Props props,
@@ -481,6 +560,9 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
     }
 
     private record StopDomain(CompletableFuture<Void> reply) implements DomainCommand {
+    }
+
+    private record StopUnclaimedSpawn(ActorRef<Command> actor) implements DomainCommand {
     }
 
     /** Package-private so this adapter's own structural test can assert the subtree exists. */
@@ -544,14 +626,26 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
                 var reply = new CompletableFuture<ActorRef<Command>>();
                 guardian.tell(new SpawnInDomain(behavior, uniqueName, Props.empty(), reply));
                 try {
-                    return reply.get(TERMINATION_BOUND_SECONDS, TimeUnit.SECONDS);
+                    return reply.get(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS);
                 } catch (InterruptedException interrupted) {
+                    domainReplyGate.beforeSpawnRefusal();
+                    abandonUnclaimedSpawn(reply, interrupted);
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException("Interrupted spawning into domain " + name, interrupted);
+                } catch (TimeoutException timeout) {
+                    domainReplyGate.beforeSpawnRefusal();
+                    abandonUnclaimedSpawn(reply, timeout);
+                    throw new IllegalStateException("Domain " + name + " did not create the node", timeout);
                 } catch (Exception error) {
                     throw new IllegalStateException("Domain " + name + " did not create the node", error);
                 }
             }, this);
+        }
+
+        private void abandonUnclaimedSpawn(CompletableFuture<ActorRef<Command>> reply, Throwable refusal) {
+            // If the guardian completed successfully at the timeout boundary, the caller still did
+            // not receive the reference. Hand that child back to its guardian for bounded cleanup.
+            abandonSpawn(reply, refusal, actor -> guardian.tell(new StopUnclaimedSpawn(actor)));
         }
 
         @Override
@@ -589,11 +683,11 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
             // promise that closing is bounded would be false. The escalation to cancel is what is
             // bounded in time regardless of what the node does.
             closure = settleAll(doomed, PekkoExecutionEngine.this::stop)
-                    .orTimeout(TERMINATION_BOUND_SECONDS, TimeUnit.SECONDS)
+                    .orTimeout(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS)
                     .handle((ignored, error) -> error == null
                             ? CompletableFuture.<Void>completedFuture(null)
                             : settleAll(doomed, PekkoExecutionEngine.this::cancel)
-                                    .orTimeout(TERMINATION_BOUND_SECONDS, TimeUnit.SECONDS))
+                                    .orTimeout(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS))
                     .thenCompose(stage -> stage)
                     .handle((ignored, error) -> {
                         // Reached on every path, including a bound that expired: stopping the
@@ -601,16 +695,37 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
                         // structural backstop a bookkeeping domain does not have.
                         var stopped = new CompletableFuture<Void>();
                         guardian.tell(new StopDomain(stopped));
-                        return stopped;
+                        return stopped.orTimeout(lifecycleTimeoutNanos, TimeUnit.NANOSECONDS);
                     })
                     .thenCompose(stage -> stage);
             return closure;
         }
     }
 
+    static <T> void abandonSpawn(CompletableFuture<T> reply, Throwable refusal,
+                                 java.util.function.Consumer<T> cleanup) {
+        reply.whenComplete((value, error) -> {
+            if (value != null) cleanup.accept(value);
+        });
+        reply.completeExceptionally(refusal);
+    }
+
     private void release() {
         nodes.clear();
         history.clear();
+    }
+
+    /** Converts the positive policy duration exactly when possible and saturates before overflow. */
+    static long timeoutNanos(Duration duration) {
+        Objects.requireNonNull(duration, "duration");
+        if (duration.isZero() || duration.isNegative()) {
+            throw new IllegalArgumentException("duration must be positive");
+        }
+        long seconds = duration.getSeconds();
+        if (seconds > Long.MAX_VALUE / 1_000_000_000L) return Long.MAX_VALUE;
+        long wholeSeconds = seconds * 1_000_000_000L;
+        if (wholeSeconds > Long.MAX_VALUE - duration.getNano()) return Long.MAX_VALUE;
+        return wholeSeconds + duration.getNano();
     }
 
     private static CompletionStage<Void> allOf(List<NodeEntry> entries,
@@ -622,7 +737,7 @@ public final class PekkoExecutionEngine implements ExecutionEngine {
     }
 
     private Behavior<Command> nodeBehavior(RavenNode node, NodeLifecycle lifecycle) {
-        return Behaviors.withStash(STASH_CAPACITY, stash -> Behaviors.setup(context -> {
+        return Behaviors.withStash(policy.maxStashedCommandsPerNode(), stash -> Behaviors.setup(context -> {
             NodeContext nodeContext = nodeContext(lifecycle);
             try {
                 node.onStart(nodeContext);

@@ -14,6 +14,13 @@ class ArtifactLifecycleConfigurationTest {
     @Test
     void defaultsDualControlToDisabled() {
         assertFalse(ArtifactLifecycleConfiguration.fromEnvironment(Map.of()).dualControl());
+        for (String blank : List.of("", " ", "\t", "\n")) {
+            assertFalse(ArtifactLifecycleConfiguration.fromEnvironment(
+                    Map.of(ArtifactLifecycleConfiguration.DUAL_CONTROL_ENV, blank)).dualControl());
+        }
+        var nullValue = new HashMap<String, String>();
+        nullValue.put(ArtifactLifecycleConfiguration.DUAL_CONTROL_ENV, null);
+        assertFalse(ArtifactLifecycleConfiguration.fromEnvironment(nullValue).dualControl());
     }
 
     @Test
@@ -22,15 +29,12 @@ class ArtifactLifecycleConfigurationTest {
                 Map.of(ArtifactLifecycleConfiguration.DUAL_CONTROL_ENV, "true")).dualControl());
         assertFalse(ArtifactLifecycleConfiguration.fromEnvironment(
                 Map.of(ArtifactLifecycleConfiguration.DUAL_CONTROL_ENV, "false")).dualControl());
-        for (String invalid : List.of("", " ", "\t", "\n", " true", "true ", "\tfalse",
+        for (String invalid : List.of(" true", "true ", "\tfalse",
                 "TRUE", "True", "FALSE", "False", "yes")) {
-            assertThrows(IllegalArgumentException.class, () -> ArtifactLifecycleConfiguration.fromEnvironment(
+            var failure = assertThrows(IllegalArgumentException.class, () -> ArtifactLifecycleConfiguration.fromEnvironment(
                     Map.of(ArtifactLifecycleConfiguration.DUAL_CONTROL_ENV, invalid)),
                     () -> "must reject raw non-canonical value: " + invalid.replace("\n", "\\n"));
+            org.junit.jupiter.api.Assertions.assertNull(failure.getCause());
         }
-        var nullValue = new HashMap<String, String>();
-        nullValue.put(ArtifactLifecycleConfiguration.DUAL_CONTROL_ENV, null);
-        assertThrows(IllegalArgumentException.class,
-                () -> ArtifactLifecycleConfiguration.fromEnvironment(nullValue));
     }
 }

@@ -64,7 +64,7 @@ public interface UnknownBehaviorPolicy {
     /** The only value that opts in. Compared after trimming, case-insensitively. */
     String REFUSE_VALUE = "refuse";
 
-    /** The default, and what every other value — including an unrecognised one — means. */
+    /** The explicit spelling of the default mode. */
     String PASS_THROUGH_VALUE = "pass-through";
 
     /**
@@ -126,24 +126,38 @@ public interface UnknownBehaviorPolicy {
     /**
      * Whether {@code environment} selects the fail-closed mode.
      *
-     * <p>An unrecognised value selects the default rather than refusing to boot. A typo becoming an
-     * outage is worse than a typo being ignored, and this switch's safe direction is the one that
-     * keeps a deployment behaving the way it behaved yesterday.</p>
+     * <p>Absence or blank selects the default. A nonblank declaration must name one of the two
+     * documented modes; rejecting a typo keeps the running policy observable and intentional.</p>
      */
     static boolean refusalSelected(java.util.Map<String, String> environment) {
-        String declared = environment == null ? null : environment.get(ENVIRONMENT_VARIABLE);
-        return declared != null
-                && REFUSE_VALUE.equals(declared.trim().toLowerCase(java.util.Locale.ROOT));
+        return REFUSE_VALUE.equals(configuredMode(environment));
     }
 
-    /** The policy {@code environment} selects: {@link #refuse()} only on an explicit opt-in. */
+    /**
+     * The policy {@code environment} selects: {@link #refuse()} only on an explicit opt-in.
+     *
+     * @throws IllegalArgumentException when a nonblank value is not a documented mode
+     */
     static UnknownBehaviorPolicy fromEnvironment(java.util.Map<String, String> environment) {
         return refusalSelected(environment) ? refuse() : passThrough();
     }
 
     /** What a composition root's startup line calls the active mode. */
     static String describe(java.util.Map<String, String> environment) {
-        return refusalSelected(environment) ? REFUSE_VALUE : PASS_THROUGH_VALUE;
+        return configuredMode(environment);
+    }
+
+    private static String configuredMode(java.util.Map<String, String> environment) {
+        String declared = environment == null ? null : environment.get(ENVIRONMENT_VARIABLE);
+        if (declared == null || declared.isBlank()) {
+            return PASS_THROUGH_VALUE;
+        }
+        String normalized = declared.trim().toLowerCase(java.util.Locale.ROOT);
+        if (REFUSE_VALUE.equals(normalized) || PASS_THROUGH_VALUE.equals(normalized)) {
+            return normalized;
+        }
+        throw new IllegalArgumentException(ENVIRONMENT_VARIABLE
+                + " must be 'pass-through' or 'refuse'");
     }
 
     /**
@@ -244,8 +258,9 @@ public interface UnknownBehaviorPolicy {
      * Fail-closed: a behavior the trusted catalog does not contain refuses when it is reached.
      *
      * <p><strong>Selectable and never the default.</strong> An operator opts in with
-     * {@code RAVENROOT_UNKNOWN_BEHAVIOR=refuse}; every other value, and its absence, leaves
-     * {@link #passThrough()} in force. ADR 0003, ADR 0006, the README and INV-04 describe a default
+     * {@code RAVENROOT_UNKNOWN_BEHAVIOR=refuse}; absence or blank leaves
+     * {@link #passThrough()} in force, while another nonblank value refuses startup. ADR 0003,
+     * ADR 0006, the README and INV-04 describe a default
      * plus an opt-in rather than an
      * unconditional rule.</p>
      *

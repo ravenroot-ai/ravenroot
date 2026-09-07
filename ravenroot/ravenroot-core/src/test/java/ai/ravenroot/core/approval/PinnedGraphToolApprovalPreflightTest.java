@@ -67,6 +67,7 @@ import ai.ravenroot.core.runtime.GraphExecutionContinuationCheckpoint;
 import ai.ravenroot.core.runtime.GraphExecutionLimits;
 import ai.ravenroot.core.runtime.NodePackages;
 import ai.ravenroot.core.runtime.NodePackageServiceRegistry;
+import ai.ravenroot.core.runtime.ShutdownBoundProbeEngine;
 import ai.ravenroot.core.security.nodepackage.ManagedNodePackageServices;
 import ai.ravenroot.core.security.nodepackage.NodePackageEgressPolicy;
 import ai.ravenroot.persistence.sqlite.SqliteExecutionStore;
@@ -228,7 +229,7 @@ class PinnedGraphToolApprovalPreflightTest {
         var decision = new AtomicReference<ToolCallContinuationInput.Decision>();
         var raced = new AtomicInteger();
         try (ExecutionStore store = new SqliteExecutionStore(directory.resolve("audit-race.db"), clock);
-             var engine = new InlineExecutionEngine()) {
+             var engine = new ShutdownBoundProbeEngine()) {
             createRunning(store, key, traversal, invocation, attempt, pin);
             var approvals = new ToolApprovalService(store, clock);
             approvals.request(key, request(approvalId, traversal, invocation, attempt, pin, 1), "create");
@@ -240,28 +241,38 @@ class PinnedGraphToolApprovalPreflightTest {
             BehaviorRegistry behaviors = NodePackages.register(new BehaviorRegistry(),
                     new DecisionProbePackage(decision, auditReplay, true));
             var executor = new PinnedGraphToolApprovalContinuationExecutor(definitions, store, approvals,
-                    engine, behaviors, new ExecutionMonitor(),
+                    null, engine, behaviors, new ExecutionMonitor(),
                     ai.ravenroot.api.application.ExecutionIdentitySource.randomUuids(),
-                    "worker", Duration.ofSeconds(30));
+                    "worker", Duration.ofSeconds(30), GraphExecutionLimits.DEFAULTS,
+                    null, null, Duration.ofMillis(50));
             var recovery = new ExecutionRecoveryService(store, List.of(TENANT), "worker", 10,
                     Duration.ofSeconds(30), RepeatabilityDeclarations.NONE_DECLARED,
                     new ToolApprovalHandlerDispatcher(store, approvals,
                             ignored -> new ToolDecision(ToolDecision.Disposition.REQUIRE_APPROVAL,
                                     "unchanged", "policy-v1"), executor));
+            var sweeping = CompletableFuture.supplyAsync(recovery::sweepOnce);
+            try {
+                engine.firstCancellation().toCompletableFuture().get(2, java.util.concurrent.TimeUnit.SECONDS);
+                List<RecoveryOutcome> outcomes = sweeping.get(5, java.util.concurrent.TimeUnit.SECONDS);
 
-            List<RecoveryOutcome> outcomes = recovery.sweepOnce();
-
-            assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
-                    outcomes::toString);
-            assertEquals(1, raced.get(), "the replay must deterministically advance the revision once");
-            assertEquals(ToolCallContinuationInput.Decision.APPROVED, decision.get());
-            assertEquals(ToolApprovalStatus.SUCCEEDED,
-                    store.loadToolApproval(key, approvalId).toCompletableFuture().join()
-                            .orElseThrow().status(),
-                    "revision drift from an audit cannot turn a known successful effect into failure");
-            assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
-                    .toCompletableFuture().join().isEmpty());
-            assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+                assertTrue(outcomes.stream().anyMatch(RecoveryOutcome.HandlerDispatched.class::isInstance),
+                        outcomes::toString);
+                assertEquals(1, raced.get(), "the replay must deterministically advance the revision once");
+                assertEquals(ToolCallContinuationInput.Decision.APPROVED, decision.get());
+                assertEquals(ToolApprovalStatus.SUCCEEDED,
+                        store.loadToolApproval(key, approvalId).toCompletableFuture().join()
+                                .orElseThrow().status(),
+                        "revision drift from an audit cannot turn a known successful effect into failure");
+                assertTrue(store.claimPendingWork(TENANT, "probe", 10, Duration.ofSeconds(30))
+                        .toCompletableFuture().join().isEmpty());
+                assertTrue(store.leases(TENANT).toCompletableFuture().join().isEmpty());
+                assertTrue(engine.cancellationCount() > 0,
+                        "tool continuation cleanup must use its composed runner shutdown bound");
+            } finally {
+                engine.close();
+                sweeping.handle((ignored, failure) -> null)
+                        .get(5, java.util.concurrent.TimeUnit.SECONDS);
+            }
         }
     }
 

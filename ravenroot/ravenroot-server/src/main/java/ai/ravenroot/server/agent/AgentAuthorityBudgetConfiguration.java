@@ -5,23 +5,31 @@ import ai.ravenroot.core.security.nodepackage.AgentAuthorityBudgetPolicy;
 
 import java.security.SecureRandom;
 import java.time.Duration;
-import java.util.Arrays;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
-import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
 /** Operator-only finite authority, spend, and bundled rate-card configuration. */
 public final class AgentAuthorityBudgetConfiguration {
     private static final SecureRandom BOOT_EPOCHS = new SecureRandom();
+    private static final Pattern IDENTITY_TOKEN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:-]*");
+    private static final Pattern SCOPE_TOKEN = Pattern.compile("[A-Za-z0-9][A-Za-z0-9._:/-]*");
+    private static final int MAX_ENVIRONMENT_TOKEN_LENGTH = 128;
+    private static final int MAX_SCOPES = 256;
+    private static final String AUTHORITY_SCOPES = "RAVENROOT_AGENT_AUTHORITY_SCOPES";
+    private static final String EFFECTIVE_AUTHORITY_LIMIT =
+            "authorityScopes must contain at most 256 effective root scope tokens";
 
     private AgentAuthorityBudgetConfiguration() { }
 
     public static AgentAuthorityBudgetPolicy fromEnvironment(Map<String, String> environment) {
-        String runtime = text(environment, "RAVENROOT_AGENT_RUNTIME_INSTANCE", "ravenroot-server");
-        String policy = text(environment, "RAVENROOT_AGENT_POLICY_VERSION", "server-finite-v1");
-        String rateCard = text(environment, "RAVENROOT_AGENT_RATE_CARD_VERSION",
+        String runtime = identity(environment, "RAVENROOT_AGENT_RUNTIME_INSTANCE", "ravenroot-server");
+        String policy = identity(environment, "RAVENROOT_AGENT_POLICY_VERSION", "server-finite-v1");
+        String rateCard = identity(environment, "RAVENROOT_AGENT_RATE_CARD_VERSION",
                 "builtin-conservative-v1");
-        String currency = text(environment, "RAVENROOT_AGENT_COST_CURRENCY", "USD").toUpperCase();
+        String currency = currency(environment, "RAVENROOT_AGENT_COST_CURRENCY", "USD");
         long lifetime = positive(environment, "RAVENROOT_AGENT_ROOT_LIFETIME_SECONDS", 3_600);
         AgentBudgetVector maxima = new AgentBudgetVector(
                 positive(environment, "RAVENROOT_AGENT_MAX_TURNS", 1_024),
@@ -33,14 +41,23 @@ public final class AgentAuthorityBudgetConfiguration {
                 positive(environment, "RAVENROOT_AGENT_MAX_DELEGATION_DEPTH", 8),
                 positive(environment, "RAVENROOT_AGENT_MAX_TEAM_CUMULATIVE", 64),
                 positive(environment, "RAVENROOT_AGENT_MAX_TEAM_ACTIVE", 16));
-        return new AgentAuthorityBudgetPolicy(runtime, BOOT_EPOCHS.nextLong(Long.MAX_VALUE), policy,
-                rateCard, currency, Duration.ofSeconds(lifetime), maxima,
-                positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000),
-                positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000),
-                nonNegative(environment, "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", 10),
-                nonNegative(environment, "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", 30),
-                tokens(environment.getOrDefault("RAVENROOT_AGENT_DATA_SCOPES", "")),
-                tokens(environment.getOrDefault("RAVENROOT_AGENT_AUTHORITY_SCOPES", "runtime:delegate")));
+        Set<String> dataScopes = tokens(environment, "RAVENROOT_AGENT_DATA_SCOPES", Set.of());
+        Set<String> authorityScopes = tokens(environment, AUTHORITY_SCOPES, Set.of("runtime:delegate"));
+        try {
+            return new AgentAuthorityBudgetPolicy(runtime, BOOT_EPOCHS.nextLong(Long.MAX_VALUE), policy,
+                    rateCard, currency, Duration.ofSeconds(lifetime), maxima,
+                    positive(environment, "RAVENROOT_AGENT_MAX_INPUT_TOKENS_PER_TURN", 128_000),
+                    positive(environment, "RAVENROOT_AGENT_MAX_OUTPUT_TOKENS_PER_TURN", 32_000),
+                    nonNegative(environment, "RAVENROOT_AGENT_INPUT_TOKEN_RATE_MICROS", 10),
+                    nonNegative(environment, "RAVENROOT_AGENT_OUTPUT_TOKEN_RATE_MICROS", 30),
+                    dataScopes, authorityScopes);
+        } catch (IllegalArgumentException invalid) {
+            if (EFFECTIVE_AUTHORITY_LIMIT.equals(invalid.getMessage())) {
+                throw new IllegalArgumentException(
+                        AUTHORITY_SCOPES + " must contain at most 256 effective root scope tokens");
+            }
+            throw invalid;
+        }
     }
 
     private static long positive(Map<String, String> environment, String name, long fallback) {
@@ -60,26 +77,45 @@ public final class AgentAuthorityBudgetConfiguration {
         try {
             return raw == null || raw.isBlank() ? fallback : Long.parseLong(raw.strip());
         } catch (NumberFormatException invalid) {
-            throw new IllegalArgumentException(name + " must be an integer", invalid);
+            throw new IllegalArgumentException(name + " must be an integer");
         }
     }
 
-    private static String text(Map<String, String> environment, String name, String fallback) {
+    private static String identity(Map<String, String> environment, String name, String fallback) {
         String value = environment.get(name);
         value = value == null || value.isBlank() ? fallback : value.strip();
-        if (value.isBlank() || value.length() > 128) {
-            throw new IllegalArgumentException(name + " must contain 1..128 characters");
+        if (value.length() > MAX_ENVIRONMENT_TOKEN_LENGTH || !IDENTITY_TOKEN.matcher(value).matches()) {
+            throw new IllegalArgumentException(name + " must be an identity token of 1..128 characters");
         }
         return value;
     }
 
-    private static Set<String> tokens(String raw) {
+    private static String currency(Map<String, String> environment, String name, String fallback) {
+        String raw = environment.get(name);
+        String value = raw == null || raw.isBlank() ? fallback : raw.strip();
+        value = value.toUpperCase(Locale.ROOT);
+        if (!value.matches("[A-Z]{3}")) {
+            throw new IllegalArgumentException(name + " must be a three-letter currency code");
+        }
+        return value;
+    }
+
+    private static Set<String> tokens(Map<String, String> environment, String name, Set<String> absentDefault) {
+        if (!environment.containsKey(name)) return absentDefault;
+        String raw = environment.get(name);
         if (raw == null || raw.isBlank()) return Set.of();
-        return Arrays.stream(raw.split(",", -1)).map(String::strip)
-                .peek(token -> {
-                    if (token.isEmpty() || token.length() > 128) {
-                        throw new IllegalArgumentException("agent scope tokens must contain 1..128 characters");
-                    }
-                }).collect(Collectors.toUnmodifiableSet());
+        var tokens = new LinkedHashSet<String>();
+        for (String element : raw.split(",", -1)) {
+            String token = element.strip();
+            if (token.length() > MAX_ENVIRONMENT_TOKEN_LENGTH || !SCOPE_TOKEN.matcher(token).matches()) {
+                throw new IllegalArgumentException(
+                        name + " must contain comma-separated scope tokens of 1..128 characters");
+            }
+            tokens.add(token);
+            if (tokens.size() > MAX_SCOPES) {
+                throw new IllegalArgumentException(name + " must contain at most 256 unique scope tokens");
+            }
+        }
+        return Set.copyOf(tokens);
     }
 }

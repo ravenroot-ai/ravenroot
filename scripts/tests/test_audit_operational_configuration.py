@@ -111,6 +111,116 @@ class OperationalConfigurationAuditTest(unittest.TestCase):
         self.assertTrue(any("unclassified operational candidate" in error and "ofSeconds(37)" in error
                             for error in errors), errors)
 
+    def test_explicit_time_unit_calls_discover_only_timeout_argument_atoms(self) -> None:
+        source = """
+            final class RuntimePolicy {
+              void waitForWork() throws Exception {
+                future.get(17, TimeUnit.SECONDS);
+                latch.await(18, java.util.concurrent.TimeUnit.MILLISECONDS);
+                semaphore.tryAcquire(19, TimeUnit.MINUTES);
+                semaphore.tryAcquire(3, 20, TimeUnit.SECONDS);
+                lock.tryLock(21, TimeUnit.SECONDS);
+                child.waitFor(22, TimeUnit.SECONDS);
+                executor.awaitTermination(23, TimeUnit.SECONDS);
+                future.get(
+                    Math.max(1, TimeUnit.MILLISECONDS.toNanos(100)),
+                    TimeUnit.NANOSECONDS);
+                consume(98, future.get(26, TimeUnit.SECONDS), 99);
+                int timeout = future.get(29, TimeUnit.SECONDS);
+              }
+            }
+            """
+        rows = audit.code_candidates(
+            Path("ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"), source, "java")
+        timed = [(row[3], row[4]) for row in rows if row[3].startswith("timeunit-")]
+        self.assertEqual([
+            ("timeunit-get", "17"),
+            ("timeunit-await", "18"),
+            ("timeunit-tryAcquire", "19"),
+            ("timeunit-tryAcquire", "20"),
+            ("timeunit-tryLock", "21"),
+            ("timeunit-waitFor", "22"),
+            ("timeunit-awaitTermination", "23"),
+            ("timeunit-get", "1"),
+            ("timeunit-get", "100"),
+            ("timeunit-get", "26"),
+        ], timed)
+        self.assertEqual(1, sum(row[4] == "29" for row in rows), rows)
+        self.assertFalse(any(row[4] in {"3", "98", "99"} for row in rows), rows)
+
+    def test_time_unit_call_coverage_is_explicit_and_fail_closed(self) -> None:
+        source = '''
+            final class RuntimePolicy {
+              void ignored() throws Exception {
+                future.get(24);
+                future.get(25, unit);
+                future.get(26, SECONDS);
+                future.get(27, ChronoUnit.SECONDS);
+                latch.await();
+                semaphore.tryAcquire();
+                semaphore.tryAcquire(28);
+                semaphore.tryAcquire(1, 29, 30, TimeUnit.SECONDS);
+                // child.waitFor(31, TimeUnit.SECONDS);
+                String quoted = "child.waitFor(32, TimeUnit.SECONDS)";
+                String block = """
+                    child.waitFor(33, TimeUnit.SECONDS);
+                    """;
+              }
+            }
+            '''
+        rows = audit.code_candidates(
+            Path("ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"), source, "java")
+        self.assertFalse(any(row[3].startswith("timeunit-") for row in rows), rows)
+        malformed = """
+            final class BrokenRuntimePolicy {
+              void ignored() throws Exception {
+                future.get(34, TimeUnit.SECONDS;
+              }
+            }
+            """
+        malformed_rows = audit.code_candidates(
+            Path("ravenroot/example/src/main/java/dev/example/BrokenRuntimePolicy.java"),
+            malformed, "java")
+        self.assertFalse(any(row[3].startswith("timeunit-") for row in malformed_rows),
+                         malformed_rows)
+
+    def test_cumulative_assignment_discovers_fixed_atom_without_path_exception(self) -> None:
+        source = """
+            final class RuntimePolicy {
+              void check(long responseBytes) {
+                long requiredCumulative = responseBytes + 256L;
+                long total = responseBytes + 257L;
+              }
+            }
+            """
+        rows = audit.code_candidates(
+            Path("ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"), source, "java")
+        self.assertTrue(any(row[3] == "requiredCumulative" and row[4] == "256L"
+                            for row in rows), rows)
+        self.assertFalse(any(row[4] == "257L" for row in rows), rows)
+
+    def test_new_timed_call_is_pending_and_literal_mutation_changes_identity(self) -> None:
+        with synthetic_repository() as location:
+            root = Path(location)
+            source = root / "ravenroot/example/src/main/java/dev/example/RuntimePolicy.java"
+            source.write_text(source.read_text(encoding="utf-8").replace(
+                "}\n", "  Object value() throws Exception { "
+                "return future.get(37, TimeUnit.SECONDS); }\n}\n"), encoding="utf-8")
+            first = next(candidate for candidate in audit.discover(root)
+                         if candidate.role == "timeunit-get")
+            errors = audit.check(root, root / "scripts/operational-configuration-inventory.json",
+                                 root / "docs/architecture/operational-configuration-audit.md",
+                                 require_complete=False)
+            source.write_text(source.read_text(encoding="utf-8").replace(
+                "future.get(37,", "future.get(38,"), encoding="utf-8")
+            second = next(candidate for candidate in audit.discover(root)
+                          if candidate.role == "timeunit-get")
+        self.assertTrue(any("unclassified operational candidate" in error
+                            and "timeunit-get" in error for error in errors), errors)
+        self.assertEqual("37", first.expression)
+        self.assertEqual("38", second.expression)
+        self.assertNotEqual(first.id, second.id)
+
     def test_root_runtime_script_default_is_rejected(self) -> None:
         with synthetic_repository() as location:
             root = Path(location)

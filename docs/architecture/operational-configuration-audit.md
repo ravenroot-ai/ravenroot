@@ -6,7 +6,7 @@ This report is generated from the checked operational-configuration inventory. T
 lexical scanner records candidates matched by its documented patterns; a candidate is not an
 operator setting until its semantic classification says so.
 
-**Audit state:** in progress. 11523 candidate(s) still require semantic review, 0 are deferred, and 0 confirmed hard-coded candidates remain unresolved.
+**Audit state:** in progress. 11556 candidate(s) still require semantic review, 0 are deferred, and 0 confirmed hard-coded candidates remain unresolved.
 
 ## Coverage
 
@@ -24,18 +24,19 @@ evidence without excerpt truncation. Candidate identity is `path + containing sy
 kind/semantic role + normalized atomic value + normalized full-expression digest + lexical duplicate
 index`; source line remains checked metadata.
 
-The scanner is deliberately lexical: it covers declared constants, known policy constructors and
-timeout APIs, environment bindings, deployment scalars, and container identity/port directives. It
-does not infer values assembled only through reflection, generated sources, or arbitrary data flow;
+The scanner is deliberately lexical: it covers declared constants, known policy constructors,
+timed Java calls with explicit `TimeUnit` arguments, environment bindings, deployment scalars,
+and container identity/port directives. Dynamic or statically imported time units and values assembled
+only through reflection, generated sources, or arbitrary data flow remain outside this bounded pattern;
 semantic review and focused source inventories remain required for those boundaries.
 
 ## Reproducible counts
 
 | Measure | Count |
 |---|---:|
-| Atomic operational candidates discovered | 15137 |
-| Reviewed | 3614 |
-| Pending review | 11523 |
+| Atomic operational candidates discovered | 15322 |
+| Reviewed | 3766 |
+| Pending review | 11556 |
 | Confirmed hard-coded candidates awaiting remediation | 0 |
 | Unique confirmed operator-configurable parameters | 52 |
 | Unique parameters converted to centralized configuration | 11 |
@@ -43,7 +44,7 @@ semantic review and focused source inventories remain required for those boundar
 | Retained security ceilings or defaults | 21 |
 | Retained protocol or format invariants | 10 |
 | Retained derived values | 2 |
-| Test fixtures | 3071 |
+| Test fixtures | 3223 |
 | Intentionally deferred | 0 |
 
 Retired source candidates preserved in inventory history: 711.
@@ -55,9 +56,9 @@ Surface counts are derived from the same inventory:
 
 - `deployment`: 1167
 - `deployment-example`: 16
-- `java`: 5755
+- `java`: 5788
 - `script`: 2304
-- `test-fixture`: 3071
+- `test-fixture`: 3223
 - `ui`: 2824
 
 ## Operator settings
@@ -158,7 +159,7 @@ into the operator report.
 | `ravenroot-adapter-openai-compatible/src/main/java/ai/ravenroot/adapter/openaicompatible/OpenAiCompatibleModelProvider.java` | 37 |
 | `ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/DevHarnessMain.java` | 30 |
 | `ravenroot-dev-harness/src/main/java/ai/ravenroot/devharness/LlmPromptNodeBehaviorFactory.java` | 3 |
-| `ravenroot-sample/src/main/java/ai/ravenroot/sample/EmbeddedSample.java` | 3 |
+| `ravenroot-sample/src/main/java/ai/ravenroot/sample/EmbeddedSample.java` | 4 |
 | `ravenroot/ravenroot-akka/src/main/java/ai/ravenroot/akka/AkkaExecutionEngine.java` | 2 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/ai/AgentRequest.java` | 1 |
 | `ravenroot/ravenroot-application-api/src/main/java/ai/ravenroot/api/application/AuthorizedRavenrootApplication.java` | 10 |
@@ -269,8 +270,8 @@ into the operator report.
 | `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/GlobalOptions.java` | 1 |
 | `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RavenrootCli.java` | 2 |
 | `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RavenrootCliMain.java` | 5 |
-| `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RecoveryBundle.java` | 23 |
-| `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RecoveryRestoreTransaction.java` | 7 |
+| `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RecoveryBundle.java` | 24 |
+| `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/RecoveryRestoreTransaction.java` | 8 |
 | `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/CliToken.java` | 2 |
 | `ravenroot/ravenroot-cli/src/main/java/ai/ravenroot/cli/remote/RemoteBackend.java` | 16 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/approval/PinnedGraphToolApprovalContinuationExecutor.java` | 3 |
@@ -317,8 +318,8 @@ into the operator report.
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/AuditedExecutionResultPurge.java` | 2 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BehaviorPropertySchema.java` | 1 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/BranchId.java` | 3 |
-| `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultGraphDeployment.java` | 18 |
-| `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java` | 34 |
+| `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultGraphDeployment.java` | 19 |
+| `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/DefaultRavenrootApplication.java` | 35 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionBudget.java` | 1 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionInstanceBusyException.java` | 1 |
 | `ravenroot/ravenroot-core/src/main/java/ai/ravenroot/core/runtime/ExecutionMonitor.java` | 6 |
@@ -411,12 +412,12 @@ into the operator report.
 | `ravenroot/ravenroot-extensions/ravenroot-filesystem/src/main/java/ai/ravenroot/extensions/filesystem/FilesystemTempNames.java` | 6 |
 | `ravenroot/ravenroot-extensions/ravenroot-filesystem/src/main/java/ai/ravenroot/extensions/filesystem/FilesystemWriteNodeBehavior.java` | 6 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/EnvironmentGitWorkspaceProfileResolver.java` | 32 |
-| `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitCredentialSession.java` | 5 |
+| `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitCredentialSession.java` | 9 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceNodeBehavior.java` | 1 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceNodePackage.java` | 1 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceProfile.java` | 13 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceRequest.java` | 1 |
-| `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceRuntime.java` | 18 |
+| `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceRuntime.java` | 22 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceService.java` | 18 |
 | `ravenroot/ravenroot-extensions/ravenroot-git-workspace/src/main/java/ai/ravenroot/extensions/gitworkspace/GitWorkspaceStore.java` | 9 |
 | `ravenroot/ravenroot-extensions/ravenroot-github/src/main/java/ai/ravenroot/extensions/github/GithubApi.java` | 5 |
@@ -464,7 +465,7 @@ into the operator report.
 | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/EnvironmentImapMutationPolicyResolver.java` | 2 |
 | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/EnvironmentImapProfileResolver.java` | 11 |
 | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/ImapConsumerPolicy.java` | 17 |
-| `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/ImapConsumerSource.java` | 23 |
+| `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/ImapConsumerSource.java` | 24 |
 | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/ImapMessageEvent.java` | 24 |
 | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapConsumeNodeBehavior.java` | 13 |
 | `ravenroot/ravenroot-extensions/ravenroot-mail/src/main/java/ai/ravenroot/extensions/mail/imap/MailImapMutationNodeBehavior.java` | 19 |
@@ -502,11 +503,11 @@ into the operator report.
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/container/build_attested.sh` | 27 |
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/container/smoke.sh` | 34 |
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/EnvironmentOcrProfileResolver.java` | 13 |
-| `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/JdkTesseractProcessFactory.java` | 4 |
+| `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/JdkTesseractProcessFactory.java` | 6 |
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrExtractNodeBehavior.java` | 9 |
-| `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrImage.java` | 8 |
+| `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrImage.java` | 9 |
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrInvocation.java` | 3 |
-| `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrProcessExecutor.java` | 1 |
+| `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrProcessExecutor.java` | 2 |
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrProfile.java` | 17 |
 | `ravenroot/ravenroot-extensions/ravenroot-ocr/src/main/java/ai/ravenroot/extensions/ocr/OcrWorkspace.java` | 1 |
 | `ravenroot/ravenroot-extensions/ravenroot-openapi-client/src/main/java/ai/ravenroot/extensions/openapi/client/EnvironmentOpenApiClientProfileResolver.java` | 22 |
@@ -543,7 +544,7 @@ into the operator report.
 | `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsBehaviorDescriptors.java` | 2 |
 | `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsConfiguration.java` | 30 |
 | `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsException.java` | 1 |
-| `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsOutgoingWebhookSourceBehavior.java` | 14 |
+| `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsOutgoingWebhookSourceBehavior.java` | 15 |
 | `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsRateLimiter.java` | 2 |
 | `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsRuntime.java` | 1 |
 | `ravenroot/ravenroot-extensions/ravenroot-teams/src/main/java/ai/ravenroot/extensions/teams/TeamsSendBehavior.java` | 15 |
@@ -567,11 +568,11 @@ into the operator report.
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/AgentAuthorityBudgetCodec.java` | 3 |
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/AggregateStorage.java` | 7 |
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteArtifactRegistry.java` | 37 |
-| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java` | 13 |
+| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteDeploymentRegistry.java` | 14 |
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteEmbedRegistrationStore.java` | 14 |
-| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionManifestStore.java` | 6 |
-| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionStore.java` | 56 |
-| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteGraphDefinitionStore.java` | 7 |
+| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionManifestStore.java` | 7 |
+| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteExecutionStore.java` | 57 |
+| `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteGraphDefinitionStore.java` | 8 |
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteSchema.java` | 1 |
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreConfig.java` | 9 |
 | `ravenroot/ravenroot-persistence-sqlite/src/main/java/ai/ravenroot/persistence/sqlite/SqliteStoreLocation.java` | 1 |
@@ -587,16 +588,17 @@ into the operator report.
 | `ravenroot/ravenroot-plugin-bundle/src/main/java/ai/ravenroot/plugin/bundle/PluginCli.java` | 4 |
 | `ravenroot/ravenroot-plugin-bundle/src/main/java/ai/ravenroot/plugin/bundle/PluginManifest.java` | 13 |
 | `ravenroot/ravenroot-plugin-bundle/src/main/java/ai/ravenroot/plugin/bundle/ReservedPluginPackages.java` | 10 |
-| `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java` | 29 |
+| `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmProgramRuntime.java` | 31 |
 | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/GraalVmWorkerMain.java` | 10 |
 | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramArtifactDigest.java` | 1 |
 | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/ProgramWireProtocol.java` | 10 |
 | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxPolicy.java` | 1 |
+| `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProcessLauncher.java` | 4 |
 | `ravenroot/ravenroot-programming-graalvm/src/main/java/ai/ravenroot/programming/graalvm/SandboxSupervisorProtocol.java` | 2 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ArtifactLifecycleConfiguration.java` | 2 |
-| `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java` | 5 |
+| `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/HumanTaskConfiguration.java` | 6 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootHealthcheck.java` | 3 |
-| `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java` | 87 |
+| `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServer.java` | 88 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/RavenrootServerMain.java` | 33 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ReplicaCount.java` | 3 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ServedConfiguration.java` | 1 |
@@ -633,7 +635,7 @@ into the operator report.
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/EmbedStartupCheck.java` | 9 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/embed/P256EmbedProofVerifier.java` | 4 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/error/PayloadRejectionAuditEvent.java` | 1 |
-| `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ingress/ManagedIngressRegistry.java` | 17 |
+| `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/ingress/ManagedIngressRegistry.java` | 19 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/ProgramBuildSubmission.java` | 2 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/payload/StructuredSubmission.java` | 6 |
 | `ravenroot/ravenroot-server/src/main/java/ai/ravenroot/server/persistence/ExecutionStoreBootstrap.java` | 2 |

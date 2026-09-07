@@ -63,7 +63,7 @@ SOURCE_SUFFIXES = {".java", ".js", ".mjs", ".ts", ".py", ".sh", ".yaml", ".yml",
 OPERATIONAL_WORD = re.compile(
     r"(?i)(timeout|deadline|interval|poll|retry|attempt|capacity|queue|limit|max|min|retention|ttl|"
     r"lifetime|grace|delay|period|expiry|expire|workers|threads|batch|burst|rate|bytes|size|count|"
-    r"lease|drain|age|port|path|directory|dir|memory|heap|cpu|replica|probe|health)"
+    r"lease|drain|age|port|path|directory|dir|memory|heap|cpu|replica|probe|health|cumulative)"
 )
 NUMBER = re.compile(r"(?<![\w.])(?:0[xX][0-9a-fA-F_]+|\d[\d_]*(?:\.\d+)?)(?:[lLdDfF])?(?![\w.])")
 QUOTED = re.compile(r'''(?s)(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')''')
@@ -79,6 +79,17 @@ KNOWN_OPERATIONAL_CALL = re.compile(
     r"(?i)(Duration\.of(?:Nanos|Millis|Seconds|Minutes|Hours|Days)|new\s+(?:PayloadLimits|GraphExecutionLimits|GraphMlLimits|Limits|RetryPolicy|RetryBackoff|AgentBudgetVector|Semaphore|"
     r"ArrayBlockingQueue|ThreadPoolExecutor)|newScheduledThreadPool|newFixedThreadPool|withStash|"
     r"orTimeout|completeOnTimeout|readNBytes|sleep|setTimeout|setInterval|getOrDefault)\s*\("
+)
+# This is intentionally a bounded lexical contract rather than Java receiver-type inference. The
+# explicit TimeUnit argument separates timed Future/latch/process/executor/lock/semaphore overloads
+# from ordinary get()/await()/tryAcquire() calls. Dynamic and static-imported units are outside the
+# supported pattern and remain visible only through their own fixed declarations, when present.
+TIME_UNIT_OPERATIONAL_CALL = re.compile(
+    r"\.(get|await|tryAcquire|tryLock|waitFor|awaitTermination)\s*\("
+)
+TIME_UNIT_ARGUMENT = re.compile(
+    r"(?:java\.util\.concurrent\.)?TimeUnit\."
+    r"(?:NANOSECONDS|MICROSECONDS|MILLISECONDS|SECONDS|MINUTES|HOURS|DAYS)"
 )
 ASSIGNMENT_NAME = re.compile(r"(?s)\b([A-Za-z_$][\w$]*)\s*=\s*[^=]")
 STATIC_FINAL = re.compile(r"\bstatic\s+final\b")
@@ -501,6 +512,43 @@ def code_candidates(relative: Path, text: str, surface_name: str) -> list[tuple[
                 candidate_offset = start + atom.start()
                 rows.append((candidate_offset, containing_symbol(markers, candidate_offset), kind,
                              label, normalized(atom.group(0)), evidence))
+    if suffix == ".java":
+        # Parse only the supported timeout argument. Feeding these method names into the broad
+        # KNOWN_OPERATIONAL_CALL branch would incorrectly collect permit counts and unrelated
+        # literals elsewhere in the containing statement.
+        occupied_offsets = {row[0] for row in rows}
+        masked = strip_c_comments_and_literals(text)
+        for start, end, raw in statement_spans(code):
+            evidence = normalized(raw)
+            for call in TIME_UNIT_OPERATIONAL_CALL.finditer(masked, start, end):
+                opening = masked.find("(", call.start(), end)
+                if opening < 0:
+                    continue
+                parsed = split_java_arguments(text, masked, opening)
+                if parsed is None:
+                    continue
+                arguments, closing = parsed
+                if closing >= end:
+                    continue
+                method = call.group(1)
+                if method == "tryAcquire":
+                    if len(arguments) not in {2, 3}:
+                        continue
+                elif len(arguments) != 2:
+                    continue
+                unit = arguments[-1]
+                unit_expression = re.sub(r"\s+", "", masked[unit[1]:unit[2]])
+                if TIME_UNIT_ARGUMENT.fullmatch(unit_expression) is None:
+                    continue
+                timeout = arguments[-2]
+                for atom in NUMBER.finditer(masked, timeout[1], timeout[2]):
+                    candidate_offset = atom.start()
+                    if candidate_offset in occupied_offsets:
+                        continue
+                    occupied_offsets.add(candidate_offset)
+                    rows.append((candidate_offset, containing_symbol(markers, candidate_offset),
+                                 "inline-operational-call", f"timeunit-{method}",
+                                 normalized(text[atom.start():atom.end()]), evidence))
     return rows
 
 
@@ -1950,9 +1998,10 @@ def render_report(document: dict[str, object]) -> str:
         "evidence without excerpt truncation. Candidate identity is `path + containing symbol + candidate",
         "kind/semantic role + normalized atomic value + normalized full-expression digest + lexical duplicate",
         "index`; source line remains checked metadata.", "",
-        "The scanner is deliberately lexical: it covers declared constants, known policy constructors and",
-        "timeout APIs, environment bindings, deployment scalars, and container identity/port directives. It",
-        "does not infer values assembled only through reflection, generated sources, or arbitrary data flow;",
+        "The scanner is deliberately lexical: it covers declared constants, known policy constructors,",
+        "timed Java calls with explicit `TimeUnit` arguments, environment bindings, deployment scalars,",
+        "and container identity/port directives. Dynamic or statically imported time units and values assembled",
+        "only through reflection, generated sources, or arbitrary data flow remain outside this bounded pattern;",
         "semantic review and focused source inventories remain required for those boundaries.", "",
         "## Reproducible counts", "",
         "| Measure | Count |", "|---|---:|",

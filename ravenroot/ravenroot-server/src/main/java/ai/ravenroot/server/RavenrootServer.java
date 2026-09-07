@@ -3278,7 +3278,7 @@ public final class RavenrootServer implements AutoCloseable {
     private void failGraphExecutionLimit(HttpExchange exchange, HttpRequestContext httpContext,
                                          ai.ravenroot.core.runtime.GraphExecutionLimitException rejection)
             throws IOException {
-        fail(exchange, httpContext, ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT.status(),
+        fail(exchange, ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT.status(),
                 ErrorEnvelope.ofServerCode(rejection.reason().publicCode(),
                         ErrorCode.GRAPH_EXECUTION_RESOURCE_LIMIT,
                         httpContext.requestId()));

@@ -7,6 +7,7 @@ import ai.ravenroot.api.security.PrincipalType;
 import ai.ravenroot.api.security.RequestContext;
 import ai.ravenroot.api.security.Role;
 import ai.ravenroot.server.AuthenticatedPrincipalAttribute;
+import ai.ravenroot.server.HttpRequestContext;
 import ai.ravenroot.server.audit.JsonStrings;
 import com.sun.net.httpserver.HttpExchange;
 
@@ -23,6 +24,7 @@ import java.util.Base64;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Supplier;
 
 /** Complete five-route server adapter for the distinct-origin, static embedded projection. */
 public final class EmbedBrowserHttpHandler {
@@ -51,13 +53,24 @@ public final class EmbedBrowserHttpHandler {
     }
 
     public void createSession(HttpExchange exchange) throws IOException {
+        createSession(exchange, () -> AuthenticatedPrincipalAttribute.requestContext(exchange),
+                () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void createSession(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        createSession(exchange, requestContext::applicationContext, requestContext::requestId);
+    }
+
+    private void createSession(HttpExchange exchange, Supplier<RequestContext> requestContext,
+                               Supplier<String> requestId)
+            throws IOException {
         if (!requireExactPath(exchange, CREATE_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "POST") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
         Map<String, String> body = body(exchange, Set.of("registrationId"));
         if (body == null) return;
         EmbedRegistrationResolution resolution = configuration.sessionCreation().resolve(
-                AuthenticatedPrincipalAttribute.requestContext(exchange), body.get("registrationId"));
+                requestContext.get(), body.get("registrationId"));
         if (!(resolution instanceof EmbedRegistrationResolution.Available available)) {
             unavailable(exchange, resolution instanceof EmbedRegistrationResolution.Temporary);
             return;
@@ -70,7 +83,7 @@ public final class EmbedBrowserHttpHandler {
         }
         try {
             var issued = tickets.issue(available.aggregate());
-            audit(exchange, available.aggregate(), EmbedSecurityAuditSink.Phase.SESSION_CREATED);
+            audit(requestId.get(), available.aggregate(), EmbedSecurityAuditSink.Phase.SESSION_CREATED);
             String launchUrl = configuration.viewerOrigin().value() + LAUNCH_PATH + "?ticket=" + issued.value();
             json(exchange, 201, "{\"launchUrl\":\"" + JsonStrings.escape(launchUrl)
                     + "\",\"expiresAt\":\"" + issued.expiresAt() + "\"}");
@@ -82,6 +95,14 @@ public final class EmbedBrowserHttpHandler {
     }
 
     public void launch(HttpExchange exchange) throws IOException {
+        launch(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void launch(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        launch(exchange, requestContext::requestId);
+    }
+
+    private void launch(HttpExchange exchange, Supplier<String> requestId) throws IOException {
         if (!requireExactPath(exchange, LAUNCH_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "GET") || !fetch(exchange, "navigate", "iframe") || hasCookie(exchange)) return;
@@ -106,7 +127,7 @@ public final class EmbedBrowserHttpHandler {
         }
         try {
             var bootstrap = sessions.begin(available.registration());
-            audit(exchange, available.registration(), EmbedSecurityAuditSink.Phase.TICKET_CONSUMED);
+            audit(requestId.get(), available.registration(), EmbedSecurityAuditSink.Phase.TICKET_CONSUMED);
             exchange.getResponseHeaders().remove("X-Frame-Options");
             exchange.getResponseHeaders().set("Content-Security-Policy",
                     "default-src 'none'; base-uri 'none'; form-action 'none'; script-src 'self'; "
@@ -171,6 +192,17 @@ public final class EmbedBrowserHttpHandler {
     }
 
     public void acknowledgeParent(HttpExchange exchange) throws IOException {
+        acknowledgeParent(exchange, () -> AuthenticatedPrincipalAttribute.requestContext(exchange),
+                () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void acknowledgeParent(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        acknowledgeParent(exchange, requestContext::applicationContext, requestContext::requestId);
+    }
+
+    private void acknowledgeParent(HttpExchange exchange, Supplier<RequestContext> requestContext,
+                                   Supplier<String> requestId)
+            throws IOException {
         if (!requireExactPath(exchange, ACKNOWLEDGEMENT_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "POST") || browserMetadataPresent(exchange) || hasCookie(exchange)) return;
@@ -178,7 +210,7 @@ public final class EmbedBrowserHttpHandler {
                 Set.of("registrationId", "acknowledgementId", "channelId", "correlationId"));
         if (body == null) return;
         EmbedRegistrationResolution resolution = configuration.sessionCreation().resolve(
-                AuthenticatedPrincipalAttribute.requestContext(exchange), body.get("registrationId"));
+                requestContext.get(), body.get("registrationId"));
         if (!(resolution instanceof EmbedRegistrationResolution.Available available)) {
             unavailable(exchange, resolution instanceof EmbedRegistrationResolution.Temporary);
             return;
@@ -187,7 +219,7 @@ public final class EmbedBrowserHttpHandler {
             validatedParentOrigin(available.aggregate());
             if (!sessions.acknowledge(body.get("acknowledgementId"), body.get("channelId"),
                     body.get("correlationId"), available.aggregate(), configuration.registrations(),
-                    () -> audit(exchange, available.aggregate(),
+                    () -> audit(requestId.get(), available.aggregate(),
                             EmbedSecurityAuditSink.Phase.PARENT_ACKNOWLEDGED))) {
                 unavailable(exchange, false);
                 return;
@@ -201,6 +233,14 @@ public final class EmbedBrowserHttpHandler {
     }
 
     public void exchange(HttpExchange exchange) throws IOException {
+        exchange(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void exchange(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        exchange(exchange, requestContext::requestId);
+    }
+
+    private void exchange(HttpExchange exchange, Supplier<String> requestId) throws IOException {
         if (!requireExactPath(exchange, EXCHANGE_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
@@ -233,7 +273,7 @@ public final class EmbedBrowserHttpHandler {
             }
             var bearer = sessions.activate(body.get("exchangeId"), pending, key, configuration.registrations());
             if (bearer == null) { unavailable(exchange, false); return; }
-            audit(exchange, pending.registration(), EmbedSecurityAuditSink.Phase.BEARER_ISSUED);
+            audit(requestId.get(), pending.registration(), EmbedSecurityAuditSink.Phase.BEARER_ISSUED);
             json(exchange, 200, "{\"tokenType\":\"Bearer\",\"bearer\":\""
                     + JsonStrings.escape(bearer.bearer()) + "\",\"challenge\":\""
                     + JsonStrings.escape(bearer.challenge()) + "\",\"expiresAt\":\""
@@ -246,6 +286,14 @@ public final class EmbedBrowserHttpHandler {
     }
 
     public void projection(HttpExchange exchange) throws IOException {
+        projection(exchange, () -> AuthenticatedPrincipalAttribute.requestId(exchange));
+    }
+
+    public void projection(HttpExchange exchange, HttpRequestContext requestContext) throws IOException {
+        projection(exchange, requestContext::requestId);
+    }
+
+    private void projection(HttpExchange exchange, Supplier<String> requestId) throws IOException {
         if (!requireExactPath(exchange, PROJECTION_PATH)) return;
         privateResponse(exchange);
         if (!method(exchange, "POST") || !viewerRequest(exchange) || hasCookie(exchange)) return;
@@ -276,12 +324,12 @@ public final class EmbedBrowserHttpHandler {
             // same revision as the grant this bearer was minted against, because it is carried by it.
             var registration = session.registration();
             var grant = registration.sessionGrant();
-            RequestContext context = new RequestContext(AuthenticatedPrincipalAttribute.requestId(exchange),
+            RequestContext context = new RequestContext(requestId.get(),
                     grant.workloadSubject(), PrincipalType.WORKLOAD, grant.workloadIssuer(), grant.tenantId(),
                     Set.of(Role.VIEWER), Set.of("ravenroot.embed.graph.read"));
             EmbedProjectionResolution resolution = configuration.projections().read(context, registration);
             if (resolution instanceof EmbedProjectionResolution.Available available) {
-                audit(exchange, registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
+                audit(context.requestId(), registration, EmbedSecurityAuditSink.Phase.PROJECTION_READ);
                 json(exchange, 200, available.projection().toJson());
             } else if (resolution instanceof EmbedProjectionResolution.DataTooLarge) {
                 error(exchange, 413, "EMBED_DATA_TOO_LARGE");
@@ -297,11 +345,11 @@ public final class EmbedBrowserHttpHandler {
         }
     }
 
-    private void audit(HttpExchange exchange, EmbedRegistrationAggregate registration,
+    private void audit(String requestId, EmbedRegistrationAggregate registration,
                        EmbedSecurityAuditSink.Phase phase) {
         var grant = Objects.requireNonNull(registration, "registration").sessionGrant();
         configuration.audit().record(new EmbedSecurityAuditSink.Event(configuration.clock().instant(),
-                AuthenticatedPrincipalAttribute.requestId(exchange), grant.tenantId(), grant.workloadSubject(),
+                requestId, grant.tenantId(), grant.workloadSubject(),
                 phase, EmbedSecurityAuditSink.Outcome.ALLOWED));
     }
 

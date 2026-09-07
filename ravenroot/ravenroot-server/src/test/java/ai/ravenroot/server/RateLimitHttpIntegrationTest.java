@@ -283,13 +283,46 @@ class RateLimitHttpIntegrationTest {
 
     @Test
     void anOversizedQueryIsRejectedWithoutBeingProcessed() throws Exception {
-        try (var fixture = fixture(limits(builder -> builder), new RecordingAudit())) {
+        var audit = new RecordingAudit();
+        try (var fixture = fixture(limits(builder -> builder), audit)) {
             var client = HttpClient.newHttpClient();
 
             var response = fixture.get(client, "/v1/status?probe=" + "a".repeat(8_000), "tenant-a");
 
             assertEquals(414, response.statusCode());
             assertTrue(response.body().contains("QUERY_TOO_LARGE"), response.body());
+            var event = audit.events().stream()
+                    .filter(candidate -> candidate.code().equals("QUERY_TOO_LARGE"))
+                    .findFirst().orElseThrow();
+            assertEquals("127.0.0.1", event.clientAddress());
+            assertFalse(event.forwarded());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.tenantId());
+            assertEquals(correlationIn(response.body()), event.requestId());
+        }
+    }
+
+    @Test
+    void aRejectedProxyTopologyUsesThePreResolutionContextAndOneCorrelationId() throws Exception {
+        var audit = new RecordingAudit();
+        var limits = limits(builder -> builder);
+        var limiter = new RateLimiter(limits,
+                new TrustedProxyConfiguration(2, Set.of("127.0.0.1")), audit, nanos::get);
+        InetAddress ipv4Loopback = InetAddress.getByName("127.0.0.1");
+        try (var fixture = fixture(limits, limiter, tenantAuthenticator(), ipv4Loopback)) {
+            String refused = rawRequest(fixture.server().port(), "GET", "tenant-a:alice",
+                    "203.0.113.6", ipv4Loopback,
+                    new java.util.concurrent.ConcurrentLinkedQueue<>());
+
+            assertTrue(refused.startsWith("HTTP/1.1 400 "), refused);
+            assertTrue(refused.contains("FORWARDED_CHAIN_TOO_SHORT"), refused);
+            var event = audit.events().stream()
+                    .filter(candidate -> candidate.code().equals("FORWARDED_CHAIN_TOO_SHORT"))
+                    .findFirst().orElseThrow();
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.clientAddress());
+            assertFalse(event.forwarded());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.tenantId());
+            assertEquals(RateLimitAuditEvent.UNKNOWN, event.subject());
+            assertEquals(correlationIn(refused), event.requestId());
         }
     }
 
@@ -456,8 +489,9 @@ class RateLimitHttpIntegrationTest {
         var audit = new RecordingAudit();
         try (var fixture = fixture(limits, audit)) {
             var client = HttpClient.newHttpClient();
-            fixture.plainGet(client, "/health");
-            fixture.plainGet(client, "/health");
+            assertEquals(200, fixture.plainGet(client, "/health").statusCode());
+            var refused = fixture.plainGet(client, "/health");
+            assertEquals(429, refused.statusCode(), refused.body());
 
             var rejection = audit.events().stream()
                     .filter(event -> event.code().equals("ADDRESS_RATE_LIMIT_EXCEEDED"))
@@ -469,6 +503,8 @@ class RateLimitHttpIntegrationTest {
             assertFalse(rejection.forwarded());
             assertEquals(429, rejection.status());
             assertTrue(rejection.retryAfterSeconds() >= 1);
+            assertEquals(correlationIn(refused.body()), rejection.requestId(),
+                    "the unauthenticated error and its audit record must name the same request");
         }
     }
 

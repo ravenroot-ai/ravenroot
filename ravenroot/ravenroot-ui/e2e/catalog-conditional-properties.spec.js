@@ -13,6 +13,10 @@ import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN } from './ports.mjs';
 // adapter name appears anywhere in this file or in src/app.js's handling of it.
 
 const CONTRACT = 'ravenroot.property-condition/1';
+const SERVICE_CONFIGURATION = JSON.stringify({
+  schemaVersion: 1,
+  graphDocumentMaxBytes: 10 * 1024 * 1024,
+});
 
 function propertyCondition(property, values) {
   return { contract: CONTRACT, property, operator: values.length > 1 ? 'ONE_OF' : 'EQUALS', values };
@@ -100,6 +104,11 @@ function startService() {
       Vary: 'Origin',
       'Content-Type': 'application/json; charset=utf-8',
     };
+    if (request.url === '/v1/configuration') {
+      response.writeHead(200, headers);
+      response.end(SERVICE_CONFIGURATION);
+      return;
+    }
     if (request.url === '/v1/node-types') {
       response.writeHead(200, headers);
       response.end(JSON.stringify(catalog));
@@ -126,6 +135,33 @@ async function connectAndModify(page) {
 
 async function addExampleSourceNode(page) {
   await page.locator('#node-catalog [data-catalog-add="example.source"]').click();
+}
+
+async function reopenSubmittedNode(page, id) {
+  await expect.poll(() => page.evaluate(nodeId => {
+    const owner = window.ravenroot.activeDocument();
+    return {
+      inDocument: Boolean(owner?.graph?.nodeMap?.[nodeId]),
+      inRenderer: owner?.cy?.getElementById(nodeId).length === 1,
+      layoutBusy: owner?.layoutBusy,
+    };
+  }, id)).toEqual({ inDocument: true, inRenderer: true, layoutBusy: false });
+  await page.evaluate(() => new Promise(resolve =>
+    requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  const point = await page.evaluate(nodeId => {
+    const owner = window.ravenroot.activeDocument();
+    const rendered = owner.cy.getElementById(nodeId).renderedPosition();
+    const container = owner.cy.container().getBoundingClientRect();
+    return { x: container.left + rendered.x, y: container.top + rendered.y };
+  }, id);
+  await page.mouse.click(point.x, point.y);
+  await expect.poll(() => page.evaluate(() =>
+    window.ravenroot.activeDocument().cy.$(':selected').map(element => element.id()).sort()))
+    .toEqual([id]);
+  const editor = page.locator('#node-editor');
+  await expect(editor).toBeVisible();
+  await expect(editor.locator('input[name="id"]')).toHaveValue(id);
+  await expect(editor.locator('input[name="id"]')).toHaveAttribute('readonly', '');
 }
 
 test.beforeEach(async () => {
@@ -215,14 +251,10 @@ test('a value typed while visible survives being hidden, shown again, and a real
   await page.locator('#node-editor input[name="id"]').fill('conditional-node-1');
   await page.locator('#node-editor button[type="submit"]').click();
 
-  // The submit handler calls showNodeInfo for the just-saved node, which re-renders the Inspector in
-  // edit mode straight from the DOCUMENT's own updated model — reading back what was actually
-  // persisted, not what happened to still be sitting in the form that submitted it.
-  await page.waitForSelector('#node-editor');
-  // readonly on the edit (not create) form, and set to the id just submitted — confirms this is the
-  // just-saved node's own edit form, not still the create form.
-  await expect(page.locator('#node-editor input[name="id"]')).toHaveValue('conditional-node-1');
-  await expect(page.locator('#node-editor input[name="id"]')).toHaveAttribute('readonly', '');
+  // Creating rebuilds the renderer without retaining a selection that did not exist beforehand.
+  // Re-select the settled rendered node through the same physical pointer path an author uses; the
+  // edit form is then reconstructed from the DOCUMENT's updated model, not from the submitted form.
+  await reopenSubmittedNode(page, 'conditional-node-1');
   await page.locator('[data-catalog-property="mode"]').selectOption('WEBHOOK');
   await expect(page.locator('[data-catalog-property="callbackUrl"]')).toHaveValue('https://example.test/callback');
 });
@@ -307,7 +339,6 @@ test('a conditionally required CLOSED CHOICE blocks submit until the author deci
   await deliveryGuarantee.selectOption('EXACTLY_ONCE');
   await page.locator('#node-editor button[type="submit"]').click();
 
-  await page.waitForSelector('#node-editor');
-  await expect(page.locator('#node-editor input[name="id"]')).toHaveValue('conditional-node-2');
-  await expect(page.locator('#node-editor input[name="id"]')).toHaveAttribute('readonly', '');
+  await reopenSubmittedNode(page, 'conditional-node-2');
+  await expect(page.locator('[data-catalog-property="deliveryGuarantee"]')).toHaveValue('EXACTLY_ONCE');
 });

@@ -1,3 +1,5 @@
+import { visualGroupPresentation } from './graph-view-state.js';
+
 export const WORKSPACE_DATABASE_NAME = 'ravenroot-workspaces';
 export const WORKSPACE_DATABASE_VERSION = 1;
 export const WORKSPACE_STORE_NAME = 'tenant-workspaces';
@@ -62,6 +64,7 @@ export function persistedDocument(document_) {
     }),
     graph,
     presentation: Object.freeze({
+      ...visualGroupPresentation(document_),
       renderMode: (document_.renderMode ?? document_.presentation?.renderMode) === 'monitoring'
         ? 'monitoring' : 'design',
       layoutMode: typeof (document_.layoutMode ?? document_.presentation?.layoutMode) === 'string'

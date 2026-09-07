@@ -14,6 +14,183 @@ import {
   validateSourceSessionStatus,
 } from '../src/runtime-client.js';
 
+function versionedRingEvent(overrides = {}) {
+  return {
+    schemaVersion: 1, source: 'RING', id: '1', eventType: 'EXECUTION_STARTED',
+    occurredAt: '2026-01-01T00:00:00Z',
+    processInstanceId: '10000000-0000-0000-0000-000000000001',
+    traversalId: '20000000-0000-0000-0000-000000000002',
+    sequence: 1, engineId: 'pekko', graphVersion: 'graph-v1',
+    executionId: '20000000-0000-0000-0000-000000000002', type: 'EXECUTION_STARTED',
+    invocationId: null, attemptId: null, nodeId: null, edgeId: null,
+    activeInstances: 0, inFlightArrivals: 0, fallback: false,
+    description: 'Execution started.', publicReason: null,
+    message: null, messageRedacted: false, messageTruncated: false,
+    processingDuration: null, ...overrides,
+  };
+}
+
+function versionedDurableEvent(overrides = {}) {
+  return {
+    schemaVersion: 1, source: 'DURABLE', id: '1', eventType: 'EXECUTION_STARTED',
+    occurredAt: '2026-01-01T00:00:00Z',
+    processInstanceId: '10000000-0000-0000-0000-000000000001',
+    traversalId: '20000000-0000-0000-0000-000000000002',
+    journalOffset: 1, streamSequence: 1,
+    eventId: '30000000-0000-0000-0000-000000000003',
+    graphVersion: 'graph-v1', description: 'Execution started.',
+    invocationId: null, attemptId: null, nodeId: null, edgeId: null,
+    causationId: null, handlerId: null, ...overrides,
+  };
+}
+
+describe('versioned execution stream normalization', () => {
+  it('retains writer-compatible empty engine identity and an equal durable type alias', () => {
+    expect(normalizeRuntimeEvent(versionedRingEvent({ engineId: '' })).engineId).toBe('');
+    expect(normalizeRuntimeEvent(versionedDurableEvent({ type: 'EXECUTION_STARTED' })))
+      .toMatchObject({ eventType: 'EXECUTION_STARTED', type: 'EXECUTION_STARTED' });
+    const onlyLegacyType = versionedRingEvent();
+    delete onlyLegacyType.eventType;
+    expect(() => normalizeRuntimeEvent(onlyLegacyType)).toThrow(/schema version 1/);
+  });
+
+  it.each([versionedRingEvent(), versionedDurableEvent()])('accepts the published $source variant', event => {
+    expect(normalizeRuntimeEvent(event)).toEqual({
+      ...event, type: event.eventType, executionId: event.traversalId,
+    });
+  });
+
+  it('preserves unknown classifiers, future fields and already-safe diagnostic output', () => {
+    const future = { nested: ['kept', 2] };
+    const output = { diagnostic: '[REDACTED]' };
+    const event = versionedRingEvent({
+      eventType: 'FUTURE_CLASSIFIER', type: 'FUTURE_CLASSIFIER', future,
+      message: '[REDACTED]', messageRedacted: true, messageTruncated: true,
+      output, outputRedacted: true, outputTruncated: true,
+    });
+    const normalized = normalizeRuntimeEvent(event);
+    expect(normalized).toEqual(event);
+    expect(normalized.future).toBe(future);
+    expect(normalized.output).toBe(output);
+    expect(normalized).not.toHaveProperty('detail');
+    expect(normalizeRuntimeEvent(versionedDurableEvent({ eventType: 'FUTURE_JOURNAL_EVENT', future })))
+      .toMatchObject({ type: 'FUTURE_JOURNAL_EVENT', future });
+  });
+
+  it.each(['schemaVersion', 'source', 'id', 'eventType', 'occurredAt', 'processInstanceId', 'traversalId'])
+  ('does not treat a partial declared version as legacy when %s is absent', field => {
+    const event = versionedDurableEvent();
+    delete event[field];
+    if (field === 'schemaVersion') {
+      // Removing the declaration is the actual compatibility path, not an unsupported declaration.
+      expect(normalizeRuntimeEvent(event)).toMatchObject({ type: 'EXECUTION_STARTED' });
+    } else {
+      expect(() => normalizeRuntimeEvent(event)).toThrow();
+    }
+  });
+
+  it.each(['sequence', 'engineId', 'executionId', 'type', 'activeInstances', 'inFlightArrivals',
+    'fallback', 'publicReason', 'message', 'messageRedacted', 'messageTruncated', 'processingDuration'])
+  ('requires published RING field %s', field => {
+    const event = versionedRingEvent();
+    delete event[field];
+    expect(() => normalizeRuntimeEvent(event)).toThrow();
+  });
+
+  it.each(['journalOffset', 'streamSequence', 'eventId', 'causationId', 'handlerId'])
+  ('requires published DURABLE field %s', field => {
+    const event = versionedDurableEvent();
+    delete event[field];
+    expect(() => normalizeRuntimeEvent(event)).toThrow();
+  });
+
+  it.each([null, undefined, 0, 2, '1', true])('rejects declared unsupported version %s', schemaVersion => {
+    expect(() => normalizeRuntimeEvent(versionedRingEvent({ schemaVersion }))).toThrow(/schema version/);
+  });
+
+  it.each(['LIVE', '', null, 1])('rejects unsupported source %s', source => {
+    expect(() => normalizeRuntimeEvent(versionedRingEvent({ source }))).toThrow(/source/);
+  });
+
+  it.each(['journalOffset', 'streamSequence', 'eventId', 'causationId', 'handlerId'])
+  ('rejects durable-only member %s even when null in RING', field => {
+    expect(() => normalizeRuntimeEvent(versionedRingEvent({ [field]: null }))).toThrow(/other source/);
+  });
+
+  it.each(['sequence', 'engineId', 'executionId', 'activeInstances', 'inFlightArrivals', 'fallback',
+    'publicReason', 'message', 'messageRedacted', 'messageTruncated', 'output',
+    'outputRedacted', 'outputTruncated', 'processingDuration'])
+  ('rejects live-only member %s even when null in DURABLE', field => {
+    expect(() => normalizeRuntimeEvent(versionedDurableEvent({ [field]: null }))).toThrow(/other source/);
+  });
+
+  it('rejects conflicting canonical aliases without changing legacy alias behavior', () => {
+    expect(() => normalizeRuntimeEvent(versionedRingEvent({ type: 'EXECUTION_FAILED' })))
+      .toThrow('type and eventType disagree');
+    expect(() => normalizeRuntimeEvent(versionedRingEvent({
+      executionId: '30000000-0000-0000-0000-000000000003',
+    }))).toThrow('executionId and traversalId disagree');
+    expect(normalizeRuntimeEvent({ type: 'NODE_STARTED', executionId: 'legacy-run' }))
+      .toEqual({ type: 'NODE_STARTED', executionId: 'legacy-run' });
+    expect(normalizeRuntimeEvent({ eventType: 'EXECUTION_FAILED', traversalId: 'legacy-run' }))
+      .toMatchObject({ type: 'EXECUTION_FAILED', executionId: 'legacy-run' });
+  });
+
+  it.each([
+    { processInstanceId: 'not-a-uuid' }, { traversalId: null }, { occurredAt: null },
+    { eventType: '' }, { type: null }, { sequence: '1' }, { sequence: 1.5 },
+    { sequence: 2 }, { activeInstances: -1 }, { inFlightArrivals: null },
+    { fallback: 'false' }, { message: {} }, { messageRedacted: null },
+    { messageTruncated: 'false' }, { processingDuration: -1 }, { processingDuration: Infinity },
+    { publicReason: 'raw exception prose' }, { outputRedacted: 'yes' }, { edgeId: 4 },
+    { invocationId: 'not-a-uuid' }, { graphVersion: null },
+  ])('rejects malformed known live fields %j', fields => {
+    expect(() => normalizeRuntimeEvent(versionedRingEvent(fields))).toThrow();
+  });
+
+  it.each([
+    { id: '0', journalOffset: 0 }, { streamSequence: 0 }, { streamSequence: 1.5 },
+    { journalOffset: '1' }, { journalOffset: 2 }, { eventId: null },
+    { causationId: 'not-a-uuid' }, { handlerId: 4 }, { type: null },
+  ])('rejects malformed known durable fields %j', fields => {
+    expect(() => normalizeRuntimeEvent(versionedDurableEvent(fields))).toThrow();
+  });
+
+  it.each(['+1', '01', '-0', '', '1.0', '1e0', '9223372036854775808',
+    '-9223372036854775809', '9'.repeat(21), 1, null])
+  ('rejects noncanonical or out-of-range exact cursor %s', id => {
+    expect(() => normalizeRuntimeEvent(versionedRingEvent({ id }))).toThrow(/id/);
+  });
+
+  it.each(['9007199254740993', '9007199254740995', '9223372036854775807', '-9223372036854775808'])
+  ('preserves exact live cursor %s after JSON numeric rounding', id => {
+    const raw = JSON.stringify(versionedRingEvent({ id })).replace('"sequence":1', '"sequence":' + id);
+    const event = JSON.parse(raw);
+    expect(Number.isSafeInteger(event.sequence)).toBe(false);
+    expect(normalizeRuntimeEvent(event).id).toBe(id);
+    expect(() => normalizeRuntimeEvent({ ...event, sequence: Number(id) + 4096 })).toThrow();
+  });
+
+  it.each(['9007199254740993', '9223372036854775807'])
+  ('preserves exact durable cursor %s after JSON numeric rounding', id => {
+    const raw = JSON.stringify(versionedDurableEvent({ id }))
+      .replace('"journalOffset":1', '"journalOffset":' + id);
+    expect(normalizeRuntimeEvent(JSON.parse(raw)).id).toBe(id);
+  });
+
+  it.each(['+1000000000-12-31T23:59:59.999999999Z', '-1000000000-01-01T00:00:00Z'])
+  ('retains extended-year producer time %s without Date coercion', occurredAt => {
+    expect(normalizeRuntimeEvent(versionedRingEvent({ occurredAt })).occurredAt).toBe(occurredAt);
+  });
+
+  it('does not mistake either named control payload for an execution envelope', () => {
+    for (const control of [
+      { code: 'STREAM_RETENTION_EXCEEDED', retainedFrom: 10, resumeFrom: 9 },
+      { code: 'STREAM_CONSUMER_TOO_SLOW', resumeAfter: 7 },
+    ]) expect(() => normalizeRuntimeEvent(control)).toThrow();
+  });
+});
+
 describe('runtime configuration client', () => {
   it.each([
     1024,
@@ -403,6 +580,16 @@ function streamResponse(frames, status = 200) {
   };
 }
 
+function deferredValue() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolve_, reject_) => {
+    resolve = resolve_;
+    reject = reject_;
+  });
+  return { promise, resolve, reject };
+}
+
 describe('Ravenroot runtime client security boundary', () => {
   it('uses same-origin endpoints, bearer headers and explicitly omits credentials', async () => {
     const fetchImpl = vi.fn().mockResolvedValue({
@@ -483,21 +670,180 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(fetchImpl.mock.calls[0][1]).toEqual(expect.objectContaining({ credentials: 'omit' }));
   });
 
-  it('still surfaces a service 401 as the same typed error and clears the in-memory token', async () => {
+  it.each([
+    [401, 'Authentication expired'],
+    [403, 'Access revoked'],
+  ])('surfaces a current service %s and clears only that credential snapshot', async (status, message) => {
     const provider = memoryTokenProvider('stale');
     const fetchImpl = vi.fn().mockResolvedValue({
       ok: false,
-      status: 401,
+      status,
       json: async () => ({ error: 'unauthorized' }),
     });
     const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
 
     await expect(client.nodeTypes()).rejects.toEqual(expect.objectContaining({
       name: 'RuntimeAuthorizationError',
-      status: 401,
-      message: 'Authentication expired',
+      status,
+      message,
     }));
     expect(await provider.getAccessToken()).toBe('');
+  });
+
+  it.each([
+    [401, 'Authentication expired'],
+    [403, 'Access revoked'],
+  ])('retains a replacement credential after a delayed JSON %s', async (status, message) => {
+    const rejected = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    const fetchImpl = vi.fn(async (_url, request) => request.headers.Authorization === 'Bearer token-a'
+      ? rejected.promise
+      : { ok: true, status: 200, text: async () => '[]' });
+    const oldClient = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+    const replacementClient = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+
+    const oldRequest = oldClient.nodeTypes().catch(error => error);
+    try {
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('token-b');
+      await expect(replacementClient.nodeTypes()).resolves.toEqual([]);
+      expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe('Bearer token-b');
+
+      rejected.resolve({ ok: false, status });
+      await expect(oldRequest).resolves.toEqual(expect.objectContaining({
+        name: 'RuntimeAuthorizationError', status, message,
+      }));
+      expect(await provider.getAccessToken()).toBe('token-b');
+      await expect(replacementClient.nodeTypes()).resolves.toEqual([]);
+      expect(fetchImpl.mock.calls[2][1].headers.Authorization).toBe('Bearer token-b');
+    } finally {
+      rejected.resolve({ ok: false, status });
+    }
+  });
+
+  it('treats reinstalling the same token value as a new credential generation', async () => {
+    const rejected = deferredValue();
+    const provider = memoryTokenProvider('same-token');
+    const fetchImpl = vi.fn()
+      .mockImplementationOnce(() => rejected.promise)
+      .mockResolvedValue({ ok: true, status: 200, text: async () => '[]' });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+
+    const oldRequest = client.nodeTypes().catch(error => error);
+    try {
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('same-token');
+      rejected.resolve({ ok: false, status: 401 });
+
+      await expect(oldRequest).resolves.toBeInstanceOf(RuntimeAuthorizationError);
+      expect(await provider.getAccessToken()).toBe('same-token');
+      await client.nodeTypes();
+      expect(fetchImpl.mock.calls[1][1].headers.Authorization).toBe('Bearer same-token');
+    } finally {
+      rejected.resolve({ ok: false, status: 401 });
+    }
+  });
+
+  it('keeps explicit revocation unconditional while invalidating old snapshots', async () => {
+    const provider = memoryTokenProvider('token');
+    const oldSnapshot = provider.getAccessTokenSnapshot();
+
+    provider.clearAccessToken();
+
+    expect(await provider.getAccessToken()).toBe('');
+    expect(provider.clearAccessTokenIfCurrent(oldSnapshot)).toBe(false);
+  });
+
+  it('keeps legacy token providers readable without invoking unsafe automatic mutation hooks', async () => {
+    const provider = {
+      getAccessToken: vi.fn(async () => 'legacy-token'),
+      clearAccessToken: vi.fn(),
+      refreshAccessToken: vi.fn(),
+    };
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+
+    await expect(client.nodeTypes()).rejects.toEqual(expect.objectContaining({
+      name: 'RuntimeAuthorizationError', status: 401, message: 'Authentication expired',
+    }));
+    expect(provider.getAccessToken).toHaveBeenCalledTimes(1);
+    expect(provider.clearAccessToken).not.toHaveBeenCalled();
+    expect(provider.refreshAccessToken).not.toHaveBeenCalled();
+  });
+
+  it('does not replace the typed authorization error when conditional invalidation rejects', async () => {
+    const provider = memoryTokenProvider('token');
+    provider.clearAccessTokenIfCurrent = vi.fn(async () => {
+      throw new Error('provider-secret-canary');
+    });
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 403 }),
+      tokenProvider: provider,
+    });
+
+    const error = await client.nodeTypes().catch(caught => caught);
+
+    expect(error).toBeInstanceOf(RuntimeAuthorizationError);
+    expect(error).toMatchObject({ status: 403, message: 'Access revoked' });
+    expect(error.message).not.toContain('provider-secret-canary');
+    expect(await provider.getAccessToken()).toBe('token');
+  });
+
+  it('awaits an asynchronous custom snapshot and its atomic conditional clear', async () => {
+    let current = Object.freeze({ accessToken: 'async-token' });
+    const provider = {
+      getAccessTokenSnapshot: vi.fn(async () => current),
+      clearAccessTokenIfCurrent: vi.fn(async snapshot => {
+        if (snapshot !== current) return false;
+        current = Object.freeze({ accessToken: '' });
+        return true;
+      }),
+    };
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+
+    await expect(client.nodeTypes()).rejects.toBeInstanceOf(RuntimeAuthorizationError);
+
+    expect(provider.getAccessTokenSnapshot).toHaveBeenCalledTimes(1);
+    expect(provider.clearAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
+    expect(current.accessToken).toBe('');
+  });
+
+  it('lets an asynchronous custom clear reject a snapshot replaced while it was pending', async () => {
+    const clearEntered = deferredValue();
+    const releaseClear = deferredValue();
+    let current = Object.freeze({ accessToken: 'token-a' });
+    const provider = {
+      getAccessTokenSnapshot: vi.fn(async () => current),
+      setAccessToken: value => { current = Object.freeze({ accessToken: value }); },
+      clearAccessTokenIfCurrent: vi.fn(async snapshot => {
+        clearEntered.resolve();
+        await releaseClear.promise;
+        if (snapshot !== current) return false;
+        current = Object.freeze({ accessToken: '' });
+        return true;
+      }),
+    };
+    const fetchImpl = vi.fn().mockResolvedValue({ ok: false, status: 403 });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+    try {
+      const request = client.nodeTypes().catch(error => error);
+      await clearEntered.promise;
+      provider.setAccessToken('token-b');
+      releaseClear.resolve();
+
+      await expect(request).resolves.toEqual(expect.objectContaining({
+        name: 'RuntimeAuthorizationError', status: 403, message: 'Access revoked',
+      }));
+      expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer token-a');
+      expect(current.accessToken).toBe('token-b');
+    } finally {
+      releaseClear.resolve();
+    }
   });
 
   it('parses multiline SSE fields without interpreting event content as markup', () => {
@@ -534,27 +880,250 @@ describe('Ravenroot runtime client security boundary', () => {
     expect(changes.some(([status]) => status === 'connected')).toBe(true);
   });
 
-  it('accepts the server maximum combined EDGE_TRAVERSED projection below the 65,536-byte frame ceiling', async () => {
+  it.each([
+    ['invalid JSON', 'id: 2\nevent: execution\ndata: {secret-canary}\n\n'],
+    ['invalid JSON in a later chunk', 'id: 2\nevent: execution\ndata: {secret-canary}\n\n', true],
+    ['empty data', 'id: 2\nevent: execution\ndata:\n\n'],
+    ['empty colonless data', 'id: 2\nevent: execution\ndata\n\n'],
+    ...[
+      ['unsupported version', '2', { schemaVersion: 2 }],
+      ['unsupported source', '2', { source: 'FUTURE' }],
+      ['native mismatch', '2', { sequence: 3 }],
+      ['missing transport ID', undefined, {}],
+      ['mismatched transport ID', '4', {}],
+      ['noncanonical transport ID', '02', {}],
+      ['empty transport ID', '', {}],
+      ['NUL transport ID', '2\0', {}],
+      ['out-of-range transport ID', '9223372036854775808', {}],
+      ['durable identity mismatch', '4', versionedDurableEvent({ id: '2', journalOffset: 2 })],
+    ].map(([name, id, fields]) => [name,
+      `${id === undefined ? '' : `id: ${id}\n`}event: execution\ndata: ${JSON.stringify(
+        fields.source === 'DURABLE' ? fields : versionedRingEvent({ id: '2', sequence: 2, ...fields }))}\n\n`]),
+  ])('stops before a later execution after %s and retries from the accepted cursor', async (_, invalid, separateChunks = false) => {
+    const frame = id => `id: ${id}\nevent: execution\ndata: ${JSON.stringify(
+      versionedRingEvent({ id, sequence: Number(id) }))}\n\n`;
+    const response = streamResponse(separateChunks
+      ? [frame('1'), invalid, frame('3')] : [frame('1') + invalid + frame('3'), frame('4')]);
+    const reader = response.body.getReader();
+    response.body.getReader = () => reader;
+    // Even cancellation failure must not expose arbitrary exception or input text.
+    reader.cancel.mockRejectedValue(new Error('cancel-secret-canary'));
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response)
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const received = [];
+    const states = [];
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    const disconnect = client.connect(event => received.push(event.id),
+      (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)?.[0]).toBe('revoked'));
+      expect(received).toEqual(['1']);
+      expect(reader.read).toHaveBeenCalledTimes(separateChunks ? 2 : 1);
+      expect(reader.cancel).toHaveBeenCalledTimes(1);
+      expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe('1');
+      expect(states).toContainEqual(['reconnecting', 'Invalid or undelivered execution event']);
+      expect(states.flat().join(' ')).not.toContain('secret-canary');
+    } finally { disconnect(); }
+  });
+
+  it.each(['throw', 'reject'])('does not acknowledge a delivery callback that will %s', async mode => {
+    const gate = deferredValue();
+    const frame = id => `id: ${id}\nevent: execution\ndata: ${JSON.stringify(
+      versionedRingEvent({ id, sequence: Number(id) }))}\n\n`;
+    const response = streamResponse([frame('1') + frame('2') + frame('3')]);
+    const reader = response.body.getReader();
+    response.body.getReader = () => reader;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(response)
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const states = [];
+    const delivery = vi.fn(event => {
+      if (event.id !== '2') return;
+      if (mode === 'throw') throw new Error('delivery-secret-canary');
+      return gate.promise;
+    });
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    const disconnect = client.connect(delivery, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(delivery).toHaveBeenCalledTimes(2));
+      if (mode === 'reject') {
+        expect(client.lastEventId).toBe('1');
+        expect(fetchImpl).toHaveBeenCalledTimes(1);
+        gate.reject(new Error('delivery-secret-canary'));
+      }
+      await vi.waitFor(() => expect(states.at(-1)?.[0]).toBe('revoked'));
+      expect(delivery.mock.calls.map(([event]) => event.id)).toEqual(['1', '2']);
+      expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe('1');
+      expect(reader.cancel).toHaveBeenCalledTimes(1);
+      expect(states.flat().join(' ')).not.toContain('secret-canary');
+    } finally { gate.resolve(); disconnect(); }
+  });
+
+  it('waits for asynchronous delivery before acknowledging or delivering the next frame', async () => {
+    const gate = deferredValue();
+    const frame = id => `id: ${id}\nevent: execution\ndata: ${JSON.stringify(
+      versionedRingEvent({ id, sequence: Number(id) }))}\n\n`;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(streamResponse([frame('1') + frame('2')]))
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const states = [];
+    const delivery = vi.fn(event => event.id === '1' ? gate.promise : undefined);
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    const disconnect = client.connect(delivery, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(delivery).toHaveBeenCalledTimes(1));
+      expect(client.lastEventId).toBe('');
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      gate.resolve();
+      await vi.waitFor(() => expect(states.at(-1)?.[0]).toBe('revoked'));
+      expect(delivery.mock.calls.map(([event]) => event.id)).toEqual(['1', '2']);
+      expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe('2');
+    } finally { gate.resolve(); disconnect(); }
+  });
+
+  it('fences pending delivery when a new connection replaces the old stream', async () => {
+    const oldDelivery = deferredValue();
+    const newStreamEnd = deferredValue();
+    const frame = id => `id: ${id}\nevent: execution\ndata: ${JSON.stringify(
+      versionedRingEvent({ id, sequence: Number(id) }))}\n\n`;
+    const oldResponse = streamResponse([frame('1') + frame('2')]);
+    const oldReader = oldResponse.body.getReader();
+    oldResponse.body.getReader = () => oldReader;
+    const newResponse = streamResponse([]);
+    const newReader = newResponse.body.getReader();
+    newReader.read.mockResolvedValueOnce({ value: new TextEncoder().encode(frame('10')), done: false })
+      .mockImplementation(() => newStreamEnd.promise);
+    newResponse.body.getReader = () => newReader;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(oldResponse).mockResolvedValueOnce(newResponse)
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const oldStates = [];
+    const newStates = [];
+    const oldCallback = vi.fn(() => oldDelivery.promise);
+    const newCallback = vi.fn();
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    client.connect(oldCallback, status => oldStates.push(status));
+    try {
+      await vi.waitFor(() => expect(oldCallback).toHaveBeenCalledTimes(1));
+      const oldSignal = fetchImpl.mock.calls[0][1].signal;
+      client.connect(newCallback, status => newStates.push(status));
+      await vi.waitFor(() => expect(newReader.read).toHaveBeenCalledTimes(2));
+      expect(oldSignal.aborted).toBe(true);
+      expect(client.lastEventId).toBe('10');
+      expect(newCallback.mock.calls.map(([event]) => event.id)).toEqual(['10']);
+
+      oldDelivery.resolve();
+      // Finish B after releasing A; B's reconnect exposes any stale cursor overwrite by A.
+      newStreamEnd.resolve({ value: undefined, done: true });
+      await vi.waitFor(() => expect(newStates.at(-1)).toBe('revoked'));
+      expect(client.lastEventId).toBe('10');
+      expect(oldCallback.mock.calls.map(([event]) => event.id)).toEqual(['1']);
+      expect(oldReader.read).toHaveBeenCalledTimes(1);
+      expect(oldStates).toEqual(['connected']);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(fetchImpl.mock.calls[2][1].signal).toBe(fetchImpl.mock.calls[1][1].signal);
+      expect(fetchImpl.mock.calls[2][1].headers['Last-Event-ID']).toBe('10');
+    } finally {
+      client.disconnect();
+      oldDelivery.resolve();
+      newStreamEnd.resolve({ value: undefined, done: true });
+    }
+  });
+
+  it('exhausts the existing retry budget without acknowledging a repeatedly invalid first event', async () => {
+    const readers = [];
+    const fetchImpl = vi.fn(() => {
+      const response = streamResponse(['id: 2\nevent: execution\ndata: {\n\n']);
+      const reader = response.body.getReader();
+      readers.push(reader);
+      response.body.getReader = () => reader;
+      return Promise.resolve(response);
+    });
+    const states = [];
+    const delivery = vi.fn();
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl, maxRetries: 1, sleep: vi.fn(async () => {}),
+    });
+    const disconnect = client.connect(delivery, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)?.[0]).toBe('error'));
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      expect(delivery).not.toHaveBeenCalled();
+      expect(client.lastEventId).toBe('');
+      expect(fetchImpl.mock.calls.every(([, options]) => !('Last-Event-ID' in options.headers))).toBe(true);
+      for (const reader of readers) expect(reader.cancel).toHaveBeenCalledTimes(1);
+    } finally { disconnect(); }
+  });
+
+  it.each([
+    [undefined, 'legacy-1'], ['opaque-next', 'opaque-next'], ['', undefined], ['bad\0id', 'legacy-1'],
+  ])('retains legacy execution ID semantics for %j after delivery', async (id, expected) => {
+    const data = JSON.stringify({ type: 'NODE_STARTED', executionId: 'legacy-traversal' });
+    const frame = id => `${id === undefined ? '' : `id: ${id}\n`}event: execution\ndata: ${data}\n\n`;
+    const fetchImpl = vi.fn().mockResolvedValueOnce(streamResponse([frame('legacy-1') + frame(id)]))
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const states = [];
+    const delivery = vi.fn();
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    const disconnect = client.connect(delivery, status => states.push(status));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)).toBe('revoked'));
+      expect(delivery).toHaveBeenCalledTimes(2);
+      expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe(expected);
+    } finally { disconnect(); }
+  });
+
+  it('does not acknowledge comments, id-only frames, unknown events or stream controls', async () => {
+    const event = versionedRingEvent();
+    const frames = [`id: 1\nevent: execution\ndata: ${JSON.stringify(event)}\n\n`,
+      ': keepalive\n\n', 'id: 2\n\n', 'id: 3\nevent: execution\n\n',
+      'id: 4\nevent: future\ndata: {}\n\n',
+      'id: 5\nevent: stream-truncated\ndata: {"code":"STREAM_RETENTION_EXCEEDED"}\n\n',
+      'id: 6\nevent: stream-overrun\ndata: {"code":"STREAM_CONSUMER_TOO_SLOW"}\n\n'];
+    const fetchImpl = vi.fn().mockResolvedValueOnce(streamResponse(frames))
+      .mockResolvedValueOnce({ ok: false, status: 403 });
+    const states = [];
+    const delivery = vi.fn();
+    const client = new RavenrootRuntimeClient('', { fetchImpl, sleep: vi.fn(async () => {}) });
+    const disconnect = client.connect(delivery, status => states.push(status));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)).toBe('revoked'));
+      expect(delivery).toHaveBeenCalledTimes(1);
+      expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe('1');
+    } finally { disconnect(); }
+  });
+
+  it.each(['RING', 'DURABLE'])('accepts the maximum versioned %s EDGE_TRAVERSED frame below 65,536 bytes', async source => {
     // Mirrors EdgeTraversalWireBudget's maximum-valid union fixture. These are server-owned bounds,
     // not a second client policy: the browser proves it can consume the largest frame the server is
     // allowed to publish without locally trimming or imposing an incompatible auxiliary-field cap.
     const edgeId = '\u0001'.repeat(8_192);
     const engineId = '\u0001'.repeat(2_036);
-    const event = {
-      sequence: 1, occurredAt: '2026-08-30T12:00:00Z', type: 'EDGE_TRAVERSED',
-      executionId: 'execution-1', traversalId: 'execution-1', processInstanceId: 'process-1',
-      edgeId, tenantId: 'tenant', requestId: 'request', engineId, graphVersion: 'graph',
-      nodeId: 'source', publicReason: 'continue', detail: 'edge traversed', nodeCatalogKey: 'catalog',
-      deploymentId: 'deployment', workloadId: 'workload',
-    };
+    const event = source === 'RING' ? versionedRingEvent({
+      id: '-9223372036854775808', sequence: Number(-9223372036854775808n),
+      occurredAt: '+1000000000-12-31T23:59:59.999999999Z',
+      type: 'EDGE_TRAVERSED', eventType: 'EDGE_TRAVERSED', edgeId,
+      engineId, graphVersion: 'graph', nodeId: 'source', publicReason: 'continue',
+      activeInstances: 2_147_483_647, inFlightArrivals: 2_147_483_647,
+      fallback: true, processingDuration: 9_223_372_036.854776,
+    }) : versionedDurableEvent({
+      id: '9223372036854775807', journalOffset: Number(9223372036854775807n),
+      streamSequence: Number(9223372036854775807n),
+      occurredAt: '+1000000000-12-31T23:59:59.999999999Z',
+      eventType: 'EDGE_TRAVERSED', edgeId, graphVersion: '\u0001'.repeat(2_045), nodeId: 'src',
+      causationId: '40000000-0000-0000-0000-000000000004',
+      handlerId: '50000000-0000-0000-0000-000000000005',
+    });
+    event.invocationId = '60000000-0000-0000-0000-000000000006';
+    event.attemptId = '70000000-0000-0000-0000-000000000007';
     const escapedBytes = value => new TextEncoder()
       .encode(JSON.stringify(value).slice(1, -1)).byteLength;
-    const auxiliary = [event.tenantId, event.requestId, event.engineId, event.graphVersion,
-      event.nodeId, event.publicReason, event.detail, event.nodeCatalogKey, event.deploymentId, event.workloadId];
+    // The live admission budget also counts trusted fields that never enter the public frame.
+    const auxiliary = source === 'RING'
+      ? ['tenant', 'request', event.engineId, event.graphVersion, event.nodeId, event.publicReason,
+        'edge traversed', 'catalog', 'deployment', 'workload']
+      : [event.eventType, event.graphVersion, event.nodeId];
     expect(escapedBytes(edgeId)).toBe(49_152);
     expect(auxiliary.reduce((sum, value) => sum + escapedBytes(value), 0)).toBe(12_287);
 
-    const frame = `id: 1\nevent: execution\ndata: ${JSON.stringify(event)}\n\n`;
+    const frame = `id: ${event.id}\nevent: execution\ndata: ${JSON.stringify(event)}\n\n`;
     expect(new TextEncoder().encode(frame).byteLength).toBeLessThan(65_536);
     const received = [];
     const changes = [];
@@ -571,7 +1140,12 @@ describe('Ravenroot runtime client security boundary', () => {
     disconnect();
     expect(received).toHaveLength(1);
     expect(received[0].edgeId).toBe(edgeId);
-    expect(received[0].engineId).toBe(engineId);
+    expect(received[0].id).toBe(event.id);
+    expect(received[0].source).toBe(source);
+    expect(fetchImpl.mock.calls[1][1].headers['Last-Event-ID']).toBe(event.id);
+    if (source === 'RING') expect(received[0].engineId).toBe(engineId);
+    expect(received[0]).not.toHaveProperty('detail');
+    expect(received[0]).not.toHaveProperty('tenantId');
   });
 
   it('normalizes durable replay fields into the live event contract', () => {
@@ -650,7 +1224,11 @@ describe('Ravenroot runtime client security boundary', () => {
 
   it('refreshes once on 401 and never retries terminal 403', async () => {
     const provider = memoryTokenProvider('expired');
-    provider.refreshAccessToken = vi.fn(async () => provider.setAccessToken('fresh'));
+    provider.refreshAccessTokenIfCurrent = vi.fn(async snapshot => {
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      provider.setAccessToken('fresh');
+      return true;
+    });
     const fetchImpl = vi.fn()
       .mockResolvedValueOnce({ ok: false, status: 401 })
       .mockResolvedValueOnce({ ok: false, status: 403 });
@@ -660,9 +1238,141 @@ describe('Ravenroot runtime client security boundary', () => {
     client.connect(() => {}, (status, message) => states.push([status, message]));
     await vi.waitFor(() => expect(states.at(-1)?.[0]).toBe('revoked'));
 
-    expect(provider.refreshAccessToken).toHaveBeenCalledTimes(1);
+    expect(provider.refreshAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.map(([, request]) => request.headers.Authorization))
+      .toEqual(['Bearer expired', 'Bearer fresh']);
     expect(await provider.getAccessToken()).toBe('');
+  });
+
+  it('does not invoke a legacy SSE refresh or clear without an atomic snapshot capability', async () => {
+    const provider = {
+      getAccessToken: vi.fn(async () => 'legacy-token'),
+      refreshAccessToken: vi.fn(),
+      clearAccessToken: vi.fn(),
+    };
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(provider.refreshAccessToken).not.toHaveBeenCalled();
+      expect(provider.clearAccessToken).not.toHaveBeenCalled();
+    } finally {
+      disconnect();
+    }
+  });
+
+  it('does not start a conditional refresh for a stale SSE 401 snapshot', async () => {
+    const response = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    let refreshWork = 0;
+    provider.refreshAccessTokenIfCurrent = vi.fn(async snapshot => {
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      refreshWork += 1;
+      provider.setAccessToken('refreshed');
+      return true;
+    });
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn(() => response.promise), tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(client.fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('token-b');
+      response.resolve({ ok: false, status: 401 });
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(provider.refreshAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
+      expect(refreshWork).toBe(0);
+      expect(await provider.getAccessToken()).toBe('token-b');
+    } finally {
+      response.resolve({ ok: false, status: 401 });
+      disconnect();
+    }
+  });
+
+  it('does not commit a conditional refresh when a replacement arrives during refresh work', async () => {
+    const refreshEntered = deferredValue();
+    const releaseRefresh = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    provider.refreshAccessTokenIfCurrent = vi.fn(async snapshot => {
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      refreshEntered.resolve();
+      await releaseRefresh.promise;
+      if (provider.getAccessTokenSnapshot() !== snapshot) return false;
+      provider.setAccessToken('refreshed');
+      return true;
+    });
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await refreshEntered.promise;
+      provider.setAccessToken('token-b');
+      releaseRefresh.resolve();
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(provider.refreshAccessTokenIfCurrent).toHaveBeenCalledTimes(1);
+      expect(await provider.getAccessToken()).toBe('token-b');
+    } finally {
+      releaseRefresh.resolve();
+      disconnect();
+    }
+  });
+
+  it('keeps a rejected refresh failure behind the fixed typed SSE 401', async () => {
+    const provider = memoryTokenProvider('token');
+    provider.refreshAccessTokenIfCurrent = vi.fn(async () => {
+      throw new Error('refresh-provider-secret-canary');
+    });
+    const states = [];
+    const client = new RavenrootRuntimeClient('', {
+      fetchImpl: vi.fn().mockResolvedValue({ ok: false, status: 401 }),
+      tokenProvider: provider,
+    });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['authentication-required',
+        'Authentication expired']));
+
+      expect(states.flat().join(' ')).not.toContain('refresh-provider-secret-canary');
+      expect(await provider.getAccessToken()).toBe('');
+    } finally {
+      disconnect();
+    }
+  });
+
+  it('retains token B when an old SSE 403 arrives before that client disconnects', async () => {
+    const response = deferredValue();
+    const provider = memoryTokenProvider('token-a');
+    const states = [];
+    const fetchImpl = vi.fn(() => response.promise);
+    const client = new RavenrootRuntimeClient('', { fetchImpl, tokenProvider: provider });
+    const disconnect = client.connect(() => {}, (status, message) => states.push([status, message]));
+    try {
+      await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+      provider.setAccessToken('token-b');
+      response.resolve({ ok: false, status: 403 });
+      await vi.waitFor(() => expect(states.at(-1)).toEqual(['revoked', 'Access revoked']));
+
+      expect(fetchImpl.mock.calls[0][1].headers.Authorization).toBe('Bearer token-a');
+      expect(await provider.getAccessToken()).toBe('token-b');
+    } finally {
+      response.resolve({ ok: false, status: 403 });
+      disconnect();
+    }
   });
 
   it('rejects oversized unframed SSE input and stops after the bounded retry budget', async () => {

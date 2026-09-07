@@ -4,6 +4,10 @@ import { expect, test } from '@playwright/test';
 
 import { SERVICE_ORIGIN, SERVICE_PORT, UI_ORIGIN, UI_PORT } from './ports.mjs';
 
+const SERVICE_CONFIGURATION = JSON.stringify({
+  schemaVersion: 1,
+  graphDocumentMaxBytes: 10 * 1024 * 1024,
+});
 
 let service;
 let preflights;
@@ -25,6 +29,15 @@ test.beforeAll(async () => {
         Vary: 'Origin',
       } : {});
       response.end();
+      return;
+    }
+    if (request.url === '/v1/configuration') {
+      response.writeHead(200, {
+        'Access-Control-Allow-Origin': UI_ORIGIN,
+        Vary: 'Origin',
+        'Content-Type': 'application/json; charset=utf-8',
+      });
+      response.end(SERVICE_CONFIGURATION);
       return;
     }
     if (request.url === '/v1/node-types') {

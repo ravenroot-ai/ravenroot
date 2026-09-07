@@ -125,6 +125,8 @@
       url: /reference/embed-extension-contracts.html
     - title: Backup and recovery bundle
       url: /reference/backup-recovery.html
+    - title: Shared PostgreSQL persistence
+      url: /reference/postgresql-persistence.html
 
 - title: First-party bundle reference
   items:

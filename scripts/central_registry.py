@@ -58,6 +58,7 @@ PUBLISHABLE_ARTIFACTS = (
     "ravenroot-openapi-server",
     "ravenroot-parent",
     "ravenroot-pekko",
+    "ravenroot-persistence-postgresql",
     "ravenroot-persistence-sqlite",
     "ravenroot-persistence-testkit",
     "ravenroot-plugin-bundle",

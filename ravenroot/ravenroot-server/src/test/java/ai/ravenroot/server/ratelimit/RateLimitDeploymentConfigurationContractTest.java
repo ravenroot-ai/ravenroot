@@ -6,6 +6,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -44,11 +46,8 @@ class RateLimitDeploymentConfigurationContractTest {
         String template = read("deploy/helm/ravenroot/templates/deployment.yaml");
         String kubernetes = read("deploy/kubernetes/ravenroot.yaml");
         Map<String, String> helmValues = yamlScalars(values);
-        String rateSchema = jsonObject(schema, "rateLimit");
+        String rateSchema = rateSchema(schema, settings);
 
-        assertTrue(schema.contains("\"required\": [\"image\", \"auth\", \"graph\", \"assistant\","
-                + " \"rateLimit\"]"));
-        assertTrue(rateSchema.contains("\"additionalProperties\": false"));
         assertEquals(settings.stream().map(Setting::environment).collect(Collectors.toSet()),
                 schemaEnvironmentNames(rateSchema));
 
@@ -107,7 +106,7 @@ class RateLimitDeploymentConfigurationContractTest {
 
     @Test
     void loweredRelationshipDependentSchemaMaximaCannotMasqueradeAsJavaPolicy() throws Exception {
-        String schema = jsonObject(read("deploy/helm/ravenroot/values.schema.json"), "rateLimit");
+        String schema = rateSchema(read("deploy/helm/ravenroot/values.schema.json"), settings());
         for (String component : List.of(
                 "addressRequestsPerSecond", "principalConcurrentStreams", "maxHeaderValueBytes")) {
             Setting setting = setting(component);
@@ -116,6 +115,37 @@ class RateLimitDeploymentConfigurationContractTest {
             assertEquals(setting.maximum(),
                     valueOf(RateLimitConfiguration.fromEnvironment(candidate(setting, setting.maximum())), setting));
         }
+    }
+
+    @Test
+    void rateSchemaSelectionRejectsMissingDuplicateAndShadowedDirectMembers() throws Exception {
+        String schema = read("deploy/helm/ravenroot/values.schema.json");
+        List<Setting> settings = settings();
+        rateSchema(schema, settings);
+
+        String missingRequired = replaceOne(schema,
+                "\"assistant\", \"rateLimit\"", "\"assistant\"");
+        assertThrows(AssertionError.class, () -> rateSchema(missingRequired, settings));
+        String duplicateRequired = replaceOne(schema,
+                "\"assistant\", \"rateLimit\"", "\"assistant\", \"rateLimit\", \"rateLimit\"");
+        assertThrows(AssertionError.class, () -> rateSchema(duplicateRequired, settings));
+
+        String missingDirect = replaceOne(schema, "    \"rateLimit\": {", "    \"renamedRateLimit\": {");
+        assertThrows(AssertionError.class, () -> rateSchema(missingDirect, settings));
+        String nestedShadowOnly = addPrecedingRootShadow(missingDirect);
+        assertThrows(AssertionError.class, () -> rateSchema(nestedShadowOnly, settings));
+        String duplicateDirect = replaceOne(schema,
+                "  \"properties\": {\n    \"replicaCount\"",
+                "  \"properties\": {\n    \"rateLimit\": {},\n    \"replicaCount\"");
+        assertThrows(IllegalStateException.class, () -> rateSchema(duplicateDirect, settings));
+
+        String precedingNestedShadow = addPrecedingRootShadow(schema);
+        assertEquals(rateSchema(schema, settings), rateSchema(precedingNestedShadow, settings));
+
+        assertThrows(IllegalStateException.class, () -> objectMembers("{\"rateLimit\": {},}"));
+        assertThrows(IllegalStateException.class, () -> stringArray("[\"rateLimit\",]"));
+        assertThrows(IllegalStateException.class, () -> stringArray("[\"rateLimit\"] false"));
+        assertThrows(IllegalStateException.class, () -> objectMembers("{\"rate\\\\/Limit\": {}}"));
     }
 
     private static void assertSchemaLeaf(String schema, Setting setting) {
@@ -192,24 +222,177 @@ class RateLimitDeploymentConfigurationContractTest {
         return Set.copyOf(names);
     }
 
-    private static String jsonObject(String json, String property) {
-        int start = json.indexOf("\"" + property + "\": {");
-        if (start < 0) throw new IllegalStateException("missing JSON object " + property);
-        int opening = json.indexOf('{', start);
-        int depth = 0;
-        boolean quoted = false;
-        boolean escaped = false;
-        for (int index = opening; index < json.length(); index++) {
-            char current = json.charAt(index);
-            if (quoted) {
-                if (escaped) escaped = false;
-                else if (current == '\\') escaped = true;
-                else if (current == '"') quoted = false;
-            } else if (current == '"') quoted = true;
-            else if (current == '{') depth++;
-            else if (current == '}' && --depth == 0) return json.substring(opening, index + 1);
+    private static String rateSchema(String schema, List<Setting> settings) {
+        Map<String, String> root = objectMembers(schema);
+        List<String> rootRequired = stringArray(root.get("required"));
+        assertEquals(1, Collections.frequency(rootRequired, "rateLimit"),
+                "root required must contain rateLimit exactly once");
+        Map<String, String> rootProperties = objectMembers(root.get("properties"));
+        assertTrue(rootProperties.containsKey("rateLimit"),
+                "root properties must contain a direct rateLimit group");
+
+        String rateSchema = rootProperties.get("rateLimit");
+        Map<String, String> rate = objectMembers(rateSchema);
+        assertEquals(Set.of("type", "additionalProperties", "required", "properties"), rate.keySet());
+        assertEquals("\"object\"", rate.get("type"));
+        assertEquals("false", rate.get("additionalProperties"));
+        Set<String> expectedLeaves = settings.stream().map(Setting::helmLeaf).collect(Collectors.toSet());
+        List<String> required = stringArray(rate.get("required"));
+        assertEquals(23, required.size());
+        assertEquals(expectedLeaves, Set.copyOf(required));
+        assertEquals(expectedLeaves, objectMembers(rate.get("properties")).keySet());
+        return rateSchema;
+    }
+
+    private static Map<String, String> objectMembers(String json) {
+        if (json == null) throw new IllegalStateException("missing JSON object");
+        int cursor = skipWhitespace(json, 0);
+        if (cursor >= json.length() || json.charAt(cursor++) != '{') {
+            throw new IllegalStateException("expected JSON object");
         }
-        throw new IllegalStateException("unterminated JSON object " + property);
+        var members = new LinkedHashMap<String, String>();
+        while (true) {
+            cursor = skipWhitespace(json, cursor);
+            if (cursor >= json.length()) throw new IllegalStateException("unterminated JSON object");
+            if (json.charAt(cursor) == '}') {
+                cursor++;
+                break;
+            }
+            if (json.charAt(cursor) != '"') throw new IllegalStateException("expected JSON member name");
+            int keyEnd = jsonStringEnd(json, cursor);
+            String key = json.substring(cursor + 1, keyEnd - 1);
+            if (key.indexOf('\\') >= 0) {
+                throw new IllegalStateException("escaped JSON member names are unsupported");
+            }
+            cursor = skipWhitespace(json, keyEnd);
+            if (cursor >= json.length() || json.charAt(cursor++) != ':') {
+                throw new IllegalStateException("expected JSON member separator");
+            }
+            int valueStart = skipWhitespace(json, cursor);
+            int valueEnd = jsonValueEnd(json, valueStart);
+            if (members.putIfAbsent(key, json.substring(valueStart, valueEnd)) != null) {
+                throw new IllegalStateException("duplicate JSON member " + key);
+            }
+            cursor = skipWhitespace(json, valueEnd);
+            if (cursor < json.length() && json.charAt(cursor) == ',') {
+                cursor = skipWhitespace(json, cursor + 1);
+                if (cursor >= json.length() || json.charAt(cursor) == '}') {
+                    throw new IllegalStateException("trailing JSON object delimiter");
+                }
+            } else if (cursor < json.length() && json.charAt(cursor) == '}') {
+                cursor++;
+                break;
+            } else throw new IllegalStateException("expected JSON member delimiter");
+        }
+        if (skipWhitespace(json, cursor) != json.length()) {
+            throw new IllegalStateException("trailing JSON content");
+        }
+        return Map.copyOf(members);
+    }
+
+    private static List<String> stringArray(String json) {
+        return arrayValues(json).stream().map(value -> {
+            if (value.length() < 2 || value.charAt(0) != '"' || value.charAt(value.length() - 1) != '"') {
+                throw new IllegalStateException("expected JSON string array value");
+            }
+            return value.substring(1, value.length() - 1);
+        }).toList();
+    }
+
+    private static List<String> arrayValues(String json) {
+        if (json == null) throw new IllegalStateException("missing JSON array");
+        int cursor = skipWhitespace(json, 0);
+        if (cursor >= json.length() || json.charAt(cursor++) != '[') {
+            throw new IllegalStateException("expected JSON array");
+        }
+        var values = new ArrayList<String>();
+        while (true) {
+            cursor = skipWhitespace(json, cursor);
+            if (cursor >= json.length()) throw new IllegalStateException("unterminated JSON array");
+            if (json.charAt(cursor) == ']') {
+                if (skipWhitespace(json, cursor + 1) != json.length()) {
+                    throw new IllegalStateException("trailing JSON array content");
+                }
+                return List.copyOf(values);
+            }
+            int end = jsonValueEnd(json, cursor);
+            values.add(json.substring(cursor, end));
+            cursor = skipWhitespace(json, end);
+            if (cursor < json.length() && json.charAt(cursor) == ',') {
+                cursor = skipWhitespace(json, cursor + 1);
+                if (cursor >= json.length() || json.charAt(cursor) == ']') {
+                    throw new IllegalStateException("trailing JSON array delimiter");
+                }
+            } else if (cursor < json.length() && json.charAt(cursor) == ']') {
+                if (skipWhitespace(json, cursor + 1) != json.length()) {
+                    throw new IllegalStateException("trailing JSON array content");
+                }
+                return List.copyOf(values);
+            } else throw new IllegalStateException("expected JSON array delimiter");
+        }
+    }
+
+    private static int jsonValueEnd(String json, int start) {
+        char first = json.charAt(start);
+        if (first == '"') return jsonStringEnd(json, start);
+        if (first == '{' || first == '[') {
+            var closing = new ArrayDeque<Character>();
+            closing.addLast(first == '{' ? '}' : ']');
+            for (int cursor = start + 1; cursor < json.length(); cursor++) {
+                char current = json.charAt(cursor);
+                if (current == '"') cursor = jsonStringEnd(json, cursor) - 1;
+                else if (current == '{') closing.addLast('}');
+                else if (current == '[') closing.addLast(']');
+                else if (current == '}' || current == ']') {
+                    if (closing.isEmpty() || closing.removeLast() != current) {
+                        throw new IllegalStateException("mismatched JSON container");
+                    }
+                    if (closing.isEmpty()) return cursor + 1;
+                }
+            }
+            throw new IllegalStateException("unterminated JSON value");
+        }
+        int cursor = start;
+        while (cursor < json.length() && json.charAt(cursor) != ','
+                && json.charAt(cursor) != '}' && json.charAt(cursor) != ']') cursor++;
+        return skipWhitespaceBack(json, cursor);
+    }
+
+    private static int jsonStringEnd(String json, int opening) {
+        if (opening >= json.length() || json.charAt(opening) != '"') {
+            throw new IllegalStateException("expected JSON string");
+        }
+        for (int cursor = opening + 1; cursor < json.length(); cursor++) {
+            if (json.charAt(cursor) == '\\') cursor++;
+            else if (json.charAt(cursor) == '"') return cursor + 1;
+        }
+        throw new IllegalStateException("unterminated JSON string");
+    }
+
+    private static int skipWhitespace(String text, int start) {
+        int cursor = start;
+        while (cursor < text.length() && Character.isWhitespace(text.charAt(cursor))) cursor++;
+        return cursor;
+    }
+
+    private static int skipWhitespaceBack(String text, int end) {
+        int cursor = end;
+        while (cursor > 0 && Character.isWhitespace(text.charAt(cursor - 1))) cursor--;
+        return cursor;
+    }
+
+    private static String replaceOne(String source, String target, String replacement) {
+        int first = source.indexOf(target);
+        if (first < 0 || source.indexOf(target, first + target.length()) >= 0) {
+            throw new IllegalStateException("expected one schema fragment: " + target);
+        }
+        return source.substring(0, first) + replacement + source.substring(first + target.length());
+    }
+
+    private static String addPrecedingRootShadow(String schema) {
+        return replaceOne(schema,
+                "  \"properties\": {\n    \"replicaCount\"",
+                "  \"properties\": {\n    \"shadow\": {\"rateLimit\": {}},\n    \"replicaCount\"");
     }
 
     private static Map<String, String> yamlScalars(String yaml) {

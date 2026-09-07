@@ -876,33 +876,25 @@ class RavenrootServerTest {
              var server = testServer(new DefaultRavenrootApplication(engine, new ExecutionMonitor()), null,
                      authenticator)) {
             var method = RavenrootServer.class.getDeclaredMethod("protectedRequest",
-                    com.sun.net.httpserver.HttpHandler.class);
+                    HttpRequestContext.Handler.class);
             method.setAccessible(true);
             var configurationMethod = RavenrootServer.class.getDeclaredMethod("configuration",
-                    com.sun.net.httpserver.HttpExchange.class);
+                    com.sun.net.httpserver.HttpExchange.class, HttpRequestContext.class);
             configurationMethod.setAccessible(true);
-            com.sun.net.httpserver.HttpHandler probe = exchange -> {
+            HttpRequestContext.Handler probe = (exchange, context) -> {
                 try {
                     barrier.await(5, TimeUnit.SECONDS);
-                    configurationMethod.invoke(server, exchange);
+                    configurationMethod.invoke(server, exchange, context);
                 } catch (Exception failure) {
                     throw new IOException(failure);
                 }
             };
-            var protectedProbe = (com.sun.net.httpserver.HttpHandler) method.invoke(server, probe);
-            var cleaned = new java.util.concurrent.atomic.AtomicInteger();
-            var observedCleanup = new java.util.concurrent.CountDownLatch(2);
-            com.sun.net.httpserver.HttpHandler observingProbe = exchange -> {
-                try {
-                    protectedProbe.handle(exchange);
-                } finally {
-                    if (AuthenticatedPrincipalAttribute.find(exchange).isEmpty()) cleaned.incrementAndGet();
-                    observedCleanup.countDown();
-                }
-            };
+            var protectedProbe = (HttpRequestContext.Handler) method.invoke(server, probe);
             var field = RavenrootServer.class.getDeclaredField("server");
             field.setAccessible(true);
-            ((com.sun.net.httpserver.HttpServer) field.get(server)).createContext("/principal-probe", observingProbe);
+            ((com.sun.net.httpserver.HttpServer) field.get(server)).createContext("/principal-probe", exchange ->
+                    protectedProbe.handle(exchange, HttpRequestContext.create()
+                            .withClient("127.0.0.1", false)));
             server.start();
             URI uri = URI.create("http://localhost:" + server.port() + "/principal-probe");
             HttpClient client = HttpClient.newHttpClient();
@@ -914,8 +906,6 @@ class RavenrootServerTest {
                     .contains("\"workspace\":{\"tenantId\":\"tenant-a\"}"));
             assertTrue(b.get(10, TimeUnit.SECONDS).body()
                     .contains("\"workspace\":{\"tenantId\":\"tenant-b\"}"));
-            assertTrue(observedCleanup.await(5, TimeUnit.SECONDS));
-            assertEquals(2, cleaned.get());
         }
     }
 
